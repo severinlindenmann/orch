@@ -70,7 +70,8 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
 `ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
 Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
-keeper's manual `ci` run with `windows=true`). On a push to develop and at night there is no merge left to stop: a
+keeper's manual `ci` run with `windows=true`; a manual run on any branch but main counts every file changed since
+main as changed, so its paths filter sees the whole release, #2559). On a push to develop and at night there is no merge left to stop: a
 red part there (known red aside) opens the release keeper's red-develop ticket, to be fixed by a pull request first
 in the queue.
 
