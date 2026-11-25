@@ -68,11 +68,25 @@ def protected(path: Path, home: Path | None = None, platform: str | None = None)
         return None
     h = home or Path.home()
     p = _resolved(path)
+    # the same folder by identity: on a case-insensitive disk ~/documents is ~/Documents, though resolve()
+    # keeps the case as typed; on a case-sensitive disk they are two folders and stay apart
+    mine = [_identity(a) for a in (p, *p.parents)]
     for rel, word in PROTECTED:
-        for base in {h / rel, _resolved(h / rel)}:
-            if p == base or base in p.parents:
-                return word
+        bases = {h / rel, _resolved(h / rel)}
+        if any(p == base or base in p.parents for base in bases):
+            return word
+        ids = {_identity(base) for base in bases} - {None}
+        if ids.intersection(mine):
+            return word
     return None
+
+
+def _identity(p: Path) -> tuple[int, int] | None:
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino
 
 
 def first_protected(paths, home: Path | None = None, platform: str | None = None) -> tuple[Path, str] | None:

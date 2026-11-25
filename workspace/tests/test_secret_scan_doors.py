@@ -369,7 +369,9 @@ OUTBOUND = {
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
     ("net.py", "profile"): {"refuse_if_secret_in"},  # relay and publish profile description and tags
-    ("secretscan.py", "refuse_if_secret"): {"find"},
+    # refuse_if_secret runs it on the file and every unpacked member
+    ("secretscan.py", "_scan_bytes"): {"find"},
+    ("secretscan.py", "refuse_if_secret"): {"_scan_bytes"},
     ("secretscan.py", "refuse_if_secret_in"): {"find"},
 }
 # functions that put bytes on the wire without scanning themselves, because their caller did (the scanned
@@ -431,3 +433,55 @@ def test_ticket_fixture_test_is_collected():
     p = Path(__file__).with_name("test_ticket_fixtures.py")
     assert p.is_file()
     assert "def test_" in p.read_text(encoding="utf-8")
+
+
+# ---- #915: envelope fields and containers ----------------------------------------------------------------
+
+
+def test_relay_message_envelope_fields_are_scanned(proj, on, planted):
+    from orch import relay
+
+    kind, value = planted
+    for kw in ({"ticket": value}, {"reply_to": value}):
+        with pytest.raises(Refused) as e:
+            relay._message(proj, PEER, "text", {"text": "hi"}, **kw)
+        _clean(kind, value, e.value)
+    _nothing_left(proj, on)
+
+
+def _containers(value: str) -> dict[str, bytes]:
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+
+    raw = f"config\n{value}\n".encode()
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("word/document.xml", raw)
+    inner = zbuf.getvalue()
+    tbuf = io.BytesIO()
+    with tarfile.open(fileobj=tbuf, mode="w") as t:
+        info = tarfile.TarInfo("a.txt")
+        info.size = len(raw)
+        t.addfile(info, io.BytesIO(raw))
+    return {
+        "zip": inner,
+        "gzip": gzip.compress(raw),
+        "tar": tbuf.getvalue(),
+        "gzip-of-zip": gzip.compress(inner),
+    }
+
+
+@pytest.mark.parametrize("fmt", ["zip", "gzip", "tar", "gzip-of-zip"])
+def test_containers_are_scanned_inside(proj, planted, fmt):
+    kind, value = planted
+    with pytest.raises(Refused) as e:
+        secretscan.refuse_if_secret(_containers(value)[fmt], "file", proj)
+    _clean(kind, value, e.value)
+
+
+def test_a_clean_container_and_a_broken_one_pass(proj):
+    for blob in _containers("nothing here").values():
+        secretscan.refuse_if_secret(blob, "file", proj)
+    secretscan.refuse_if_secret(b"PK\x03\x04 not really a zip", "file", proj)
