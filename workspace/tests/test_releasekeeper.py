@@ -2529,3 +2529,16 @@ def test_hit_time_limit_reads_github_s_annotation(tmp_path, monkeypatch):
     assert w.hit_time_limit(601) is True
     monkeypatch.setattr(w, "_gh_json", lambda args: [{"message": "Process completed with exit code 1."}])
     assert w.hit_time_limit(601) is False
+
+
+def test_open_prs_reads_every_open_pull_request_not_just_the_newest_60(tmp_path):
+    # #1881: the pre-merge security check must see pull request number 85 of 106
+    prs = [{"number": n} for n in range(106, 0, -1)]
+
+    def fake_run(argv, cwd=None, timeout=120):
+        limit = int(argv[argv.index("--limit") + 1])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(prs[:limit]), "")
+
+    w = rk.World(None, cfg(tmp_path))
+    w._run = fake_run
+    assert len(w.open_prs()) == 106
