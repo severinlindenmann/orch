@@ -3514,7 +3514,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
     """R5.2 (#942): evidence can leave this computer later (sync, the relay, a phone, a share), so every
     evidence write runs the one scanner first. `evidence`: evidence objects or their JSON text (anything else
     is left to parse_evidence). A hit refuses with the kind and the field, never the value; nothing is
-    written."""
+    written. Strict: saved keys that cannot be compared refuse too (the send-only skip is not for writes)."""
     from orch import secretscan
 
     for raw in evidence:
@@ -3525,7 +3525,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
             except ValueError:
                 ev = raw  # not JSON: still scanned as text, parse_evidence refuses it afterwards
         if not isinstance(ev, dict):
-            secretscan.refuse_if_secret_in(root, {"evidence": str(ev)}, "evidence", verb="saved")
+            secretscan.refuse_if_secret_in(root, {"evidence": str(ev)}, "evidence", verb="saved", strict=True)
             continue
         body = {}
         for k, v in ev.items():
@@ -3540,7 +3540,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
             while key in body:  # never overwrite a field already in the body: every value is scanned
                 key += " "
             body[key] = v
-        secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
+        secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved", strict=True)
 
 
 def check_done(
@@ -5358,7 +5358,7 @@ def _attach_file(
                 raise Refused(_too_big(cur_src.name))
             from orch import secretscan
 
-            secretscan.refuse_if_secret(data, "evidence file", root, verb="saved")  # R5.2 (#942)
+            secretscan.refuse_if_secret(data, "evidence file", root, verb="saved", strict=True)  # R5.2 (#942)
             out.write(data)
     except BaseException:
         with contextlib.suppress(OSError):
