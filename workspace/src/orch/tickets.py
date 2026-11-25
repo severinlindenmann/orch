@@ -100,6 +100,8 @@ _WIN_RESERVED = {
     *(f"lpt{i}" for i in range(1, 10)),
 }
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
+# the ticket id of the unattributed record run (secretrun); never a real ticket
+RESERVED_OUTSIDE_ID = "t_outside"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
@@ -172,7 +174,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid) or tid == RESERVED_OUTSIDE_ID:
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -186,6 +188,34 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
+BROKEN_FIX = "fix the JSON by hand or restore it from git"
+
+
+def broken_file(name: str) -> str:
+    """The one sentence for a ticket file that holds no valid JSON (ORCH-2019): list, show and doctor."""
+    return f"The ticket file .orch/tickets/{name} is broken (not valid JSON): {BROKEN_FIX}."
+
+
+def _broken_with_key(root: Path, want: str) -> Refused | None:
+    """Why a key was not found when some ticket files are broken: the file that still names the key, else
+    the broken files it may be in. Only the broken files are read, and only on this miss."""
+    from orch import ticketindex
+
+    bad = ticketindex.broken(root)
+    if not bad:
+        return None
+    rx = re.compile(r'"key"\s*:\s*"' + re.escape(want) + '"', re.I)
+    for name in bad:
+        try:
+            text = (tickets_dir(root) / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if rx.search(text):
+            return Refused(f"Ticket {want} can't be read. " + broken_file(name))
+    files = ", ".join(bad[:3]) + (f" and {len(bad) - 3} more" if len(bad) > 3 else "")
+    return Refused(
+        f"Ticket {want} doesn't exist here, or it is in a broken ticket file ({files}): {BROKEN_FIX}."
+    )
 
 
 def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
@@ -205,6 +235,9 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
             return t["id"]
+    broken = _broken_with_key(root, want)
+    if broken is not None:
+        raise broken
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
 
 
@@ -314,8 +347,9 @@ def _check_format(data: dict, tid: str) -> None:
 
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
-    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
-    quarantines or deletes a file."""
+    may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
+    broken file the person fixes (ORCH-2019). Read-only: a reader never rewrites, quarantines or deletes a
+    file."""
     for attempt in range(4):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -324,7 +358,11 @@ def _read_ticket(p: Path, tid: str) -> dict:
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
-            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+            if syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
+                raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
+            if attempt == 3:
                 if isinstance(e, PermissionError):
                     raise
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
@@ -1167,6 +1205,8 @@ def create(
         add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
+    if ticket.get("note"):  # #1812: the first note stays as it was asked; the note itself is editable
+        ticket["request"] = {"note": ticket["note"]}
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
     if tid is not None and ticket_path(root, tid).exists():
@@ -1975,6 +2015,7 @@ def set_status(
             add_history(ticket, actor, f"Status {old} -> {target}")
         if target == "done" and old != "done":
             _note_agent_finish(ticket, actor)
+        note_results(root, ticket, _result_by(by))
 
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away of a done/closed ticket
 
@@ -3308,7 +3349,12 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
-    return apply_op(root, tid, lambda t: _set_field(t, "summary", text), by=by)[0]
+
+    def op(t):
+        _set_field(t, "summary", text)
+        note_results(root, t, _result_by(by))
+
+    return apply_op(root, tid, op, by=by)[0]
 
 
 # Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
@@ -3569,6 +3615,7 @@ def check_done(
         if proved:
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
+        note_results(root, t, _result_by(by))
         add_history(t, by, f"Check {item['id']} done")
         _note_run_task(t, item["id"])
         return item
@@ -5413,7 +5460,8 @@ def _stat_key(p: Path):
         st = os.stat(p, follow_symlinks=False)
     except (OSError, ValueError):
         return None
-    return st.st_size, st.st_mtime_ns
+    # identity and ctime too: a file swapped in with the same size and copied mtime is still a different file
+    return st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino, st.st_ctime_ns
 
 
 def proof_changed(root: Path, tid: str, ev: dict) -> bool:
@@ -5607,15 +5655,37 @@ def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
 FEEDBACK_DIR = "feedback"
 
 
+REQUEST_FILES_MAX = 100
+
+
+def _add_request_file(ticket: dict, name: str) -> None:
+    """#1812: the file came with the request (the files sent with a new ticket), kept by name."""
+    req = ticket.get("request") if isinstance(ticket.get("request"), dict) else {}
+    old = req.get("files") if isinstance(req.get("files"), list) else []
+    files = [f for f in old if isinstance(f, str)]
+    if name not in files and len(files) < REQUEST_FILES_MAX:
+        files.append(name)
+    ticket["request"] = {**req, "files": files}
+
+
 def attach(
-    root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None, folder: str | None = None
+    root: Path,
+    tid: str,
+    hint,
+    data: bytes,
+    by: str,
+    *,
+    exact: str | None = None,
+    folder: str | None = None,
+    request: bool = False,
 ) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
-    means it was done before (returned with existed=True, nothing written)."""
+    means it was done before (returned with existed=True, nothing written). `request`: the file came with the
+    request (a new ticket's files): its name is kept in the ticket's `request.files`."""
     if folder not in (None, FEEDBACK_DIR):
         raise Refused("That folder is not allowed.")
     ticket_path(root, tid)
@@ -5623,22 +5693,63 @@ def attach(
         _refuse_closed_agent(root, tid, by)  # before the file is written
         res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
     text = f"Attached {res['name']}"
-    if res.get("existed"):
-        # done before: only the history line may be missing (an earlier call was refused as busy after the
-        # file was written); add it if it is not there
-        apply_op(
-            root,
-            tid,
-            lambda t: (
-                NO_WRITE
-                if any(h.get("text") == text for h in t.get("history", []))
-                else add_history(t, by, text)
-            ),
-            by=by,
-        )
-    else:
-        apply_op(root, tid, lambda t: add_history(t, by, text), by=by)
+    # done before: only the history line may be missing (an earlier call was refused as busy after the file
+    # was written); add it if it is not there
+    there = lambda t: res.get("existed") and any(h.get("text") == text for h in t.get("history", []))  # noqa: E731
+
+    def op(t):
+        line = not there(t)
+        kept = request and res["name"] in ((t.get("request") or {}).get("files") or [])
+        if not line and (not request or kept):
+            return NO_WRITE
+        if line:
+            add_history(t, by, text)
+        if request:
+            _add_request_file(t, res["name"])
+
+    apply_op(root, tid, op, by=by)
     return res
+
+
+def _result_by(by: str) -> str:
+    """Who added a file nobody attached: the agent whose write found it, else orch itself (never a person)."""
+    return by if str(by).startswith("agent:") else SYSTEM
+
+
+RESULT_LINE = "Added file "
+RESULT_LINES_MAX = 50  # one sweep writes at most this many lines; the rest come on the next one
+
+
+def note_results(root: Path, ticket: dict, by: str) -> None:
+    """#1812: one history line per file that landed in the ticket's results folder (artifacts/) by plain file
+    I/O since the last look, with the file's time at that look: a later rewrite never moves it. Files a person
+    attached (an "Attached <name>" line) and feedback files are theirs already. Called inside a write
+    (status, check done, summary), so a helper's files are on the history when its work is shown."""
+    d = tickets_dir(root) / ticket["id"] / "artifacts"
+    try:
+        if d.is_symlink() or not d.is_dir():
+            return
+        found = []
+        for f in d.rglob("*"):
+            rel = f.relative_to(d)
+            if f.is_symlink() or not f.is_file() or any(p.startswith(".") for p in rel.parts):
+                continue
+            if rel.parts[0] == FEEDBACK_DIR and len(rel.parts) > 1:
+                continue
+            found.append((f.stat().st_mtime, rel.as_posix()))
+    except OSError:
+        return
+    seen = set()
+    for h in ticket.get("history", []):
+        text = str(h.get("text", ""))
+        for head in ("Attached ", RESULT_LINE):
+            if text.startswith(head):
+                seen.add(text[len(head) :])
+    t_now = now()
+    for mtime, name in sorted(x for x in found if x[1] not in seen)[:RESULT_LINES_MAX]:
+        at = datetime.fromtimestamp(mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        at = max(min(at, t_now), str(ticket.get("created_at") or at))
+        add_history(ticket, by, RESULT_LINE + name, at=at)
 
 
 def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:

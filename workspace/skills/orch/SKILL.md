@@ -81,7 +81,7 @@ The Reviewer (for a script that repeats, only when the person turned on `workflo
 Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 The Auto Reviewer and Away mode (only when the person turned on `workflow.auto_reviewer` or `workflow.away`, on the Review page): the same pass checks finished work by its kind (screen, campaign, data, code), writes the points in the history and accepts it or sends it back once; Away also answers plain questions and choice or plan cards with your recommendation at once. Both leave every ticket with Human review needed on alone, and never answer words, names, money, deploy, delete or keys: so put pictures at 1280, 1920 and 390 px, the campaign file or the data file on the ticket as evidence, and recommend the option you would pick. The person undoes any of it: `orch review undo <ticket> [q3]`.
 Drafts are the person's alone: a `--draft` card, a `--choose` card whose options show files, and the ticket that carries one are answered and accepted only by the person themselves, signed in, never by a program or a helper. The Reviewer, its second look, its routine answers and `orch answer` / `orch review answer` from a script or your shell are refused for them; `orch review accepted` lists them under "Waiting for your pick".
-Prepare (Save without starting, `orch run start <id> --prepare`): orch skips it with no helper when every field is filled, the ticket was prepared already, a helper made the sub-ticket, `workflow.prepare_on_save` is off or the daily limit (`workflow.prepare_daily_limit`) is reached. A prepare helper never changes the status (`orch ticket status`, `orch wait` are refused); its one question keeps the ticket in Backlog.
+Prepare (Save ticket, `orch run start <id> --prepare`): orch skips it with no helper when every field is filled, the ticket was prepared already, a helper made the sub-ticket, `workflow.prepare_on_save` is off or the daily limit (`workflow.prepare_daily_limit`) is reached. A prepare helper never changes the status (`orch ticket status`, `orch wait` are refused); its one question keeps the ticket in Backlog.
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 Security review (you were started as one by the release keeper, ticket "Security review: pull request #N"): read only, follow the ticket's note, then record exactly one verdict: `orch review security <N> ok "<one line>" --sha <commit>` (nothing High or Medium left) or `orch review security <N> problems "<the worst finding>" --sha <commit>`, with the commit the note names. Releases wait for it. A later pull request M fixes a problems finding of N: `orch review security <N> fixed-by <M>` (only a person or N's review helper; anyone else asks the person); the release then waits only until M is merged with its own security OK.
 
@@ -160,7 +160,7 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens`.
 
 Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
 ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
@@ -233,7 +233,7 @@ waits for a person with `orch needs`.
 orch only records the wait. An add-on may wake the ticket when it is due; if none does, tell the user when to come back.
 Waiting on another ticket or a pull request costs nothing: the helper watcher looks without a helper and starts you
 only once it is finished, merged or closed (a merge-queue throw-out wakes you too, and a red check when the
-pull-requests add-on is set to act on failed checks). Never wait for a
+add-on is set to act on failed checks). Never wait for a
 time just to look whether a pull request merged or a ticket finished: every such wake-up is a whole helper run.
 
 **Sub-tickets**

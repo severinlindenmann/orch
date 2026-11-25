@@ -1044,3 +1044,8 @@ def test_evidence_at_and_by_are_set_by_the_core(proj, run, new_ticket):
     code, _, _ = run("check", "done", tid, "c1", "--evidence", ev)
     got = read(proj, tid)["checklist"][0]["evidence"][0]
     assert code == 0 and got["at"] < "2099" and got["by"] != "human:owner"
+
+
+def test_the_unattributed_run_ticket_id_cannot_be_created(proj):
+    with pytest.raises(Refused):
+        tickets.create(proj, "Sneaky", "agent:test", tid="t_outside")
