@@ -24,7 +24,17 @@ module.exports = {
     await page.getByRole('button', { name: 'Change title' }).click();
     await act('ticket.edit', async () => { await page.getByLabel('Title', { exact: true }).fill('Print the lunch posters (A3)'); await page.keyboard.press('Enter'); });
 
-    const add = async key => { await page.locator(`[data-key="props-add-${mine}"] > summary`).click(); await page.locator(`[data-key="prop-add-${key}-${mine}"]`).click(); };
+    // a menu can close again before its item is clicked (the page draws the rail again while it fills in, as in
+    // a-ticket-header-fit, ORCH-1610; #2589): open it again, as a person would, until the item takes the click
+    const pick = async (opener, item, what) => {
+      for (let i = 0; i < 4; i++) {
+        if (!(await item.isVisible())) await opener().catch(() => {});
+        if (await item.click({ timeout: 3000 }).then(() => true, () => false)) return;
+      }
+      throw new Error(`${what} did not take the click:\n` + (await text()).slice(0, 600));
+    };
+    const add = key => pick(() => page.locator(`[data-key="props-add-${mine}"]:not([open]) > summary`).click({ timeout: 5000 }),
+      page.locator(`[data-key="prop-add-${key}-${mine}"]`), `+ Add > ${key}`);
     await add('owner');   // + Add opens the owner editor at once
     await act('ticket.edit', async () => { await page.getByLabel('Owner', { exact: true }).fill('Anna'); await page.keyboard.press('Enter'); });
 
@@ -33,8 +43,8 @@ module.exports = {
     await act('ticket.model', () => page.getByLabel('Helper strength').first().selectOption('opus'));
     await add('kind');
     await act('ticket.kind', () => page.getByLabel('Kind', { exact: true }).first().selectOption('small_bug'));
-    await page.getByLabel('More ticket actions').click();
-    await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Working' }).click());
+    await act('ticket.patch', () => pick(() => page.getByLabel('More ticket actions').click({ timeout: 5000 }),
+      page.getByRole('menuitem', { name: 'Working' }), 'More ticket actions > Working'));
 
     await add('links');   // + Add opens the reference dialog
     const ref = page.locator('dialog[open]');

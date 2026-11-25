@@ -43,6 +43,16 @@ module.exports = {
     await reload();
     must(await sw().isChecked(), 'the repeat did not switch back on');
 
+    // ORCH-1861: Edit names the zone the time is read in, the repeat's own saved zone, beside the time field
+    const zone = JSON.parse(orchAsPerson('ticket', 'show', tid, '--json')).ext.automation.tz;
+    await row().getByRole('button', { name: 'Edit' }).click();
+    const tag = page.locator('#repeat-zone');
+    await tag.waitFor({ timeout: 10000 });
+    for (const end = Date.now() + 10000; (await tag.innerText()) !== zone && Date.now() < end;) await page.waitForTimeout(250);
+    must((await tag.innerText()) === zone, 'Edit does not name the saved zone ' + zone + ': ' + (await tag.innerText()));
+    must(!(await page.locator('[data-key=repeat-zone-change]').isVisible()), 'a repeat in the default zone says saving moves it');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
     orchAsPerson('automation', 'repeat', tid, '--off');
     await addonOff('automation');
   },

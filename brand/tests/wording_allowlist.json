@@ -113,7 +113,7 @@
   "agent": 1
  },
  "workspace/src/orch/cli_run.py": {
-  "agent": 5
+  "agent": 4
  },
  "workspace/src/orch/collect_claude.py": {
   "Agent": 1

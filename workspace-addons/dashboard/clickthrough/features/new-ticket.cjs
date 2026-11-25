@@ -13,7 +13,9 @@ module.exports = {
     // ORCH-1852: Save ticket sits beside the request (right under it on a phone), in the first screen, with the line that says what Start now costs
     const box = await form.getByPlaceholder(/What should the helper do/).boundingBox();
     const save = await form.getByRole('button', { name: 'Save ticket' }).boundingBox();
-    must(save.y < page.viewportSize().height && save.y + save.height >= box.y + box.height && save.y - (box.y + box.height) < 24, 'Save ticket is not beside or right under the request');
+    const beside = save.x >= box.x + box.width && save.y < box.y + box.height && save.y + save.height > box.y;
+    const under = save.y >= box.y + box.height && save.y - (box.y + box.height) < 24;
+    must(save.y + save.height <= page.viewportSize().height && (beside || under), 'Save ticket is not beside or right under the request');
     must((await text()).includes('This uses its time and may cost money'), 'the page does not say what Start now costs');
     await act('ticket.new', () => form.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });

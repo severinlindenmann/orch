@@ -383,12 +383,17 @@ workspace's chat cannot be used to add or remove there (`orch relay group add` s
 - **Add**: `member_added` (with `added_by`) to everyone including the new member, then to the new member only the
   ticket card (§4) carrying `shared_chat`. That is all it gets: the fixed card fields and the chat lines, nothing
   else.
-- **Remove / leave**: the host marks the member left and saves that first, then takes it out of every send intent
-  still pending (§5 crash replay) and deletes what still waits for it in the outbox; only the news of its own
+- **Remove / leave**: the host marks the member left and saves that in one write with the send intent of the
+  `member_left` news (§5 crash replay: a crash after it still tells everyone on the next sync), then takes it out
+  of every send intent still pending and deletes what still waits for it in the outbox; only the news of its own
   removal still goes to it. When the outbox is sent later, a copy for a workspace that is no longer a member is
-  dropped. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
+  dropped; while the host cannot read its member list, its group copies wait in the outbox (never sent
+  unchecked). The outbox keeps the order the copies were saved in, also across a restart. A person's Add on an
+  ask-to-add card is noted before the answer is saved, so a crash in between still adds on the next sync. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
   own removal still lists that member in the header of its own copy, so it accepts the news and stops. A replay
   after a crash and the leave a member sends itself follow the same rule (nothing more for a member that is gone).
+- **Member list at a member**: the header's title and member list are taken only from a copy whose `seq` is not
+  below the one already taken (a copy without `seq` only before any): a late copy never puts back an older list.
 - **Added back**: a member that left or was removed takes part again only on a `member_added` for itself with a
   `seq` above the one it left at; its order starts afresh from that `seq`. An older add never counts.
 - **Refused**: a message from a workspace that is not a current member (never added, left or removed), a forged

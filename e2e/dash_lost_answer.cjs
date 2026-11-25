@@ -70,7 +70,7 @@ async function run(width, arrives) {
     await page.keyboard.press('n');  // New ticket on every width (the top-bar button is hidden on a phone)
     const dialog = page.locator('.new-ticket');  // ORCH-1037: the New ticket page (#new), no longer a window
     await dialog.waitFor();
-    await dialog.locator('textarea[name=text]').fill('Check the invoice export');
+    await dialog.getByRole('textbox', {name: 'What needs doing?'}).fill('Check the invoice export');
     await dialog.getByRole('button', {name: 'Save ticket'}).click();
     return {page, dialog, posts, made, errors, browser};
   } catch (e) { await browser.close(); throw e; }
