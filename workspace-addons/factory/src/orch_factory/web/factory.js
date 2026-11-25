@@ -846,15 +846,35 @@
     if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
     if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
   }
-  async function render() {
+  const places = 'a[href],button,summary,[tabindex]:not([tabindex="-1"])';
+  const placeOf = el => ({tag: el.tagName, label: (el.textContent || '').trim(), href: el.getAttribute('href')});
+  // A background refresh keeps where you are: the focused action, the scroll position and the content on screen.
+  function holdPlace() {
+    const el = document.activeElement, all = [...view.querySelectorAll(places)];
+    return {y: window.scrollY, at: el && view.contains(el) ? all.indexOf(el) : -1, was: el && view.contains(el) ? placeOf(el) : null, count: all.length};
+  }
+  function restorePlace(held) {
+    const all = [...view.querySelectorAll(places)];
+    if (held.was) {
+      const same = all.find(el => { const q = placeOf(el); return q.tag === held.was.tag && q.label === held.was.label && q.href === held.was.href; });
+      const next = same || all[Math.min(Math.max(held.at, 0), all.length - 1)];
+      if (next) next.focus({preventScroll: true});
+      if (!same) live.textContent = next ? 'The item you were on is gone. Focus moved to “' + (next.textContent || '').trim() + '”.' : 'The item you were on is gone.';
+    }
+    window.scrollTo(0, held.y);
+  }
+  async function render(mode) {
+    const background = mode === 'background';
+    const held = background ? holdPlace() : null;
     const serial = ++request;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
-    view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
+    view.setAttribute('aria-busy', 'true'); if (!background) notices.replaceChildren();
     const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
-    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+    if (background) { /* the page stays as it is until the new one is ready */ }
+    else if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
       // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
       view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
     } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
@@ -897,11 +917,14 @@
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;
-      view.replaceChildren(); draw(); view.classList.add('page-enter');
-      if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+      if (background && busy()) return;  // you started something while it was read: keep your page
+      view.replaceChildren(); draw();
+      if (background) restorePlace(held);
+      else { view.classList.add('page-enter'); if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true}); }
     } catch (error) {
       if (serial !== request) return;
-      const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', render);
+      if (background) return;  // the page you see stays; the next tick tries again
+      const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', () => render());
       const box = card('Factory could not read this page', p('The record may be unavailable, or this page may no longer exist.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
       view.replaceChildren(box);
     } finally {
@@ -912,7 +935,8 @@
   document.querySelector('.skip-link').addEventListener('click', event => {
     event.preventDefault(); document.getElementById('content').focus();
   });
-  window.addEventListener('hashchange', render);
+  const live = node('p', null, 'sr-only'); live.setAttribute('role', 'status'); notices.after(live);
+  window.addEventListener('hashchange', () => render());
   // An open page follows the workspace: every 15 s (only while visible) home is read again, and the page is drawn anew
   // only when something changed and you are not in the middle of something (typing, a box with text, a request waiting).
   let lastHome = null;
@@ -922,7 +946,7 @@
     if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
     try {
       const data = await read('/api/home');
-      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render('background');
     } catch (_) { /* the next tick tries again */ }
   }
   setInterval(follow, 15000);

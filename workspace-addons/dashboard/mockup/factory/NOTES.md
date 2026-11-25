@@ -42,3 +42,6 @@ list and on the order. A notice above the page says where and by whom it is star
 the workspace “Demo”." and "Whoever runs orch for that workspace can start it again there with `orch factory start`.
 Factory then starts helpers again on its started runs." There is no button: the dashboard's Start starts every add-on
 of the workspace, not only Factory, and starting Factory can start helpers, so it stays a deliberate step.
+
+## A background refresh keeps your place (ORCH-2046)
+When the workspace changes while the Factory page is open, the page updates in place: no loading skeleton, the heading does not take focus, and the scroll position and the focused action stay. If the item you were on is gone, focus moves to its neighbour and one quiet announcement says so ("The item you were on is gone. Focus moved to “…”."). Opening another page still focuses its heading. Typing, an open dialog, a waiting request and a failed read all keep the page as it is (a failed background read shows nothing; the next tick tries again). Mockup: the list in `factory.html` is the settled state; there is no extra screen, the announcement is screen-reader text only.

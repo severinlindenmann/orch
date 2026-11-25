@@ -206,6 +206,16 @@ def test_an_open_page_follows_the_workspace_without_disturbing_you(srv):
     assert "asked.size > 0" in js and "t.value.trim()" in js  # a request waiting / a box with your text
 
 
+def test_a_background_refresh_keeps_content_focus_and_scroll(srv):
+    """ORCH-2046: follow() never draws the loading skeleton or moves focus to the heading; only deliberate navigation does."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "render('background')" in js and "window.addEventListener('hashchange', () => render())" in js
+    assert "else if (location.hash === ''" in js and "if (!background) notices.replaceChildren()" in js
+    assert "if (background) restorePlace(held)" in js and "window.scrollTo(0, held.y)" in js
+    assert "if (serial > 1) view.querySelector('h1')" in js and "else { view.classList.add('page-enter')" in js
+    assert "The item you were on is gone." in js and "if (background) return;" in js
+
+
 def test_the_idea_box_never_cuts_text_silently_and_an_empty_draft_says_so(srv):
     """Bug hunt 17 Nov: a 15000-character paste was cut to 500 without a word; a 0-byte draft showed an empty box."""
     js = get(srv, "/web/factory.js")[1].decode()
