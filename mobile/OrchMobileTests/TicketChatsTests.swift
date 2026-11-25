@@ -35,6 +35,23 @@ final class TicketChatsTests: XCTestCase {
 
     // MARK: Ticket chat items
 
+    func testOlderChatLinesStayWhenNewerOnesPushThemOutOfTheWindow() {
+        // #2372: the snapshot window keeps only the newest chat lines; lines from the computer seen before stay.
+        func line(_ n: Int) -> TicketSnapshot.Line {
+            .init(at: "2026-11-21T09:0\(n):00Z", by: "you", role: "person", text: "Line \(n)", chat: true, messageId: "m_keep00000000000\(n)", name: "Nina")
+        }
+        func update(_ id: String, _ lines: [TicketSnapshot.Line]) -> TicketUpdate {
+            TicketUpdate(id: id, workspace: "ws_a", workspaceName: "Marketing", ticket: "t_1", kind: "note", title: "Launch", text: "",
+                         replyTo: nil, at: lines.last!.at!, ticketView: TicketSnapshot(historyTail: lines))
+        }
+        let worked = TicketSnapshot.Line(at: "2026-11-21T09:00:30Z", by: "Claude", role: "agent", text: "Finished a task: Draft")
+        let tickets = TicketBuilder.build(updates: [update("u1", [worked, line(1), line(2)]), update("u2", [line(2), line(3)])],
+                                          questions: [], answers: [:])
+        let items = ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), ConversationInputs(messages: [], tickets: tickets))
+        XCTAssertEqual(items.map(\.text), ["Line 1", "Line 2", "Line 3"], "each chat line once, the older one kept")
+        XCTAssertFalse(tickets[0].view!.historyTail.contains(worked), "only chat lines are kept, not old history")
+    }
+
     func testTicketChatShowsChatLinesWithNamesOnce() {
         let view = TicketSnapshot(historyTail: [
             .init(at: "2026-11-21T09:00:00Z", by: "Claude", role: "agent", text: "Finished a task: Draft"),                       // not a chat line

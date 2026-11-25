@@ -6,7 +6,7 @@ const idOf = out => (/\[(t_[A-Za-z0-9]+)\]/.exec(out) || [])[1];
 module.exports = {
   name: 'Run it now on a run card',
   covers: ['card.run'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson }) {
+  async run({ page, open, reload, act, must, text, seen, orch, orchAsPerson }) {
     const tid = idOf(orch('ticket', 'new', 'Turn on the second look'));
     must(tid, 'no ticket was made');
     orch('ask', tid, 'Turn on the second look?', '--run', 'orch config set workflow.reviewer_look on',
@@ -23,7 +23,8 @@ module.exports = {
 
     await act('card.run', () => runCard.getByRole('button', { name: /Run it now/ }).click());
     await reload();
-    must(/I ran it/.test(await text()), '"I ran it" is not on the ticket after a reload');
+    // a reloaded page draws its last copy first and fills in the newer state after (ORCH-1652, #2589)
+    must(/I ran it/.test(await seen([/I ran it/])), '"I ran it" is not on the ticket after a reload');
     const got = JSON.parse(orchAsPerson('config', 'get', 'workflow.reviewer_look', '--json'));
     const on = typeof got === 'object' && got !== null ? got['workflow.reviewer_look'] : got;
     must(on === true || on === 'on', 'the setting is not on after Run it now');

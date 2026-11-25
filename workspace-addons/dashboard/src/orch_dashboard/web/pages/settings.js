@@ -1737,6 +1737,15 @@ function savedRepeatWords(cron) {
 function repeatTicketName(t) { return (t.key ? t.key + ' · ' : '') + (t.title || t.id); }
 const REPEAT_UNITS = [['minutes', 'minutes'], ['hours', 'hours'], ['days', 'days']];
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
+// The zone the repeat window's time is read in (ORCH-1861), from the add-on's `zones`: a saved repeat's own (an old
+// one without a zone reads in the zone it runs in), a new repeat's the default `repeat` saves. Save sends no zone,
+// so `move` says when saving would change it to that default.
+function repeatZone(zones, only, saved) {
+  const isSaved = !!(only && saved?.recurring === true && saved.cron), next = zones?.new || null;
+  const here = isSaved ? (zones?.repeats?.[only] || saved.tz || null) : next;
+  return {here:here || 'Uses the workspace’s time zone.', move:isSaved && here && next && here !== next ? 'Saving changes the time zone to ' + next + '.' : null};
+}
+
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
@@ -1752,6 +1761,19 @@ function repeatsDialog(only = null, addonName = null) {
   const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
   if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});
   const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
+  // The zone the time is read in, from the add-on (never the browser's): a saved repeat's own, a new one's default.
+  // Saving sends no zone, so the command saves the default: when that differs, the window says so (ORCH-1861).
+  const zoneTag = h('span', {className:'meta', id:'repeat-zone', 'data-key':'repeat-zone'});
+  const zoneMove = h('p', {className:'meta', 'data-key':'repeat-zone-change', hidden:true});
+  const showZone = () => {
+    const z = repeatZone(addonViews[key]?.view?.zones, only, saved);
+    zoneTag.textContent = z.here;
+    zoneMove.hidden = !z.move;
+    zoneMove.textContent = z.move || '';
+  };
+  showZone();
+  const waitZone = n => { showZone(); if (!addonViews[key]?.view?.zones && n > 0) setTimeout(() => waitZone(n - 1), 500); };
+  if (!addonViews[key]?.view?.zones && !snapshot) loadAddon(key).then(() => waitZone(6), () => {});
   const rowsHost = h('div', {className:'schedule-fields'});
   const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
   const save = button('Save repeat', 'primary', async () => {
@@ -1805,9 +1827,9 @@ function repeatsDialog(only = null, addonName = null) {
       kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));
     }
     if (choice.freq !== 'custom' || choice.unit === 'days') {
-      const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
+      const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time', 'aria-describedby':'repeat-zone'});
       time.oninput = () => { choice.time = time.value; refreshSummary(); };
-      kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+      kids.push(row('Time', h('div', {className:'schedule-value'}, h('div', {className:'schedule-time'}, time, zoneTag), zoneMove)));
     }
     rowsHost.replaceChildren(...kids);
     refreshSummary();

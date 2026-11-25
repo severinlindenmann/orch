@@ -340,7 +340,8 @@ function reviewDrawSide(queue, deck) {
   if (!queue || !deck || typeof deck.drawList !== 'function') return;
   deck.drawList(queue);
 }
-// "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
+// "What the Reviewer did" (ORCH-77, renamed ORCH-1835): what the Reviewer, the Auto Reviewer and Away mode did today; each
+// row says Accepted, Sent back or Answered, and one tap sends an accepted ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
 const reviewSentBack = new Set();
 function reviewAccepted() { return array(state?.review?.accepted).filter(a => a && typeof a.ticket === 'string'); }
@@ -417,7 +418,7 @@ function reviewAcceptedRow(a) {
 function reviewAcceptedCard() {
   const rows = reviewAccepted();
   if (!rows.length) return null;
-  return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
+  return card('review-accepted', 'What the Reviewer did', '', rows.map(reviewAcceptedRow));
 }
 // The Auto Reviewer and Away (ORCH-425): two switches, each saves at once (only a person turns them on;
 // `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
@@ -431,7 +432,7 @@ const REVIEW_SWITCHES = {
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
     meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
 };
-const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under Accepted for you on Review.';
+const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
 function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
   return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
