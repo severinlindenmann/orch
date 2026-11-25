@@ -1,18 +1,19 @@
 """git-sync: the sync add-on end to end on one machine (workspaces A, B, C), with a local bare repository as the remote.
 
 Two workspaces keep the same tickets through the remote, edit them on both sides, work offline, meet a conflict and
-resolve it with the person's signed choice. A third workspace whose team repository tracks .orch files is asked to
-Move them out first. The person's proofs come from the scripted test human of a TEST install (the e2e driver writes
-the install record into the tool environment, like the installer does): never a real person, never a real home.
+resolve it with the person's choice. A third workspace whose team repository tracks .orch files is asked to
+Move them out first. It runs as a TEST install (the e2e driver writes the install record into the tool environment,
+like the installer does): never a real person, never a real home.
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
-from lib import Skip, Fail, check, scenario
+from lib import Fail, check, scenario
 
 PREVIEW = {"ORCH_SYNC_REMOTE_PREVIEW": "1"}  # copying to a remote is a preview; on only inside this scenario
 ENV: dict = {}  # PREVIEW plus the scenario's own orch folder (a test workspace needs one under <home>/.orch-test)
@@ -40,15 +41,8 @@ class Ws:
         except ValueError:
             raise Fail(f"orch {' '.join(args)[:60]} did not print JSON: {out[:160]!r}") from None
 
-    def signed(self, argv, op: str, target: str, ok=True):
-        return self.o(*argv, ok=ok)
-
-    def act_target(self, verb: str, target: str, *extra) -> str:
-        return self.j("sync", "act", verb, target, *extra, "--proof-target")["target"]
-
     def set_remote(self, remote: Path, ok=True):
-        t = self.act_target("set", str(remote))
-        return self.signed(["sync", "set", "--mode", "remote", "--remote", str(remote)], "addon.act", t, ok=ok)
+        return self.o("sync", "set", "--mode", "remote", "--remote", str(remote), ok=ok)
 
     def status(self) -> dict:
         return self.j("sync", "status")
@@ -63,6 +57,15 @@ class Ws:
         out = self.j("needs")
         rows = out if isinstance(out, list) else (out.get("needs") or out.get("items") or [])
         return [r for r in rows if isinstance(r, dict) and str(r.get("id", "")).startswith("sync:")]
+
+    def sync_rows_after_change(self, secs: int = 20) -> list[dict]:
+        """The sync rows once they changed: a busy machine may answer `orch needs` from the add-on's saved rows
+        (it was too slow to answer), and a fresh answer follows in the background."""
+        for _ in range(secs):
+            if not (rows := self.sync_rows()):
+                break
+            time.sleep(1)
+        return rows
 
 
 def _tool_python(e) -> str:
@@ -86,7 +89,6 @@ def _workspace(e, py, base: Path, name: str, git: bool = False) -> Ws:
 
 @scenario("git-sync", local_only=True)
 def git_sync(e):
-    raise Skip("first remote sync never pushes orch-state: https://github.com/severinlindenmann/orch/issues/876")
     py = _tool_python(e)
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
     base = real / ".orch-test" / f"e2e-gitsync-{os.getpid()}"
@@ -131,7 +133,7 @@ def git_sync(e):
         heads = e.sh(["git", "--git-dir", str(bare), "branch", "--list", "orch-state"], check_rc=True)[1]
         check("orch-state" in heads, f"remote has no orch-state: {heads!r} {a.status()} {st}")
 
-        # 2. B joins the same remote (signed); its first sync brings A's ticket
+        # 2. B joins the same remote; its first sync brings A's ticket
         b.set_remote(bare)
         st = b.now()
         check(not st.get("last_error"), f"B first sync: {st}")
@@ -162,7 +164,7 @@ def git_sync(e):
         check(b.ticket(tid)["title"] == "Pay the invoices today", "B did not receive the offline work")
 
         # 5. the same file changed on both sides can't be merged -> a pause with a Needs row; keep theirs with the
-        #    person's proof -> both converge (the file the person set aside stays as a dated copy, on both)
+        #    person's choice -> both converge (the file the person set aside stays as a dated copy, on both)
         path = f"tickets/{tid}/artifacts/plan.txt"
         for w, text in ((a, "base\n"),):
             (w.root / ".orch" / path).parent.mkdir(parents=True, exist_ok=True)
@@ -177,12 +179,9 @@ def git_sync(e):
         rows = b.sync_rows()
         check(st.get("paused") and rows, f"no pause/row on B: rows={rows} needs={b.o('needs', '--json', ok=False)[1][:2000]}")
         check((b.root / ".orch" / path).read_text() == "B says two\n", "the pause changed B's own file")
-        t = b.act_target("keep-theirs", path)
-        argv = ["sync", "resolve", path, "--keep", "theirs"]
-        # a changed file of a ticket (this case) needs no proof (ticket files and the counter are signed)
-        check(not t, f"an artifact choice unexpectedly needs a proof: {t}")
-        b.o(*argv)
-        check(not b.sync_rows(), f"row still there after the choice: {b.sync_rows()}")
+        b.o("sync", "resolve", path, "--keep", "theirs")
+        rows = b.sync_rows_after_change()
+        check(not rows, f"row still there after the choice: {rows} {b.status()}")
         for w in (b, a, b, a):
             check(not w.now().get("last_error"), "converge round failed")
         ta, tb = ((w.root / ".orch" / path).read_text() for w in (a, b))
@@ -213,7 +212,8 @@ def git_sync(e):
         st = c.now()
         check(not st.get("last_error"), f"C does not sync after Move: {st}")
         check((c.root / ".orch" / ".git").exists(), "no state repository after Move")
-        check(not c.sync_rows(), f"Move row still there: {c.sync_rows()}")
+        rows = c.sync_rows_after_change()
+        check(not rows, f"Move row still there: {rows}")
         return "A+B sync, merge, offline, conflict resolved, C moved out of the team repository"
     finally:
         restore()  # later scenarios of the same run see their own install record again

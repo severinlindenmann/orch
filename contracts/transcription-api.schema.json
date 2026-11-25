@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/transcription-api.schema.json",
+  "title": "orch-transcription API v1 response bodies (transcription-api.md)",
+  "description": "Unknown fields are allowed everywhere: an older client ignores what it does not know (R3.1). Examples: vectors/transcription-api-v1.json.",
+  "$defs": {
+    "language": {
+      "description": "The Whisper language code heard or given (`de-CH` is answered as `de`); null when silence was sent and no language given.",
+      "type": ["string", "null"],
+      "pattern": "^[a-z]{2,3}$"
+    },
+    "seconds": {"type": "number", "minimum": 0},
+    "job_id": {"type": "string", "pattern": "^j_[a-z0-9]{16}$"},
+    "unix_time": {"type": "integer", "minimum": 0},
+    "health": {
+      "type": "object",
+      "required": ["ok", "version"],
+      "properties": {
+        "ok": {"const": true},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "transcribe_response": {
+      "type": "object",
+      "required": ["text", "language", "duration"],
+      "properties": {
+        "text": {"type": "string", "description": "Empty for silence or noise, never made-up text."},
+        "language": {"$ref": "#/$defs/language"},
+        "duration": {"$ref": "#/$defs/seconds"}
+      }
+    },
+    "job": {
+      "type": "object",
+      "required": ["id", "status", "created_at", "expires_at"],
+      "properties": {
+        "id": {"$ref": "#/$defs/job_id"},
+        "status": {"enum": ["waiting", "running", "done", "failed", "needs_key"]},
+        "created_at": {"$ref": "#/$defs/unix_time"},
+        "expires_at": {"$ref": "#/$defs/unix_time"},
+        "duration": {"$ref": "#/$defs/seconds"},
+        "error": {"enum": ["unsupported_audio", "too_large", "transcription_failed"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "failed"}}},
+          "then": {"required": ["error"]},
+          "else": {"not": {"required": ["error"]}}
+        }
+      ]
+    },
+    "job_created": {
+      "allOf": [
+        {"$ref": "#/$defs/job"},
+        {"properties": {"status": {"const": "waiting"}}}
+      ]
+    },
+    "job_key_response": {
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": {"$ref": "#/$defs/job_id"},
+        "status": {"const": "waiting"}
+      }
+    },
+    "transcript_file": {
+      "description": "The file inside the result blob (OPF1, result key): transcript.json.",
+      "type": "object",
+      "required": ["text", "language", "duration", "segments"],
+      "properties": {
+        "text": {"type": "string"},
+        "language": {"$ref": "#/$defs/language"},
+        "duration": {"$ref": "#/$defs/seconds"},
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["start", "end", "text"],
+            "properties": {
+              "start": {"$ref": "#/$defs/seconds"},
+              "end": {"$ref": "#/$defs/seconds"},
+              "text": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["error", "message"],
+      "properties": {
+        "error": {
+          "enum": ["unauthorized", "rate_limited", "invalid", "too_large", "unsupported_audio", "busy", "transcription_failed", "conflict", "not_found"]
+        },
+        "message": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

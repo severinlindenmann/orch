@@ -181,6 +181,19 @@ def test_merge_off_only_reports_once(proj, role, linked):
     assert history(proj, linked) == before  # the same report is not said again
 
 
+def test_never_merges_past_a_merge_queue_on_its_base_branch(proj, role, linked, monkeypatch):
+    """#1809: green pull requests into develop were merged by the unblocker, past the merge queue."""
+    from orch import cli
+
+    ub.set_merge(proj, "on")
+    monkeypatch.setattr(cli, "_queue_bases", lambda root: ["develop"])
+    gh = FakeGH({PR: view()})
+    _, res = two_passes(proj, gh)
+    assert gh.merged == [] and res["reported"]
+    said = [h for h in history(proj, linked) if "nothing merged it" in h]
+    assert len(said) == 1 and f"orch pull-requests queue add {PR} --ticket" in said[0]
+
+
 def test_merge_limit_full_reports_with_next_place(proj, role, linked, room):
     ub.set_merge(proj, "on")
     room[0].update(used=30, next_in_secs=720)
