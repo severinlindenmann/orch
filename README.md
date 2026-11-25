@@ -6,7 +6,7 @@
 
 <p align="center"><img src="docs/images/dashboard-home.png" alt="The orch dashboard: what needs you, your tickets, which agents are working" width="900"></p>
 
-orch works with the agent tool you already use: Claude, Codex, Copilot, or any command you can type. Your agent keeps its work in
+orch works with the agent tool you already use: Claude, Codex, GitHub Copilot, or any command you can type. Your agent keeps its work in
 simple **tickets**. Every task needs **proof** before it counts as done. When the agent needs a decision, it
 asks you a **question**, and you can answer from your browser or your iPhone.
 
@@ -19,7 +19,7 @@ Five parts. Use one or all of them. The first part works fully on its own, with 
 | | Part | What it does |
 |---|---|---|
 | 1 | **Workspace: the `orch` command and skills** | Tickets, checklists with evidence, questions and history, stored as plain files in your project (`.orch/`). Your agent learns how to use them from a skill. |
-| 2 | **Dashboard, Focus and automation** (add-ons) | A page on your own computer with all tickets and what needs you. Focus is the live page of every helper session, inside the dashboard. Automation starts your agent at the right time, or when a message arrives. |
+| 2 | **Add-ons** (each one off until you turn it on) | **Dashboard**: a page on your own computer with all tickets and what needs you. **Focus**: the live page of every helper session. **Automation**: starts your agent at the right time, or when a message arrives. **Factory**: turn an idea into finished work, you press Start. **Pull requests**: the merge queue and merge when green. Also Files, Lessons, Insights, Usage, Skills, Services, Browse, Personal and Sync: see [docs/addons.md](docs/addons.md). |
 | 3 | **Publish** (works alone) | Share a file with a link. The file is encrypted, and only people with the full link can open it. Also hosts small apps. |
 | 4 | **Relay** (works alone) | Lets your workspaces, your phone and outside services (webhooks) talk to each other, and share skills and tools. |
 | 5 | **iPhone app** | Answer your agents' questions with one tap, and send them text or voice notes. |
@@ -114,11 +114,12 @@ $ orch run start <id>
 $ orch needs
 ```
 
-Make a ticket, add tasks and start your agent on it; `orch needs` lists what waits for you. Add-ons one by one:
-`orch addon add <name>` ([docs/addons.md](docs/addons.md)).
+Make a ticket, add tasks and start your agent on it; `orch needs` lists what waits for you. `orch init` asks which
+agent tool to use (Claude, Codex or Copilot, whichever it finds; any other command works too). Add-ons one by one:
+`orch addon list`, then `orch addon add <name>` ([docs/addons.md](docs/addons.md)).
 
-Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [publish](docs/publish.md) · [dashboard](docs/dashboard.md) ·
-[relay](docs/relay.md) · [words used](docs/wording.md)
+Guides: [tickets](docs/workspace.md) · [agents](docs/agents.md) · [add-ons](docs/addons.md) · [factory](docs/factory.md) · [publish](docs/publish.md) · [dashboard](docs/dashboard.md) ·
+[relay](docs/relay.md) · [phone](docs/mobile.md) · [words used](docs/wording.md)
 
 ## How tickets work
 
@@ -143,6 +144,10 @@ All commands accept `--json` for agents.
 | `orch publish file <path>` / `orch publish app <folder>` | Share an encrypted file or deploy a small app |
 | `orch relay inbox` / `send <workspace> "text"` | Read messages, message another workspace |
 | `orch addon add\|list\|remove` / `orch update` | Add-ons and updates |
+| `orch start` / `stop` / `status` | Start, stop and see the background add-ons (dashboard, automation, ...) |
+| `orch pause` / `resume` | Stop all automation in this workspace, and turn it back on |
+| `orch pull-requests queue add <url> --ticket <id>` | Put a ready pull request in the merge queue (add-on: pull-requests) |
+| `orch doctor` / `orch report` | See what is wrong with orch here; report a problem |
 
 ## Security in plain words
 
@@ -161,7 +166,7 @@ All commands accept `--json` for agents.
 |---|---|---|---|
 | `contracts/` | Shared formats: ticket, message, APIs, crypto, with test vectors | JSON Schema, docs | `contracts.yml` (and every folder below that uses it) |
 | `workspace/` | The `orch` command and its skills | Python, uv | `workspace.yml` |
-| `workspace-addons/` | Dashboard, Focus, automation | Python, uv | `addons.yml` |
+| `workspace-addons/` | The add-ons: dashboard, Focus, automation, Factory, pull requests, files, ... | Python, uv | `addons.yml` |
 | `publish/` | Encrypted files and small apps (publish.severin.io) | Rust | `publish.yml` |
 | `relay/` | Inbox, rules, webhooks, shared tools, phone API (relay.severin.io) | Rust | `relay.yml` |
 | `mobile/` | iPhone app | Swift | `mobile.yml` |
