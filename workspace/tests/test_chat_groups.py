@@ -3090,3 +3090,15 @@ def test_chat_info_says_who_added_and_removed_a_member(proj, run, rel, host, mon
     members = {m["ws"]: m for m in cg.view(proj)["hosted"][0]["members"]}
     assert members[HOME]["added_by"] == "you" and members[HOME]["removed_by"] == "you"
     assert members[WS]["added_by"] is None  # the host's own entry
+
+
+def test_a_late_copy_never_puts_back_an_older_member_list(proj, run, rel, member):
+    # #2324: the header's list is taken only from a copy not older than the one already taken
+    inbox(run, rel, from_host("text", {"text": "two of us"}, seq=4, id=mid("n4"), i="n4"))
+    old = from_host("text", {"text": "from before"}, seq=2, id=mid("n2"), i="n2")
+    old["body"]["group"]["title"] = "An old title"
+    old["body"]["group"]["members"].append({"ws": "ws_old00000001", "name": "Removed"})
+    inbox(run, rel, old)
+    j = _joined(proj)
+    assert j["title"] == "Pay car tax 2027"
+    assert [x["ws"] for x in j["members"]] == [FIN, WS]

@@ -969,6 +969,9 @@ a.helper-title:hover{text-decoration:underline}
 .short-row .short-side{flex:none;display:flex;align-items:center;gap:var(--s2)}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
+/* issue 1368: the title link is a 44 px touch target; its clear edge above and below takes no room in the row and stays
+   outside the two-line clip */
+.short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
 .switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
@@ -1643,7 +1646,9 @@ button.gtree-row:hover{background:var(--surface-2)}
 .gtree[data-mode=strip] .gtree-list{flex-direction:row;gap:var(--s1);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .gtree[data-mode=strip] .gtree-list>li{flex:none;padding-left:0}
 .gtree[data-mode=strip] .gtree-list>li::before{display:none}
-.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 3);border:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 4);min-height:var(--touch);border:1px solid var(--border)}
+/* issue 2597: a strip chip keeps the whole helper name readable: up to two lines, the tooltip for a longer one */
+.gtree[data-mode=strip] .gtree-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
 .gtree[data-mode=strip] .gtree-b,.gtree[data-mode=strip] .gtree-m{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--s2)}
 .gtree[data-mode=strip] li[data-small] .gtree-row{border-style:dashed}
 .gtree[data-mode=strip] .gtree-tag:not([data-small]){display:none}

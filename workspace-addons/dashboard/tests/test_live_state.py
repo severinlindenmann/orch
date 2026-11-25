@@ -9,11 +9,9 @@ from datetime import UTC, datetime, timedelta
 
 from orch_dashboard import data
 
-NOW = datetime.now(UTC)
-
 
 def _iso(days_ago: float) -> str:
-    return (NOW - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _write(root, tid, status, days_ago, history=3, parent=None, evidence=0):

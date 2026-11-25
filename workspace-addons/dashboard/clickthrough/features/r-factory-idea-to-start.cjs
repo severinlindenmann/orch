@@ -7,8 +7,11 @@ const path = require('node:path');
 module.exports = {
   name: 'Factory: an idea becomes an order, the proposal is read and Start starts it',
   covers: ['addon.start'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, addonOff, until, workspace }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, addonOff, until, workspace, slowOk }) {
     addonOn('factory');
+    // the idea opens its new order's page, and a busy computer can be slow to build the Factory home: their first
+    // answer may still be built (503, the page says Try again)
+    slowOk(/^\/addon\/factory\/api\/(order\/t_[a-z0-9]+|home)$/);
     await open('#home');
     await until(s => (s.addons || []).some(a => a.name === 'factory'), 'Factory on');
     await open('#addon/factory');
@@ -45,12 +48,24 @@ module.exports = {
     // back to the Factory home (the idea opened its order's draft page): it lists the proposal under Waits for you
     await open('#addon/factory');
     const read = frame.getByText('Read proposal').first();
-    for (let i = 0; i < 6 && !(await read.isVisible()); i++) { await page.waitForTimeout(3000); await open('#addon/factory'); }
+    // poll for it; a home that was still being built says Try again: press it, as a person does
+    const retry = frame.getByRole('button', { name: 'Try again' });
+    for (let i = 1, end = Date.now() + 60000; !(await read.isVisible()) && Date.now() < end; i++) {
+      if (await retry.isVisible()) await retry.click().catch(() => {});
+      await page.waitForTimeout(1000);
+      if (i % 5 === 0) await open('#addon/factory');   // the home is read when it is opened
+    }
     await read.waitFor({ timeout: 10000 }).catch(async () => {
       throw new Error('no "Read proposal" on Factory:\n' + (await frame.locator('body').innerText()).slice(0, 600));
     });
     await read.click();
-    await frame.getByRole('button', { name: 'Answer' }).click();
+    // the proposal page is read when it opens; a busy computer may answer Try again first (as on the home above)
+    const answer = frame.getByRole('button', { name: 'Answer' });
+    for (const end = Date.now() + 60000; !(await answer.isVisible()) && Date.now() < end;) {
+      if (await retry.isVisible()) await retry.click().catch(() => {});
+      await page.waitForTimeout(1000);
+    }
+    await answer.click();
     const card = page.locator('dialog[open]');
     must(/Start 'Opening hours page'\?/.test(await card.innerText()), 'the answer card does not ask to start the run');
     await card.getByRole('button', { name: 'Start', exact: true }).click();
@@ -61,9 +76,11 @@ module.exports = {
     }
     must(started, 'the order did not start after Start');
     await open('#addon/factory');
-    await page.waitForTimeout(1500);
-    must(/Running[\s\S]*Opening hours page/.test(await page.frameLocator('iframe.embed').locator('body').innerText()),
-      'Factory does not show the order as Running after a reload');
+    // the Factory page fills in after it is drawn: wait for the Running row instead of reading the first picture
+    const body = () => page.frameLocator('iframe.embed').locator('body').innerText({ timeout: 5000 }).catch(() => '');
+    let shown = '';
+    for (const end = Date.now() + 20000; !/Running[\s\S]*Opening hours page/.test(shown = await body()) && Date.now() < end;) await page.waitForTimeout(250);
+    must(/Running[\s\S]*Opening hours page/.test(shown), 'Factory does not show the order as Running after a reload:\n' + shown.slice(0, 400));
     await open('#home');   // leave the Factory tab first: an open tab asks for the page again once Factory is off (a 404)
     orchAsPerson('stop');
     await addonOff('factory');   // off again for the next click-through
