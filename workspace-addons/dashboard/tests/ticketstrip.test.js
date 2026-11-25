@@ -42,6 +42,11 @@ for (const [pill, patch, run, sentence] of STATES) {
     assert.equal(nodes(strip).filter(n => /(^| )pill( |$)/.test(n.attrs.className || '')).length, 1);
     assert.ok(nodes(strip).some(n => new RegExp('(^| )pill (.* )?' + pill + '( |$)').test(n.attrs.className || '')), 'pill ' + pill);
     assert.match(text(strip), sentence);
+    // as in the mockup: unboxed, the number and the state in one line above the title (not a pill column beside it)
+    assert.match(strip.attrs.className, /(^| )strip-plain( |$)/);
+    const line = nodes(strip).find(n => /(^| )strip-kicker( |$)/.test(n.attrs.className || ''));
+    assert.ok(nodes(line).some(n => /(^| )pill( |$)/.test(n.attrs.className || '')), 'the pill sits in the line above the title');
+    assert.equal(nodes(strip).find(n => n.tag === 'h1').attrs.className.split(' ')[0], 't-title');
     const all = JSON.stringify(tree);
     assert.doesNotMatch(all, /stepper|Ticket progress/);
     assert.doesNotMatch(all, /Your helper (is|asks|finished|paused)/, 'the actor is just "Helper"');
@@ -338,4 +343,15 @@ test('ORCH-1850: Done with a real result keeps Results on top and no handover ba
   assert.ok(keyed(all, 'results-widgets') && !keyed(all, 'progress') && !keyed(all, 'agent-bar'));
   assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
   assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
+});
+
+test('Results: a completion note counts as a result, so no "Nothing yet" under it', () => {
+  const seen = [];
+  const c = ctx({resultsHost:(id, o) => { seen.push(o.empty); return h('div', {}); }, ticketHostsOpenGroup:() => false});
+  c.window.UI.result = () => null;
+  const done = c.detail({...STATES[4][1], ...base, status:'done', done_at:'2026-11-14T11:05:00Z', checklist:[{id:'c1', text:'Collect', done:true, at:'2026-11-14T11:00:00Z', evidence:[{type:'note', ref:'Sales up 8%.'}]}]});
+  const card = nodes(done).find(n => n.attrs?.['data-key'] === 'results-widgets');
+  assert.ok(nodes(card).some(n => n.attrs?.['data-key'] === 'completion-note'));
+  assert.equal(seen.pop(), '', 'no empty line under the note');
+  assert.match(text(card), /Results1 note/);
 });
