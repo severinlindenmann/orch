@@ -238,3 +238,15 @@ def test_review_list_in_the_terminal_shows_the_same_groups(proj, run, new_ticket
     lines = out.splitlines()
     assert lines[1] == "Holds up work now" and "[Question]" in lines[2]
     assert lines[3] == "Look at the result" and "Write the spring newsletter" in lines[4]
+
+
+def test_propose_mode_skips_the_second_look(proj, run, monkeypatch):
+    from orch import lookreview
+
+    assert run("config", "set", "workflow.reviewer", "on", "--by", "human:tester")[0] == 0
+    assert run("config", "set", "workflow.reviewer_mode", "propose", "--by", "human:tester")[0] == 0
+    monkeypatch.setattr(lookreview, "on", lambda root: True)
+    monkeypatch.setattr(
+        lookreview, "tend", lambda *a, **k: pytest.fail("the second look accepts: off in propose")
+    )
+    assert reviewer.run(proj)["second_look"] == []

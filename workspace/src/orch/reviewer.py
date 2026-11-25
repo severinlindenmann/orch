@@ -700,7 +700,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
 
     now_mode = autoreview.mode(root)
     propose = config.reviewer_mode(root) == "propose"
-    look = plain and lookreview.on(root)
+    look = plain and lookreview.on(root) and not propose  # its second look accepts too: never in propose mode
     own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
