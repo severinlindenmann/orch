@@ -22,12 +22,6 @@ NAME = "dash.example.org"
 ANS = {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def _outside_ip() -> str | None:
     """An address of this computer that is not loopback (no packet is sent), or None."""
     with contextlib.suppress(OSError), socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -64,9 +58,11 @@ def ws(tmp_path, monkeypatch):
 @pytest.fixture
 def live(ws):
     """A real dashboard with remote listening on all addresses at a fixed port."""
-    rport = _free_port()
-    srv = make_server(ws, 0, orch_bin=pagesession.SELF, remote=("0.0.0.0", rport))
+    srv = make_server(
+        ws, 0, orch_bin=pagesession.SELF, remote=("0.0.0.0", 0)
+    )  # the OS picks the port, no race
     assert srv.remote_server is not None, srv.remote_error
+    rport = srv.remote_server.server_address[1]
     for s in (srv, srv.remote_server):
         threading.Thread(target=s.serve_forever, daemon=True).start()
     yield ws, srv.server_address[1], rport

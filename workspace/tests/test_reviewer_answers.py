@@ -8,7 +8,11 @@ import pytest
 
 from orch import brake, reviewer, runs, tickets
 
-LATER = time.time() + 3600  # past the 30 minutes
+
+def later() -> float:
+    """An hour from now, past the 30 minutes. Read at each call: the one-job Windows VM suite runs longer than
+    an hour, so a time taken at import can be in the past by the time a test runs (ORCH-1907)."""
+    return time.time() + 3600
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +42,7 @@ def _q(proj, tid, qid="q1"):
 def test_a_routine_question_is_answered_with_the_recommendation_and_the_reason(proj, run, new_ticket, on):
     tid = new_ticket("Flaky test in the run tests")
     _ask(run, tid, "The run test fails once in ten on Windows. Fix it now or open an issue?")
-    rows = reviewer.answer_routine(proj, now=LATER)
+    rows = reviewer.answer_routine(proj, now=later())
     assert [(r["question"], r["routine"], r["done"]) for r in rows] == [("q1", True, True)]
     q = _q(proj, tid)
     assert (q["answer"], q["answered_by"], q["via"]) == ("Fix it now", "agent:reviewer", "reviewer")
@@ -78,7 +82,7 @@ def test_a_fresh_question_waits_30_minutes_for_the_owner(proj, run, new_ticket, 
 def test_concept_words_look_money_and_production_stay_for_the_owner(proj, run, new_ticket, on, text, kind):
     tid = new_ticket("Small fix")
     _ask(run, tid, text, ("Yes", "No"), "Yes")
-    rows = reviewer.answer_routine(proj, now=LATER)
+    rows = reviewer.answer_routine(proj, now=later())
     assert rows[0]["routine"] is False and kind in rows[0]["why"]
     assert _q(proj, tid)["answer"] is None
 
@@ -86,14 +90,14 @@ def test_concept_words_look_money_and_production_stay_for_the_owner(proj, run, n
 def test_the_ticket_title_counts_too(proj, run, new_ticket, on):
     tid = new_ticket("New look for the Tickets page")
     _ask(run, tid, "The test fails once in ten. Fix it now or open an issue?")
-    assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
+    assert reviewer.answer_routine(proj, now=later())[0]["routine"] is False
 
 
 def test_no_recommendation_or_one_option_stays(proj, run, new_ticket, on):
     tid = new_ticket("Small fix")
     _ask(run, tid, "Fix it now or open an issue?", rec=None)
     _ask(run, tid, "Go on with the fix?", ("Go on",), "Go on")
-    rows = reviewer.answer_routine(proj, now=LATER)
+    rows = reviewer.answer_routine(proj, now=later())
     assert all(not r["routine"] and r["why"] == "no recommended option" for r in rows)
 
 
@@ -102,7 +106,7 @@ def test_a_card_stays_for_the_owner(proj, run, new_ticket, on, tmp_path):
     args = ["--choose", "Pick", "--option", "A=First", "--option", "B=Second", "--suggest", "B"]
     code, out, err = run("ask", tid, "Which one?", *args, "--then", "I build it.", "--by", "agent:helper")
     assert code == 0, out + err
-    rows = reviewer.answer_routine(proj, now=LATER)
+    rows = reviewer.answer_routine(proj, now=later())
     assert rows and not rows[0]["routine"]
     assert _q(proj, tid)["answer"] is None
 
@@ -156,7 +160,7 @@ def test_a_changed_question_is_refused(proj, run, new_ticket, on):
 def test_look_alike_letters_and_hidden_marks_stay_for_the_owner(proj, run, new_ticket, on, text):
     tid = new_ticket("Small fix")
     _ask(run, tid, text)
-    assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
+    assert reviewer.answer_routine(proj, now=later())[0]["routine"] is False
 
 
 def test_the_wait_counts_from_the_question_not_from_history(proj, run, new_ticket, on):
@@ -174,7 +178,7 @@ def test_a_question_from_an_older_version_stays_for_the_owner(proj, run, new_tic
     t = tickets.load(proj, tid)
     t["questions"][0].pop("asked_at")
     tickets.save(proj, t)
-    assert reviewer.answer_routine(proj, now=LATER)[0]["routine"] is False
+    assert reviewer.answer_routine(proj, now=later())[0]["routine"] is False
 
 
 def test_a_routine_answer_reads_as_plain_words():

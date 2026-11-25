@@ -666,6 +666,25 @@ def _int(v):
     return isinstance(v, int) and not isinstance(v, bool) and v >= 0
 
 
+_ZONE = re.compile(r"^[A-Za-z0-9_+/-]{1,64}$")
+_ZONE_TID = re.compile(r"^t_[a-z0-9]{1,32}$")
+
+
+def _zones(z):
+    """The repeat window's time zones (ORCH-1861): `new` and `repeats` {ticket id: zone}, IANA names only."""
+    reps = z.get("repeats", {}) if isinstance(z, dict) else None
+    return (
+        _keys_only(z, ("new", "repeats"))
+        and _opt(z, "new", lambda v: isinstance(v, str) and bool(_ZONE.match(v)))
+        and isinstance(reps, dict)
+        and len(reps) <= 500
+        and all(
+            isinstance(k, str) and _ZONE_TID.match(k) and isinstance(x, str) and _ZONE.match(x)
+            for k, x in reps.items()
+        )
+    )
+
+
 def check_view(v) -> dict | None:
     """Return the view with unknown block types dropped, or None when it breaks the contract."""
     if not (
@@ -694,6 +713,9 @@ def check_view(v) -> dict | None:
         **{
             k: v[k] for k in ("schema", "generated_at", "notice", "notice_tone", "button", "header") if k in v
         },
+        **(
+            {"zones": v["zones"]} if "zones" in v and _zones(v["zones"]) else {}
+        ),  # a bad one is dropped, not the view
         "blocks": blocks,
     }
 

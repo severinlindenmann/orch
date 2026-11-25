@@ -20,8 +20,8 @@ from pathlib import Path
 from . import calendar as cal_mod
 from . import inbox as inbox_mod
 from . import meetings as meetings_mod
+from . import meetings_live, store
 from . import notes as notes_mod
-from . import store
 from . import ways as ways_mod
 from .store import Refused
 
@@ -307,10 +307,16 @@ def _meetings_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
             "line": "Add your recorder as a way in and turn it on.",
         }
     last = items[0] if items else None
+    pend = [] if who.helper else meetings_mod.pending(root)
+    newest_pending = pend and (not last or str(pend[0].get("started")) > str(last.get("started")))
     return {
         "state": "ok",
         "status": f"{len(items)} meeting" + ("" if len(items) == 1 else "s"),
-        "line": last["title"] if last else "No meeting has arrived yet.",
+        "line": f"{pend[0]['title']}: {pend[0]['words']}"
+        if newest_pending
+        else last["title"]
+        if last
+        else "No meeting has arrived yet.",
         "changed": last.get("arrived") if last else None,
         "changed_word": "arrived",
         "source": ", ".join(w["name"] for w in recs) or None,
@@ -360,6 +366,7 @@ def meetings_list(root: Path, who: Who) -> dict:
         "schema": "orch.personal.meetings/1",
         "meetings": rows,
         "waiting": [] if who.helper else meetings_mod.waiting(root),
+        "pending": [] if who.helper else meetings_mod.pending(root),
         "recorders": [
             {"way": w["way"], "name": w["name"], "words": w["words"], "last_worked": w["last_worked"]}
             for w in meetings_mod.recorders(root)
@@ -367,6 +374,7 @@ def meetings_list(root: Path, who: Who) -> dict:
         "read": p["read"],
         "write": p["write"],
         "consent": "Ask everyone on the call before you record. Helpers never get the sound.",
+        "now": None if who.helper else meetings_live.live(root),
     }
 
 
@@ -1065,6 +1073,7 @@ def notes_show(root: Path, who: Who, ref: str) -> dict:
         "titles": titles,
         "app_link": None if who.helper else v.app_link(n.id),
         "tickets": store.tickets_using(root, "notes", n.id),
+        "keys": {} if who.helper else _keys(root, store.tickets_using(root, "notes", n.id)),
     }
 
 
@@ -1257,6 +1266,28 @@ def calendar_rule(root: Path, who: Who, ref: str | None, level: str | None, move
 def calendar_source(root: Path, who: Who, source: str) -> dict:
     need_person(who, "choose where Calendar reads from")
     return cal_mod.set_source(root, source)
+
+
+def meetings_companion(root: Path, who: Who) -> dict:
+    need_person(who, "add the orch Companion way in")
+    return meetings_live.add_companion(root)
+
+
+def meetings_service(root: Path, who: Who, url: str | None, token: str | None, off: bool) -> dict:
+    """Where orch Companion sends recordings: our transcription service (address and key). Only the person sets it."""
+    if off:
+        need_person(who, "turn the transcription service off")
+        return meetings_live.remove_service(root)
+    if url is None:
+        return meetings_live.service_status(root)
+    need_person(who, "set where call recordings are sent")
+    return meetings_live.set_service(root, url, token or "")
+
+
+def meetings_now(root: Path, who: Who) -> dict:
+    need_person(who, "see whether a call runs now")
+    meetings_live.look(root)
+    return {"now": meetings_live.live(root)}
 
 
 def calendar_outlook(root: Path, who: Who) -> dict:

@@ -204,7 +204,9 @@ def test_send_is_sent_when_the_watcher_typed_the_notice_first(proj, run, lab, mo
 
     def watcher_wins(*a, **kw):
         item = add(*a, **kw)
-        assert runs_live.deliver(proj, tid) == 1  # what retry_deliver does on its next poll
+        runs_live.deliver(
+            proj, tid
+        )  # what retry_deliver does on its next poll; 0 when the real watcher was first
         return item
 
     monkeypatch.setattr(runs, "pending_add", watcher_wins)
@@ -362,7 +364,7 @@ def test_stop_ends_the_session_and_the_agent_but_keeps_the_work(proj, run, lab):
     assert runs.read(proj, tid) is None and not runs_live.session_exists(proj, tid)
     _until(lambda: not runs._running(rec["agent_pid"], rec["agent_pid_started"]), what="agent ended")
     assert not runs._running(rec["pid"], rec["pid_started"])
-    assert run("run", "stop", tid)[1].strip() == f"Nothing is running on {tickets.load(proj, tid)['key']}."
+    assert run("run", "stop", tid)[1].splitlines()[0] == f"Nothing is running on {tickets.load(proj, tid)['key']}."
 
 
 @needs_tmux

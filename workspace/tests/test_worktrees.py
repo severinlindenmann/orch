@@ -641,6 +641,9 @@ def test_codex_in_a_copy_gets_exactly_the_workspace_store_as_writable(repo):
     assert runs.store_access(fresh, "generic", repo, copy) == fresh  # no store_args declared
     claude = ["claude", "-p", "x"]
     assert runs.store_access(claude, "claude", repo, copy) == claude
+    copilot = ["copilot", "--autopilot", "--no-ask-user", "--session-id", "sid"]
+    out = runs.store_access(copilot, "copilot", repo, copy)
+    assert out == [*copilot[:3], "--add-dir", str(root / ".orch"), *copilot[3:]]
 
 
 def test_store_access_is_refused_for_a_linked_store_a_non_copy_and_a_prompt_word(repo, tmp_path):
