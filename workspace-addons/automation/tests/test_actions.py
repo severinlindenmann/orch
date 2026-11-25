@@ -327,3 +327,86 @@ def test_repeat_off_refused_on_a_closed_ticket_names_the_real_reason(ws, capsys)
     assert main(["--dir", str(ws), "repeat", t["id"], "--off", "--json"]) == 2
     out = capsys.readouterr()
     assert "This ticket is closed" in out.out + out.err and "Try again" not in out.out + out.err
+
+
+def test_a_click_on_a_repeat_the_helper_removed_meanwhile_counts_as_done(ws, monkeypatch):
+    """The entry is gone by the time the write is tried again: nothing left to delete or switch, no error."""
+    from orch_automation import orchcli
+
+    t = sched(ws)
+    (ws / ".orch" / "tickets" / f"{t['id']}.json").write_text(json.dumps({**t, "revision": 2, "ext": {}}))
+    reads = iter([[{**t, "revision": 1}]])
+    real = orchcli.tickets
+    monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
+    assert act(ws, "off", t["id"])["paused"] is True
+    assert ext(ws, t["id"]) is None  # nothing was written back
+
+
+def test_only_repeat_and_the_schedule_verbs_take_a_value(ws):
+    sched(ws)
+    with pytest.raises(Bad, match="Only repeat takes a time"):
+        act(ws, "on", "t_rec00001", value="9:00")
+    with pytest.raises(Bad, match="200 characters"):
+        act(ws, "repeat", "t_rec00001", value="   ")
+
+
+def test_a_copy_with_a_bad_parent_id_is_refused(ws):
+    add_ticket(ws, "t_child001", parent="../../etc")
+    with pytest.raises(Bad, match="parent"):
+        act(ws, "copy", "t_child001")
+    assert not [c for c in calls(ws) if c["args"][:2] == ["ticket", "new"]]
+
+
+def test_time_limit_is_set_and_removed_for_a_repeat_only(ws):
+    sched(ws)
+    r = act(ws, "limit", "t_rec00001", value="60")
+    assert ext(ws, "t_rec00001")["time_limit"] == 60 and "60 minutes" in r["text"]
+    for bad in ("61", "abc", None):
+        with pytest.raises(Bad, match="30, 45"):
+            act(ws, "limit", "t_rec00001", value=bad)
+    act(ws, "limit", "t_rec00001", value="none")
+    assert "time_limit" not in ext(ws, "t_rec00001")
+    add_ticket(ws, "t_once0009", ext={"automation": {"at": "2026-11-05T08:00:00Z"}})
+    with pytest.raises(Bad, match="Only a repeat"):
+        act(ws, "limit", "t_once0009", value="60")
+
+
+def test_quick_check_off_keeps_what_it_watches_and_on_brings_it_back(ws):
+    watch = {"branch": "develop"}
+    add_ticket(ws, "t_rec00002", ext={"automation": {"recurring": True, "cron": "0 8 * * *"}})
+    with pytest.raises(Bad, match="nothing to check yet"):
+        act(ws, "quick", "t_rec00002", value="on")
+    assert act(ws, "quick", "t_rec00002", value="off")["text"] == "Quick check is already off."
+    t = json.loads((ws / ".orch/tickets/t_rec00002.json").read_text())
+    t["ext"]["automation"]["when_changed"] = watch
+    (ws / ".orch/tickets/t_rec00002.json").write_text(json.dumps(t))
+    act(ws, "quick", "t_rec00002", value="off")
+    e = ext(ws, "t_rec00002")
+    assert "when_changed" not in e and e["when_changed_off"] == watch
+    act(ws, "quick", "t_rec00002", value="on")
+    e = ext(ws, "t_rec00002")
+    assert e["when_changed"] == watch and "when_changed_off" not in e
+    with pytest.raises(Bad, match="on or off"):
+        act(ws, "quick", "t_rec00002", value="maybe")
+
+
+def test_a_schedule_change_core_refuses_says_so(ws, monkeypatch):
+    from orch_automation import orchcli
+
+    sched(ws)
+    monkeypatch.setattr(orchcli, "set_ext", lambda *a, **k: False)
+    with pytest.raises(Bad, match="could not be saved"):
+        act(ws, "limit", "t_rec00001", value="30")
+
+
+def test_review_refuses_plainly_when_there_is_nothing_to_allow(ws):
+    from orch_automation.actions import review
+
+    assert review(ws, "on", "t_rec00001") == {"target": None, "review": None}
+    with pytest.raises(Bad, match="not a ticket id"):
+        review(ws, "allow-script", "../x")
+    sched(ws)
+    with pytest.raises(Bad, match="runs no script"):
+        review(ws, "allow-script", "t_rec00001")
+    with pytest.raises(Bad, match="runs no script"):
+        act(ws, "allow-script", "t_rec00001", value="0" * 64)
