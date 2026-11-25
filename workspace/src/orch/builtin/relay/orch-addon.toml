@@ -4,6 +4,7 @@ orch_api = 1
 name = "relay"
 version = "0.1.0"
 description = "Messages and tasks between workspaces and phones."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch"
 skill = "skills/orch-relay"
 agents_block = "skills/orch-relay/AGENTS-block.md"

@@ -1278,6 +1278,7 @@ body[data-live-narrow] .review-side{display:none}
    0 px beside them at 1280 with the layer on the right */
 body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+body[data-live-narrow] .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
 body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
@@ -1395,6 +1396,10 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
 .wall-sum>:not(.actions){grid-column:1}
 .wall-sum>.actions{grid-column:2;grid-row:1/span 2;align-self:center;justify-content:flex-end;margin:0}
+/* Runs on under the start buttons (draft D, ORCH-1617): the tool and model a new session starts on */
+.wall-sum:has(>.wall-runs)>.actions{grid-row:1;align-self:end}
+.wall-sum>.wall-runs{grid-column:2;grid-row:2;justify-content:flex-end;padding:0;border:0}
+.live-prow .start-run{margin:0}
 .wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
 .wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
 .wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
@@ -1452,6 +1457,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
   .wall-tools .input{max-width:none}
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
   .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+  .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
   .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}

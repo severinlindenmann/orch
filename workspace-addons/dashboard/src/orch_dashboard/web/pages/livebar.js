@@ -29,29 +29,37 @@ const LIVEBAR_NEW = [
   {kind:'manager', title:'Manager', what:'Looks after all helpers'},
 ];
 
-// ORCH-710: the Empty helper says the model it starts on and the person picks it, like the Start choice of a ticket.
-// The model comes from orch (state.sessions, the core's next pick); before the first Empty helper exists it is the one
-// orch picks for it (core modelpick.EMPTY_HELPER; tests/test_sessions_data.py keeps the two the same).
+// Runs on (draft D features 4 and 12; ORCH-710, ORCH-1660, ORCH-1617): one row in the New menu and on the wall, the tool
+// and the model a new helper without a ticket starts on, the usual ones preselected so it stays one click, like the Start
+// choice of a ticket. The model comes from orch (state.sessions, the core's next pick); before the first Empty helper
+// exists it is the one orch picks for it (core modelpick.EMPTY_HELPER; tests/test_sessions_data.py keeps the two the same).
 const LIVEBAR_MODELS = [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku'], ['fable', 'Fable']];
 const LIVEBAR_EMPTY_MODEL = 'sonnet';
-// {name, label} of the model the Empty helper starts on, or null when the usual tool has no model choice.
-function liveBarNewModel(sessions, agents) {
-  const tools = (Array.isArray(agents) ? agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false);
-  const usual = tools.find(a => a.chosen === true) || tools[0];
-  if (!usual || usual.models !== true) return null;
+const liveBarModelOk = m => LIVEBAR_MODELS.some(x => x[0] === m);
+// {tools, usual, tool, takesModel, model, usualModel} of the Runs on row, or null when no tool is set up here.
+// pick: {tool, model} the person changed ('' = the usual one).
+function liveBarRunsOn(sessions, agents, pick) {
+  const tools = (Array.isArray(agents) ? agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false)
+    .map(a => ({name:a.name, label:String(a.label || a.name), models:a.models === true, chosen:a.chosen === true}));
+  if (!tools.length) return null;
+  const usual = (tools.find(t => t.chosen) || tools[0]).name;
+  const tool = tools.find(t => t.name === pick?.tool) || tools.find(t => t.name === usual);
   const s = (Array.isArray(sessions) ? sessions : []).find(x => x && x.kind === 'empty');
-  const name = s && LIVEBAR_MODELS.some(m => m[0] === s.model) ? s.model : LIVEBAR_EMPTY_MODEL;
-  return {name, label:LIVEBAR_MODELS.find(m => m[0] === name)[1]};
+  const usualModel = s && liveBarModelOk(s.model) ? s.model : LIVEBAR_EMPTY_MODEL;
+  return {tools, usual, tool:tool.name, takesModel:tool.models, model:liveBarModelOk(pick?.model) ? pick.model : usualModel, usualModel};
 }
-// The usual tool is there but takes no model: the menu says so, like the Start choice of a ticket.
-function liveBarNewOwnModel(agents) {
-  const tools = (Array.isArray(agents) ? agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false);
-  const usual = tools.find(a => a.chosen === true) || tools[0];
-  return !!usual && usual.models !== true;
-}
-// What New sends for a session without a ticket: the model only when the person picked another than the usual one.
-function liveBarNewArgs(kind, picked, usual) {
-  return kind === 'empty' && picked && usual && picked !== usual.name ? {kind, model:picked} : {kind};
+// What New sends for a session without a ticket: the tool only when it is not the usual one, the model only when the
+// person picked one other than the one this helper starts on anyway. A plain terminal runs no helper: neither.
+function liveBarNewArgs(kind, pick, runsOn, sessions) {
+  const out = {kind};
+  if (kind === 'terminal' || !runsOn) return out;
+  if (pick?.tool && pick.tool !== runsOn.usual && runsOn.tools.some(t => t.name === pick.tool)) out.agent = pick.tool;
+  if (runsOn.takesModel && liveBarModelOk(pick?.model)) {
+    const s = (Array.isArray(sessions) ? sessions : []).find(x => x && x.kind === kind);
+    const own = s && liveBarModelOk(s.model) ? s.model : kind === 'empty' ? LIVEBAR_EMPTY_MODEL : '';
+    if (pick.model !== own) out.model = pick.model;
+  }
+  return out;
 }
 
 // One row per live session: {id, key, title, s: wait|run|queue|idle, word, pin}, from the live sessions API
@@ -124,10 +132,10 @@ function liveBarNeedText(total, sessions) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarNeedCount, liveBarCountName, liveBarNewModel, liveBarNewOwnModel, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
+  module.exports = {liveBarNeedCount, liveBarCountName, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, model:'', busy:'', perm:''};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
     // ORCH-818: the Permissions row of the New menu (pages/live-perm.js): the tool's modes for the next start
     const permRow = kind => typeof livePermRow === 'function' ? livePermRow(state?.session_modes, kind, bar.perm) : null;
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
@@ -227,16 +235,36 @@ if (typeof module === 'object' && module.exports) {
       r.choices.some(c => !c.allowed) ? h('p', {className:'meta', 'data-key':'lbar-perm-off'}, r.choices.filter(c => !c.allowed).map(c => c.label).join(', ') + ': ' + LIVE_PERM_OFF.charAt(0).toLowerCase() + LIVE_PERM_OFF.slice(1)) : null,
       r.warn ? h('p', {className:'meta', 'data-key':'lbar-perm-warn'}, r.warn) : null];
     }
-    // ORCH-710 (draft D feature 12): the model the Empty helper runs on, the usual one preselected so it stays one click.
+    // Runs on (ORCH-1660): the tool and the model of the next helper started here, the usual ones preselected; the same
+    // row on the wall (window.LiveNew.runsOn). A tool picker only when there are two or more tools (kit .start-run).
+    const runsOnNow = () => liveBarRunsOn(state.sessions, state?.settings?.agents, bar.pick);
+    function runsOn(where) {
+      const r = runsOnNow();
+      if (!r) return null;
+      const k = where === 'wall' ? 'wall-runs' : 'lbar-runs';
+      const opt = (v, word, on, usual) => h('option', {value:v, selected:on ? '' : null}, word + (usual ? ' (usual)' : ''));
+      const tool = r.tools.length > 1
+        ? h('select', {'aria-label':'Tool', 'data-lnew-pick':'tool', 'data-key':k + '-tool', disabled:!!bar.busy},
+          r.tools.map(t => opt(t.name, t.label, t.name === r.tool, t.name === r.usual)))
+        : h('span', {className:'chip', 'data-key':k + '-tool'}, 'Tool: ' + r.tools[0].label);
+      const model = r.takesModel
+        ? h('select', {'aria-label':'Model', 'data-lnew-pick':'model', 'data-key':k + '-model', disabled:!!bar.busy},
+          LIVEBAR_MODELS.map(([v, word]) => opt(v, word, v === r.model, v === r.usualModel)))
+        : h('span', {className:'meta', 'data-key':k + '-model'}, 'This tool uses its own model.');
+      return h('div', {className:where === 'wall' ? 'live-prow wall-runs' : 'live-prow', role:'group', 'aria-label':'Runs on', 'data-key':k},
+        h('span', {className:'meta'}, 'Runs on'), h('span', {className:'start-run'}, tool, model));
+    }
+    // The helper places in use, under the choices (draft D): a new helper takes one, or waits in line when all are taken.
+    function placesLine() {
+      const p = typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null;
+      if (!p || typeof liveWallPlaces !== 'function') return null;
+      return h('p', {className:'meta', 'data-key':'lbar-new-places'}, liveWallPlaces(p));
+    }
     function newMenu() {
-      const m = liveBarNewModel(state.sessions, state?.settings?.agents), picked = bar.model || m?.name;
       return h('div', {className:'live-pop', role:'group', 'aria-label':'New session without a ticket', 'data-key':'lbar-new-menu'},
         h('p', {className:'live-pop-h'}, 'New session without a ticket'),
+        runsOn('bar'),
         permSegs(),
-        m ? h('label', {className:'meta', for:'lbar-new-model'}, 'Empty helper runs on')
-          : liveBarNewOwnModel(state?.settings?.agents) ? h('p', {className:'meta'}, 'Empty helper: this tool uses its own model.') : null,
-        m ? h('select', {className:'input', id:'lbar-new-model', 'data-lbar-model':'1', 'data-key':'lbar-new-model', disabled:!!bar.busy},
-          LIVEBAR_MODELS.map(([v, word]) => h('option', {value:v, selected:v === picked ? '' : null}, word + (v === m.name ? ' (usual)' : '')))) : null,
         LIVEBAR_NEW.map(n => {
           const open = liveBarNewOpen(state.sessions, n.kind), r = permRow(n.kind), ended = open ? null : liveBarNewEnded(state.sessions, n.kind);
           const moved = open && r && bar.perm && r.running && r.cur !== r.running;  // goes on in the picked mode
@@ -247,7 +275,8 @@ if (typeof module === 'object' && module.exports) {
           // an ended helper (ORCH-817): its earlier conversations are one click away
           return ended ? h('span', {className:'lbar-newrow'}, start, h('button', {type:'button', className:'btn sm ghost', 'data-lbar-hist':ended.id,
             'data-key':'lbar-new-history-' + n.kind, 'aria-label':'History of the ' + n.title}, 'History')) : start;
-        }));
+        }),
+        placesLine());
     }
     function newButton(fold) {
       const tiny = fold >= 3;
@@ -269,26 +298,22 @@ if (typeof module === 'object' && module.exports) {
       if (typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(id);
       else location.hash = link(a, {id});
     }
-    // The one start path (core `orch session new`); the new one is pinned (pins stay in this browser until orch keeps
-    // them) and opens in the layer. One already open is only opened.
-    async function startNew(kind, fromMenu) {
+    // The one start path (core `orch session new`), on the tool and model of the Runs on row; the new one is pinned
+    // (pins stay in this browser until orch keeps them) and opens in the layer. One already open is only opened.
+    async function startNew(kind) {
       const a = liveAddon();
       if (!a || bar.busy) return;
       const open = liveBarNewOpen(state.sessions, kind), pr = permRow(kind);
       const pick = pr && bar.perm && pr.cur === bar.perm ? bar.perm : '';  // a mode this kind can take, else its own
       if (open && !(pick && pr.running && pick !== pr.running)) { bar.menu = false; paint(true); openSession(a, open.id); return; }
-      // a running one keeps its model (ORCH-710): the model step is only for a start
-      const usual = kind === 'empty' && !open ? liveBarNewModel(state.sessions, state?.settings?.agents) : null;
-      if (usual && !fromMenu) {  // a button at the top of the live page: the menu shows the model first (ORCH-710)
-        bar.menu = true; bar.model = ''; bar.list = ''; bar.q = ''; paint(true);
-        bar.el?.querySelector('[data-lbar-model]')?.focus();
-        return;
-      }
-      bar.busy = kind; paint(true);
-      const args = {...liveBarNewArgs(kind, bar.model, usual), ...(typeof livePermArgs === 'function' ? livePermArgs(kind, pick) : {})};
+      bar.busy = kind; paint(true); wallPaint();
+      // a running one keeps its tool and model (ORCH-710): Runs on is only for a start
+      const args = {...(open ? {kind} : liveBarNewArgs(kind, bar.pick, runsOnNow(), state.sessions)),
+        ...(typeof livePermArgs === 'function' ? livePermArgs(kind, pick) : {})};
       const r = await act('session.new', args);
-      bar.busy = ''; bar.model = '';
-      if (r.ok) bar.perm = '';
+      bar.busy = '';
+      if (r.ok) { bar.perm = ''; bar.pick = {tool:'', model:''}; }
+      wallPaint();
       const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
       bar.menu = !made && !r.ok;
       if (made) {
@@ -298,9 +323,11 @@ if (typeof module === 'object' && module.exports) {
       }
       paint(true);
       if (made) openSession(a, made.id);
-      else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.ok ? '' : r.text, 'It did not start.', () => startNew(kind, true));
+      else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.ok ? '' : r.text, 'It did not start.', () => startNew(kind));
     }
-    window.LiveNew = {start: startNew, kinds: LIVEBAR_NEW};
+    // the wall shows the same Runs on row (pages/livewall.js): it is drawn again when the pick changes
+    const wallPaint = () => { if (typeof liveWallRepaint === 'function') liveWallRepaint(); };
+    window.LiveNew = {start: startNew, kinds: LIVEBAR_NEW, runsOn: () => runsOn('wall')};
     function place() {
       const el = bar.el; if (!el) return;
       const tab = document.getElementById('tabbar');
@@ -323,7 +350,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins(), groups());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, bar.perm, bar.list, bar.menu, bar.model, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -355,15 +382,25 @@ if (typeof module === 'object' && module.exports) {
       const l = bar.list; bar.list = ''; bar.q = ''; paint(true);
       if (back) bar.el?.querySelector('[data-lbar-list="' + l + '"]')?.focus();
     }
-    // the Empty helper's model in the New menu (ORCH-710): kept until the menu closes
+    // the Runs on row's tool and model (in the New menu or on the wall): kept for the next start
     document.addEventListener('change', e => {
-      const sel = e.target.closest?.('[data-lbar-model]');
-      if (sel && bar.el?.contains(sel)) bar.model = sel.value;
+      const sel = e.target.closest?.('[data-lnew-pick]');
+      if (!sel) return;
+      bar.pick = {...bar.pick, [sel.dataset.lnewPick]:sel.value};
+      const key = sel.dataset.key, inBar = !!bar.el?.contains(sel);
+      // after the kit's picker closed: the bar is drawn new, so the keyboard goes back to the same picker
+      setTimeout(() => {
+        paint(true); wallPaint();
+        if (inBar) requestAnimationFrame(() => {
+          const n = bar.el?.querySelector('[data-key="' + key + '"]');
+          (n?.closest('.ui-select')?.querySelector('.ui-select-trigger') || n)?.focus();
+        });
+      });
     });
     document.addEventListener('click', e => {
       const nb = e.target.closest?.('[data-lbar-new]');
       if (nb && bar.el?.contains(nb)) {
-        bar.menu = !bar.menu; bar.model = ''; bar.list = ''; bar.q = ''; paint(true);
+        bar.menu = !bar.menu; bar.list = ''; bar.q = ''; paint(true);
         if (bar.menu) bar.el?.querySelector('[data-lbar-kind]')?.focus();
         return;
       }
@@ -374,17 +411,14 @@ if (typeof module === 'object' && module.exports) {
         return;
       }
       const k = e.target.closest?.('[data-lbar-kind]');
-      if (k && bar.el?.contains(k)) { startNew(k.dataset.lbarKind, true); return; }
+      if (k && bar.el?.contains(k)) { startNew(k.dataset.lbarKind); return; }
       const pm = e.target.closest?.('[data-lbar-perm]');
       if (pm && bar.el?.contains(pm)) {  // pick (or unpick) the mode of the next start; nothing starts yet
         bar.perm = bar.perm === pm.dataset.lbarPerm ? '' : pm.dataset.lbarPerm;
         paint(true); bar.el?.querySelector('[data-lbar-perm="' + pm.dataset.lbarPerm + '"]')?.focus();
         return;
       }
-      // (a New button at the top of the live page opens this menu at the Empty helper's model: that click keeps it open)
-      if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target) && !e.target.closest?.('[data-live-new]')) {
-        bar.menu = false; bar.model = ''; paint(true);
-      }
+      if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target)) { bar.menu = false; paint(true); }
       const b = e.target.closest?.('[data-lbar-list]');
       if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
       // with the layer there, a chip or row opens its session in the layer instead of changing page
@@ -402,7 +436,7 @@ if (typeof module === 'object' && module.exports) {
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;
-      if (bar.menu) { e.stopPropagation(); bar.menu = false; bar.model = ''; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
+      if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
       else if (bar.list) { e.stopPropagation(); close(true); }
     }, true);
     // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current

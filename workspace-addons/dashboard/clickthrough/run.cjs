@@ -6,6 +6,8 @@
 //   node workspace-addons/dashboard/clickthrough/run.cjs --list           the features and who covers them, no browser
 //   node workspace-addons/dashboard/clickthrough/run.cjs --out DIR        keep a picture of each click-through's end
 //   node workspace-addons/dashboard/clickthrough/run.cjs --size 390x844   another window size (default 1280x900)
+//   node workspace-addons/dashboard/clickthrough/run.cjs --part 1/2       every 2nd click-through from the 1st (CI runs
+//                                                                          the parts as jobs at once, ORCH-1118)
 //
 // Each click-through (features/*.cjs) does a thing, reloads the page, checks the result is still there, and fails on
 // any console error or uncaught exception. The server is the real dashboard with working actions (server.py): a click
@@ -15,7 +17,8 @@
 //
 // The runner records every action the page really sends and every page it shows. A click-through that claims a
 // feature in `covers` but never did it fails; with no --only, a feature of the catalogue (catalogue.cjs) that no
-// click-through did fails too, by name. Exit 0 = all passed.
+// click-through did fails too, by name (with --part: the features its click-throughs claim, and in part 1 also the
+// ones nobody claims). The limit of 3 second tries below counts per part. Exit 0 = all passed.
 //
 // A click-through that fails is tried once more at the end, alone, on a fresh throw-away home, server and browser
 // context (ORCH-1132): a pass then counts, and the summary names it ("passed on second try: <file>") so a flaky one
@@ -50,12 +53,17 @@ const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 
 const envArgs = env => ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
 
 function args(argv) {
-  const o = { only: null, out: null, list: false };
+  const o = { only: null, out: null, list: false, part: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--list') o.list = true;
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(s => s.replace(/\.cjs$/, '')));
     else if (a === '--out') o.out = path.resolve(argv[++i]);
+    else if (a === '--part') {
+      const m = /^(\d+)\/(\d+)$/.exec(argv[++i] || '');
+      if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error('--part wants N/M, for example 1/2');
+      o.part = { n: +m[1], of: +m[2] };
+    }
     else if (a === '--size') { const [w, h] = argv[++i].split('x').map(Number); SIZE = { width: w, height: h }; }
     else throw new Error(`unknown option ${a}`);
   }
@@ -522,8 +530,10 @@ async function main() {
     console.log(`\n${cov.features.length} features, ${cov.missing.length} without a click-through${cov.missing.length ? ': ' + cov.missing.join(' ') : ''}`);
     return 0;
   }
-  const todo = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
-  if (o.only && todo.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
+  const picked = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
+  if (o.only && picked.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
+  const todo = o.part ? part(picked, o.part) : picked;
+  if (o.part) console.log(`part ${o.part.n} of ${o.part.of}: ${todo.length} of ${picked.length} click-throughs`);
   if (o.out) fs.mkdirSync(o.out, { recursive: true });
   const nLanes = Math.max(1, Math.min(LANES, todo.length));
   // every lane's server starts at once; a server that does not start stops the ones that did
@@ -581,17 +591,31 @@ async function main() {
     for (const one of [...servers, ...spent]) one.stop();
   }
   const { results, secondTry } = run;
-  const v = verdict(results, o.only ? null : catalogue.features());
+  const wanted = o.only ? null : partFeatures(all, todo, catalogue.features(), o.part);
+  const v = verdict(results, wanted);
   if (v.missing.length) {
     console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
     for (const k of v.missing) console.log(`  - ${k}`);
   }
-  const nFeatures = catalogue.features().length;
+  const nFeatures = (wanted || []).length;
   console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
   if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
   for (const r of v.unsteady) console.log(`FAILED (known unsteady, does not count): ${r.c.file} (${UNSTEADY[r.c.file]} fixes it)`);
   if (v.failed.length) console.log(`failed: ${v.failed.map(r => r.c.file).join(', ')}`);
   return v.code;
+}
+
+/** The click-throughs of part {n, of}: every of-th one from the n-th, so the long ones spread over the parts. */
+function part(all, { n, of }) {
+  return all.filter((c, i) => i % of === n - 1);
+}
+
+/** The features a run must have done: all of them without a part; in a part the ones its click-throughs cover, and
+ *  in part 1 also those no click-through covers at all (so a feature nobody claims still fails, once). */
+function partFeatures(all, todo, features, p) {
+  if (!p) return features;
+  const has = (list, k) => list.some(c => (c.covers || []).includes(k));
+  return features.filter(k => has(todo, k) || (p.n === 1 && !has(all, k)));
 }
 
 /** The run's verdict. failed: what makes it red; unsteady: failures of the UNSTEADY list (printed, not counted);
@@ -610,6 +634,6 @@ function verdict(results, features, unsteady = UNSTEADY) {
   return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
 }
 
-module.exports = { tools, recorder, where, runAll, withTimeout, verdict, seedState, restoreSeed, UNSTEADY };
+module.exports = { tools, recorder, where, runAll, withTimeout, verdict, part, partFeatures, seedState, restoreSeed, UNSTEADY };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

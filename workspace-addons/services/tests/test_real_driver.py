@@ -157,6 +157,39 @@ def test_real_systemd(real, ws, monkeypatch):
 @pytest.mark.skipif(
     not (REAL and sys.platform == "darwin"), reason="real launchd test: macOS + ORCH_SERVICES_REAL=1"
 )
+def test_real_launchd_job_that_ends_stays_stopped(real, ws):
+    """A job that ends with exit code 0 is done: launchd does not start it again; a crash still does (ORCH-1844)."""
+    from pathlib import Path
+
+    label = f"ch.orch.svc.{WID}.once"
+    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    domain = f"gui/{os.getuid()}"
+    log = ws / ".orch/addons/services/logs/once.log"
+    mark = ws / "fail-once"
+    mark.write_text("x", encoding="utf-8")
+    # first run: crash (exit 3) and drop the mark; second run (launchd's restart): print and end with exit 0
+    body = (
+        "import os, sys; p = sys.argv[1]; print('run', flush=True); "
+        "sys.exit(3 if os.path.exists(p) and not os.remove(p) else 0)"
+    )
+    try:
+        code, out = real("add", "Once", "--id", "once", "--", "python3", "-u", "-c", body, str(mark))
+        assert code == 0, out
+        real("start", "once")
+        assert _wait(lambda: log.is_file() and log.read_text(encoding="utf-8").count("run") >= 2, 30)
+        time.sleep(15)  # launchd would have started it again within its 10 s throttle
+        assert log.read_text(encoding="utf-8").count("run") == 2
+        assert _row(real)["state"] == "stopped"
+    finally:
+        subprocess.run(["launchctl", "bootout", f"{domain}/{label}"], check=False, capture_output=True)
+        subprocess.run(["launchctl", "enable", f"{domain}/{label}"], check=False, capture_output=True)
+        if plist.exists():
+            plist.unlink()
+
+
+@pytest.mark.skipif(
+    not (REAL and sys.platform == "darwin"), reason="real launchd test: macOS + ORCH_SERVICES_REAL=1"
+)
 def test_real_found_and_adopt_on_a_mac(real, ws):
     """A throwaway LaunchAgent of its own in the sealed HOME: found, adopted, stopped, started, forgotten."""
     import plistlib
