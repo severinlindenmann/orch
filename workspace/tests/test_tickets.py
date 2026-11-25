@@ -1037,6 +1037,15 @@ def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
         time.tzset()
 
 
+def test_evidence_at_and_by_are_set_by_the_core(proj, run, new_ticket):
+    tid = new_ticket()
+    run("check", "add", tid, "Implement")
+    ev = '{"type":"note","ref":"x","at":"2099-01-01T00:00:00Z","by":"human:owner"}'
+    code, _, _ = run("check", "done", tid, "c1", "--evidence", ev)
+    got = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert code == 0 and got["at"] < "2099" and got["by"] != "human:owner"
+
+
 def test_the_unattributed_run_ticket_id_cannot_be_created(proj):
     with pytest.raises(Refused):
         tickets.create(proj, "Sneaky", "agent:test", tid="t_outside")
