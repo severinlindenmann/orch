@@ -76,7 +76,9 @@ def test_windows_stop_leaves_children_when_the_launcher_child_is_not_certain(mon
     monkeypatch.setattr(procs.sys, "platform", "win32")
     monkeypatch.setattr(procs, "_run", lambda argv, **kw: killed.append(argv[2]))
     monkeypatch.setattr(
-        procs, "_win_processes", lambda: [(10, 1, "python.exe"), (11, 10, "python.exe"), (12, 10, "python.exe")]
+        procs,
+        "_win_processes",
+        lambda: [(10, 1, "python.exe"), (11, 10, "python.exe"), (12, 10, "python.exe")],
     )
     assert procs.stop_tree(10, verified=lambda: True)
     assert killed == ["10"]
