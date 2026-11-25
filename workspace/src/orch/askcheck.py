@@ -106,9 +106,8 @@ def nudge(root: Path, tid: str, text: str | None) -> tuple[str, list[str]] | Non
         return None
 
 
-def last_reply_from_transcript(path: str | None) -> str | None:
-    """The text of the last assistant message in the tool's transcript (JSONL, `assistant` rows), read
-    from a bounded tail."""
+def _transcript_tail(path: str | None) -> list[str] | None:
+    """The last lines of the tool's transcript (JSONL), from a bounded tail; None when it can't be read."""
     if not isinstance(path, str) or not os.path.isabs(path):
         return None
     p = Path(path)
@@ -121,7 +120,42 @@ def last_reply_from_transcript(path: str | None) -> str | None:
             raw = f.read(TRANSCRIPT_TAIL).decode("utf-8", "replace")
     except OSError:
         return None
-    for row in reversed(raw.splitlines()):
+    return raw.splitlines()
+
+
+def pending_call_from_transcript(path: str | None) -> tuple[str, dict] | None:
+    """(tool name, input) of the last tool call in the tool's transcript that has no result yet: the call a
+    permission prompt waits on (ORCH-1808). None when there is none or the transcript can't be read."""
+    rows = _transcript_tail(path)
+    open_calls: dict[str, tuple[str, dict]] = {}
+    for row in rows or []:
+        if '"tool_use' not in row and '"tool_result' not in row:
+            continue
+        try:
+            d = json.loads(row)
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or d.get("isSidechain"):
+            continue
+        content = (d.get("message") or {}).get("content") if isinstance(d.get("message"), dict) else None
+        for b in content if isinstance(content, list) else []:
+            if not isinstance(b, dict):
+                continue
+            if d.get("type") == "assistant" and b.get("type") == "tool_use" and isinstance(b.get("id"), str):
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                open_calls[b["id"]] = (str(b.get("name") or ""), inp)
+            elif b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
+                open_calls.pop(b["tool_use_id"], None)
+    return next(reversed(open_calls.values()), None)
+
+
+def last_reply_from_transcript(path: str | None) -> str | None:
+    """The text of the last assistant message in the tool's transcript (JSONL, `assistant` rows), read
+    from a bounded tail."""
+    rows = _transcript_tail(path)
+    if rows is None:
+        return None
+    for row in reversed(rows):
         try:
             d = json.loads(row)
         except ValueError:

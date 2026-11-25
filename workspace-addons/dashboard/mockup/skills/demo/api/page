@@ -430,7 +430,8 @@
    ],
    "signin_state": "connected",
    "signin": "Signed in and working (checked 2026-11-19 09:12)",
-   "can_delete": false
+   "can_delete": false,
+   "check_hint": "Also finds the services in your Claude account. This may take a moment"
   },
   {
    "id": "service:mine:context7",
@@ -454,7 +455,8 @@
    "signin_state": "needs-sign-in",
    "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
    "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex",
-   "can_delete": false
+   "can_delete": false,
+   "check_hint": "Also finds the services in your Claude account. This may take a moment"
   },
   {
    "id": "service:admin:crm",
@@ -478,7 +480,70 @@
    ],
    "signin": "Its login is stored here",
    "signin_state": "connected",
-   "can_delete": false
+   "can_delete": false,
+   "check_hint": "Also finds the services in your Claude account. This may take a moment"
+  },
+  {
+   "kind": "service",
+   "on": true,
+   "switch": null,
+   "can_off": false,
+   "tools": {},
+   "problems": [],
+   "actions": [
+    "check"
+   ],
+   "check_hint": "Also finds the services in your Claude account. This may take a moment",
+   "can_delete": false,
+   "id": "service:mine:linear",
+   "name": "linear",
+   "server": "linear",
+   "where": "mine",
+   "manage_in": "Claude",
+   "description": "Web service at mcp.linear.app",
+   "signin_state": "connected",
+   "signin": "Signed in and working (checked 2026-11-19 09:12)"
+  },
+  {
+   "kind": "service",
+   "on": true,
+   "switch": null,
+   "can_off": false,
+   "tools": {},
+   "problems": [],
+   "actions": [],
+   "can_delete": false,
+   "id": "service:mine:github",
+   "name": "github",
+   "server": "github",
+   "where": "mine",
+   "manage_in": "Copilot CLI",
+   "description": "Program on this computer: npx",
+   "signin": "Not checked yet. The sign-in itself happens in your helper tool, not in orch"
+  },
+  {
+   "kind": "service",
+   "on": true,
+   "switch": null,
+   "can_off": false,
+   "tools": {},
+   "problems": [
+    "Needs a sign-in. Open Claude Code, type /mcp and sign in to Gmail again"
+   ],
+   "actions": [
+    "check"
+   ],
+   "check_hint": "Also finds the services in your Claude account. This may take a moment",
+   "can_delete": false,
+   "id": "service:account:claude.ai Gmail",
+   "name": "Gmail",
+   "server": "claude.ai Gmail",
+   "where": "account",
+   "from": "In your Claude account",
+   "manage_in": "Claude",
+   "description": "In your Claude account",
+   "signin_state": "needs-sign-in",
+   "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to Gmail again (checked 2026-11-19 09:12)"
   }
  ],
  "logins": [
@@ -566,5 +631,6 @@
    "state": "in-bin",
    "can_restore": true
   }
- ]
+ ],
+ "services_checked_at": "2026-11-19T09:12:00Z"
 }

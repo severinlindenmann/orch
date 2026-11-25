@@ -492,6 +492,33 @@ def rows(root):
                 tone="warn",
             )
         )
+    if change := cli.address_change(root):
+        old, new = cli.safe_address(change["old"]), cli.safe_address(change["new"])
+        who = f" Changed by {change['by']}." if change["by"] else ""
+        out.append(
+            row(
+                "address-change",
+                "remote",
+                cli.address_change_text(change) + who,
+                change["at"],
+                "orch sync address undo|keep",
+                ["Undo", "Keep"],
+                title="Sync",
+                actions=[
+                    action(
+                        "Undo",
+                        "undo-address",
+                        "remote",
+                        review={
+                            "title": f"Send to {old} again?",
+                            "body": f"Sync stops sending to {new} and sends to {old} again.",
+                            "done": f"Sync sends to {old} again.",
+                        },
+                    ),
+                    action("Keep", "keep-address", "remote"),
+                ],
+            )
+        )
     if _needs_move(root):
         out.append(
             row(

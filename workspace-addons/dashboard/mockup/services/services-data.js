@@ -6,9 +6,15 @@ const services=[
  {id:'budget-guard',name:'Budget guard',what:'Stops helpers when the weekly budget is used up',state:'failing',
   since:'stopped 3 times in the last 10 minutes, last at 16:41',sinceShort:'last stop 16:41',auto:false,madeBy:{text:'ORCH-7',href:ticket,kind:'ticket'},
   health:{ok:false,how:'process alive',text:'Not alive: it stops about 40 seconds after every start'},depends:['Every helper run that has a budget'],
-  question:{title:'Budget guard keeps stopping',text:'Restart, Stop or Look into it?',from:'ORCH-7'},
+  /* ORCH-1854: what it affects comes first, then the count, then the suggested answer; the log stays in the panel */
+  question:{title:'Budget guard keeps stopping',text:'Affected: Every helper run that has a budget. It failed 3 times in the last 10 minutes. Suggested: Restart.',suggested:'Restart',from:'ORCH-7'},
   log:['16:39:02 started','16:39:40 could not read the budget file, stopping','16:40:11 started','16:40:13 key loaded: ••••••',
        '16:40:52 could not read the budget file, stopping','16:41:20 started','16:41:58 could not read the budget file, stopping']},
+ {id:'report-mailer',name:'Report mailer',what:'Sends the weekly report by mail',state:'failing',
+  since:'stopped 6 times in the last 10 minutes, last at 16:43',sinceShort:'last stop 16:43',auto:false,madeBy:{text:'ORCH-12',href:ticket,kind:'ticket'},
+  health:{ok:false,how:'process alive',text:'Not alive: it stops right after every start'},depends:[],
+  question:{title:'Report mailer keeps stopping',text:'What it affects is not known. It failed 6 times in the last 10 minutes. Suggested: Look into it.',suggested:'Look into it',from:'ORCH-12'},
+  log:['16:42:01 started','16:42:02 mail login refused (password ••••••), stopping','16:43:10 started','16:43:11 mail login refused (password ••••••), stopping']},
  {id:'forwarder',name:'Private-network forwarder',what:'Makes your shared pages reachable on the private network',state:'running',
   since:'since Mon 16 Nov, 09:12',auto:true,important:true,madeBy:{text:'Found, now managed',kind:'outside'},address:'http://127.0.0.1:8790',
   health:{ok:true,how:'answers on its address',text:'Answers on its address'},depends:['The dashboard link','The demo'],
@@ -133,22 +139,36 @@ const about=(s,o)=>{o=o||{};
  return h('div',{class:'stack-lg','data-about':s.id},
   h('dl',null,
    h('div',null,h('dt',null,'State'),h('dd',null,stateLine(s))),
+   dependsRow(s),
+   s.recovered?h('div',null,h('dt',null,'Last problem'),h('dd',null,h('span',{class:'dot-ok','aria-hidden':'true'}),' Kept stopping, runs fine since '+s.recovered)):null,
    h('div',null,h('dt',null,'Starts by itself'),h('dd',null,h('label',{class:'row'},autoSwitch(s),h('span',null,autoWords(s))))),
    h('div',null,h('dt',null,'Important'),h('dd',null,h('label',{class:'row'},importantSwitch(s),h('span',null,importantWords(s))))),
    h('div',null,h('dt',null,'Made by'),h('dd',null,madeBy(s))),
    s.address?h('div',null,h('dt',null,'Address'),h('dd',null,addressLine(s))):null,
-   h('div',null,h('dt',null,'Health check'),h('dd',null,h('span',{class:s.health.ok?'dot-ok':'dot-err','aria-hidden':'true'}),' '+s.health.text)),
-   h('div',null,h('dt',null,'Depends on it'),h('dd',null,s.depends.join(', ')))),
+   h('div',null,h('dt',null,'Health check'),h('dd',null,h('span',{class:s.health.ok?'dot-ok':'dot-err','aria-hidden':'true'}),' '+s.health.text))),
   logBox(s),
   removeRow(s,o.afterRemove))};
+const dependsRow=s=>s.depends.length?h('div',null,h('dt',null,'Depends on it'),h('dd',null,s.depends.join(', '))):
+ s.state==='failing'?h('div',null,h('dt',null,'Depends on it'),h('dd',null,'Not known')):null;
 const toLog=(root,id)=>{const l=(root||document).querySelector('[data-log="'+id+'"]');if(!l)return;const dlg=l.closest('dialog');if(dlg)dlg.scrollTop=l.getBoundingClientRect().top-dlg.getBoundingClientRect().top+dlg.scrollTop-16;else l.scrollIntoView({block:'nearest'});l.focus({preventScroll:true})};
 const stateLine=s=>WORD[s.state]+(s.state==='failing'?': ':' ')+s.since;
-const question=s=>h('div',{class:'grow stack',role:'group','aria-label':'Question about '+s.name},
- h('div',null,h('strong',null,s.question.title),h('p',{class:'muted'},'It '+s.since+'. '+s.question.text)),
- h('div',{class:'row'},
-  h('button',{class:'btn primary sm',type:'button','data-k':s.id+':q-restart',onclick:()=>act.answer(s.id,'restart')},'Restart'),
-  h('button',{class:'btn outline sm',type:'button','data-k':s.id+':q-stop',onclick:()=>act.answer(s.id,'stop')},'Stop'),
-  h('a',{class:'btn ghost sm',href:ticket},'Look into it')));
+/* the suggested answer is the one filled button: Restart, or Look into it after many failures; Stop is never first */
+const question=s=>{const look=s.question.suggested==='Look into it';
+ const restart=h('button',{class:'btn '+(look?'outline':'primary')+' sm',type:'button','data-k':s.id+':q-restart',onclick:()=>act.answer(s.id,'restart')},'Restart'),
+  stop=h('button',{class:'btn outline sm',type:'button','data-k':s.id+':q-stop',onclick:()=>act.answer(s.id,'stop')},'Stop'),
+  into=h('a',{class:'btn '+(look?'primary':'ghost')+' sm',href:ticket},'Look into it');
+ return h('div',{class:'grow stack',role:'group','aria-label':'Question about '+s.name},
+  h('div',null,h('strong',null,s.question.title),h('p',{class:'muted'},s.question.text)),
+  h('div',{class:'row'},look?[into,restart,stop]:[restart,stop,into]))};
+/* a service that kept stopping and ran fine 10 minutes in a row at a fresh check: one quiet line for an hour */
+const recoveredLine=()=>{const r=data.services.filter(s=>s.recovered);if(!r.length)return null;
+ return h('p',{class:'status-line'},h('span',{class:'badge done'},'● Runs fine again'),
+  h('span',null,r.length===1?r[0].name+' kept stopping; it has run fine since '+r[0].recovered+'.':r[0].name+' and '+(r.length-1)+' more kept stopping; they run fine again.'))};
+/* Preview cases (?case=): recovered = Budget guard ran fine again at the last check; stale = the check stopped, so it
+   still reads failing and never "runs fine again" */
+const preview=new URLSearchParams(location.search).get('case');
+if(preview==='recovered'){const b=data.services[0];Object.assign(b,{state:'running',since:'since today 16:52',recovered:'today 16:52'});delete b.question;b.health.ok=true;b.health.text='Process alive'}
+if(preview==='stale')data.services[0].question.text='Affected: Every helper run that has a budget. It was failing at the last check and orch has not checked it since. Suggested: Restart.';
 const counts=()=>{const c={running:0,stopped:0,failing:0};data.services.forEach(s=>c[s.state]++);return c};
 const summary=()=>{const c=counts(),n=data.services.length;return [n+(n===1?' service':' services'),c.running+' running',c.stopped?c.stopped+' stopped':null,c.failing?c.failing+' failing':null].filter(Boolean).join(' · ')};
 const order=()=>[...data.services.filter(s=>s.state==='failing'),...data.services.filter(s=>s.state!=='failing')];
@@ -159,5 +179,5 @@ const param=(k,v)=>{const u=new URL(location.href);if(v==null)u.searchParams.del
 const fillStates=()=>{const e=document.querySelector('[data-view="empty"]'),x=document.querySelector('[data-view="error"]');
  if(e){const a=h('a',{class:'btn outline sm',href:'../chat/chat.html'},'Chat');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
  if(x)x.replaceChildren(window.UI.state({kind:'error',title:'Could not read the services on this computer',text:'Nothing was changed. Your services keep running as they were.',action:{label:'Try again',onClick:()=>{const u=new URL(location.href);u.searchParams.set('state','loaded');location.href=u.href}}}))};
-window.servicesDemo={data,WORD,hung,listWord,importantSwitch,importantWords,askStop,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
+window.servicesDemo={data,recoveredLine,WORD,hung,listWord,importantSwitch,importantWords,askStop,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
 })();

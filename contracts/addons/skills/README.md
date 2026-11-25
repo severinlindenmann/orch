@@ -22,15 +22,18 @@ workspace's copy of a shared skill (the admin keeps it). Nothing else is moved, 
 
 ## Items
 `id` = `<kind>:<where>:<name>`: kind `skill` · `instructions` · `service` · `login`; where `orch` (orch and its add-ons) ·
-`workspace` · `admin` (shared over the relay) · `mine` (this computer, outside the folder). Each item has `name`,
+`workspace` · `admin` (shared over the relay) · `mine` (this computer, outside the folder) · `account` (a service of the
+helper tool's account, only from the last `check`). Each item has `name`,
 `description`, `on`, `can_off`, `locked` (why not, plain words), `tools` ({"Claude": "on"|"off", "Codex": ...} for the
 helper tools found here), `note` ("Codex still sees it" when off but a tool still sees it), `problems` (Needs a look),
 `actions` (other clicks: `remove`, `restore`, `check`), `tool_limit` (why a tool cannot be switched for it), and for
 skills `fields` (the header metadata read by `orch.skillmeta`, ORCH-532; without it only the description).
 Shared skills also carry `newer` (the admin has a newer version, or newer settings wait for the next relay update);
 a removed one shows as a row with `removed: true` and the action `restore`. Services carry `signin` (plain words) and
-`signin_state` (`connected` · `needs-sign-in` · `failed`). Logins carry `on_means`, `off_means`
-and `scope`.
+`signin_state` (`connected` · `needs-sign-in` · `failed`), `check_hint` (the words next to Check sign-in) and, when
+only the helper tool turns them on or off, `manage_in` (its label; no switch here). `account` rows also carry `from`
+("In your Claude account"). The page has `services_checked_at` (the last `check`, or null). Logins carry `on_means`,
+`off_means` and `scope`.
 
 ## Where the tool details come from
 The add-on names no helper tool. Each tool's per-folder switches (settings file, format, where a skill, service or
@@ -58,6 +61,13 @@ too. Rules files: Codex always reads the folder's `AGENTS.md`.
 A service with an orch key profile: whether its login is stored here. Any other service: what Claude reported at the
 last `check` (Claude keeps a web sign-in in its own store; orch cannot read them). `check` starts the services'
 programs, so it runs only on a click. The sign-in itself happens in Claude (`/mcp`).
+
+The services come from files only (inventory.md, ORCH-1819): besides the workspace's and Claude's own settings, the
+servers of enabled Claude plugins (`~/.claude/settings.json` `enabledPlugins` → `~/.claude/plugins/installed_plugins.json`
+`installPath` → the plugin's `.mcp.json` or `.claude-plugin/plugin.json` `mcpServers`) and Copilot CLI's
+`~/.copilot/mcp-config.json`; these say "Manage in Claude" / "Manage in Copilot CLI" and have no switch. `check` also
+keeps the names Claude lists that no file has (its claude.ai connectors) in `signin.json` (`account`, `by`): read-only
+`account` rows, shown from the cache only. A failed `check` keeps the last answer.
 
 orch records the settings lines it wrote in `.orch/addons/skills/owned.json` and removes only those; a line written by
 hand shows as off and `locked`. One change at a time (`.orch/addons/skills/.lock`). A settings file that is not readable

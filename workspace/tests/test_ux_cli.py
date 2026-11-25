@@ -133,6 +133,38 @@ def test_plain_usage_errors(proj, run, capsys):
     assert code == 2 and '"nonsense" is not a ticket status' in err and "command" not in err
     code, err = _exit(run, capsys, "ticket", "new")
     assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
+    code, err = _exit(run, capsys, "ticket", "nonsense")
+    assert code == 2 and '"nonsense" is not an orch ticket command' in err
+
+
+def test_wrong_status_filter_is_a_value_not_a_command(proj, run, capsys, new_ticket):
+    from orch import tickets
+
+    t = new_ticket()
+    before = {p.name: p.read_bytes() for p in (proj / ".orch" / "tickets").iterdir()}
+    names = ", ".join(tickets.STATUSES)
+    for argv in (["--status", "working"], ["--status", "Working", "--json"]):
+        with pytest.raises(SystemExit) as e:
+            run("ticket", "list", *argv)
+        cap = capsys.readouterr()
+        assert e.value.code == 2 and cap.out == ""
+        assert cap.err == (
+            f'"{argv[1]}" is not a status to filter by. Choose one of: {names}.\n'
+            "The dashboard says Working for active: orch ticket list --status active\n"
+        )
+    code, err = _exit(run, capsys, "ticket", "list", "--status", "nonsense")
+    assert code == 2 and err == f'"nonsense" is not a status to filter by. Choose one of: {names}.\n'
+    code, err = _exit(run, capsys, "ticket", "list", "--status", "won't do")
+    assert code == 2 and "Won't do for dropped: orch ticket list --status dropped" in err
+    assert {p.name: p.read_bytes() for p in (proj / ".orch" / "tickets").iterdir()} == before
+
+    code, out, _ = run("ticket", "list", "--status", "active", "--json")
+    assert code == 0 and json.loads(out) == []
+    run("ticket", "status", t, "active")
+    code, out, _ = run("ticket", "list", "--status", "active", "--json")
+    assert code == 0 and [x["id"] for x in json.loads(out)] == [t]
+    code, err = _exit(run, capsys, "ticket", "status", t, "working")
+    assert code == 2 and err == f'"working" is not a ticket status. Choose one of: {names}.\n'
 
 
 def test_a_shipped_addon_that_is_off_says_how_to_turn_it_on(proj, run, capsys, monkeypatch):

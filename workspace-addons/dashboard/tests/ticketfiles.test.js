@@ -121,3 +121,18 @@ test('files the person attached count in the Files tab and are listed there (ORC
   assert.equal(vm.runInContext('reviewFile', c)({...t, status:'review'}), null, 'the person\'s own file is never shown as the result');
   assert.doesNotMatch(text(h('div', {}, c.artifactsPanel(t))), /No files attached yet/);
 });
+test('the file list did not load: an error with one Try again, never skeleton tiles for ever (R7.2)', () => {
+  const c = ctx(), t = {id:'t_one', status:'review'}, notes = [];
+  c.stateNote = (title, text, kind, action) => { notes.push({title, kind, action}); return h('div', {className:'empty-state err', role:'alert'}, title, ' ', text, action ? h('button', {className:'btn primary sm'}, action.label) : null); };
+  vm.runInContext("artifactData.set('t_one', {at:Date.now(), data:null})", c);
+  const all = nodes(h('div', {}, c.artifactsPanel(t)));
+  assert.match(text(h('div', {}, ...all.slice(0, 1))), /The files did not load/);
+  assert.equal(all.filter(x => /skeleton/.test(x.attrs?.className || '')).length, 0, 'no skeleton tiles');
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].kind, 'error');
+  assert.equal(notes[0].action.label, 'Try again');
+  let drawn = 0; c.render = () => { drawn++; };
+  notes[0].action.onClick();
+  assert.equal(vm.runInContext("artifactData.has('t_one')", c), false, 'Try again asks again');
+  assert.equal(drawn, 1);
+});

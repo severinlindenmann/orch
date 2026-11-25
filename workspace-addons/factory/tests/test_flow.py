@@ -1177,3 +1177,41 @@ def test_stop_question_asked_under_the_old_words_still_matches():
     new = render.render("factory:stop", data, 1)
     assert "(routine, suggested: Looks good)" in old[0] and old != new
     assert authority.asked_as_frozen({"text": old[0], "options": old[1]}, "factory:stop", data, 1, *new)
+
+
+@pytest.mark.parametrize("how", ["review", "waiting", "question"])
+def test_next_waits_for_a_started_crew_that_only_waits(ws, run, how):
+    """#1607: the stage's crew was started and its ticket now waits for a person (Review, waiting, a question):
+    `next` says wait with the crew ticket instead of start-crew again, so the manager is not woken in a loop."""
+    order, _ = started(ws, run)
+    run("next", order)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    run("crew", "start", order, "booking-form")
+    if how == "question":
+        edit(
+            ws,
+            tid,
+            lambda t: t.update(status="active", questions=[{"id": "q1", "text": "Which?", "answer": None}]),
+        )
+    else:
+        edit(ws, tid, lambda t: t.update(status=how))
+    step = run("next", order)
+    assert step["step"] == "wait" and step["waiting_for"] == "crew" and step["tickets"] == [tid]
+    edit(
+        ws, tid, lambda t: t.update(status="open", questions=[])
+    )  # nothing waits: its helper is started again
+    assert run("next", order)["step"] == "start-crew"
+
+
+def test_a_newer_change_takes_back_the_older_one(ws, run):
+    """#1007: a second change leaves one open change question; the first is taken back and never counts."""
+    order, _ = started(ws, run)
+    run("next", order)
+    first = run("change", order, "--file", "-", data=change_file())["question"]
+    second = run("change", order, "--file", "-", data=change_file(adds_min=40))["question"]
+    qs = {q["id"]: q for q in core(ws, "ticket", "show", order)["questions"]}
+    assert qs[first]["answer"].startswith("Taken back:") and qs[first]["answered_by"] == "agent:factory"
+    assert qs[second]["answer"] is None
+    assert [q["id"] for q in run("show", order)["questions"] if q["kind"] == "factory:change"] == [second]
+    run("change", order, "--file", "-", data=change_file(adds_min=40))  # the same change again: nothing more
+    assert sum(q["answer"] is None for q in core(ws, "ticket", "show", order)["questions"]) == 1

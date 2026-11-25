@@ -122,7 +122,7 @@ def test_check_sign_in_keeps_the_answer_and_shows_it(ws, tmp_path, monkeypatch, 
     data = model.build(ws)
     assert _item(data, "services", "playwright")["signin"].startswith("Signed in and working (checked ")
     cache = json.loads((ws / ".orch/addons/skills/signin.json").read_text())
-    assert set(cache) == {"schema", "checked_at", "servers"}  # names and states only
+    assert set(cache) == {"schema", "checked_at", "servers", "account", "by"}  # names and states only
 
 
 def test_check_sign_in_without_claude_is_refused(ws, tmp_path, monkeypatch, capsys):
@@ -131,6 +131,69 @@ def test_check_sign_in_without_claude_is_refused(ws, tmp_path, monkeypatch, caps
     assert cli.main(["--dir", str(ws), "check", "service:workspace:linear", "--json"]) == 2
     assert "Claude is not installed" in json.loads(capsys.readouterr().out)["error"]
     assert not (ws / ".orch/addons/skills/signin.json").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a shell script stands in for claude")
+def test_check_sign_in_keeps_account_services_and_a_failed_check_keeps_them(ws, tmp_path, monkeypatch, capsys):
+    """ORCH-1819: names Claude lists that no file has become read-only account rows, from the cache only."""
+    _conns(monkeypatch, "playwright", "ctx")
+    assert not [i for i in model.build(ws)["services"] if i["where"] == "account"]
+    _fake_claude(tmp_path, monkeypatch, LIST + "plugin:ctx:ctx: https://mcp.ctx.example (HTTP) - ✔ Connected\n")
+    assert (
+        cli.main(["--dir", str(ws), "act", "check", "--by", "human:Anna", "--json", "--", "service:workspace:linear"])
+        == 2
+    )
+    capsys.readouterr()
+    assert (
+        cli.main(
+            ["--dir", str(ws), "act", "check", "--by", "human:Anna", "--json", "--", "service:workspace:playwright"]
+        )
+        == 0
+    )
+    assert "1 of them are in your Claude account" in json.loads(capsys.readouterr().out)["next"]
+    data = model.build(ws)
+    gmail = _item(data, "services", "Gmail")
+    assert (gmail["where"], gmail["from"], gmail["manage_in"], gmail["can_off"]) == (
+        "account",
+        "In your Claude account",
+        "Claude",
+        False,
+    )
+    assert gmail["signin_state"] == "needs-sign-in" and gmail["actions"] == ["check"]
+    assert _item(data, "services", "ctx")["signin_state"] == "connected"  # the plugin's line counts for ctx
+    assert "broken" not in {i["server"] for i in data["services"]}  # no account prefix: not an account service
+    assert "Claude account" in _item(data, "services", "playwright")["check_hint"]
+    at = data["services_checked_at"]
+    assert at
+
+    _fake_claude(tmp_path, monkeypatch, "Checking MCP server health…\n", code=1)  # a failed check
+    assert cli.main(["--dir", str(ws), "act", "check", "--by", "human:Anna", "--json", "--", gmail["id"]]) == 2
+    capsys.readouterr()
+    again = model.build(ws)
+    assert _item(again, "services", "Gmail")["signin_state"] == "needs-sign-in"
+    assert again["services_checked_at"] == at
+
+
+def test_plugin_and_copilot_servers_say_manage_in_with_no_switch(ws):
+    """ORCH-1819: servers of an enabled Claude plugin and of Copilot CLI are listed, read only."""
+    home = ws.parent / "home"
+    plug = home / ".claude" / "plugins" / "cache" / "mkt" / "ctx" / "1.0"
+    plug.mkdir(parents=True)
+    (plug / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"ctx": {"type": "http", "url": "https://mcp.ctx.example/m"}}})
+    )
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(
+        json.dumps({"version": 2, "plugins": {"ctx@mkt": [{"scope": "user", "installPath": str(plug)}]}})
+    )
+    (home / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"ctx@mkt": True}}))
+    (home / ".copilot").mkdir()
+    (home / ".copilot" / "mcp-config.json").write_text(json.dumps({"mcpServers": {"gh": {"command": "uvx"}}}))
+    data = model.build(ws)
+    ctx, gh = _item(data, "services", "ctx"), _item(data, "services", "gh")
+    assert (ctx["where"], ctx["manage_in"], ctx["can_off"], ctx["tools"]) == ("mine", "Claude", False, {})
+    assert (gh["manage_in"], gh["can_off"]) == ("Copilot CLI", False)
+    with pytest.raises(switches.Refused):
+        model.turn(ws, ctx["id"], False)
 
 
 # ---- shared skills ------------------------------------------------------------------------------------------

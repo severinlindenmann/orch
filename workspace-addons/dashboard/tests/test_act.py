@@ -150,7 +150,9 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("session.new", {"kind": "manager", "permissions": "root"}),
         ("session.new", {"kind": "manager", "permissions": "--fresh"}),
         ("session.new", {"kind": "terminal", "permissions": "auto"}),
-        ("session.new", {"kind": "chat", "model": "opus"}),  # ORCH-710: only the Empty helper takes a model
+        ("session.new", {"kind": "terminal", "model": "opus"}),  # ORCH-1660: a terminal runs no helper
+        ("session.new", {"kind": "terminal", "agent": "claude"}),
+        ("session.new", {"kind": "empty", "agent": "--fresh"}),
         ("session.new", {"kind": "empty", "model": "auto"}),
         ("session.new", {"kind": "empty", "model": "gpt"}),
         ("session.end", {"kind": "ticket"}),
@@ -343,6 +345,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         (  # ORCH-710: the Empty helper starts on the model the person picked in the New menu
             {"op": "session.new", "args": {"kind": "empty", "model": "sonnet"}},
             ["session", "new", "empty", "--model", "sonnet", *common],
+        ),
+        (  # ORCH-1660: the Runs on row: tool and model for any helper without a ticket
+            {"op": "session.new", "args": {"kind": "chat", "model": "haiku", "agent": "codex"}},
+            ["session", "new", "chat", "--model", "haiku", "--agent", "codex", *common],
         ),
         (  # ORCH-710 + ORCH-818: one start with both picks
             {"op": "session.new", "args": {"kind": "empty", "model": "opus", "permissions": "auto"}},

@@ -320,6 +320,34 @@ def c4(e):
     check(not (w.root / ".orch" / "addons").exists(), "an add-on appeared")
 
 
+@scenario("V2-C5")
+def c5(e):
+    """ORCH-1760: a helper's last reply asks the person something the ticket does not hold: the turn ends with one
+    history line on the ticket. A question already asked with `orch ask`, or a reply that asks nothing, gets none."""
+    w = W(e, "V2-C5").init()
+    nudge = "last reply asked"
+    w.agent("--reply " + shlex.quote("Draft is ready. Should the KW47 report use CHF or EUR? And who reviews it?"))
+    tid = w.ticket("KW47 report draft", "write the draft", "send it")
+    w.j("run", "start", tid)
+    w.wait_done(tid)
+    lines = [h["text"] for h in w.history(tid) if nudge in h["text"]]
+    check(len(lines) == 1 and "2 questions" in lines[0] and "orch ask" in lines[0], f"no nudge on the ticket: {lines}")
+
+    asked = w.ticket("KW47 report with its question", "write the draft", "send it")
+    w.o("ask", asked, "Should the KW47 report use CHF or EUR?", "--option", "CHF", "--option", "EUR", "--recommend", "CHF")
+    w.j("run", "start", asked)
+    w.wait_done(asked)
+    check(not [h for h in w.history(asked) if nudge in h["text"]], "nudged although the question is on the ticket")
+
+    w2 = W(e, "V2-C5b").init()
+    w2.agent("--reply " + shlex.quote("Done: the draft is written. Anything else?"))
+    plain = w2.ticket("KW47 report, no question", "write the draft", "send it")
+    w2.j("run", "start", plain)
+    w2.wait_done(plain)
+    check(not [h for h in w2.history(plain) if nudge in h["text"]], "nudged for a reply that asks nothing")
+    return "nudge once for 2 questions; none with an open question; none for a plain reply"
+
+
 # ------------------------------------------------------------------------------------------------ runs
 
 

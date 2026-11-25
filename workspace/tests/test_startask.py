@@ -89,7 +89,7 @@ def test_request_says_whose_sign_in_each_tool_runs_on_and_a_move_up(proj, asker,
     """ORCH-342: an add-on can hold a start that would spend a full subscription, and may narrow the model
     only until orch or the helper moved the ticket up."""
     names = adapters.builtin_names()
-    monkeypatch.setattr(adapters, "detect", lambda: [{"name": n, "found": True} for n in names])
+    monkeypatch.setattr(adapters, "found_names", lambda root=None: list(names))
     tid = _new(proj)
     startask.ask(proj, tid, "agent:automation", None, "generic", False)
     req = json.loads((proj / "asked.json").read_text())
@@ -106,8 +106,18 @@ def test_request_says_whose_sign_in_each_tool_runs_on_and_a_move_up(proj, asker,
     assert json.loads((proj / "asked.json").read_text())["model_up"] is True
 
 
+def test_request_names_registered_tools_without_asking_each_tool_its_version(proj, asker, monkeypatch):
+    """#2692: every start ran each tool's --version (5 s each) and left out the tools a user registered."""
+    monkeypatch.setattr(adapters, "_version", lambda b: pytest.fail("a start asked a tool for its version"))
+    cfg = proj / ".orch" / "config.toml"
+    extra = '\n[agents.mine]\nadapter = "generic"\n'
+    cfg.write_text(cfg.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    startask.ask(proj, _new(proj), "agent:automation", None, "generic", False)
+    assert "mine" in json.loads((proj / "asked.json").read_text())["agents"]
+
+
 def test_answer_tool_model_and_account_are_used(proj, asker, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [{"name": "generic", "found": True}])
+    monkeypatch.setattr(adapters, "found_names", lambda root=None: ["generic"])
     tid = _new(proj)
     ans = {
         "go": True,
@@ -206,6 +216,19 @@ def test_a_persons_start_goes_ahead_with_the_reason_as_a_note(proj, gen, asker, 
     asker({"go": False, "why": "No room for Helpers."})
     r = runs.start(proj, tid, "human:t")
     assert "Started anyway: No room for Helpers." in r["notes"]
+    _wait(proj, tid)
+
+
+@pytestmark_wrap
+def test_a_start_that_must_not_wait_goes_ahead_with_the_reason_as_a_note(proj, gen, asker, monkeypatch):
+    """#2692: an over_limit start (a red develop, ORCH-699) waited when every account was full."""
+    monkeypatch.setattr(runs_live, "available", lambda adapter: False)
+    gen("--silent 0.2")
+    tid = _new(proj)
+    asker({"go": False, "why": "No room for Helpers."})
+    r = runs.start(proj, tid, "agent:automation", over_limit=True)
+    assert "Started anyway: No room for Helpers." in r["notes"]
+    assert tickets.load(proj, tid)["status"] != "waiting"
     _wait(proj, tid)
 
 

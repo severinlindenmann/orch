@@ -16,8 +16,10 @@ What it writes, shaped like a real workspace (measured on the orch workspace on 
 - per ticket an artifacts folder with pictures and notes, evidence files and reviewed before/after pictures;
   the pictures come from a small pool of real-sized PNGs: on macOS as clones (own files, no extra disk, so
   50,000 tickets fit on a laptop), elsewhere as copies (--pictures link: hard links, which sync refuses);
-- live helper records in .orch/run/tickets for --live working tickets (pid of this script's parent, so the
-  dashboard shows them as running while that shell lives);
+- live helper records in .orch/run/tickets for --live working tickets. Their pid is a stand-in process this
+  script starts in its own session (a sleep of STAND_IN_SECONDS, printed as "live_pid"), so the dashboard shows
+  them as running. Never the pid of a caller: orch stops a live run whose terminal session is gone, and that
+  stop ended the measuring script itself (ORCH-1609: the nightly 10,000-ticket check never finished);
 - the ticket counter, so `orch ticket new` goes on after the highest number.
 
 The same --seed gives the same workspace. Prints one JSON line with what it wrote and how long it took.
@@ -29,7 +31,9 @@ import argparse
 import json
 import os
 import random
+import signal
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -37,6 +41,7 @@ import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+STAND_IN_SECONDS = 6 * 3600  # longer than any measuring run; it ends by itself, or stand_in_end() ends it
 MARK = "seeded.json"  # .orch/seeded.json: written by this script, so a second run may add to its own seed
 
 ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -460,7 +465,7 @@ class Seeder:
                 for j in range(i + 1, min(self.n, i + 1 + self.rng.randint(2, 8))):
                     parent_of.setdefault(j, tids[i])
         live_left = self.live
-        pid = os.getppid()
+        pid = stand_in() if self.live else None
         counts: dict[str, int] = {}
         for i in range(self.n):
             t = self.ticket(i, tids[i], created[i], parent_of.get(i), i in epics)
@@ -474,8 +479,25 @@ class Seeder:
         mark = self.ws / ".orch" / MARK
         prev = json.loads(mark.read_text()) if mark.is_file() else {"tickets": 0}
         (mark).write_text(json.dumps({"tickets": prev["tickets"] + self.n, "seeded_at": iso(self.now)}) + "\n")
-        return {"tickets": self.n, "live": self.live - live_left, "statuses": counts, "files": self.files,
+        return {"tickets": self.n, "live": self.live - live_left, "live_pid": pid, "statuses": counts, "files": self.files,
                 "text_bytes": self.bytes, "seconds": round(time.monotonic() - t0, 1), "last_key": f"{self.code}-{last}"}  # fmt: skip
+
+
+def stand_in() -> int:
+    """A process of its own for the live records to name: stopping it ends nothing else."""
+    kw: dict = {"creationflags": 0x00000200 | 0x08000000} if os.name == "nt" else {"start_new_session": True}
+    p = subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({STAND_IN_SECONDS})"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)  # fmt: skip
+    return p.pid
+
+
+def stand_in_end(pid: object) -> None:
+    """End the stand-in once measuring is done (gone already: nothing to do)."""
+    if isinstance(pid, int) and pid > 1:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
