@@ -449,10 +449,13 @@ test('before the sync status is read no choice is selected (not a false Off), th
   const before = c.syncCard(ON);
   assert.deepEqual(all(before, n => n.attrs?.type === 'radio').map(n => [n.attrs.value, n.checked, n.attrs.disabled]), [['off', false, true], ['local', false, true], ['remote', false, true]]);
   assert.match(text(byKey(before, 'sync-unread')), /Reading the sync setting/);
+  const busy = n => all(n, x => x.attrs?.id === 'sync-card')[0].attrs['aria-busy'];
+  assert.equal(busy(before), 'true', 'orch shot waits while the setting is read (ORCH-2021)');
   ui.card = {...BASE, mode:'local', remote:null};
   const after = c.syncCard(ON);
   assert.equal(byKey(after, 'sync-where-local').checked, true);
   assert.equal(byKey(after, 'sync-unread'), undefined);
+  assert.equal(busy(after), 'false');
 });
 
 test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {

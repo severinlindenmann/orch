@@ -85,6 +85,22 @@
     if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
   });
   spend(true);
+  // A refused sign-in link: the login screen says the link no longer works and how to get in (ask for a new link,
+  // or log in with a token), and the page goes on as a browser that is not signed in (ORCH-1851). Without the login
+  // screen (or for a watch-only page) the notice keeps the server's words and nothing starts.
+  function refused(t) {
+    if (document.readyState === "loading") {  // login.js may not be there yet: answer once the page's scripts ran
+      return new Promise(function (done) { document.addEventListener("DOMContentLoaded", function () { done(refused(t)); }); });
+    }
+    var login = window.orchLogin;
+    if (login && login.available() && t.indexOf("watch-only") === -1) {
+      var first = (/^[^.]*\./.exec(t) || ["This sign-in link did not work."])[0];
+      login.showLogin(first + " Ask the person who sent it for a new link, or log in with a token.");
+      return undefined;
+    }
+    showSignIn(t);
+    return new Promise(function () { /* a refused link: nothing starts, the words stay */ });
+  }
   function spend(loading) {
     var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
     if (!m) return false;
@@ -95,21 +111,20 @@
     // the page address before the token stays (a live page address of one ticket, then #launch=...)
     history.replaceState(null, "", location.pathname + location.search + (location.hash || "").replace(/[#&]launch=[A-Za-z0-9_-]+$/, ""));
     var failed = "This sign-in link did not work. Sign in again: run orch dashboard open in your terminal.";
-    var never = function () { return new Promise(function () { /* a refused link: nothing starts, the words stay */ }); };
     var done = realFetch("/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: m[1] }),
     }).then(function (r) {
       if (!r.ok) {  // a used or ended link: say so (the page would stay on empty boxes with no word why)
-        return r.text().then(function (t) { showSignIn(t || failed); return never(); });
+        return r.text().then(function (t) { return refused(t || failed); });
       }
       return r.json().then(function (j) {
         try { localStorage.setItem(KEY, j.secret || ""); } catch (e) { /* no storage: the page stays watch-only */ }
         try { sessionStorage.removeItem(KEY); } catch (e) { /* none */ }
         if (!loading) location.reload();
       });
-    }, function () { showSignIn(failed); return never(); });
+    }, function () { return refused(failed); });
     if (loading) {
       pendingSignIn = done.then(function () { pendingSignIn = null; });
       window.orchSignIn = pendingSignIn;

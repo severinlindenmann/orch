@@ -171,3 +171,16 @@ def test_fresh_init_has_no_relay_or_publish_trace(proj, run, capsys):
         assert not re.search(r"relay|publish", _help(capsys, flag), re.I), flag
     assert run("addon", "add", "relay", "--yes")[0] == 0
     assert re.search(r"\brelay\b", _help(capsys, "--help-all"))
+
+
+def test_core_skills_name_no_addon():
+    # ordinary words that are also an add-on name; the Factory run state is a core ticket term
+    plain = set(EVERYWHERE) | {"services", "usage", "personal", "automation", "factory"}
+    words = {n for n in ADDONS if n not in plain}
+    bad = []
+    for f in sorted((ROOT / "workspace/skills").rglob("*.md")):
+        text = f.read_text(encoding="utf-8")
+        for n in words:
+            if re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", text, re.I):
+                bad.append(f"{f.relative_to(ROOT)}: {n}")
+    assert not bad, "a core skill names an add-on (R1.1/R1.2, #877):\n" + "\n".join(bad)

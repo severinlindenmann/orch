@@ -122,6 +122,42 @@ def test_the_sign_in_command_passes_only_when_it_is_plain(ws):
     assert "sign_in" not in second and "sign_in" not in third
 
 
+def test_a_check_file_waiting_for_approve_carries_what_it_runs_and_its_hash(ws):
+    """#1549: the Approve button shows what the check runs and sends back the hash it showed."""
+    h = "a" * 32
+    wait = {**ROW, "name": "db", "kind": "tool", "state": "unreachable", "approve": "new"}
+    health.save(
+        ws,
+        [
+            {**wait, "runs": "databricks current-user me", "hash": h},
+            {**wait, "name": "b", "runs": "x\ny", "hash": h},
+            {**wait, "name": "c", "runs": "x", "hash": "nothex"},
+            {**wait, "name": "d", "approve": "broken"},
+            {**wait, "name": "e", "approve": "yes"},
+        ],
+    )
+    first, second, third, broken, other = load_logins(ws)["items"]
+    assert first["kind"] == "tool" and first["approve"] == "new"
+    assert first["runs"] == "databricks current-user me" and first["hash"] == h
+    assert second["approve"] == "new" and "runs" not in second and "hash" not in second
+    assert "hash" not in third
+    assert broken["approve"] == "broken" and "hash" not in broken
+    assert "approve" not in other
+
+
+def test_approve_runs_the_cli_s_own_approve_with_the_hash_shown():
+    argv = build_argv("checks.approve", {"name": "db-dev", "hash": "a" * 32})
+    assert argv[:5] == ["checks", "approve", "db-dev", "--hash", "a" * 32] and "--by" in argv
+    for bad in (
+        {"name": "db-dev"},
+        {"name": "db-dev", "hash": "A" * 32},
+        {"name": "../x", "hash": "a" * 32},
+        {"name": "db-dev", "hash": "a" * 32, "by": "agent:x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("checks.approve", bad)
+
+
 # ORCH-1693: the phone link is connected by pasting its one line into Settings, never in a terminal.
 def test_the_pasted_phone_link_line_runs_relay_connect_and_nothing_else():
     token = "orn_" + "Ab-_9" * 9
