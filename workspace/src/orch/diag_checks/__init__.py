@@ -2,9 +2,10 @@
 
 A check module has `NAME` and `check(snap) -> {name, verdict, fact, evidence[]}`. `snap` is
 `{"now": epoch seconds, "collected": {collector: result}, "events": [debug-log events of the last day]}`.
-verdict: `problem` | `ok` | `cannot_check`. A check reads the snapshot only: it never touches the
-workspace, so it
-can never repair or change anything. A check that raises is `cannot_check` (the others still run).
+verdict: `problem` | `ok` | `cannot_check`. A module may also have `FIX`: the one sentence `orch doctor` shows
+as the next step for its problem (else it points at `orch diag inspect`). A check reads the snapshot only: it
+never touches the workspace, so it can never repair or change anything.
+A check that raises is `cannot_check` (the others still run).
 """
 
 from __future__ import annotations
