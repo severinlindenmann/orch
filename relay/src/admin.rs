@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 
 pub fn router(app: AppState) -> Router {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(|| async { crate::util::health_text() }))
         .route(
             "/",
             get(|| async { axum::response::Redirect::to("/admin") }),
