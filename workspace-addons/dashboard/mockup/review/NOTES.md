@@ -136,3 +136,11 @@
 - One card says "1 thing waits on you." (no "most urgent first").
 - `review.html?empty=1`: nothing waits. The master empty state "You're up to date" sits in the card column with one next
   step, See answers; the heading line keeps "Nothing waits for you." so no sentence shows twice.
+
+## Nothing to review (25 Nov 2026, ORCH-2024)
+
+`review.html?empty=1` is the product's empty Review page: subtitle "Nothing waits for you.", the Waiting / Answered
+switch with no count, and the master empty state ("Nothing waits for you" / "New cards appear here when a helper needs
+you."). With nothing in the rail (no cards, no Auto Reviewer, nothing the Reviewer did) the page is one column: the
+switch lines up with the heading and the empty state sits in the card's 760 px column under it (before: an empty left
+column pushed both to the right). Master rule in `widgets.css`, no page CSS.
