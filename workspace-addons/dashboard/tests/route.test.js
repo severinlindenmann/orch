@@ -85,6 +85,9 @@ test('#review and the link `orch review link` prints (#/review) are the Review p
   assert.deepEqual({...route('#review', [])}, {kind:'review', hash:'#review'});
   assert.deepEqual({...route('#/review', [])}, {kind:'review', hash:'#review'});
   assert.equal(route('#review?x=1', []).kind, 'review');
+  // ORCH-1804: the ticket beside the deck is part of Review, so opening or closing it keeps the deck where it is
+  assert.equal(route('#review?ticket=t_abcdef', []).hash, '#review');
+  assert.equal(route('#review?card=x&ticket=t_abcdef', []).hash, route('#review?card=x', []).hash);
   assert.equal(route('#reviews', []).kind, 'notfound');
   assert.equal(route('#/reviewx', []).kind, 'notfound');
 });

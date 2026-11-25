@@ -74,6 +74,17 @@ def test_helper_sees_only_attached_notes(cli, vault, monkeypatch, fake_orch, ws)
     assert "Kunde seit" not in log and "read" in log
 
 
+def test_note_names_the_ticket_it_is_attached_to(cli, vault, monkeypatch, fake_orch):
+    """The note page links to the ticket by its key, so the person can open it and check (ORCH-1853)."""
+    setup_notes(cli, vault)
+    assert jrun(cli, "use", "DM1-12", "notes", "Projects/Helvetia Logistik")[0] == 0
+    show = jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]
+    assert show["tickets"] == ["t_abc123"] and show["keys"] == {"t_abc123": "DM1-12"}
+    assert jrun(cli, "notes", "show", "Projects/Preismodell 2027")[1]["keys"] == {}
+    as_helper(monkeypatch)
+    assert jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]["keys"] == {}
+
+
 def test_rules_never_and_all(cli, vault, monkeypatch):
     setup_notes(cli, vault, read="never", write="never")
     as_helper(monkeypatch)
@@ -220,6 +231,31 @@ def test_notes_list_pages_newest_first(cli, ws, vault):
     second = api.notes_list(ws, who, None, 20, 20)
     assert second["notes"][0]["id"] == "Page note 24"
     assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants
+
+
+def test_helper_attaches_only_to_its_own_ticket(cli, ws, vault, monkeypatch):
+    setup_notes(cli, vault, read="all")
+    as_helper(monkeypatch)
+    monkeypatch.setenv("ORCH_TICKET", "t_abc123")
+    (ws / ".orch" / "tickets" / "t_other1.json").write_text(
+        json.dumps({"id": "t_other1", "key": "DM1-13", "title": "Other", "status": "active"}),
+        encoding="utf-8",
+    )
+    code, d = jrun(cli, "use", "t_other1", "notes", "Helvetia Logistik")
+    assert code == 2 and "own ticket" in d["error"]
+
+
+def test_helper_change_looks_titles_up_only_among_allowed_notes(cli, vault, monkeypatch):
+    setup_notes(cli, vault, read="attached", write="change")
+    as_helper(monkeypatch)
+    jrun(cli, "notes", "write", "Mine", "--text", "a")
+    seen = jrun(cli, "notes", "write", "Helvetia Logistik", "--text", "x", "--change")
+    none = jrun(cli, "notes", "write", "No such note anywhere", "--text", "x", "--change")
+    assert seen[0] == none[0] == 2
+    assert (
+        "not attached to your ticket" in seen[1]["error"]
+        and "not attached to your ticket" in none[1]["error"]
+    )
 
 
 def test_run_card_commands_run_for_the_person(cli, vault, ws, monkeypatch):

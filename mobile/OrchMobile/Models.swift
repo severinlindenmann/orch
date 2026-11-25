@@ -100,6 +100,9 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var digest: String? = nil
     var card: ReviewCard? = nil
     var cardFiles: [CardFile]? = nil
+    /// The task the question is about (relay-api.md "Questions"): `task` is its id, `about` its text. The Review stack groups by them.
+    var about: String? = nil
+    var task: String? = nil
 }
 
 extension QuestionBody {
@@ -123,6 +126,8 @@ extension QuestionBody {
         card = try? c.decodeIfPresent(ReviewCard.self, forKey: .card)
         cardFiles = try? c.decodeIfPresent([CardFile].self, forKey: .cardFiles)
         if card == nil { cardFiles = nil }
+        about = try? c.decodeIfPresent(String.self, forKey: .about)
+        task = try? c.decodeIfPresent(String.self, forKey: .task)
     }
 }
 
@@ -676,6 +681,20 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         return result
     }
 
+    /// The history window holds only the newest chat lines (#2372): chat lines an earlier snapshot of this ticket
+    /// showed and this one no longer holds stay in view, oldest first and before this window, merged by id.
+    static let chatKept = 200
+    func keepingChat(of older: TicketSnapshot?) -> TicketSnapshot {
+        guard let older else { return self }
+        let ids = Set(historyTail.map(\.id))
+        let gone = older.historyTail.filter { $0.chat && !ids.contains($0.id) }
+        guard !gone.isEmpty else { return self }
+        var result = self
+        let kept = historyTail.filter(\.chat).count
+        result.historyTail = Array(gone.suffix(max(0, Self.chatKept - kept))) + historyTail
+        return result
+    }
+
     /// Steps done with proof (a Won't do step is not counted).
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
@@ -890,6 +909,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     var text: String? = nil
     var ticket: String? = nil
     var general: Bool? = nil
+    /// Explicit new-topic choice; nil preserves older callers and workspace defaults.
+    var humanReview: Bool? = nil
     var replyTo: String? = nil
     var attachments: [MessageAttachment]? = nil
     var voice: VoiceMemo? = nil

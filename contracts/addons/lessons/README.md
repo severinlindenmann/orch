@@ -17,7 +17,7 @@ row in Settings › Add-ons).
 ## A lesson
 - One plain line, 1–200 characters after trimming; no line breaks, control characters, `<` or `>` (the dashboard shows plain text only); never a secret (the core
   secret scan runs on every add and edit; a hit refuses and says what was found, R5.2).
-- Id `l_` + 6 lowercase letters or digits, random; a new id avoids the files that exist now (a removed id may come again).
+- Id `l_` + 6 lowercase letters or digits, random, never the id of a lesson that exists now (the id of a removed lesson may come up again).
 - File `.orch/addons/lessons/<id>.md` (UTF-8, LF or CRLF read the same), front matter of plain `key: value` lines between
   `---` lines, then the text:
 

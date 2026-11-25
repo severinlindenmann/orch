@@ -113,6 +113,23 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def invite(root: Path, name: str, folder: str, group: str | None, admin_url: str, token: str) -> dict:
+    """`orch relay invite`: add a workspace on the relay (admin API) and connect `folder` to it.
+    `group`: a group id (grp_…) or name; without it the workspace is in no group."""
+    body: dict = {"name": name.strip(), "description": "", "tags": []}
+    if not body["name"]:
+        raise Refused("Give the new workspace a name.")
+    if group:
+        groups = net.items(net.admin_call(admin_url, token, "GET", "/admin/api/groups"))
+        hit = [g for g in groups if group in (g.get("id"), g.get("name"))]
+        if not hit:
+            names = ", ".join(str(g.get("name")) for g in groups) or "none yet"
+            raise Refused(f"There is no group {group} on the relay (groups: {names}). Pick one of them.")
+        body["group"] = hit[0]["id"]
+    r = net.invite_service(root, "relay", folder, connect, admin_url, token, body)
+    return {**r, "group": body.get("group")}
+
+
 # Speech to text through the relay's one Deepgram key (relay-api.md: POST /v1/transcribe, workspace auth).
 # The key never comes here; the relay answers {text, language, duration}. Used by the dashboard's message box
 # (ORCH-696). Safari records audio/mp4, which the relay takes as audio/m4a.
@@ -457,6 +474,19 @@ def _read_dir(root: Path) -> dict:
     return net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
 
 
+def relist_if_missing(root: Path) -> str | None:
+    """The relay turned on again while still connected (ORCH-1770): turning it off removed its skill folder
+    and the list of workspaces in it, so Contacts said "No other workspace or phone yet". Fetch the list once
+    now. Returns the line to print, or None when nothing was missing."""
+    have = (root / ".agents" / "skills" / "orch-relay" / "workspaces.json").is_file()
+    if have or not (net.secrets_dir(root) / "relay.json").is_file():
+        return None
+    try:
+        return refresh(root)
+    except (Refused, OSError, ValueError, TimeoutError) as e:
+        return f"The workspaces you can reach could not be fetched yet ({e}). Next: orch relay refresh"
+
+
 def _directory(root: Path) -> list[dict]:
     """Workspaces and paired phones from workspaces.json (refresh writes it)."""
     d = _read_dir(root)
@@ -535,15 +565,25 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
     # the write time is the send order (outbox_list): a precise, strictly rising time, because a file system
-    # may keep coarse times and two messages saved in a row must never share one
+    # may keep coarse times and two messages saved in a row must never share one. It also stays after every
+    # file already waiting, so a restart (a new process, a clock set back) never sends a newer copy first
     global _LAST_SAVED_NS
-    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1)
+    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1, _newest_saved_ns(d, p) + 1)
     with contextlib.suppress(OSError):
         os.utime(p, ns=(_LAST_SAVED_NS, _LAST_SAVED_NS))
     return p
 
 
 _LAST_SAVED_NS = 0
+
+
+def _newest_saved_ns(d: Path, skip: Path) -> int:
+    newest = 0
+    for f in d.glob("m_*.json"):
+        if f != skip:
+            with contextlib.suppress(OSError):
+                newest = max(newest, f.lstat().st_mtime_ns)
+    return newest
 
 
 def _own_key(root: Path, tid: str) -> str | None:
@@ -615,6 +655,7 @@ def _message(
     .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
     msg = _build_message(root, to, type_, body, ticket, reply_to, mid, created_at)
     scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
+    scan_outgoing(root, {k: v for k, v in msg.items() if k != "body"})  # envelope fields too (#915)
     if _DRY_RUN.get():
         return {**msg, "dry_run": True}
     from orch import msgtrust
@@ -760,6 +801,9 @@ def resend_outbox(root: Path) -> dict:
                 from orch import chat_groups
 
                 if why := chat_groups.stale_copy(root, msg):  # removed from the group while it waited
+                    if why == chat_groups.HELD:  # membership can't be checked now: kept, tried again later
+                        res["waiting"].append(m["id"])
+                        continue
                     res["dropped"].append({"id": m["id"], "reason": why})
                     p.unlink(missing_ok=True)
                     continue
@@ -774,7 +818,7 @@ def resend_outbox(root: Path) -> dict:
             _post_message(root, raw)
         except Refused as e:
             if _unreachable(e):
-                res["waiting"] = [x["id"] for x in items[n:]]
+                res["waiting"] += [x["id"] for x in items[n:]]
                 if getattr(e, "blocked", False):
                     res["problem"] = str(e)  # not the network: needs fixing before anything goes out
                     _set_problem(root, res["problem"])
@@ -796,19 +840,24 @@ def _update_title(root: Path, ticket: str) -> str | None:
     """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces), with
     secrets and stored key values hidden like every text of the ticket view (send_text itself hides nothing).
     No value hider: no title (fail closed)."""
-    from orch import phone_results, phone_view
-
     try:
         title = tickets.load(root, ticket)["title"]
     except (Refused, ValueError, KeyError):
         return None
+    return _phone_line(root, title)
+
+
+def _phone_line(root: Path, raw_text) -> str | None:
+    """One line of ticket text for a phone, hidden and cut like the title (fail closed: None)."""
+    from orch import phone_results, phone_view
+
     if (h := phone_results.value_hider(root)) is None:
         return None
     # no cut before hiding (a cut ahead of a collapse can leave a prefix of a stored value inside the
     # shown 120): titles are short, a huge one gets no title. Then clean, collapse and filter (these can
     # join or split text into a secret), then hide the stored values and redact; the result must be a
     # fixed point of both, else no title (fail closed)
-    raw = str(title)
+    raw = str(raw_text)
     if len(raw) > 4000:
         return None
     hidden = h.hide_text(raw)
@@ -1242,6 +1291,18 @@ def question_extras(q: dict, previews: list[str] | None, scope: str | None) -> d
     return out
 
 
+def _question_task(root: Path, ticket: dict, q: dict) -> dict:
+    """body.task and body.about (relay-api.md 'Questions'): the task a question is about, so the phone groups
+    its Review cards by ticket, then task. Only for a question on a task with text; else nothing (RULE A)."""
+    cid = q.get("check")
+    items = ticket.get("checklist") or []
+    item = next((c for c in items if isinstance(c, dict) and c.get("id") == cid), None)
+    if not isinstance(cid, str) or not re.fullmatch(r"c[0-9]{1,4}", cid) or item is None:
+        return {}
+    about = _phone_line(root, item.get("text") or "")
+    return {"task": cid, "about": about} if about else {}
+
+
 def send_question(
     root: Path,
     ticket: dict,
@@ -1266,6 +1327,7 @@ def send_question(
     for key, val in (("digest", digest), ("card", card), ("card_files", card_files)):
         if val is not None:
             body[key] = val
+    body.update(_question_task(root, ticket, q))
     msg = _message(root, "phones", "question", body, ticket["id"])
     rec = {
         "ticket": ticket["id"],
@@ -2142,16 +2204,32 @@ def _phone_action(root: Path, asked: dict | None) -> str:
     return "merge" if review.merge_url(q) else "answer"
 
 
-def _ask_again(root: Path, asked: dict | None) -> None:
-    """A refused phone answer may have used up the relay's one answer to that question message: a plain
-    question still open goes to the phones again (a new message), so a phone that may decide can answer it.
-    Cards, reviews and proposals are sent again by their own sync; group questions are not ours to resend."""
-    if not isinstance(asked, dict) or asked.get("group") or asked.get("review") or asked.get("proposal"):
+def _ask_again(root: Path, asked: dict | None, mid: str = "") -> None:
+    """A refused phone answer may have used up the relay's one answer to that question message, so the
+    question goes to the phones again (a new message) and a phone that may decide can still answer it (#2285):
+    a plain question as itself, a card with its card, a review as the next round. A ticket proposal is bound
+    to its message (the dashboard card stays); group questions are not ours to resend."""
+    from orch import phone_view
+
+    if not isinstance(asked, dict) or asked.get("group") or asked.get("proposal"):
         return
     with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError, StopIteration):
         t = tickets.load(root, str(asked["ticket"]))
+        if asked.get("review"):
+            # closing the refused round (only when it is still the one bound to this message) lets the
+            # review sync send the next round while the ticket stays in Review
+            if (
+                phone_view.close_review(root, t["id"], asked.get("round"), mid)
+                and t.get("status") == "review"
+            ):
+                phone_view.sync_reviews(root)
+            return
         q = next(x for x in t["questions"] if x.get("id") == asked["question_id"])
-        if q.get("answer") is None and q.get("kind") in (None, "plain", "relay:allow"):
+        if q.get("answer") is not None:
+            return
+        if isinstance(q.get("card"), dict):
+            phone_view.send_card_again(root, t, q)
+        elif q.get("kind") in (None, "plain", "relay:allow"):
             send_question(root, t, q)
 
 
@@ -2177,7 +2255,7 @@ def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str 
         try:
             who = _people_check(root, msg, action)
         except people.PhoneRefused as e:
-            _ask_again(root, asked)
+            _ask_again(root, asked, str(msg.get("reply_to") or ""))
             return f"refused: {e}", None
         if who is not None and action == "allow":
             people.remember_answer(root, str(asked["ticket"]), str(asked["question_id"]), who[1])
@@ -3753,7 +3831,7 @@ def _ticket_for(root: Path, msg: dict) -> str:
             if (
                 r.get("start_key") == b["key"]
                 and r.get("from") == msg["from"]
-                and t.get("status") in ("open", "active", "waiting")
+                and t.get("status") not in tickets.CLOSED
             ):  # remember this message too, so a second `done` finds the same ticket
                 if (atid := _allow_ticket(root, msg["id"])) is not None and atid != t["id"]:
                     _merge_allow(root, atid, t["id"], by)  # before the record below: safe to run twice

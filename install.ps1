@@ -13,7 +13,10 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "Installing uv ..."
     # A fresh Windows refuses scripts (execution policy Restricted); allow them for this one process only.
     powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
-    if ($LASTEXITCODE -ne 0) { throw "uv install failed" }
+    # Name the step that stopped and one thing to try; uv's own messages stay above, its exit code stays in the text.
+    if ($LASTEXITCODE -ne 0) {
+        throw "orch install stopped while setting up uv, the tool that installs orch (exit code $LASTEXITCODE; its details are above). Next: install uv yourself from https://docs.astral.sh/uv/getting-started/installation/, then run the install line again in a new PowerShell window."
+    }
     $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
 $repo = if ($env:ORCH_REPO) { $env:ORCH_REPO } else { "https://github.com/severinlindenmann/orch" }
@@ -38,7 +41,9 @@ if ($arch -eq "ARM64") {
     $py = @("--python", "cpython-3.13-windows-x86_64-none")
 }
 uv tool install --reinstall --refresh @py $spec
-if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
+if ($LASTEXITCODE -ne 0) {
+    throw "orch install stopped while installing orch with uv (exit code $LASTEXITCODE; its details are above). Next: read uv's lines above for the reason, then run the install line again."
+}
 # The install record is written here, by this installer, into orch's own tool environment (no orch command does).
 $toolDir = Join-Path (uv tool dir) "orch-workspace"
 $record = [ordered]@{ kind = $InstallKind; root = (Resolve-Path $toolDir).Path; schema = "orch.install/1" } | ConvertTo-Json -Compress
@@ -54,5 +59,9 @@ $bin = "$env:USERPROFILE\.local\bin"
 if (($env:Path -split ";") -notcontains $bin) {
     Write-Host "Run this line in PowerShell, then open a new terminal:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+    Write-Host "Then go to your project folder and run one of these:"
+} else {
+    Write-Host "Open a new terminal, go to your project folder and run one of these:"
 }
-Write-Host "Then go to your project folder and run: orch init"
+Write-Host "  orch init                  local tickets: enough to start"
+Write-Host "  orch init --recommended    the same, plus the dashboard (optional; asks first)"

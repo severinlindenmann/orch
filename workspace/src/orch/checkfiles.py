@@ -239,7 +239,8 @@ def _how_to_approve(e: dict) -> str:
 
 def waiting_rows(root: Path) -> list[dict]:
     """A row for every check file that waits for the person (new, changed or broken). Nothing runs; the row
-    says how to approve it (the command shown with Copy, never run by orch)."""
+    says how to approve it (the command shown with Copy, never run by orch), what it runs and the short hash
+    of the content (the dashboard's Approve button shows both and sends that hash back)."""
     rows = []
     for e in entries(root):
         if e["status"] == "approved" and e["recipe"]:
@@ -271,6 +272,8 @@ def waiting_rows(root: Path) -> list[dict]:
                 "how": how,
                 "sign_in": sign_in,
                 "approve": e["status"] if r else "broken",
+                # what the dashboard's Approve shows before the click, and the content it approves (#1549)
+                **({"runs": runs(r), "hash": short(e["digest"])} if r else {}),
             }
         )
     return rows

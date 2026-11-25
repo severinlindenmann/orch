@@ -27,6 +27,10 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+from seed import stand_in_end  # noqa: E402
+
 ADDONS = ("dashboard", "focus", "factory", "insights", "sync")
 
 
@@ -43,11 +47,13 @@ def orch_python(orch: str) -> str:
     return first[2:].strip().split()[0] if first.startswith("#!") else sys.executable
 
 
-def seed(ws: Path, n: int, orch: str, py: str) -> None:
+def seed(ws: Path, n: int, orch: str, py: str) -> int | None:
+    """Seed <ws>; returns the pid of the stand-in its live records name (end it with stand_in_end)."""
     ws.mkdir(parents=True)
     sh(["git", "init", "-q", "-b", "main"], ws)
     sh([orch, "init"], ws)
-    sh([py, str(HERE / "seed.py"), str(ws), "--tickets", str(n), "--now", "2026-11-18T12:00:00Z"], ws, timeout=7200)
+    r = sh([py, str(HERE / "seed.py"), str(ws), "--tickets", str(n), "--now", "2026-11-18T12:00:00Z"], ws, timeout=7200)
+    return json.loads(r.stdout.strip().splitlines()[-1]).get("live_pid")
 
 
 def disk(ws: Path) -> dict:
@@ -86,8 +92,14 @@ def measure(base: Path, n: int, a, orch: str, py: str) -> dict:
     done = base / "out" / f"result-{n}.json"
     if a.resume and done.is_file():  # measured in an earlier run that stopped later
         return json.loads(done.read_text())
-    if not ws.exists():
-        seed(ws, n, orch, py)
+    stand_in = seed(ws, n, orch, py) if not ws.exists() else None
+    try:
+        return _measure(base, ws, n, a, orch, py)
+    finally:
+        stand_in_end(stand_in)
+
+
+def _measure(base: Path, ws: Path, n: int, a, orch: str, py: str) -> dict:
     for name in ADDONS:
         for _ in range(3):  # an add-on install right after another can meet "orch is still updating"
             sh([orch, "addon", "add", name, "--yes"], ws, timeout=900, check=False)

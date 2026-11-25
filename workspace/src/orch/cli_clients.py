@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import getpass
+import os
 import re
 import sys
 from pathlib import Path
@@ -71,6 +73,37 @@ def _run_profile(args, mod, out) -> None:
 _COMMON: list = []
 
 
+def _add_invite(svc, common, server: str):
+    x = svc.add_parser(
+        "invite", parents=[common], help=f"admin: add a new workspace on this {server} and connect its folder"
+    )
+    x.add_argument("name", help="the new workspace's name")
+    x.add_argument("--folder", required=True, help="the new workspace's folder (made when missing)")
+    x.add_argument("--admin-url", required=True, help="the admin page's address (private network)")
+    return x
+
+
+def _admin_token(name: str) -> str:
+    """The server's admin token: its environment variable, else typed (not shown). Never saved or printed."""
+    env = net.ADMIN_TOKEN_ENV[name]
+    t = os.environ.get(env, "").strip()
+    if t:
+        return t
+    if not term.is_terminal(sys.stdin):
+        raise Refused(f"orch needs the admin token: set {env}, or run this in a terminal to type it.")
+    t = getpass.getpass("Admin token (not shown, not saved): ").strip()
+    if not t:
+        raise Refused("No admin token typed; nothing was changed.")
+    return t
+
+
+def _invite_text(r: dict, server: str) -> str:
+    return (
+        f"Added {r['name']} ({r['id']}) on the {server} and connected {r['folder']}.\n"
+        "Its token went straight into that folder; nothing secret was shown."
+    )
+
+
 def add_parsers(sub, common) -> None:
     _COMMON[:] = [common]
     pub = sub.add_parser("publish", help="share files and apps by private link").add_subparsers(
@@ -80,6 +113,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
+    _add_invite(pub, common, "publish server")
     pub.add_parser("whoami", parents=[common], help="show who you are and what you may share")
     _add_profile(pub)
     life = argparse.ArgumentParser(add_help=False)
@@ -111,6 +145,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("stack", choices=templates.STACKS)
     x.add_argument("folder")
     x.add_argument("--store", choices=templates.STORES, default="none")
+    x.add_argument(
+        "--lang", choices=templates.LANGS, default="python", help="docker only: rust starts a Rust app"
+    )
     pub.add_parser("list", parents=[common], help="list shared files and apps")
     pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
@@ -126,6 +163,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
+    _add_invite(rel, common, "relay").add_argument("--group", help="the group it joins (id or name)")
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
     rel.add_parser(
@@ -472,7 +510,11 @@ def run_publish(args, root: Path, out) -> None:
     args._root = root
     if sub == "profile":
         return _run_profile(args, publish, out)
-    if sub == "connect":
+    if sub == "invite":
+        cardtext.server_address(args.admin_url)
+        r = publish.invite(root, args.name, args.folder, args.admin_url, _admin_token("publish"))
+        out(args, r, _invite_text(r, "publish server"))
+    elif sub == "connect":
         who = publish.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -533,7 +575,7 @@ def run_publish(args, root: Path, out) -> None:
             f"Open this link:\n{r['link']}{note}",
         )
     elif sub == "new":
-        r = templates.create(args.stack, args.store, Path(args.folder))
+        r = templates.create(args.stack, args.store, Path(args.folder), lang=args.lang)
         out(
             args,
             r,
@@ -765,7 +807,7 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "status", "outbox", "view", "key") and not dry
+        sub not in ("connect", "invite", "status", "outbox", "view", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
         _key_once(root)
@@ -773,7 +815,11 @@ def run_relay(args, root: Path, out) -> None:
         return run_group(args, root, out)
     if sub == "contacts":
         return run_contacts(args, root, out)
-    if sub == "connect":
+    if sub == "invite":
+        cardtext.server_address(args.admin_url)
+        r = relay.invite(root, args.name, args.folder, args.group, args.admin_url, _admin_token("relay"))
+        out(args, r, _invite_text(r, "relay"))
+    elif sub == "connect":
         cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(

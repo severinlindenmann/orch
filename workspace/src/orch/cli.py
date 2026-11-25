@@ -471,6 +471,21 @@ class _Parser(argparse.ArgumentParser):
         import re
 
         m = re.search(r"invalid choice: '([^']*)'", message)
+        quoted = r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""  # the value as argparse quotes it (repr)
+        opt = re.search(r"^argument (-[^\s:/]+): invalid choice: " + quoted, message)
+        if opt:  # a wrong value for an option, e.g. --status, is not a command either
+            import ast
+
+            flag, value = opt.group(1), ast.literal_eval(opt.group(2))
+            choices = next((a.choices for a in self._actions if flag in a.option_strings), None) or ()
+            names = ", ".join(map(str, choices))
+            if tuple(choices) == tickets.STATUSES:  # the dashboard's words map one to one to these
+                stored = {w.lower(): s for s, w in tickets.STATUS_WORDS.items()}.get(value.lower())
+                word = tickets.STATUS_WORDS.get(stored)
+                tip = f"\nThe dashboard says {word} for {stored}: {self.prog} {flag} {stored}"
+                tip = tip if stored else ""
+                self.exit(2, f'"{value}" is not a status to filter by. Choose one of: {names}.{tip}\n')
+            self.exit(2, f'"{value}" is not a value for {flag}. Choose one of: {names}.\n')
         if m:
             if self.prog == "orch ticket status":  # a status is a value, not a command
                 names = ", ".join(tickets.STATUSES)
@@ -530,12 +545,23 @@ class _Version(argparse.Action):
         parser.exit()
 
 
+# ORCH-1936: the two everyday goals come before the command list; lines stay short for a narrow terminal
+_INTRO = """\
+orch keeps your work in tickets: each
+with a checklist and the evidence of
+what was done, for any agent tool.
+
+Examples, inside a workspace:
+  See your tickets: orch ticket list
+  See what needs your answer: orch needs"""
+
+
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
 
-    p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
+    p = _Parser(prog="orch", description=_INTRO)
     p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
@@ -770,6 +796,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--feedback", action="store_true", help="a person's feedback file: kept in the feedback folder"
     )
+    x.add_argument("--request", action="store_true", help="the file came with the request of a new ticket")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -1072,6 +1099,13 @@ def _child_warning(root: Path, t: dict) -> list[str]:
 
 def _init_guard(cwd: Path) -> None:
     """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    other = addons.home_override()
+    if other is not None:
+        raise Refused(
+            f"HOME points to {other}, not to your account's folder, and orch keeps its own files in your "
+            "account's folder. Nothing was written. "
+            "Fix: set ORCH_HOME to a folder under your own home, or unset HOME."
+        )
     here = cwd.resolve()
     env = _env_root()
     if env is not None and env != here:
@@ -1147,32 +1181,60 @@ def run(args: argparse.Namespace) -> None:
         root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
-        new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
-        agent = init_mod.choose_agent(root, args.yes, asking)
-        lines = init_mod.init(root, args.code, new)
-        if you := init_mod.ask_name(root, asking and not args.yes):
-            lines.append(you)
-        start = None
-        if new and (asking if args.starter is None else args.starter):
-            t = init_mod.starter(root, by())
-            start = t["key"]
-            lines.append(f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile')
-        on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
+        new = init_mod.is_new(root)  # before anything is written
+        lines = [*init_mod.init(root, args.code, new), init_mod.CONSENT]  # local tickets work from here on
+        text = [init_mod.READY, *lines]
+
+        def shown() -> None:  # a person in a terminal reads what is in place before the next question
+            if asking and text:
+                print("\n".join(text), flush=True)
+                text.clear()
+
+        try:
+            shown()
+            agent = init_mod.choose_agent(root, args.yes, asking)
+            from orch import config
+
+            more = [init_mod.CAN_USE] if config.agent_name(root) else []
+            start = None
+            if new and (asking if args.starter is None else args.starter):
+                t = init_mod.starter(root, by())
+                start = t["key"]
+                more.append(
+                    f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
+                )
+            text += [agent, *more]
+            on = []
+            if args.recommended:
+                shown()
+                on = init_mod.recommended(root, args.yes, asking)
+                if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
+                    more.append(you)
+                    text.append(you)
+                text.append(
+                    f"Turned on: {', '.join(on)}"
+                    if on
+                    else "Add-ons     nothing to turn on "
+                    "(the recommended ones are on, or this install has none)"
+                )
+            elif names := init_mod.recommended_names(root):
+                more.append(init_mod.optional_line(names))
+                text.append(more[-1])
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback
+            raise init_mod.stopped(
+                "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
+            ) from None
         _out(
             args,
             {
                 "ok": True,
                 "root": str(root),
-                "details": lines,
+                "details": lines + more,
                 "agent": agent,
                 "recommended": on,
                 "starter": start,
             },
-            "orch is ready in this folder. "
-            + agent
-            + "\n"
-            + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else ""),
+            "\n".join(text),
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
@@ -1308,8 +1370,10 @@ def run(args: argparse.Namespace) -> None:
         elif args.json:  # the dashboard reads the same rows in-process
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
-        else:  # the text list needs only the index rows (ORCH-521)
-            ts, everything = reads.index_list(root, args.status, args.all)
+        else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
+            with ticketindex.reuse():
+                ts, everything = reads.index_list(root, args.status, args.all)
+                args._broken_tickets = ticketindex.broken(root)
         ids = {x["id"] for x in everything}
         hidden = (
             0
@@ -1326,6 +1390,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
+            txt += "\n" + tickets.broken_file(name)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
@@ -1511,7 +1577,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         folder = tickets.FEEDBACK_DIR if args.feedback else None
-        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder)
+        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder, request=args.request)
         _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
@@ -1890,6 +1956,29 @@ def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
     return check
 
 
+def _reopened(root: Path, t: dict, who: str) -> list[str]:
+    """#1318: the ticket's pull requests recorded as closed that GitHub shows open again (reopened).
+    A recorded state is only what was last seen, so it is asked about before ref wait refuses;
+    each one found open is recorded as open. Merged stays final. No answer from GitHub keeps the
+    recorded state."""
+    from orch import prwait
+
+    out = []
+    for r in t.get("refs") or []:
+        url = r.get("url") if isinstance(r, dict) else None
+        if not prwait.is_pr_url(url) or (r.get("status") or "") != "closed" or url in out:
+            continue
+        try:
+            state = (prwait.Live(url).view() or {}).get("state")
+        except (Refused, OSError):
+            continue
+        if state == "OPEN":
+            out.append(url)
+            with contextlib.suppress(Refused, OSError):
+                tickets.ref_set(root, t["id"], url, "open", who)
+    return out
+
+
 def _ref_wait(args, root: Path, who: str) -> None:
     """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
     verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
@@ -1910,7 +1999,7 @@ def _ref_wait(args, root: Path, who: str) -> None:
                 raise Refused(f"{key} has no GitHub pull request {target}. Link it: orch ref add {key} <url>")
             urls.append(ref["url"])
     else:
-        urls = stuck.open_pulls(t)
+        urls = stuck.open_pulls(t) or _reopened(root, t, who)
         if not urls:
             raise Refused(f"{key} has no open GitHub pull request. Link one: orch ref add {key} <url>")
     if args.merge:

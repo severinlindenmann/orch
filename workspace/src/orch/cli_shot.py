@@ -125,8 +125,17 @@ def target_url(target: str) -> str:
         return target
     p = Path(target).expanduser()
     if not p.is_file():
+        if "://" in target:
+            raise Refused(
+                f"No such file: {_no_token(target)}. Pass only the address (it starts with http://)."
+            )
         raise Refused(f"No such file: {target}")
     return p.resolve().as_uri()
+
+
+def _no_token(text: str) -> str:
+    """The text with every sign-in token (#launch=...) cut out: a token is never printed."""
+    return re.sub(r"#launch=\S*", "", text)
 
 
 def command(browser: str, profile: str, width: int, height: int) -> list[str]:
@@ -264,7 +273,17 @@ def page_url(url: str, part: str) -> str:
 
 
 STILL_LOADING = "the page was still loading"
-BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
+# Busy anywhere: the page or any same-origin iframe in it, at any depth (add-on pages run in an iframe and set
+# aria-busy there, ORCH-2021). A cross-origin frame cannot be read and counts as not busy.
+BUSY_JS = """(function busy(d) {
+  if (d.querySelector('[aria-busy="true"]')) return true;
+  for (const f of d.querySelectorAll('iframe, frame')) {
+    let inner = null;
+    try { inner = f.contentDocument; } catch (e) {}
+    if (inner && busy(inner)) return true;
+  }
+  return false;
+})(document)"""
 
 
 def _busy(pipe, session: str) -> bool:
@@ -397,7 +416,7 @@ def shoot(
                 capture(pipe, url, widths[0], _height(widths[0], height), wait)
             except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
                 raise Refused(f"The sign-in link did not open ({e}).") from None
-        shown = re.sub(r"#launch=.*$", "", url)  # never print a sign-in token
+        shown = _no_token(url)
         for pname, part in pages or [("", "")]:
             for w in widths:
                 stem = f"{name}-{pname}-{w}" if pname else f"{name}-{w}"
@@ -417,7 +436,10 @@ def shoot(
                             raise
                         data = capture(pipe, page, w, _height(w, height), wait)
                 except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
-                    raise Refused(f"No picture was made for {where} at {w} wide ({e}).") from None
+                    hint = ""
+                    if str(e) == STILL_LOADING and "#launch=" not in url and url.startswith("http"):
+                        hint = " If it waits for a sign-in, pass the link from orch dashboard open --print."
+                    raise Refused(f"No picture was made for {where} at {w} wide ({e}).{hint}") from None
                 if not data:
                     raise Refused(f"No picture was made for {where} at {w} wide.")
                 out.write_bytes(data)

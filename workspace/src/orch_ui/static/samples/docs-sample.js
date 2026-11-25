@@ -210,8 +210,8 @@ window.DOCS_SAMPLE = {
      "decision": true,
      "branch": [
       {
-       "if": "Save without starting",
-       "then": "It stays in Backlog; nothing runs",
+       "if": "Save ticket",
+       "then": "It stays in Backlog; a helper may prepare it, but no work starts",
        "stop": true
       },
       {
@@ -1952,7 +1952,11 @@ window.DOCS_SAMPLE = {
      ],
      [
       "orch lessons list",
-      "all lessons"
+      "all lessons, with their date; outdated ones are flagged"
+     ],
+     [
+      "orch lessons review <id>",
+      "mark one as still true"
      ],
      [
       "orch lessons rm <id>",

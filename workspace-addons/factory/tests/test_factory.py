@@ -103,6 +103,21 @@ def test_superseded_answer_does_not_start(ws, run, proposal):
     assert "superseded" in [r["type"] for r in Store(ws).journal_read()]
 
 
+def test_a_second_proposal_takes_back_the_first_start(ws, run, proposal):
+    """#1007: a second proposal leaves exactly one open Start; the first is taken back and never counts."""
+    order, old = setup(run, proposal)
+    new = run("propose", order, "--file", "-", data=proposal + b"\n")
+    qs = {q["id"]: q for q in core(ws, "ticket", "show", order)["questions"]}
+    assert qs[old["question"]]["answer"].startswith("Taken back:")
+    assert [q for q in qs.values() if q["kind"] == "factory:start" and q["answer"] is None] == [
+        qs[new["question"]]
+    ]
+    assert not authority.started(order, ws)
+    assert not any(
+        "ignored the agent answer" in h["text"] for h in core(ws, "ticket", "show", order)["history"]
+    )
+
+
 @pytest.mark.parametrize("change", ["ship", "stage", "proves", "schema"])
 def test_invalid_proposals(ws, run, proposal, change):
     order = run("idea", "Booking")["order"]
@@ -401,7 +416,7 @@ def test_act_idea_is_saved_when_no_agent_can_start_and_titles_are_cut(ws):
     (ws / "fail-run").write_text("")
     long = "-- " + "word " * 40
     code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", long)
-    assert code == 0 and r["started"] is False and "Start your agent" in r["text"]
+    assert code == 0 and r["started"] is False and "Start your helper" in r["text"]
     title = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())["title"]
     assert title.startswith("word") and title.endswith("…") and len(title) <= 81
 

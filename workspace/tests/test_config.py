@@ -74,6 +74,7 @@ def fake_path(tmp_path, monkeypatch):
 def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
     _stub(fake_path, "claude", "2.1.318")
     _stub(fake_path, "codex", "0.163.0")
+    _stub(fake_path, "copilot", "1.0.114")
     run("config", "agent", "add", "my-agent", "--command", "my-agent --prompt {prompt}")
     run("config", "set", "workspace.agent", "my-agent")
     code, out, _ = run("agents")
@@ -92,13 +93,15 @@ def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
         "usage",
     ]
     assert lines[1].split() == ["codex", "found", "0.163.0", "continue"]
-    assert lines[2].split() == ["my-agent", "your", "command", "fresh", "each", "run"]
-    assert lines[3] == "* my-agent does the work here"
+    assert lines[2].split() == ["copilot", "found", "1.0.114", "continue"]
+    assert lines[3].split() == ["my-agent", "your", "command", "fresh", "each", "run"]
+    assert lines[4] == "* my-agent does the work here"
     code, out, _ = run("agents", "--json")
     rows = {r["name"]: r for r in json.loads(out)}
     assert rows["my-agent"]["chosen"] and rows["claude"]["found"] and not rows["claude"]["chosen"]
     # ORCH-362: the Start choice offers a model only for a tool orch passes the ticket's model to
     assert rows["claude"]["models"] is True and rows["my-agent"]["models"] is False
+    assert rows["copilot"]["models"] is True
 
 
 def test_orch_agents_nothing_found_nothing_chosen(proj, run, fake_path):
@@ -120,7 +123,7 @@ def test_init_yes_takes_first_found(proj, run, fake_path):
 
 def test_init_nothing_found(proj, run, fake_path):
     code, out, _ = run("init", "--yes")
-    assert code == 0 and "No agent found; set one later: orch config set workspace.agent <name>" in out
+    assert code == 0 and "No agent found yet. Optional: install one (orch agents lists them)" in out
     assert config.agent_name(proj) is None
 
 
@@ -166,7 +169,7 @@ def test_array_lines_are_not_tables_and_del_is_escaped(proj):
 def test_init_other_asks_a_name_and_keeps_existing(proj, run, fake_path, monkeypatch):
     config.add_agent(proj, "my-agent", "old {prompt}", approve=True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
-    answers = iter(["", "new {prompt}"])
+    answers = iter(["y", "", "new {prompt}"])  # none found: yes to adding one by its command
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     code, _, err = run("init")
     assert code == 2 and "already an agent called 'my-agent'" in err

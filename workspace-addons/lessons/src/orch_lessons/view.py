@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from . import store
 
 PROMPT = "Edit lesson"
-ROWS = 50  # the list block holds at most this many rows (addon-view.schema.json)
+MAX_ROWS = 50  # maxItems of a list block in the view schema
 
 
 def _day(iso: str) -> str:
@@ -38,7 +38,7 @@ def _ticket_label(root, tid: str) -> str:
 def build(root) -> dict:
     data = store.load(root)
     items = []
-    for r in data["lessons"][:ROWS]:
+    for r in data["lessons"][:MAX_ROWS]:
         sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
         if r["outdated"]:
             sub += f" · last reviewed {_day(store.last_checked(r))}, check it still holds"
@@ -83,10 +83,14 @@ def build(root) -> dict:
     notes = []
     if data["shown"] < len(data["lessons"]):
         notes.append("Helpers see only the newest lessons. Merge or delete some.")
-    if len(data["lessons"]) > ROWS:
-        notes.append(f"{len(data['lessons']) - ROWS} older lessons are not listed here: orch lessons list.")
-    if data["unreadable"]:
-        notes.append(f"{data['unreadable']} file(s) in .orch/addons/lessons could not be read and are skipped.")
+    hidden = len(data["lessons"]) - MAX_ROWS
+    if hidden > 0:
+        notes.append(f"This page lists the newest {MAX_ROWS}; {hidden} older are hidden.")
+    n = data["unreadable"]
+    if n:
+        notes.append(
+            f"{n} lesson file{' is' if n == 1 else 's are'} unreadable and skipped. Fix or remove them."
+        )
     if notes:
         view["notice"] = " ".join(notes)
         view["notice_tone"] = "warn"

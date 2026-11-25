@@ -127,7 +127,9 @@ def test_crlf_file_and_unreadable_skipped(cli, ws):
     (d / "notes.txt").write_text("x", encoding="utf-8")
     _, data = jrun(cli, "list")
     validator(LIST).validate(data)
-    assert [x["text"] for x in data["lessons"]] == ["CRLF lesson."] and data["unreadable"] == 2  # notes.txt is not a lesson file
+    assert [x["text"] for x in data["lessons"]] == ["CRLF lesson."] and data[
+        "unreadable"
+    ] == 2  # notes.txt is no lesson file
     jrun(cli, "edit", "l_aaaaaa", "Edited.")
     body = (d / "l_aaaaaa.md").read_text(encoding="utf-8")
     assert "flavour: kept" in body and "changed_at:" in body and "\r" not in body
@@ -221,22 +223,6 @@ def test_old_lesson_is_flagged_until_reviewed_or_edited(cli, ws):
     assert next(x for x in data["lessons"] if x["id"] == ia)["outdated"] is False
 
 
-def test_view_says_how_many_rows_are_hidden_and_unreadable_files(cli, ws):
-    d = ws / ".orch" / "addons" / "lessons"
-    d.mkdir(parents=True)
-    for i in range(53):
-        (d / f"l_a{i:05d}.md").write_text(
-            f"---\nby: agent:x\nat: 2026-11-15T18:{i // 60:02d}:{i % 60:02d}Z\n---\nLesson number {i}.\n",
-            encoding="utf-8",
-        )
-    (d / "l_zzzzzz.md").write_text("broken", encoding="utf-8")
-    _, view = jrun(cli, "view")
-    validator(VIEW).validate(view)
-    assert len(view["blocks"][0]["items"]) == 50 and view["blocks"][0]["count"] == 53
-    assert "3 older lessons are not listed" in view["notice"]
-    assert "1 file(s)" in view["notice"] and "could not be read" in view["notice"]
-
-
 def test_two_adds_of_one_text_store_it_once(cli, ws):
     import threading
 
@@ -284,3 +270,17 @@ def test_without_dir_the_workspace_comes_from_orch_root_or_the_walk_up(ws, tmp_p
     assert main(["add", "Via walk-up.", "--json"]) == 0
     texts = [x["text"] for x in store.load(ws)["lessons"]]
     assert sorted(texts) == ["Via ORCH_ROOT.", "Via walk-up."] and not (elsewhere / ".orch").exists()
+
+
+def test_view_notices_unreadable_and_hidden(cli, ws):
+    d = ws / ".orch" / "addons" / "lessons"
+    d.mkdir(parents=True)
+    (d / "l_bbbbbb.md").write_text("no front matter", encoding="utf-8")
+    for i in range(52):
+        (d / f"l_{i:06d}.md").write_text(
+            f"---\nby: agent:x\nat: 2026-11-15T18:{i // 60:02d}:{i % 60:02d}Z\n---\nL{i}\n", encoding="utf-8"
+        )
+    _, view = jrun(cli, "view")
+    validator(VIEW).validate(view)
+    assert len(view["blocks"][0]["items"]) == 50
+    assert "2 older are hidden" in view["notice"] and "1 lesson file is unreadable" in view["notice"]

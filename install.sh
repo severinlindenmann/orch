@@ -45,7 +45,14 @@ case "$KIND" in normal) ;; *) echo "*** $(echo "$KIND" | tr a-z A-Z) INSTALL: th
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"
-"$TOOL_BIN/orch" update --after-install || echo "Note: your add-ons could not be installed again. Run: orch update"
+# orch keeps its files in the account's home, never in $HOME. With only HOME changed (a test or a sandbox), the
+# add-on step would write the real ~/.orch-tool, so it is skipped.
+ACCOUNT_HOME="$(eval echo "~$(id -un)")"
+if [ -z "${ORCH_HOME:-}" ] && [ "$(cd "$HOME" 2>/dev/null && pwd -P)" != "$(cd "$ACCOUNT_HOME" 2>/dev/null && pwd -P)" ]; then
+  echo "Note: HOME is not your account's home, so your add-ons were not put back. Set ORCH_HOME, or run: orch update"
+else
+  "$TOOL_BIN/orch" update --after-install || echo "Note: your add-ons could not be installed again. Run: orch update"
+fi
 case "$(basename "${SHELL:-sh}")" in
   zsh)  RC="~/.zshrc";  LINE="export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
   bash) RC="~/.bashrc"; LINE="export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
@@ -54,10 +61,12 @@ case "$(basename "${SHELL:-sh}")" in
 esac
 echo "orch is installed."
 case ":$ORIG_PATH:" in
-  *":$BIN:"*) echo "Open a new terminal, go to your project folder and run: orch init" ;;
+  *":$BIN:"*) echo "Open a new terminal, go to your project folder and run one of these:" ;;
   *)
     echo "Add this line to $RC, then open a new terminal:"
     echo "  $LINE"
-    echo "Then go to your project folder and run: orch init"
+    echo "Then go to your project folder and run one of these:"
     ;;
 esac
+echo "  orch init                  local tickets: enough to start"
+echo "  orch init --recommended    the same, plus the dashboard (optional; asks first)"

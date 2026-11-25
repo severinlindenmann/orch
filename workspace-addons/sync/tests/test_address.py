@@ -208,3 +208,52 @@ def test_a_planted_folder_at_the_record_is_an_error_and_sync_stops(root, tmp_pat
     record.mkdir()
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
     assert cli.read(root, "settings")["mode"] == "local"  # stopped using the address before the error
+
+
+def change_rows(root):
+    return [r for r in needs.rows(root) if r["kind"] == "sync:address-change"]
+
+
+def test_a_changed_address_is_shown_with_undo_and_keep(root, tmp_path, monkeypatch, preview):
+    """#941: an agent moves sync to another address; the person sees old and new, and Undo brings the old back."""
+    a, b = bare(tmp_path, "a.git"), bare(tmp_path, "b.git")
+    assert set_remote(root, a) == 0
+    assert not change_rows(root)  # the first choice is not a change
+    monkeypatch.setenv("ORCH_AGENT", "codex")
+    assert set_remote(root, b) == 0
+    monkeypatch.delenv("ORCH_AGENT")
+    [r] = change_rows(root)
+    assert r["text"].startswith(cli.address_change_text({"old": str(a), "new": str(b)}))
+    assert [x["label"] for x in r["actions"]] == ["Undo", "Keep"]
+    settings = cli.DEFAULTS | cli.read(root, "settings")
+    assert cli.status_result(root, settings)["address_change"]["old"] == cli.safe_address(str(a))
+    assert "agent:codex changed where sync sends to" in json.dumps(cli.read(root, "history"))
+    assert "agent:codex" in r["text"]
+    success(root)  # sync keeps working meanwhile
+    out = act.act(root, settings, type("A", (), {"verb": "undo-address", "target": "remote", "by": None})())
+    assert out["remote"] == cli.safe_address(str(a))
+    settings = cli.DEFAULTS | cli.read(root, "settings")
+    assert settings["remote"] == str(a) and cli.address_confirmed(root, str(a))
+    assert not cli.address_confirmed(root, str(b)) and not change_rows(root)
+
+
+def test_keep_clears_the_change_and_a_second_change_keeps_the_first_address(root, tmp_path, preview):
+    a, b, c = (bare(tmp_path, f"{n}.git") for n in "abc")
+    assert set_remote(root, a) == 0
+    assert set_remote(root, b) == 0
+    assert set_remote(root, c) == 0
+    assert cli.address_change(root)["old"] == str(a)  # C, was A
+    assert set_remote(root, a) == 0 and cli.address_change(root) is None  # back to A: nothing changed
+    assert set_remote(root, b) == 0
+    assert cli.main(["--dir", str(root), "address", "keep"]) == 0
+    assert cli.address_change(root) is None
+    assert (cli.DEFAULTS | cli.read(root, "settings"))["remote"] == str(b)
+    assert cli.main(["--dir", str(root), "address", "undo"]) != 0  # nothing waits any more
+
+
+def test_leaving_remote_drops_the_change(root, tmp_path, preview):
+    a, b = bare(tmp_path, "a.git"), bare(tmp_path, "b.git")
+    assert set_remote(root, a) == 0
+    assert set_remote(root, b) == 0
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
+    assert cli.address_change(root) is None

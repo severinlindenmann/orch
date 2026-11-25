@@ -271,6 +271,35 @@ def test_a_program_in_a_mac_protected_folder_is_refused(cli, fake, ws, tmp_path,
     assert code == 2 and "The program ~/Desktop/serve is in Desktop" in out["error"]
 
 
+def test_other_casing_of_a_protected_folder_is_refused(tmp_path, monkeypatch):
+    # ORCH-1867: ~/documents/work is ~/Documents/work on a case-insensitive Mac; nothing is installed or started
+    from orch import macfolders
+
+    from orch_services import cli as services_cli
+    from orch_services import drivers
+
+    home = tmp_path / "home"
+    (home / "Documents" / "work").mkdir(parents=True)
+    (home / "code").mkdir()
+    other = home / "documents" / "work"
+    if not (other.exists() and other.samefile(home / "Documents" / "work")):
+        pytest.skip("this disk tells folder names apart by case")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+
+    class Launchd:
+        name = "launchd"
+
+    def spec(cwd):
+        return drivers.Spec("web", "Web", WID, ["/bin/echo"], cwd, tmp_path / "web.log", False)
+
+    for cwd in (home / "Documents" / "work", other):
+        with pytest.raises(services_cli.Refused, match="in Documents"):
+            services_cli._refuse_protected(Launchd(), spec(cwd))
+    services_cli._refuse_protected(Launchd(), spec(home / "CODE"))  # a distinct folder is fine
+
+
 def test_start_is_refused_too_and_other_computers_are_not_asked(cli, fake, ws, mac_documents):
     code, out = _add(cli)  # the fake driver is no launchd: Linux and Windows have no such folders
     assert code == 0

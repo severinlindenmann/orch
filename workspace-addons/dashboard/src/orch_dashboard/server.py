@@ -319,7 +319,7 @@ def _link_msg(session, name: str) -> bytes:
         return REVOKED_MSG.encode()
     if getattr(session, "active", True) is False:  # a helper started this server: watch-only
         return WATCH_ONLY_MSG.encode()
-    return b"This link was already used. Sign in again: run orch dashboard open in your terminal."
+    return b"This sign-in link was already used or has ended. Sign in again: run orch dashboard open in your terminal."
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
@@ -1029,6 +1029,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/companion":  # orch Companion's newest release (version and download): no secrets
+            from . import update
+
+            return self._send(200, json.dumps(update.companion_download()).encode(), "application/json")
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -1132,9 +1136,14 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._events()
         if path == "/api/ref-file":
             q = parse_qs(query)
-            code, body, ctype = reffiles.read(
-                self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
-            )
+            if "evidence" in q:  # the current file behind a task's evidence copy (ORCH-1874)
+                code, body, ctype = reffiles.read_source(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("evidence") or [""])[0]
+                )
+            else:
+                code, body, ctype = reffiles.read(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
+                )
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
@@ -1900,6 +1909,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         )
         from . import update as _update
 
+        if self._frame is None and not self._signed_in():  # even the free ops need the sign-in (R4.1a)
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         session = (
             self._can_act()
         )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)

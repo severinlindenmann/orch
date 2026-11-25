@@ -261,7 +261,19 @@
   "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
-  "selfcheck": [],
+  "selfcheck": [
+   {
+    "args": [
+     "setup",
+     "--check"
+    ],
+    "fails": "the browser is not downloaded: run orch browse setup",
+    "label": "Browser downloaded"
+   }
+  ],
+  "setup": [
+   "setup"
+  ],
   "skill": "skills/orch-browse",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -364,7 +376,7 @@
     ]
    },
    "idea": {
-    "summary": "File the idea box's text as a new order and start your agent on its first draft",
+    "summary": "File the idea box's text as a new order and start your helper on its first draft",
     "who": "people",
     "writes": [
      "ext.factory"
@@ -851,7 +863,11 @@
       ],
       [
        "orch lessons list",
-       "all lessons"
+       "all lessons, with their date; outdated ones are flagged"
+      ],
+      [
+       "orch lessons review <id>",
+       "mark one as still true"
       ],
       [
        "orch lessons rm <id>",

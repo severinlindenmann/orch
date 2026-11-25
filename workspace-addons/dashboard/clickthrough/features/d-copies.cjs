@@ -47,6 +47,8 @@ module.exports = {
     must(asked.text.length > 5, 'asking the helper to update gave no readable answer');
     await page.getByRole('button', { name: 'Apply changes' }).first().click();
     const applied = await act('copies.approve', () => page.locator('dialog[open]').getByRole('button', { name: 'Apply changes' }).click(), { refused: true });
+    // read once the dialog has gone: the reason was said into the fading dialog and left with it (ORCH-1771)
+    await page.locator('dialog[open]').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
     must((await page.locator('body').innerText()).includes(applied.text), 'the page did not say why the changes were not applied: ' + applied.text);
   },
 };

@@ -12,6 +12,7 @@ The tabs are directly below the ticket header; open Tasks to see each task’s e
 
 - Expand and every file preview now open the same file viewer with the survey title, details, Open in new tab, Download and Copy link.
 - × Close, Esc and clicking outside close the viewer and return focus to the opening control.
+- ORCH-1874: when the file in the project differs from the copy a step saved, the result row says "Changed since this step." with "See the current file" (the file as it is now). Shown here on the survey row as that state.
 - Added counted Tasks, Files and Activity tabs; the survey note belongs to reading the answers and the summary file belongs to writing the summary.
 
 ### ticket-working.html
@@ -227,6 +228,11 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
 - `ticket-idle.html` (new): a ticket In progress with no helper. The pill says **In progress** (Working is said only
   while a helper runs), the line under the title says "No helper is working on it right now.", as the Add to this
   ticket box below does.
+- ORCH-1850: right under the header, the handover row answers "where did it stop": **Last marked step · <task>**, then
+  who marked it and when, and what the run record says ("Claude last worked 1 h ago", "The last run ended without
+  finishing", or "No helper run on record"; the helper is named only from a real run or session). One click, See in
+  Activity, opens the event. The marked task reads **In progress** (◐), never Working: Working is said only while a
+  helper runs. The task done last keeps its evidence line, and Progress comes before Results while the ticket is open.
 - The start is outlined, never filled (UX D2): its cost in one line above it ("On Opus · estimate about $1.20, $0.40
   used so far") and, on a strong model, the same start on Sonnet beside it (kit `.cost-pick`). Every page's
   Start helper is outlined too.

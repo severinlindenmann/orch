@@ -293,8 +293,9 @@ def test_a_stale_lock_is_taken_over_by_exactly_one_waiter(tmp_path):
     cmd = f"echo start >> {marks}; sleep 0.5; echo end >> {marks}"
     e = {"PATH": os.environ.get("PATH", ""), "ORCH_LOCK_DIR": str(tmp_path / "locks"), "ORCH_LOCK_POLL_SECS": "0.1"}
     procs = [subprocess.Popen(["bash", str(RUNNER / "lock.sh"), "run", "xcode", f"w{i}", "--", "sh", "-c", cmd], env=e,
-                              stderr=subprocess.DEVNULL) for i in range(4)]
-    assert [p.wait(timeout=60) for p in procs] == [0, 0, 0, 0]
+                              stderr=subprocess.PIPE, text=True) for i in range(4)]
+    out = [p.communicate(timeout=60)[1] for p in procs]  # what a waiter says is kept, so a red run shows why
+    assert [p.returncode for p in procs] == [0, 0, 0, 0], out
     assert marks.read_text().split() == ["start", "end"] * 4
 
 

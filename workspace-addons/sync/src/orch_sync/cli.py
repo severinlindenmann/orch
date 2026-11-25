@@ -1,11 +1,14 @@
 """`orch sync`: local settings, one-shot sync, the background loop (start/stop/status/now) and the person's choices."""
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
+import secrets
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -28,6 +31,8 @@ ACT_VERBS = (
     "ignore",
     "leave-deleted",
     "restored",
+    "undo-address",
+    "keep-address",
 )
 
 
@@ -74,6 +79,11 @@ def status_line(s):
         f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {local_when(s['last_ok']) if s['last_ok'] else 'never'}. "
         f"Paused: {'yes' if s['paused'] else 'no'}."
         + (f" Problem: {s['last_error']}" if s["last_error"] else "")
+        + (
+            f" {address_change_text(s['address_change'])} Undo: orch sync address undo. Keep: orch sync address keep."
+            if s.get("address_change")
+            else ""
+        )
     )
 
 
@@ -90,6 +100,10 @@ def save_settings(root, settings):
 
 
 ADDRESS = "run/sync/address.json"  # the address the person chose (set / use-public), written by apply_set
+# seconds `orch sync now` waits for the running loop's pass before it says "in the background"
+NOW_WAIT = 120.0
+NOW_POLL = 0.2
+ADDRESS_CHANGE = "run/sync/address-change.json"  # #941: a remote address change the person has not seen yet
 UNCONFIRMED = "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
 
 
@@ -144,6 +158,90 @@ def confirmed_remote(root, settings):
     return url
 
 
+def address_change(root):
+    """{old, new, by, at} of a remote address change that waits for the person's Undo or Keep, else None."""
+    try:
+        data = json.loads(repo.safe(root, ADDRESS_CHANGE).read_text())
+    except (ValueError, OSError, RecursionError, repo.Refused):
+        return None
+    if not isinstance(data, dict) or not all(
+        isinstance(data.get(k), str) and data[k] for k in ("old", "new")
+    ):
+        return None
+    return {
+        "old": data["old"],
+        "new": data["new"],
+        "by": str(data.get("by") or ""),
+        "at": str(data.get("at") or ""),
+    }
+
+
+def address_change_text(change):
+    """The plain line for a change ({old, new} as safe addresses or full ones)."""
+    return f"Sync now sends to {safe_address(change['new'])} (was {safe_address(change['old'])})."
+
+
+def _drop_address_change(root):
+    with contextlib.suppress(OSError, repo.Refused):
+        repo.safe(root, ADDRESS_CHANGE).unlink(missing_ok=True)
+
+
+def _now_iso():
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _note_address_change(root, old, new, args):
+    """#941: remote mode moved from `old` to `new`. A change that waits keeps its first old address (A to B to C
+    says C, was A); going back to that address clears it. Recorded in the history with who changed it."""
+    from orch import tickets
+
+    from . import history
+    from .step import encoded, write
+
+    waiting = address_change(root)
+    first = waiting["old"] if waiting else old
+    by = tickets.acting_by(args)
+    now = _now_iso()
+    history.note(
+        root, now, f"{by} changed where sync sends to: {safe_address(new)} (was {safe_address(old)})"
+    )
+    if new == first:
+        _drop_address_change(root)
+        return
+    write(root, ADDRESS_CHANGE, encoded({"old": first, "new": new, "by": by, "at": now}))
+
+
+def answer_address_change(root, settings, undo, args):
+    """The person's Undo (sync sends to the old address again) or Keep (the new address stays) of a change."""
+    from orch import tickets
+
+    from . import history
+
+    change = address_change(root)
+    if not change:
+        raise repo.Refused("No sync address change waits for you. See where sync sends to: orch sync status")
+    by = tickets.acting_by(args)
+    if undo:
+        if settings.get("mode") != "remote":
+            _drop_address_change(root)
+            raise repo.Refused("Sync is not set to an address any more, so there is nothing to undo.")
+        # the old address was the person's own choice before (a public one included): choosing it again
+        apply_set(root, settings, "remote", change["old"], args=args, public=True, undo=True)
+        history.note(
+            root, _now_iso(), f"{by} undid the address change: sync sends to {safe_address(change['old'])}"
+        )
+        return {
+            "remote": safe_address(change["old"]),
+            "text": f"Sync sends to {safe_address(change['old'])} again.",
+        }
+    _drop_address_change(root)
+    history.note(root, _now_iso(), f"{by} kept the new sync address {safe_address(change['new'])}")
+    return {
+        "remote": safe_address(change["new"]),
+        "text": f"Sync keeps sending to {safe_address(change['new'])}.",
+    }
+
+
 class PublicAddress(repo.Refused):
     """A public address on a plain choice: never used then (the person's use-public choice is a separate one)."""
 
@@ -169,12 +267,23 @@ def _remote_gate(root, address, args, public):
 
 
 def apply_set(
-    root, settings, mode=None, remote=None, interval=None, kind="private", *, args=None, public=False
+    root,
+    settings,
+    mode=None,
+    remote=None,
+    interval=None,
+    kind="private",
+    *,
+    args=None,
+    public=False,
+    undo=False,
 ):
     """`orch sync set` (also `orch sync act set` and `use-public`): check, save and wake the loop. Returns
     (settings, notice): the notice is the visibility line for a remote address seen for the first time, else None.
     Choosing or changing the remote address (`remote`, or turning remote on with the stored one) records that
     address (_remote_gate); `public` = the caller is the person's use-public choice."""
+    # #941: a change of the address in remote mode waits for the person's Undo or Keep (sync keeps working
+    # meanwhile); `undo` = that Undo.
     if mode is None and interval is None:
         raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
     if interval is not None and interval not in (5, 15, 60):
@@ -192,6 +301,11 @@ def apply_set(
         raise repo.Refused("Set a remote in local or remote mode")
     if mode == "remote" and not (remote or settings.get("remote")):
         raise repo.Refused("A remote address is required")
+    previous = (
+        settings.get("remote")
+        if settings["mode"] == "remote" and address_confirmed(root, settings.get("remote"))
+        else None
+    )
     # turning remote on uses the stored address: that is choosing it too (settings.json is agent-writable)
     chosen = remote or (settings.get("remote") if mode == "remote" and settings["mode"] != "remote" else None)
     visibility = None
@@ -217,7 +331,13 @@ def apply_set(
             )
     if chosen:
         approve_address(root, chosen)  # the address this choice applies (checked at every use)
-    elif mode in ("off", "local"):
+        if undo:
+            _drop_address_change(root)
+        elif remote and previous and remote != previous and mode == "remote":
+            _note_address_change(root, previous, remote, args)
+    if mode in ("off", "local"):
+        _drop_address_change(root)  # no address in use: nothing left to undo
+    if not chosen and mode in ("off", "local"):
         # leaving remote removes the address record: planting mode=remote in settings.json later can't bring the
         # old address back; turning remote on again is a new choice
         settings.pop(
@@ -258,6 +378,11 @@ def status_result(root, settings):
         "last_error": info.get("last_error") or state.get("last_error"),
         "paused": verified_pause(root, state) is not None,
         "next_run": info.get("next_run") if pid else None,
+        "address_change": (
+            {**change, "old": safe_address(change["old"]), "new": safe_address(change["new"])}
+            if (change := address_change(root))
+            else None
+        ),
     }
 
 
@@ -362,6 +487,10 @@ def main(argv=None):
     p.add_argument("--ignore", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("address")  # the person's answer to a remote address change (#941)
+    p.add_argument("answer", choices=("undo", "keep"))
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("deleted")
     p.add_argument("ticket")
     p.add_argument("--keep", action="store_true")
@@ -417,10 +546,24 @@ def main(argv=None):
             from .step import run_once
 
             if service.running_pid(root):
-                loop.wake_up(root)
-                result = {"woken": True}
-                print(json.dumps(result) if args.json else "Sync runs now in the background.")
-                return 0
+                # #876: the running loop does the pass; wait for that pass to end, so what is printed (and
+                # what `orch sync status` says next) is the state after it, not the state before it.
+                token = secrets.token_hex(8)
+                loop.wake_up(root, token)
+                end = time.monotonic() + NOW_WAIT
+                while time.monotonic() < end and service.running_pid(root):
+                    info = service.read(root, loop.INFO)
+                    if loop.answered(info, token):
+                        result = read(root, "state")
+                        if info.get("last_error"):  # the pass itself failed (the loop's own catch-all)
+                            result["last_error"] = info["last_error"]
+                        print(json.dumps(result) if args.json else str(result))
+                        return 2 if result.get("last_error") else 0
+                    time.sleep(NOW_POLL)
+                if service.running_pid(root):
+                    result = {"woken": True}
+                    print(json.dumps(result) if args.json else "Sync runs now in the background.")
+                    return 0
             loop.note(root, last_try=loop.iso(time.time()))
             result = run_once(root, "manual")
             # status shows the loop's own error first: an old one must not outlive this pass (its error, if any,
@@ -428,6 +571,11 @@ def main(argv=None):
             loop.note(root, last_error=None)
             print(json.dumps(result) if args.json else str(result))
             return 2 if result.get("last_error") else 0
+        elif args.cmd == "address":
+            result = answer_address_change(root, settings, args.answer == "undo", args)
+            if not args.json:
+                print(result["text"])
+                return 0
         elif args.cmd == "status":
             result = status_result(root, settings)
             if not args.json:

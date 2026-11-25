@@ -46,3 +46,13 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - automation.html: the one table is split into "Repeating" (plan, next time, last time, switch) and "Once" (ticket, starts, Start now); one-time rows lose the "Once" / "Not yet" / "One-time wake-up" words they repeated.
 - Both tables use the compact table rows (40 px, the quiet line beside the name); a table shows five rows and the rest behind "Show N more".
 - Second round (owner: "make all look a bit tighter and compact and nicer", challenged with an outside review): Coming up is the compact week (frequent repeats as one line of pills, one row per day with its starts on single lines, empty days folded into one row); Recent starts is a compact one-line table; long ticket names end with "…" on one line (full name on hover); at phone width a compact table row is the name, one quiet line of facts, then the buttons.
+
+## Time zone beside the time (ORCH-1861, 24 Nov)
+
+- automation-edit.html: the Time field names the zone it is read in beside it ("Europe/Zurich"), on one line at phone width too. In the product the name comes from the automation add-on, never from the browser: a new repeat shows the zone `orch automation repeat` saves without `--tz`; a saved one its own, an old one saved without a zone "UTC" (as the scheduler reads it).
+- `?mode=edit&zone=utc`: an old repeat read in UTC; below the field "Saving changes the time zone to Europe/Zurich.", because saving sends no zone.
+- automation.html list: the product's Next time now ends with the zone of this computer ("Mon 30 Nov, 08:00 CET").
+
+## Relay off: no incoming footnote (ORCH-2022, 25 Nov)
+
+- automation.html: the footnote "Incoming from your phone and other workspaces · … / Manage incoming work →" is the relay-on demo. `?relay=off` shows the page of a workspace without the relay: no footnote, no link, no phone or relay words (R1.1). The product does the same (`orch automation view` and `status` read `orch addon list`).

@@ -93,8 +93,15 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+- 24 Nov (ORCH-1798, owner): the Auto Reviewer card shows only while one of its switches is on; both are off by default
+  and are turned on in Settings > General (same rows there). Plain words for any workspace, and a last line: "Each
+  verdict shows in the ticket's history, and you can undo it under What the Reviewer did on Review." The list of what always
+  waits for the person stays fixed (no editable list, R4.4). The mockup shows it turned on.
 
 - ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
+- 24 Nov (ORCH-1835, owner picked "one card, honest name"): the rail card "Accepted for you" is now "What the Reviewer did".
+  It lists accepts, send-backs and answers of the Reviewer, the Auto Reviewer and Away mode; each row still says
+  Accepted, Sent back to the helper or Answered.
 
 ## Factory draft ready (18 Nov 2026, ORCH-479)
 
@@ -102,3 +109,28 @@
   the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
   comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
   the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.
+
+## Ticket beside the deck (24 Nov 2026, ORCH-1804, draft for the owner's pick)
+
+- Every card has "Open ticket" (outline, in the card's footer; in place of a stuck card's plain "Open"). It shows the card's
+  ticket in a panel on the left, in place of All cards, while the card and its answers stay on the right (`?ticket=1` in
+  the mockup, `#review?ticket=<id>` in the product). The panel is the ticket page itself in one column, scrolls by itself,
+  has "Open full page" and Close, and follows the card on screen. Its filled buttons read as outline: the card's answer
+  stays the one filled button. A phone shows the panel in the card's place; Close or Back brings the card back.
+
+## One plain question in one tap (24 Nov 2026, ORCH-1847)
+
+- `review.html?one=1`: one plain, reversible question (orch's `one_tap`: two to four short answers, no card, no add-on
+  kind, no spending, sending outside, starting, merging, deleting or keys) shows the question, its ticket and the named
+  answers first. A tap on Thursday records the ticket answer once ("Answered Thursday: DT-70", Undo while it is held);
+  no Pick one, no count, bar, "1 of 1" or All cards list for one card. Comment, None of these and Later stay; Enter on a
+  focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
+
+
+## Nothing to review (25 Nov 2026, ORCH-2024)
+
+`review.html?empty=1` is the product's empty Review page: subtitle "Nothing waits for you.", the Waiting / Answered
+switch with no count, and the master empty state ("Nothing waits for you" / "New cards appear here when a helper needs
+you."). With nothing in the rail (no cards, no Auto Reviewer, nothing the Reviewer did) the page is one column: the
+switch lines up with the heading and the empty state sits in the card's 760 px column under it (before: an empty left
+column pushed both to the right). Master rule in `widgets.css`, no page CSS.

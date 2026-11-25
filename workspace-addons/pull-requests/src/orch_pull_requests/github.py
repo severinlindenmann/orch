@@ -58,35 +58,39 @@ class GitHub:
 
     def failed_checks(self, url: str) -> frozenset[str]:
         """The names of the pull request's checks that have already failed (empty: none, or unreadable)."""
-        got = self._run("pr", "checks", url, "--json", "name,bucket")
-        try:
-            rows = json.loads(got.stdout or "[]")
-        except ValueError:
-            return frozenset()
-        if not isinstance(rows, list):
-            return frozenset()
-        return frozenset(
-            str(r.get("name") or "") for r in rows if isinstance(r, dict) and r.get("bucket") == "fail"
-        )
+        got = self.own_checks(url)
+        return frozenset(x["name"] for x in got["failed"]) if got else frozenset()
 
     def own_checks(self, url: str) -> dict | None:
         """The pull request's own checks as the queue picks it (ORCH-1377): {"failed": [{name, link}],
-        "pending": [name]}; None when GitHub did not answer. gh exits 8 while some still run: still read."""
-        got = self._run("pr", "checks", url, "--json", "name,bucket,link")
+        "pending": [name]}; None when GitHub did not answer. gh exits 8 while some still run: still read.
+        Only the checks that count (prstate.current, the page's rule too): a check of an older run of a workflow
+        whose newer run still goes is pending, never failed (#2411)."""
+        from . import prstate
+
+        got = self._run("pr", "checks", url, "--json", "name,bucket,link,workflow,startedAt")
         try:
             rows = json.loads(got.stdout or "")
         except ValueError:
             return None
         if not isinstance(rows, list):
             return None
-        rows = [r for r in rows if isinstance(r, dict)]
+        rows = prstate.current(
+            [
+                {"workflow": r.get("workflow"), "name": r.get("name"), "run": prstate.run_of(r.get("link")),
+                 "at": r.get("startedAt"), "pending": r.get("bucket") == "pending", "row": r}
+                for r in rows
+                if isinstance(r, dict)
+            ]
+        )  # fmt: skip
+        bucket = [("pending" if x.get("replaced") else x["row"].get("bucket"), x["row"]) for x in rows]
         return {
             "failed": [
                 {"name": str(r.get("name") or ""), "link": str(r.get("link") or "")}
-                for r in rows
-                if r.get("bucket") == "fail"
+                for b, r in bucket
+                if b == "fail"
             ],
-            "pending": [str(r.get("name") or "") for r in rows if r.get("bucket") == "pending"],
+            "pending": [str(r.get("name") or "") for b, r in bucket if b == "pending"],
         }
 
     def first_failure(self, link: str) -> str:
