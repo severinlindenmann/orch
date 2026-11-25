@@ -5,7 +5,9 @@ replaces orch's own tool folder, so when orch ran it, uv stopped halfway ("Acces
 broken (`No module named 'orch'`). On Windows orch therefore hands the reinstall to a small finisher: a
 standalone script run by the base Python (outside the tool folder, it imports nothing from orch). It waits
 until orch has exited and the folder is free, runs uv, saves the add-on list and runs the follow-up step
-(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log.
+(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log. While the dashboard is off it
+serves the "orch is updating" page on the dashboard's address(es) (orch_ui/static/updating.html, copied with the
+master stylesheets to <orch home>/finish/page before orch is replaced; ORCH-1794).
 
 The entry guard reads <orch home>/finish.updating (a decimal owner PID), beside finish.pending and
 finish/job.json. The finisher holds it from before the folder probe/reinstall through RESULT ok/fail,
@@ -19,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +37,7 @@ import json, os, subprocess, sys, time
 job = json.load(open(sys.argv[1], encoding="utf-8"))
 job.setdefault("updating", os.path.join(os.path.dirname(job["pending"]), "finish.updating"))
 job.setdefault("step", os.path.join(os.path.dirname(job["updating"]), "finish.step"))
+job.setdefault("took", os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "took.json"))
 log = open(job["log"], "a", encoding="utf-8")
 registry_written = False
 registry_before = None
@@ -51,6 +55,11 @@ def say(text):
 
 began = time.time()
 now_step = {"n": 0, "of": 0, "label": None, "since": began}
+# For the updating page (ORCH-1794): the plain name of every step, the seconds each finished step took and
+# what each took last time (finish/took.json, written after an update that worked).
+names = []
+spent = {}
+usual = {}
 
 
 def took(seconds):
@@ -59,8 +68,9 @@ def took(seconds):
 
 def end_step():
     if now_step["label"]:
-        spent = took(time.time() - now_step["since"])
-        say("step %d of %d done (%s)" % (now_step["n"], now_step["of"], spent))
+        seconds = time.time() - now_step["since"]
+        spent[now_step["n"]] = round(seconds, 1)
+        say("step %d of %d done (%s)" % (now_step["n"], now_step["of"], took(seconds)))
         now_step["label"] = None
 
 
@@ -73,10 +83,148 @@ def step(label, n=None):
     try:
         tmp = job["step"] + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({**now_step, "began": began}, f)
+            json.dump({**now_step, "began": began, "names": names,
+                       "took": [spent.get(k) for k in range(1, now_step["n"])],
+                       "usual": [usual.get(x) for x in names]}, f)
         os.replace(tmp, job["step"])
     except OSError:
         pass
+
+
+def plan_names():
+    out = ["Stopping the dashboard"] if job.get("services") else []
+    out.append("Getting the new orch")
+    out += [cmd.get("name") or "Updating this workspace" for cmd in job["then"]]
+    if job.get("services"):
+        out.append("Starting the dashboard again")
+    return out
+
+
+def load_usual():
+    try:
+        with open(job["took"], encoding="utf-8") as f:
+            data = json.load(f)
+        usual.update({k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, (int, float))})
+    except Exception:
+        pass
+
+
+def save_usual():
+    try:
+        tmp = job["took"] + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({names[k - 1]: v for k, v in spent.items() if 0 < k <= len(names)}, f)
+        os.replace(tmp, job["took"])
+    except Exception:
+        pass
+
+
+# ---- the "orch is updating" page (ORCH-1794): on the dashboard's addresses while the dashboard is off
+
+PAGE_PREFIX = "/orch-updating/"
+PAGE_FILES = {"tokens.css": "text/css", "components.css": "text/css", "motion.css": "text/css",
+              "widgets.css": "text/css", "updating.js": "text/javascript"}
+page_servers = []
+page_end = {"result": None, "bad": None, "reason": None}
+
+
+def page_state():
+    """What the page shows: finish.step as this finisher wrote it, plus how it ended (once it has)."""
+    try:
+        with open(job["step"], "rb") as f:
+            data = json.loads(f.read(65536).decode("utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    keep = ("n", "of", "since", "began", "names", "took", "usual")
+    out = {k: data[k] for k in keep if k in data}
+    out.update(page_end, orch_updating=True, now=time.time())
+    return out
+
+
+def serve_page():
+    page = job.get("page")
+    if not page:
+        return
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    def read(name):
+        with open(os.path.join(page["dir"], name), "rb") as f:
+            return f.read()
+
+    class Page(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def send(self, code, body, kind):
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+            if code == 503:
+                self.send_header("Retry-After", "5")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            name = path[len(PAGE_PREFIX):] if path.startswith(PAGE_PREFIX) else ""
+            try:
+                if name == "state":
+                    return self.send(200, json.dumps(page_state()).encode("utf-8"), "application/json")
+                if name in PAGE_FILES:
+                    return self.send(200, read(name), PAGE_FILES[name] + "; charset=utf-8")
+                self.send(503, read("updating.html"), "text/html; charset=utf-8")
+            except OSError:
+                self.send(503, b"orch is updating. Try again in a few minutes.", "text/plain; charset=utf-8")
+
+        do_HEAD = do_GET
+
+        def do_POST(self):
+            self.send(503, b'{"error": "orch is updating. Try again in a few minutes."}', "application/json")
+
+    class Server(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = os.name != "nt"  # Windows: it would let two servers share a port
+
+    for host, port in page.get("at") or []:
+        server = None
+        for _ in range(int(job.get("page_tries", 20))):  # the dashboard has just stopped: its port frees soon
+            try:
+                server = Server((host, int(port)), Page)
+                break
+            except OSError:
+                time.sleep(0.25)
+        if server is None:
+            say("could not show the updating page on port %s (it is still in use)" % port)
+            continue
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True).start()
+        page_servers.append(server)
+        say("the updating page is on port %s" % port)
+
+
+def stop_page():
+    """Free the dashboard's port before it starts again; an open page first sees how the update ended."""
+    if not page_servers:
+        return
+    if final_line and final_line.startswith("RESULT fail"):
+        why = final_line[len("RESULT fail: "):].strip()
+        page_end.update(result="fail", bad=page_end["bad"],
+                        reason=why if why and "\n" not in why and len(why) <= 200 else None)
+    else:
+        page_end["result"] = "ok"
+    time.sleep(job.get("page_linger", 2.5))  # the page asks every second
+    for server in page_servers:
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            pass
+    del page_servers[:]
 
 
 IN_USE_SUFFIXES = (".exe", ".pyd", ".dll")
@@ -127,6 +275,8 @@ def result(text):
     """The RESULT line is written last, after the services are back (the page waits for it)."""
     global final_line
     final_line = "RESULT " + text
+    if text.startswith("fail") and page_end["bad"] is None:
+        page_end["bad"] = now_step["n"]  # the step the updating page marks as failed
 
 
 def orch(verb, *args, cwd=None):
@@ -150,6 +300,7 @@ def stop_services():
 def start_services():
     if stopped:
         step("starting the dashboard and the other services again", now_step["of"])
+    stop_page()
     for ws in stopped:
         try:
             r = orch("start", "--no-open", cwd=ws)
@@ -221,12 +372,14 @@ def main():
     with open(job["updating"], "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
     busy()
-    services = 2 if job.get("services") else 0
-    now_step["of"] = services + 1 + len(job["then"])
-    if services:
+    names[:] = plan_names()
+    now_step["of"] = len(names)
+    load_usual()
+    if job.get("services"):
         time.sleep(job.get("stop_delay", 3))  # the update that started us is just ending
         step("stopping the dashboard and the other services")
         stop_services()
+        serve_page()
     step("replacing orch: download and install (often 1 to 2 min)")
     say("waiting for orch to exit (finisher pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
     tries = job.get("tries", 3)
@@ -299,6 +452,12 @@ finally:
         end_step()
     except Exception:
         pass
+    try:
+        stop_page()  # no services to start: the page still must not outlive the finisher
+    except Exception:
+        pass
+    if code == 0:
+        save_usual()
     try:
         os.remove(job["step"])
     except OSError:
@@ -443,7 +602,10 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "record": (extra or {}).get("record"),
         "consents": (extra or {}).get("consents"),  # [consent.json, workspace id, names]: dropped on failure
         "backup": {"env": str(env_dir), "bins": (extra or {}).get("bins") or []},
-        "then": [{"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
+        "then": [
+            {"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd), "name": _then_name(t)}
+            for t in then
+        ],
         "py": str(py),
         "services": [str(w) for w in (extra or {}).get("services") or []],
         "log": str(log_path(home)),
@@ -455,6 +617,8 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     # In orch's own folder, not %TEMP% (which can be shared, e.g. C:\Windows\Temp for tasks).
     d = home / "finish"
     d.mkdir(parents=True, exist_ok=True)
+    job["took"] = str(d / "took.json")
+    job["page"] = _copy_page(d / "page", (extra or {}).get("page"))
     (d / "finish.py").write_text(FINISHER, encoding="utf-8")
     (d / "job.json").write_text(json.dumps(job), encoding="utf-8")
     # NOT DETACHED_PROCESS: with no console at all, every program the finisher runs (uv, orch stop/start)
@@ -485,6 +649,35 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         mark.unlink(missing_ok=True)
         raise RuntimeError(f"could not start the finisher: {e}") from e
     return log_path(home)
+
+
+def _then_name(argv: list[str]) -> str:
+    """The plain name of a follow-up step on the updating page."""
+    if argv[:2] == ["addon", "add"] and len(argv) > 2:
+        return f"Turning on {argv[2]}"
+    return "Updating this workspace"
+
+
+PAGE_FILES = ("updating.html", "updating.js", "tokens.css", "components.css", "motion.css", "widgets.css")
+
+
+def _copy_page(d: Path, at: object) -> dict | None:
+    """The updating page and the master files it needs, copied next to the finisher now: the finisher
+    serves them while orch's own folder is being replaced. `at`: the dashboard's [host, port] pairs.
+    None: no page."""
+    if not isinstance(at, list) or not at:
+        return None
+    import orch
+
+    # found by path: the core never imports orch_ui
+    kit = Path(orch.__file__).resolve().parent.parent / "orch_ui" / "static"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        for name in PAGE_FILES:
+            shutil.copyfile(kit / name, d / name)
+    except OSError:
+        return None  # the update goes on without the page
+    return {"dir": str(d), "at": [[str(h), int(p)] for h, p in at]}
 
 
 def _claim(home: Path, mark: Path) -> None:
