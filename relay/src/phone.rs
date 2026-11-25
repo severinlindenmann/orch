@@ -108,7 +108,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
             params![pid, n],
         )?;
     }
-    // A browser has no signing key of its own: a key sent at its pairing is ignored.
+    // A browser keeps no phone key: a `public_key` sent at its pairing is ignored.
     let is_phone: bool =
         tx.query_row("SELECT kind='phone' FROM phones WHERE id=?1", [&pid], |r| {
             r.get(0)

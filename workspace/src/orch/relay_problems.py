@@ -38,8 +38,8 @@ _CODE_PLACE = re.compile(r"(?<![\w:./-])[A-Za-z_][\w.]{0,80}:[A-Za-z_<][\w<>.]{0
 
 
 def _no_twice(pairs: list) -> dict:
-    """json.loads hook: a field named twice would hide the first value from the value-by-value check, so such a
-    file is not read as JSON and its whole text is checked instead."""
+    """json.loads hook: a field named twice would hide the first value from the value-by-value check,
+    so such a file is not read as JSON and its whole text is checked instead."""
     out: dict = {}
     for k, v in pairs:
         if k in out:
@@ -101,7 +101,11 @@ def scan(root: Path, folder: Path, without_content: bool = False) -> None:
                 doc = (
                     json.loads(text, object_pairs_hook=_no_twice)
                     if p.suffix == ".json"
-                    else [json.loads(line, object_pairs_hook=_no_twice) for line in text.splitlines() if line.strip()]
+                    else [
+                        json.loads(line, object_pairs_hook=_no_twice)
+                        for line in text.splitlines()
+                        if line.strip()
+                    ]
                 )
                 _check(
                     root,
