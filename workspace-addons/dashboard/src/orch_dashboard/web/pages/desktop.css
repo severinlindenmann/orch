@@ -12,7 +12,7 @@
   .ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}
   .ticket-page .input{min-height:36px}
   .live-strip .btn{min-height:32px}
-  .settings button,.addon-native button,.settings-other button,.settings .sync-chip{min-height:32px}
+  .settings button:not(.switch),.addon-native button:not(.switch),.settings-other button:not(.switch),.settings .sync-chip{min-height:32px}
   .settings-nav button,.settings-nav a,.settings details summary,.addon-native summary{min-height:36px}
   .chat-page button,.chat-page a,.chat-page summary,.chat-page input{min-height:32px}
   .chat-page .chat-button,.chat-page .chat-delivery .chat-button,.chat-page .chat-bubble > .btn.outline{min-height:32px}
@@ -21,5 +21,4 @@
   /* Board: columns are lanes, cards carry a state accent (accepted Tickets draft) */
   /* Ticket: Progress and What was asked read as plain sections, not boxed cards (accepted Ticket draft) */
   .ticket-page .progress-card,.ticket-page .card.asked{background:none;border:0;padding:0}
-  .settings .switch{border-color:transparent}
 }
