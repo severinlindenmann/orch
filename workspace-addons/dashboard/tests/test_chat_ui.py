@@ -20,16 +20,16 @@ def test_page_is_wired_into_the_shell():
 def test_groups_render_only_when_data_exists():
     assert "state?.groups?.hosted" in JS and "state?.groups?.joined" in JS
     for text in (
-        "'Earlier'",
-        "'Earlier days'",
         "'Finished groups'",
         " · you can read, not reply",
-        "'Back to today'",
         "Search chats",
-        "Search earlier chats",
-        "A new conversation starts each day at 04:00",
+        "'Show earlier messages'",
+        "Your helper starts each day without yesterday’s conversation.",
         "'Needs your OK'",
         "is thinking…",
+        "Your helper is writing…",
+        "Not sent. Check the connection.",
+        "Saved. Your helper reads it when it starts.",
         "Members",
         "Remove from group",
         "Answer on your phone or in ",
@@ -45,6 +45,8 @@ def test_groups_render_only_when_data_exists():
         "Running · ",
         "Context cleared daily",
         "'Chat · '",
+        "A new conversation starts each day at 04:00",  # ORCH-2171: earlier days by scrolling up, no rule to read
+        "'Back to today'",
     ):
         assert gone not in JS, gone
 
@@ -59,7 +61,8 @@ def test_css_is_scoped_small_screens_and_touch_targets():
     assert "min-height:44px" in CSS
     assert "@media" in CSS and "prefers-reduced-motion" in CSS
     selectors = re.findall(r"(?m)^([^{@}/]+)\{", CSS)
-    assert selectors and all(s.strip().startswith(".chat-page") for s in selectors)
+    # the one rule outside .chat-page lets the Chat frame fill the page (ORCH-2171: full height, no page title)
+    assert selectors and all(s.strip().startswith(".chat-page") or s.strip() == ".page:has(>.chat-frame)" for s in selectors)
 
 
 def test_group_talk_is_marked_by_the_data_layer(ws):
@@ -166,5 +169,5 @@ def test_ticket_chats_are_wired_after_the_chat_page():
     assert "innerHTML" not in tc and "insertAdjacentHTML" not in tc
     sent = set(re.findall(r"act\('([a-z.]+)'", tc))
     assert sent == {"chat.read", "chat.say", "run.start"} and sent <= set(actions.OPS)
-    assert "'Ticket chats'" in tc and "'Decided'" in tc and "'Open chat'" in tc
+    assert "'Tickets'" in tc and "'Decided'" in tc and "'Open chat'" in tc
     assert "let chatRich" in JS  # ticketchat.js widens it
