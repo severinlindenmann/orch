@@ -8,6 +8,7 @@ ADDON="${1:-focus}"
 # fallback to the real one an error. The workflow sets both (so the install is covered too); this is the local default.
 if [ -z "${ORCH_HOME:-}" ]; then ORCH_HOME="$HOME/.orch-test/smoke-home-$$"; mkdir -p "$ORCH_HOME"; fi
 export ORCH_HOME ORCH_HOME_STRICT=1
+AGENT_PY="$(cd "$(dirname "$0")/../fixtures/generic-agent" && pwd)/agent.py"  # the generic fake agent (R3.4)
 BASE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 D="$BASE/orch smoke Büro $$"
 mkdir -p "$D"; cd "$D"
@@ -48,6 +49,39 @@ orch ticket summary "$ID" "Smoke run on $(uname -s)"
 step "ask"
 orch ask "$ID" "Which colour?" --option red --option blue --recommend red
 orch ticket show "$ID"
+# F2 with the scripted fake agent (R3.4, R2.1-R2.6, ORCH-2069): it asks and works on while it waits; the person
+# answers; its next run picks the answer up and sends the ticket to Check; the person marks it Done. The folder has a
+# space and an umlaut, and so has the evidence file.
+step "F2 loop with the fake agent"
+PY=""; for c in python3 python; do if "$c" -c 'import sys' >/dev/null 2>&1; then PY="$c"; break; fi; done
+[ -n "$PY" ] || { echo "no python for the fake agent"; exit 1; }
+f2_is() {  # f2_is <python expression over the ticket t>: fails the smoke when it is false
+  orch ticket show "$FID" --json | "$PY" -c 'import json, sys
+t = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
+ok = eval(sys.argv[1])
+print("ok:" if ok else "FAILED:", sys.argv[1])
+ok or print(json.dumps({k: t.get(k) for k in ("status", "waiting_on", "checklist", "questions")}, indent=1))
+sys.exit(0 if ok else 1)' "$1"
+}
+F="$(orch ticket new "F2 Übung" --json)"
+FID="$(printf '%s' "$F" | grep -m1 '"id"' | sed 's/.*"id": *"\([^"]*\)".*/\1/')"
+orch check add "$FID" "draft the letter"
+orch check add "$FID" "attach the report"
+orch check add "$FID" "send it after the answer"
+ORCH_TICKET="$FID" "$PY" "$AGENT_PY" --ask "Send it today?" "work on $FID"
+f2_is 't["status"] == "waiting" and t["waiting_on"] == {"kind": "question", "ref": "q1"}'
+f2_is 't["checklist"][0]["done"] and t["checklist"][0]["evidence"] and not t["checklist"][2]["done"]'
+rc=0; orch check done "$FID" c2 || rc=$?
+[ "$rc" = 2 ] || { echo "check done without evidence: exit $rc, expected 2"; exit 1; }
+mkdir -p "Berichte Ü"; echo "Umsatz ok" > "Berichte Ü/Q4 Bericht.txt"
+orch check done "$FID" c2 --file "Berichte Ü/Q4 Bericht.txt"
+f2_is 't["checklist"][1]["evidence"][0]["type"] == "file" and t["checklist"][1]["evidence"][0]["ref"].endswith("Q4 Bericht.txt")'
+orch answer "$FID" q1 no
+f2_is 't["waiting_on"] is None and t["questions"][0]["answer"] == "no"'
+ORCH_TICKET="$FID" "$PY" "$AGENT_PY" --ask "Send it today?" "work on $FID"
+f2_is 't["status"] == "review" and t["checklist"][2]["evidence"][0]["ref"] == "answer was no"'
+orch ticket status "$FID" done
+f2_is 't["status"] == "done"'
 # ORCH-897 (first run): init is safe to repeat, and orch uninstall keeps the tickets so init brings the folder back
 step "init again"
 ORCH_AGENT=claude orch init
