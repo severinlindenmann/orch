@@ -3345,7 +3345,13 @@ def update(
         from orch import updateinfo
 
         sha_now = _source_sha() or _sha_or_none(updateinfo.origin_sha())  # no network: what uv recorded
-        _save_installed(sha_now, updateinfo.release_now(sha_now))
+        import time
+
+        _save_installed(
+            sha_now,
+            updateinfo.release_now(sha_now),
+            None if sha_now else _pending_install(time.time() - 600),  # looked up later (ORCH-1399)
+        )
         reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
