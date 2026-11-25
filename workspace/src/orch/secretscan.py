@@ -351,7 +351,8 @@ def refuse_if_secret(
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
-    runs are kept from the label rules only (passes). strict: as in refuse_if_secret_in. A zip, gzip or tar is scanned inside as well."""
+    runs are kept from the label rules only (passes). A zip, gzip or tar is scanned inside as well.
+    strict: as in refuse_if_secret_in."""
     found: list[dict] = []
     try:
         for blob in _unpacked(data, [_UNPACK_LIMIT]):
