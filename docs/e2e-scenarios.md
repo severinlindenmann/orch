@@ -46,6 +46,7 @@ Format: steps → expected result.
 - P8 Workspace lists, restarts, stops, deletes its apps and files; cannot touch Home's items (403/404).
 - P9 Admin portal (Playwright): files show no names, apps show status; restart/stop work. Public `/admin` → 404; admin port without token → 401; admin port not reachable from the public IP.
 - P10 (local, Playwright) Shared-link and app pages at 1440 and 390: the file page decrypts a shared CSV and shows its rows; a cut-short key says so; a stopped link says the file is gone; a stopped app says it is paused. No sideways scrolling, no script error.
+- P11 (local) R5.1 link key only in the fragment: after share + download (page, blob, meta, whole link as Referer) and recording the link on a ticket (ref, summary, evidence), no form of the key is in the server log, the server data, the CLI output or the workspace outside `.orch/secrets/`; the ticket keeps the link as `#k=…`.
 
 ## Relay (R)
 - R1 Admin adds Pilatus, Home, Reports with description + tags; rules Pilatus→Reports text+files+delegate+start, Home→Pilatus text → `orch relay connect` prompts work; on a machine without orch the onboarding.sh/.ps1 line installs it first, then connects.

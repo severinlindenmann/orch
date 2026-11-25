@@ -96,6 +96,38 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
+def test_link_key_never_lands_in_a_ticket_or_a_run_record(proj, run, pub):
+    """R5.1: the key stays in the link fragment. Recording the link on a ticket keeps `#k=…`, the CLI never
+    echoes the key, and a run record hides it."""
+    from orch import secretrun
+
+    connect(run, pub)
+    f = proj / "report.txt"
+    f.write_bytes(b"hello report")
+    link = json.loads(run("publish", "file", str(f), "--json")[1])["link"]
+    key = link.split("#k=")[1]
+    tid = json.loads(run("ticket", "new", "Share report", "--json")[1])["id"]
+    run("check", "add", tid, "Share it")
+    run("check", "add", tid, "Tell them")
+    outs = [
+        run("ref", "add", tid, link),
+        run("ticket", "summary", tid, f"Shared at {link}"),
+        run("check", "done", tid, "c1", "--url", link),
+        run("check", "done", tid, "c2", "--note", f"sent {link} by mail"),
+    ]
+    assert all(code == 0 and key not in out + err for code, out, err in outs)
+    kept = link.split("#k=")[0] + "#k=\u2026"
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert key not in text and text.count(kept) >= 4
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and "secrets" not in p.parts and key in p.read_text("utf-8", errors="ignore")
+    ]
+    assert leaks == []
+    assert key not in secretrun.record_writer(proj).hider.hide_text(f"orch publish file -> {link}")
+
+
 BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())
 
 
