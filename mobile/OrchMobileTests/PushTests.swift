@@ -92,6 +92,13 @@ final class SettingsBugFixTests: XCTestCase {
         XCTAssertEqual(SignOutWording.text(for: [waiting, stored, refused]), SignOutWording.base + " 1 message and 1 answer are still waiting to be sent and will be lost.")
     }
 
+    func testRevokedTextNamesWhatWasNotSent() {
+        let signedOut = RelayError.unauthorized.localizedDescription
+        XCTAssertEqual(SignOutWording.revoked(notSent: (0, 0)), signedOut)
+        XCTAssertEqual(SignOutWording.revoked(notSent: (1, 0)), signedOut + " 1 message waiting on this phone was not sent.")
+        XCTAssertEqual(SignOutWording.revoked(notSent: (2, 1)), signedOut + " 2 messages and 1 answer waiting on this phone were not sent.")
+    }
+
     func testNotificationAccessFromSystemStatus() {
         XCTAssertEqual(NotificationAccess.from(.denied), .denied)
         XCTAssertEqual(NotificationAccess.from(.notDetermined), .notAsked)
