@@ -24,7 +24,7 @@ function liveNow(s) {
   if (s.status === 'needs-you') return s.question || s.detail || 'Needs you.';
   if (s.status === 'in-line') return 'Waits in line for a free helper place.';
   // ORCH-1687: a ticket that waits for the person without a session (a result, a question, a start that failed)
-  if (s.status === 'closed' && s.needs === true) return s.word === 'Check' ? 'A result to check.' : s.word === 'Could not start' ? 'The helper could not start.' : 'Waits for your answer.';
+  if (s.status === 'closed' && s.needs === true) return s.word === 'Review' ? 'A result to review.' : s.word === 'Could not start' ? 'The helper could not start.' : 'Waits for your answer.';
   if (s.status === 'closed') return 'No session right now.';
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;

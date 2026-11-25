@@ -162,7 +162,7 @@ the first rows without any extra work.
 - SX-17 Motion tokens: hover/press 100 ms, open/close 150 ms (QA-09), page change 200 ms, panels 240 ms, enter
   ease-out / exit ease-in (BP-70), reduced-motion = instant; used by: route change, tab switch, dialog, list
   insert/remove (Home answered card), status pill change (one pulse), skeleton → content cross-fade.
-- SX-18 Words: helper / step / result / ticket / schedule / phone / Check (status) / Check result (action) / Looks good
+- SX-18 Words: helper / step / result / ticket / schedule / phone / Review (status) / Review result (action; ORCH-2140) / Looks good
   · Send back; the person = chosen name (fb13); "agent", "artifact", "autopilot", "relay", "copy" (worktree), "Exact
   text", "Reference" are banned on level 1 (BP-78, F2, F3).
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).

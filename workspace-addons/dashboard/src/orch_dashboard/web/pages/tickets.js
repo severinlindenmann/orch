@@ -335,7 +335,7 @@ function ticketNext(t) {
     }
     if (text) text = 'Question: ' + text;
   } else if (status === 'review') {
-    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Review result');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
@@ -514,7 +514,7 @@ function boardSignal(t, lane, parts) {
       else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
     });
   }
-  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Check result');
+  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Review result');
   if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
   const helper = helperChip(t);
   if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
@@ -560,7 +560,7 @@ function boardCard(t, lane = '') {
   return card;
 }
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
-  blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
+  blocked:'Nothing waits for a date', review:'Nothing to review', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
 // ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
 const BOARD_MOVES = window.DashHelpers.MOVE_CHOICES;
 const CAPPED_LANES = BOARD_ROWS;  // every row: two rows of tiles, then "Show N more"
@@ -852,7 +852,7 @@ function groupAction(status, group, folded = foldedGroups.has(status)) {
       if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
     });
   }
-  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
+  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Review ' + group.length + (group.length === 1 ? ' result' : ' results'));
   return null;
 }
 const searchHead = n => { const q = String(ticketSearch).trim(); if (q && searchServed() && !savedView()) n = Math.max(n, hits.total); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
@@ -925,7 +925,7 @@ function shortFact(t, row) {
 function shortSide(t, row, status) {
   // ORCH-1716: a result to check says Check result at every width (the computer row shows it first, the session button
   // only on hover); the phone has room for one thing, so it is that one
-  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Review result');
   const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
   if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
@@ -1111,13 +1111,13 @@ function list() {
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
-    h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
+    h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to review.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
 }
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.
 const TRIAGE_LANES = [['backlog', 'Backlog'], ['todo', 'To do'], ['working', 'Working'], ['needs-you', 'Needs you'], ['waiting', 'Waiting'],
-  ['check', 'Check'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
+  ['check', 'Review'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
 const triagePicked = new Set(['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']);
 // The board's own lane rule (DashHelpers.laneOf, ORCH-152), named with the lane ids core triage takes.
 const TRIAGE_ID = {open:'backlog', ready:'todo', active:'working', waiting:'needs-you', blocked:'waiting', review:'check', done:'done', dropped:'wont-do', superseded:'superseded'};

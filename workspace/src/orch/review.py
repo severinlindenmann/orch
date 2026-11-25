@@ -1310,7 +1310,7 @@ def decide(
     ticket = tickets.load(root, tid)
     if key == "review":
         if picked is not None:
-            raise BadVerdict("A Check result has no options to pick.")
+            raise BadVerdict("A result to review has no options to pick.")
         return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid, person)
     q = _find(ticket, key)
     tickets.refuse_if_taken_back(q)
@@ -1663,7 +1663,7 @@ def change(
     if old.get("answer") is None:
         raise Refused(f"{qid} is not answered yet. Answer it first.")
     if (old.get("card") or {}).get("kind") == "check":
-        raise Refused("A Check result is final. Reopen the ticket to look at it again.")
+        raise Refused("A reviewed result is final. Reopen the ticket to look at it again.")
     if digest is not None and tickets.question_digest(old) != digest:
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)

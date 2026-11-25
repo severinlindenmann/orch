@@ -158,7 +158,7 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1, 'a running helper is named in the header line (ORCH-70)');
   assert.equal(p.count('agent-bar'), 0, 'no second helper bar under the header');
   await p.poll(state(ticket({status:'review', work}), {rev:'c', runs:{}}));
-  assert.ok(p.text().includes('Check'), 'the status chip follows the ticket');
+  assert.ok(p.text().includes('Review'), 'the status chip follows the ticket');
   assert.equal(p.count('agent-bar'), 0, 'no agent bar in Review');
   await p.poll(state(ticket({status:'active'}), {rev:'d', runs:{t_x:{running:true, claim:{agent:'claude', mode:'run'}, shared_folder:{line:'"Other" is also changing this folder.'}}}}));
   assert.equal(p.count('work-copy'), 0, 'the copy line goes when the ticket no longer has one');

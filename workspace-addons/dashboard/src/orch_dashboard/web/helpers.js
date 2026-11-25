@@ -6,7 +6,7 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Backlog', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: "Won't do"};
+  const STATUS_WORD = {open: 'Backlog', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Review', done: 'Done', dropped: "Won't do"};
   /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
      Lifecycle order. New tickets land in Backlog ("open"); To do ("ready") is what comes next, and paused or sent-back
      work; "waiting" shows as "Needs you". ORCH-152 (owner, 17 Nov): Backlog, To do, Waiting, Won't do, Superseded. */
@@ -20,7 +20,7 @@
   /* The board's lanes, left to right. "blocked" = Waiting: waits for a date, another ticket or the outside, with no
      open question. "superseded" = Won't do because another ticket replaces it (superseded_by). */
   const LANES = [['open', 'Backlog'], ['ready', 'To do'], ['active', 'Working'], ['waiting', 'Needs you'], ['blocked', 'Waiting'],
-    ['review', 'Check'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
+    ['review', 'Review'], ['done', 'Done'], ['dropped', "Won't do"], ['superseded', 'Superseded']];
   /* "Move to" (ticket page, list, board card) offers every lane but Needs you, which only a helper's question makes.
      Waiting asks for its date and reason, Superseded for the ticket that replaces it (ORCH-235: the same places
      everywhere). */
@@ -182,7 +182,8 @@
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a task';
     if (/^Added task|^Added check/i.test(text)) return 'Added a task';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
-    return plainNames(text).replace(/ moved it to Review$/, ' sent it to Check');
+    // ORCH-2140: one word for this step, also on older history lines that said Check
+    return plainNames(text).replace(/ moved it to Review$/, ' sent it to Review').replace(/ sent it to Check\b/, ' sent it to Review').replace(/the owner's Check$/, "the owner's review");
   }
 
   /* Plain words for a failure or notice: never a raw ticket id, an internal actor name (agent:/human:) or a UTC time.
@@ -606,7 +607,7 @@
         primary: start('Continue'), items: [fresh]};
     }
     // a ticket already waiting for the person's check has no run to start: no Start button
-    if (t.status === 'review') return {state: 'new', agent, status: 'ready for you to check', primary: null, items: []};
+    if (t.status === 'review') return {state: 'new', agent, status: 'ready for you to review', primary: null, items: []};
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 

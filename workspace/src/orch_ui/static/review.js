@@ -52,7 +52,7 @@
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
-const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
+const KIND={draft:['Draft','page'],check:['Review','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
