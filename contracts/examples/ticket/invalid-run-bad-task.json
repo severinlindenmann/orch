@@ -1,0 +1,103 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_4h7runs",
+  "title": "Spring newsletter",
+  "status": "review",
+  "created_at": "2026-11-24T08:00:00Z",
+  "updated_at": "2026-11-24T10:05:00Z",
+  "revision": 9,
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Write the draft",
+      "done": true,
+      "evidence": [
+        {
+          "type": "file",
+          "ref": "artifacts/draft.md",
+          "by": "agent:claude",
+          "at": "2026-11-24T08:40:00Z"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "text": "Pick the photos",
+      "done": true,
+      "evidence": [
+        {
+          "type": "note",
+          "ref": "Three photos picked",
+          "by": "agent:claude",
+          "at": "2026-11-24T09:58:00Z"
+        }
+      ]
+    }
+  ],
+  "refs": [],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-24T08:00:00Z",
+      "by": "human:Sam",
+      "text": "Created"
+    },
+    {
+      "at": "2026-11-24T08:40:00Z",
+      "by": "agent:claude",
+      "via": "cli",
+      "text": "Check c1 done",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-24T08:41:00Z",
+      "by": "agent:claude",
+      "via": "cli",
+      "text": "The draft is ready. I left the prices out until you confirm them.",
+      "chat_message": true,
+      "id": "m_a1b2c3d4e5f6g7h8"
+    },
+    {
+      "at": "2026-11-24T09:00:00Z",
+      "by": "agent:automation",
+      "via": "cli",
+      "text": "Set ext.automation",
+      "chat_message": false,
+      "addon": "automation"
+    },
+    {
+      "at": "2026-11-24T09:58:00Z",
+      "by": "agent:claude",
+      "via": "cli",
+      "text": "Check c2 done",
+      "chat_message": false
+    }
+  ],
+  "runs": [
+    {
+      "id": "r_8k2m01ab",
+      "agent": "claude",
+      "started": "2026-11-24T08:02:00Z",
+      "ended": "2026-11-24T08:54:00Z",
+      "minutes": 52,
+      "tasks": [
+        "1"
+      ]
+    },
+    {
+      "id": "r_9p3n02cd",
+      "agent": "claude",
+      "started": "2026-11-24T09:30:00Z",
+      "ended": "2026-11-24T10:01:00Z",
+      "minutes": 31,
+      "tasks": [
+        "c2"
+      ]
+    },
+    {
+      "id": "r_0q4o03ef",
+      "agent": "codex",
+      "started": "2026-11-24T10:04:00Z"
+    }
+  ]
+}

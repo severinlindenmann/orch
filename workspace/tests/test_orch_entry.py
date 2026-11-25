@@ -188,6 +188,32 @@ def test_live_marker_never_imports_orch(tmp_path):
     assert r.stderr == "orch is still updating, try again in a moment.\n"
 
 
+def test_live_marker_says_the_finishers_step_and_time(tmp_path):
+    """ORCH-1794: while the finisher works, the answer names its step and how long it runs."""
+    import json
+
+    orch_entry.marker_path(tmp_path).write_text(str(os.getpid()))
+    now = time.time()
+    orch_entry.step_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "n": 3,
+                "of": 4,
+                "label": "running orch update --project-only",
+                "since": now - 60,
+                "began": now - 240,
+            }
+        )  # fmt: skip
+    )
+    r = _entry(tmp_path, "import sys, orch_entry; sys.exit(orch_entry.main())")
+    assert r.returncode == 3
+    assert "step 3 of 4, running orch update --project-only (60 s so far, 4 min in all)" in r.stderr
+    assert str(tmp_path / "finish.log") in r.stderr and "Try again in a moment" in r.stderr
+    orch_entry.step_path(tmp_path).write_text("{broken")  # a bad step file: the plain answer
+    r = _entry(tmp_path, "import sys, orch_entry; sys.exit(orch_entry.main())")
+    assert r.stderr == "orch is still updating, try again in a moment.\n"
+
+
 @pytest.mark.parametrize(
     "stale",
     ["age", "future", "dead", "absent", "text", "pid1", "invalid", "huge", "long", "fifo", "link", "dir"],

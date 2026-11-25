@@ -55,7 +55,16 @@
     for (const [k, v] of Object.entries(attrs || {})) if (k !== 'icon') b.setAttribute(k, v);
     return b;
   };
+  // The one scheme check for every address an item brings (a helper or another workspace wrote it): http, https,
+  // mailto or a relative address; anything else (javascript:, data:, vbscript:, blob: ...) is dropped.
+  const safeHref = u => {
+    const s = typeof u === 'string' ? u.trim() : '';
+    if (!s) return '';
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(s.replace(/[\u0000-\u0020\u007f-\u009f]/g, ''));
+    return !scheme || /^(https?|mailto)$/i.test(scheme[1]) ? s : '';
+  };
   const linkBtn = (label, href, cls, iconName, dl) => {
+    href = safeHref(href); if (!href) return null;
     const a = el('a', 'btn ' + (cls || 'ghost sm')); a.href = href;
     if (dl) a.setAttribute('download', ''); else { a.target = '_blank'; a.rel = 'noopener'; }
     if (iconName) a.append(ic(iconName, 16)); a.append(el('span', '', label)); return a;
@@ -72,7 +81,7 @@
       case 'change': return (item.files || []).length > 0;
       case 'pr': return true;
       case 'archive': return (item.files || []).length > 0;
-      case 'link': return !!item.href;
+      case 'link': return !!safeHref(item.href);
       case 'file': return item.size !== 0;
       default: return !!(item.src || item.thumb) && item.size !== 0;
     }
@@ -100,7 +109,8 @@
   }
   function markdown(text, max) {
     const box = el('div', 'result-md'); let list = null, para = null, n = 0;
-    for (const raw of lines(text)) {
+    // HTML comments are not shown in Markdown, as on GitHub (an agent tool's <!-- orch:begin --> markup, ORCH-1691)
+    for (const raw of lines(String(text || '').replace(/<!--[\s\S]*?(?:-->|$)/g, ''))) {
       if (max && n >= max) break;
       const line = raw.trimEnd(), h = /^(#{1,6})\s+(.*)$/.exec(line), li = /^\s*(?:[-*+]|\d+\.)\s+(.*)$/.exec(line);
       if (!line.trim()) { list = null; para = null; continue; }
@@ -246,12 +256,12 @@
       }
       case 'page': {
         const f = el('iframe', 'result-frame'); f.setAttribute('sandbox', ''); f.setAttribute('referrerpolicy', 'no-referrer'); f.loading = 'lazy'; f.title = name;
-        if (item.src) f.src = item.src; else f.srcdoc = String(item.html || '');
+        if (safeHref(item.src)) f.src = safeHref(item.src); else f.srcdoc = String(item.html || '');
         if (!xl) { f.tabIndex = -1; f.setAttribute('aria-hidden', 'true'); }
         return f;
       }
       case 'pdf': {
-        if (xl && item.src) { const o = el('object', 'result-frame'); o.type = 'application/pdf'; o.data = item.src; o.setAttribute('aria-label', name); o.append(el('p', 'meta', 'This browser cannot show PDFs here. Use Download.')); return o; }
+        if (xl && safeHref(item.src)) { const o = el('object', 'result-frame'); o.type = 'application/pdf'; o.data = safeHref(item.src); o.setAttribute('aria-label', name); o.append(el('p', 'meta', 'This browser cannot show PDFs here. Use Download.')); return o; }
         const box = el('div', 'result-pic');
         if (item.thumb) { const im = el('img'); im.src = item.thumb; im.alt = 'First page of ' + name; im.loading = 'lazy'; box.append(im); } else box.append(pageGlyph(item.pages));
         if (item.pages) box.append(el('span', 'result-badge', plural(item.pages, 'page')));
@@ -324,7 +334,7 @@
       default: {
         const box = el('div', 'result-unknown');
         box.append(el('p', '', big ? 'This kind of file cannot be shown here. Download it and open it on your computer.' : (item.size ? sizeText(item.size) : 'No preview')));
-        if (xl && item.download) box.append(linkBtn('Download', item.download, 'outline sm', 'download', true));
+        if (xl && item.download) { const b = linkBtn('Download', item.download, 'outline sm', 'download', true); if (b) box.append(b); }
         return box;
       }
     }
@@ -345,7 +355,7 @@
       if (size !== 'sm') {
         const row = el('div', 'row');
         if (o.onRetry) row.append(button('Try again', 'outline sm', () => o.onRetry(item), {icon: 'refresh'}));
-        if (item.download && size === 'lg') row.append(linkBtn('Download', item.download, 'ghost sm', 'download', true));
+        { const b = item.download && size === 'lg' && linkBtn('Download', item.download, 'ghost sm', 'download', true); if (b) row.append(b); }
         if (row.childNodes.length) box.append(row);
       }
       return box;
@@ -357,7 +367,7 @@
     const media = MEDIA.has(type) && type !== 'pdf';
     const p = el('p', 'result-note');
     p.textContent = media ? 'Too big to show here.' : size === 'sm' ? 'Too big to show in full.' : 'Too big to show in full. The first part is shown; download it for the rest.';
-    if (size === 'lg' && item.download) { p.append(' '); const a = el('a', '', 'Download'); a.href = item.download; a.setAttribute('download', ''); p.append(a); }
+    if (size === 'lg' && safeHref(item.download)) { p.append(' '); const a = el('a', '', 'Download'); a.href = safeHref(item.download); a.setAttribute('download', ''); p.append(a); }
     return p;
   }
 
@@ -374,16 +384,17 @@
   }
 
   function linkWidget(item, size, state) {
-    const a = el(state === 'ready' ? 'a' : 'div', 'result-link');
+    const href = safeHref(item.href), live = state === 'ready' && !!href;
+    const a = el(live ? 'a' : 'div', 'result-link');
     a.dataset.size = size; a.dataset.type = 'link'; a.dataset.state = state;
-    if (state === 'ready') { a.href = item.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+    if (live) { a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
     a.append(ic('link', 16));
     const text = el('span', 'result-linktext');
     text.append(el('span', 'result-name', item.name || hostOf(item.href)));
-    const line = state === 'ready' ? (item.meta || hostOf(item.href)) + ' · opens in a new tab' : state === 'loading' ? 'Checking the address…' : state === 'error' ? 'This link could not be checked.' : EMPTY.link;
+    const line = live ? (item.meta || hostOf(item.href)) + ' · opens in a new tab' : state === 'loading' ? 'Checking the address…' : state === 'error' ? 'This link could not be checked.' : EMPTY.link;
     text.append(el('span', 'meta', line)); a.append(text);
     if (state === 'loading') a.setAttribute('aria-busy', 'true');
-    if (state === 'ready') a.append(ic('external', 16));
+    if (live) a.append(ic('external', 16));
     return a;
   }
 
@@ -400,7 +411,7 @@
     const canOpen = state !== 'loading' && !(state === 'empty' && size === 'sm');
     if (size === 'lg') {
       head.append(el('span', 'grow'));
-      if (item.download) head.append(linkBtn('', item.download, 'ghost icon sm', 'download', true)), head.lastChild.setAttribute('aria-label', 'Download ' + (item.name || ''));
+      { const b = item.download && linkBtn('', item.download, 'ghost icon sm', 'download', true); if (b) { b.setAttribute('aria-label', 'Download ' + (item.name || '')); head.append(b); } }
       if (canOpen) head.append(button('', 'ghost icon sm', open, {icon: 'expand', 'aria-label': 'Open a big preview of ' + (item.name || BY[type].word), title: 'Open big'}));
     }
     const main = el('div', 'result-body'); main.append(content(item, type, size, state, o));
@@ -437,8 +448,8 @@
       d.setAttribute('aria-label', 'Big preview of ' + title.textContent);
       const many = items.length > 1; pos.textContent = many ? (i + 1) + ' of ' + items.length : ''; prev.hidden = next.hidden = !many;
       acts.replaceChildren();
-      if (item.href && state !== 'loading') acts.append(linkBtn('Open in new tab', item.href, 'ghost sm', 'external'));
-      if (item.download && state !== 'loading') acts.append(linkBtn('Download', item.download, 'ghost sm', 'download', true));
+      { const b = item.href && state !== 'loading' && linkBtn('Open in new tab', item.href, 'ghost sm', 'external'); if (b) acts.append(b); }
+      { const b = item.download && state !== 'loading' && linkBtn('Download', item.download, 'ghost sm', 'download', true); if (b) acts.append(b); }
       main.dataset.type = type; main.dataset.state = state;
       main.replaceChildren(content(item, type, 'xl', state, o));
       if (moved) { main.classList.remove('moved'); void main.offsetWidth; main.classList.add('moved'); }
@@ -457,6 +468,6 @@
   }
 
   result.TYPES = TYPES; result.kindOf = kindOf; result.LIMIT = LIMIT; result.parseRows = parseRows;
-  result.gist = gist;
+  result.gist = gist; result.safeHref = safeHref;
   UI.result = result; UI.resultOverlay = resultOverlay;
 })();

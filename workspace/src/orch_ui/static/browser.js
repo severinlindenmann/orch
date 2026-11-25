@@ -9,7 +9,8 @@
        handle.tabs([{title, url, current}])
        handle.frame({jpeg, w, h, at})   a picture (JPEG as base64); a slow page skips pictures, newest wins
        handle.clear()                   the view switched tabs: the old picture goes at once
-       handle.event({text, site_text?}) something the browser stopped or closed (a card; site_text is the site's)
+       handle.event({text, site_text?, allow?}) something the browser stopped or closed (a card; site_text is the site's;
+       allow: a listed site a person's send stopped for, the card then has Allow <site> for the page in control)
        handle.show('connecting'|'lost') while (re)connecting; the last picture stays, greyed
        handle.end({why, final})         the browser ended (final) or no browser is open (not final)
        handle.dispose()
@@ -29,9 +30,11 @@
    helper: Take over in the bar (asking: one line "The helper needs you" with Take over); finishing (mine): "The
    helper is finishing its step…" with Stop its step now; person (mine): the view fills the window with one fixed
    bar (Give back to the helper, Back to the ticket, Stop browser), keyboard focus on the picture, mouse, wheel,
-   keys and pasted text go to the site (Esc goes to the site too; F6 moves to the buttons); paused: Take over again
-   or Give back. Input is batched (moves merged, at most every 40 ms) and never kept. Pure parts: UI.browserView.
-   toPicture (page point -> picture pixels, null outside the picture), keyOf (a key -> an input event), WORDS. */
+   keys and pasted text go to the site (Esc goes to the site too; F6 moves to the buttons); paused: Give back or
+   Take over again, under the same "starts on a fresh page" line as in control (ORCH-1858); entering paused takes
+   or gives nothing by itself. Input is batched (moves merged, at most every 40 ms) and never kept. Pure parts:
+   UI.browserView.toPicture (page point -> picture pixels, null outside the picture), keyOf (a key -> an input event),
+   WORDS. */
 (() => {
   'use strict';
   const UI = (typeof window === 'object' ? (window.UI = window.UI || {}) : {});
@@ -79,6 +82,7 @@
     sendOn: site => 'Forms you send to ' + site + ' go through while you are in control; each one is noted on the ticket. Everything else stays blocked.',
     sendOff: 'To sign in, pick the site first: until then nothing you send leaves the browser.',
     sendEmpty: 'To sign in, add the site to this ticket’s list first: until then nothing you send leaves the browser.',
+    allow: site => 'Allow ' + site,
   };
   /* The keys that go to the site (the broker has the same list) and the modifier bits. */
   const KEYS = ['Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
@@ -388,7 +392,7 @@
         if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), full ? btn(WORDS.back, 'ghost', () => setFull(false)) : btn(WORDS.full, 'outline', () => setFull(true)));
         if (c && full && o.onStop) acts.push(btn(WORDS.stop, 'ghost', () => o.onStop(generation)));
       } else if (st === 'person') { lead = WORDS.other; line = WORDS.otherMore; }
-      else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
+      else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; more = c ? WORDS.youAfter : ''; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
       const picks = st === 'person' && mine && !!c && !!c.allowSends;
       if (!picks) ctlSend.replaceChildren();
       ctlSend.hidden = !picks;
@@ -432,6 +436,11 @@
         const card = make('div', 'bview-card');
         card.append(make('span', '', clip(ev.text, 160)));
         if (ev.site_text) { const q = make('q', 'bview-site', clip(ev.site_text, 160)); card.append(q); }
+        /* ORCH-1779: a send stopped because its listed site was not picked: one click allows it (the holder only). */
+        const sites = Array.isArray(ctlState.sites) ? ctlState.sites : [];
+        if (typeof ev.allow === 'string' && sites.includes(ev.allow) && ctlState.state === 'person' && ctlState.mine && c && c.allowSends) {
+          card.append(btn(WORDS.allow(clip(ev.allow, 80)), 'outline', async () => { const r = await act(() => c.allowSends(ev.allow)); if (r && r.ok) card.remove(); }));
+        }
         cards.prepend(card);
         while (cards.children.length > 3) cards.lastChild.remove();
       },

@@ -42,7 +42,8 @@
       "properties": {
         "state": { "enum": ["starting", "idle", "working", "attention"], "description": "What the live agent last said: idle comes from its tool's hook or `orch run done`; input is pasted only while idle." },
         "since": { "$ref": "#/$defs/time" },
-        "why": { "type": "string", "minLength": 1, "maxLength": 400, "description": "Optional, with attention: plain words on what the tool waits for (a screen it shows before it is up, or not up after a minute)." }
+        "why": { "type": "string", "minLength": 1, "maxLength": 400, "description": "Optional, with attention: plain words on what the tool waits for (a screen it shows before it is up, or not up after a minute)." },
+        "asks": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, with attention: the call the tool's permission prompt waits on, one short line (a shell command or the tool's plain words), never a line the secret scan flags." }
       },
       "description": "Optional, live runs only."
     },
