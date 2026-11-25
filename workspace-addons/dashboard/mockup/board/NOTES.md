@@ -179,3 +179,6 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 ### new.html (ORCH-1852)
 - The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
 - Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
+
+### Select lists (ORCH-2051)
+- Every list in the mockup uses the master select: typing a ticket key such as SALES-097 jumps to that option (the letters are buffered for 700 ms, Escape clears them and closes). Long options wrap inside the list, also at 320 px, and the trigger edge uses the input colour on dark cards.
