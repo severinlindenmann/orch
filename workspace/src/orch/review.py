@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from orch import history, ownerpick, safefile, tickets
+from orch import cardkinds, history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
 KINDS = ("draft", "check", "link", "choice", "plan", "run")
@@ -1760,7 +1760,10 @@ def stack(root: Path) -> list[dict]:
     also has `one_tap`: answered with one tap on its named answer, ORCH-1847) and, when the
     question belongs to a task, `about` (its text, one line) and `task` (its id). Neither is part of the card
     or its digest."""
-    from orch import needs  # needs imports tickets; no cycle back
+    from orch import (
+        needs,  # needs imports tickets; no cycle back
+        reviewer,  # reviewer reads review's facts; imported here, no cycle at load
+    )
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
@@ -1809,6 +1812,11 @@ def stack(root: Path) -> list[dict]:
                         "recommended": q.get("recommended"),
                         "text": q.get("text") or "",
                         "one_tap": one_tap(t, q),
+                        "card_kind": cardkinds.look(
+                            card,
+                            question_kind=q.get("kind") if isinstance(q.get("kind"), str) else None,
+                            merge=isinstance(q.get("action"), dict) and "merge" in q["action"],
+                        ),
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                         **run_last(t, q, card, root),
@@ -1816,17 +1824,23 @@ def stack(root: Path) -> list[dict]:
                 )
         if t.get("status") == "review" and t["id"] not in skip:
             hist = [h for h in history.lines(root, t) if isinstance(h, dict) and h.get("at")]
+            card = check_card(t, root)
+            proposal = reviewer.proposal(
+                hist
+            )  # Reviewer mode "propose" (owner, 25 Nov): its verdict, one click
             out.append(
                 {
                     **base,
                     "id": f"core:review:{t['id']}",
                     "key": "review",
                     "kind": "check",
-                    "card": check_card(t, root),
+                    "card": card,
                     "digest": check_digest(t, root),
                     "since": hist[-1]["at"] if hist else t.get("updated_at") or t.get("created_at"),
                     "options": [],
-                    "recommended": None,
+                    "recommended": {"accept": "ok", "back": "no"}[proposal["verdict"]] if proposal else None,
+                    "card_kind": cardkinds.look(card, proposed=proposal is not None),
+                    **({"proposal": proposal} if proposal else {}),
                 }
             )
     # grouped: the ticket (round) with the longest-waiting card first, then its tasks in checklist order,
@@ -1836,6 +1850,7 @@ def stack(root: Path) -> list[dict]:
         oldest[r["ticket"]] = min(oldest.get(r["ticket"], r["since"] or ""), r["since"] or "")
     out.sort(
         key=lambda r: (
+            cardkinds.lane_rank(r),  # R2 A (owner, 25 Nov): what holds up work first, then by what you do
             oldest[r["ticket"]],
             r["ticket"],
             order[r["ticket"]].get(r["task"], 1 << 20) if r.get("task") else 1 << 30,
