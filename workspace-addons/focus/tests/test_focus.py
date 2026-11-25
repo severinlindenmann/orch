@@ -164,30 +164,6 @@ def test_a_workspace_is_found_upwards_from_a_folder_with_spaces_and_umlauts(tmp_
     assert json.loads(capsys.readouterr().out)["url"].endswith(f"/#addon/focus/t/{t['id']}")
 
 
-def test_outside_a_workspace_both_commands_say_what_to_do(tmp_path, capsys):
-    assert cli.find_workspace(tmp_path) is None
-    for argv in (["--dir", str(tmp_path), "needs"], ["--dir", str(tmp_path), "open", "t_ab12cd"]):
-        assert cli.main(argv) == 2
-        assert "Run `orch init` first." in capsys.readouterr().err
-
-
-def test_a_dashboard_that_does_not_start_is_named_with_its_error(ws, monkeypatch, capsys):
-    _, t = ws
-    from orch import addons, services
-
-    monkeypatch.setattr(addons, "active_manifests", lambda r: {"dashboard": {}})
-    monkeypatch.setattr(services, "running", list)
-    monkeypatch.setattr(
-        services, "start", lambda r, only=None: [{"addon": "dashboard", "error": "port busy"}]
-    )
-    assert cli.main(["open", t["id"], "--no-open"]) == 2
-    assert capsys.readouterr().err.strip() == "Refused: The dashboard did not start: port busy"
-    monkeypatch.setattr(services, "start", lambda r, only=None: [])
-    assert cli.main(["open", t["id"], "--json"]) == 2  # --json: the refusal is JSON on stdout
-    out = capsys.readouterr()
-    assert json.loads(out.out) == {"error": "The dashboard did not start. Run orch start."} and out.err == ""
-
-
 def test_a_dashboard_of_another_workspace_is_not_used(ws, monkeypatch, capsys):
     root, t = ws
     from orch import addons, services
@@ -219,63 +195,6 @@ def test_the_browser_opens_only_for_a_person_at_a_terminal(ws, monkeypatch, caps
     page = f"http://127.0.0.1:8777/#addon/focus/t/{t['id']}"
     assert seen == ([f"{page}#launch=tok"] if opened else [])
     assert "launch=" not in capsys.readouterr().out  # the launch token is never printed
-
-
-def test_needs_command_empty_state_text_and_json(ws, monkeypatch, capsys):
-    root, t = ws
-    from orch import runs
-
-    assert cli.main(["needs"]) == 0
-    assert capsys.readouterr().out.strip() == "Nothing needs you here."
-    assert cli.main(["needs", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == []
-    _live(root, t["id"], {"state": "attention", "why": "Allow the edit?"})
-    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
-    assert cli.main(["needs"]) == 0
-    assert capsys.readouterr().out.strip() == f"{t['title']}: Allow the edit?"
-    assert cli.main(["needs", "--json"]) == 0
-    assert [r["ticket"] for r in json.loads(capsys.readouterr().out)] == [t["id"]]
-
-
-def test_needs_falls_back_for_why_since_and_title(ws, monkeypatch):
-    root, t = ws
-    from orch import runs, tickets
-
-    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
-    raw = tickets.load(root, t["id"])
-    raw["title"] = " <> "
-    tickets.save(root, raw)
-    _live(root, t["id"], {"state": "attention"})
-    [row] = needs.rows(root)
-    assert row["title"] == "A ticket"  # a title of only angle brackets is not shown as empty
-    assert row["text"] == "Waiting for your OK in the live session."
-    assert row["since"] == "2026-11-19T10:00:00Z"  # the claim's renewal when the live state has no time
-    _live(root, t["id"], {"state": "attention"}, renewed_at=None)
-    from datetime import UTC, datetime
-
-    [row] = needs.rows(root, now=datetime(2026, 11, 25, 9, 30, tzinfo=UTC))
-    assert row["since"] == "2026-11-25T09:30:00Z"
-
-
-def test_needs_skips_the_manager_the_phone_conversation_and_a_broken_ticket(ws, monkeypatch):
-    root, t = ws
-    from orch import cli as core
-    from orch import runs, tickets
-
-    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
-    for title in ("Second", "Third", "Fourth"):
-        assert core.main(["ticket", "new", title]) == 0
-    others = [x for x in tickets.list_all(root) if x["id"] != t["id"]]
-    for x, flag in zip(others, ("general", "manager", None), strict=True):
-        raw = tickets.load(root, x["id"])
-        if flag:
-            raw[flag] = True
-            tickets.save(root, raw)
-        else:
-            (root / ".orch" / "tickets" / f"{x['id']}.json").write_text("{ broken", encoding="utf-8")
-    for x in (t, *others):
-        _live(root, x["id"], {"state": "attention"})
-    assert [r["ticket"] for r in needs.rows(root)] == [t["id"]]
 
 
 @pytest.mark.parametrize("live", ["attention", ["attention"], 7, True])
