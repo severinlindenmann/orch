@@ -365,6 +365,7 @@ OUTBOUND = {
     ("relay.py", "resend_outbox"): {"scan_outgoing"},  # an old outbox entry is scanned again before it posts
     ("relay.py", "transcribe"): {"scan_blob"},  # the recording is scanned before it goes to the relay
     ("publish.py", "scan_files"): {"find"},  # every publish upload runs this on the plain bytes
+    ("publish.py", "scan_names"): {"find"},  # the shared name and every path inside (ORCH-2076)
     ("publish.py", "bundle"): {"scan_files"},
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
