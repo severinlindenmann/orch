@@ -269,7 +269,8 @@ def _views(window: bytes):
 
 
 _UNPACK_DEPTH = 3
-_UNPACK_LIMIT = 256 * 1024 * 1024  # all unpacked bytes of one file; a bigger container is refused, not skipped
+# all unpacked bytes of one file; a bigger container is refused, not skipped
+_UNPACK_LIMIT = 256 * 1024 * 1024
 
 
 def _unpacked(data: bytes, budget: list[int], depth: int = 0):

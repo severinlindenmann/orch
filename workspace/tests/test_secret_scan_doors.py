@@ -369,7 +369,8 @@ OUTBOUND = {
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
     ("net.py", "profile"): {"refuse_if_secret_in"},  # relay and publish profile description and tags
-    ("secretscan.py", "_scan_bytes"): {"find"},  # refuse_if_secret runs it on the file and every unpacked member
+    # refuse_if_secret runs it on the file and every unpacked member
+    ("secretscan.py", "_scan_bytes"): {"find"},
     ("secretscan.py", "refuse_if_secret"): {"_scan_bytes"},
     ("secretscan.py", "refuse_if_secret_in"): {"find"},
 }
