@@ -104,8 +104,8 @@ def workspace_tz(root: Path) -> str | None:
     import tomllib
 
     try:
-        t = tomllib.loads((root / ".orch" / "config.toml").read_text()).get("workspace")
-    except (OSError, tomllib.TOMLDecodeError):
+        t = tomllib.loads((root / ".orch" / "config.toml").read_text(encoding="utf-8")).get("workspace")
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
         return None
     name = t.get("tz") if isinstance(t, dict) else None
     return name if isinstance(name, str) and zone(name) else None
