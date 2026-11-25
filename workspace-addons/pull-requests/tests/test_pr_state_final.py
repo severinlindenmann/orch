@@ -94,7 +94,7 @@ def test_the_queue_waits_for_the_ready_run_instead_of_taking_the_draft_time_fail
     ready_test = {"name": "test", "bucket": "pending", "workflow": "ci", "link": JOB.format(200, 5),
                   "startedAt": "2026-11-22T06:07:00Z"}  # fmt: skip
     got = gh_checks([draft_verdict, ready_test]).own_checks(PR.format(2407))
-    assert got == {"failed": [], "pending": ["verdict", "test"]}
+    assert got == {"failed": [], "pending": ["verdict", "test"], "cancelled": []}
     assert gh_checks([draft_verdict, ready_test]).failed_checks(PR.format(2407)) == frozenset()
     # the newer run ended without making it again: the failure counts (GitHub sees it too)
     ended = {**ready_test, "bucket": "pass"}

@@ -23,7 +23,8 @@ branch, in line order:
   base branch is red.
 - its own checks first (ORCH-1377): an entry whose own checks still run waits in line in its place and holds up
   nobody; a red own check is run again ONCE per head by the queue; red again, it leaves the queue with the failed
-  check and its first failing test.
+  check and its first failing test. Red only because its jobs were cancelled (or timed out; CI's roll-up check
+  red over them counts too): run again once the same way; cancelled again, it keeps waiting, never dropped.
 - a red group is closed and split by what failed (blame.py, ORCH-558, ORCH-1377): the members that change a
   failing test file or a module the failing suites import are the suspects, else those whose files share the most
   words with the failed tests and checks; the suspects are checked first (one alone), the others after. When
@@ -461,9 +462,10 @@ class Runner:
         look = getattr(self.gh, "own_checks", None)
         got = look(u) if look is not None else None
         if got is None:  # GitHub did not answer that read (or an older GitHub part): the failed names only
-            rows, pending = [{"name": n, "link": ""} for n in sorted(self.failed_checks(u))], []
+            rows, pending, stopped = [{"name": n, "link": ""} for n in sorted(self.failed_checks(u))], [], []
         else:
             rows, pending = list(got.get("failed") or []), list(got.get("pending") or [])
+            stopped = [x for x in got.get("cancelled") or [] if isinstance(x, dict)]
         failed = frozenset(str(x.get("name") or "") for x in rows)
         if failed and self.base_to_blame(repo, base, u, [r], failed):
             return False
@@ -475,6 +477,7 @@ class Runner:
             return False
         if not failed:
             return True
+        cancelled = _only_cancelled(repo, rows, stopped, settings.summary_checks(self.root))
         done = set(r.get("rerun_runs") or []) if head and r.get("rerun_head") == head else set()
         fresh = [x for x in dict.fromkeys(_run_of(repo, x) for x in rows) if x and x not in done]
         refused: list[str] = []
@@ -487,6 +490,8 @@ class Runner:
                 )
             if started:
                 why = f"its own check {_names(failed)} failed; the merge queue runs it again once"
+                if cancelled:
+                    why = "its checks were cancelled; the merge queue runs them again once"
                 store.set_state(self.root, u, WAITING, why, not_before=self.clock() + PAUSE_SECS)
                 self.log(f"{u}: {why}.")
                 return False
@@ -496,6 +501,9 @@ class Runner:
                 )
                 return False
         again = bool(done - set(refused))  # a refused rerun never ran: not "again"
+        if again and cancelled:  # cancelled, not failed: it keeps its place, the rerun count stays one
+            self._hold(r, "its checks were cancelled; they run again when GitHub has room")
+            return False
         first = next((x for x in rows if x.get("link")), rows[0])
         find = getattr(self.gh, "first_failure", None)
         test = ""
@@ -1513,6 +1521,32 @@ def _taken(r: dict, v: dict, b: str, proof: bool, lone: str) -> dict:
 def _failed_names(got: dict) -> frozenset[str]:
     """The names of the failed checks in an own_checks answer."""
     return frozenset(str(x.get("name") or "") for x in got.get("failed") or [] if isinstance(x, dict))
+
+
+def _only_cancelled(repo: str, failed: list[dict], cancelled: list[dict], summary: list[str]) -> bool:
+    """True when the head's red checks were only stopped, not failed: each failed check was cancelled or timed out,
+    or is a summary check (CI's roll-up, settings.summary_checks) whose workflow run has a cancelled or timed-out
+    job and no other failed one. Read from the check states, never from logs."""
+    from fnmatch import fnmatchcase
+
+    def stop(x: dict) -> bool:
+        return str(x.get("state") or "").upper() in ("CANCELLED", "TIMED_OUT")
+
+    if not failed:
+        return False
+    for x in failed:
+        if stop(x):
+            continue
+        run = _run_of(repo, x)
+        name = str(x.get("name") or "").lower()
+        if not run or not any(fnmatchcase(name, p.lower()) for p in summary):
+            return False
+        others = [y for y in failed if y is not x and _run_of(repo, y) == run]
+        if not all(stop(y) for y in others):
+            return False  # it sums up a real failure
+        if not others and not any(_run_of(repo, y) == run for y in cancelled):
+            return False  # nothing in its run was cancelled: it failed on its own
+    return True
 
 
 def _run_of(repo: str, row: dict) -> str:
