@@ -466,6 +466,8 @@ Production targets: local feedback <100 ms; warm route <300 ms; cold data route 
 
 One focal animation at a time, no input blocked by animation. `prefers-reduced-motion: reduce` disables every transition, pulse, shimmer and transform animation; all controls still change state. No ambient movement at idle. The motion page's separate Replay controls are independent experiments, not an instruction to run every animation together.
 
+Durations come from the `--dur-*` tokens (never above 240 ms for a one-shot; only endless loops such as spinners and shimmer use longer). `interaction.css` carries the one global `prefers-reduced-motion` rule that zeroes every animation and transition duration. Checks: `brand/tests/test_motion_lint.py` (static) and the reduced-motion step of `workspace/src/orch_ui/tests/ux_checks.cjs` (H10, in the browser).
+
 ## Accessibility and interaction contract
 
 Skip link; semantic landmarks; ordered headings; named icon buttons; visible 2 px focus with 3 px offset; no clipped focus rings on ordinary cards. Native radio, checkbox, disclosure, select and dialog behaviours are intentional. Status has readable words and a symbol (BP-15, BP-75–77). Toolbar controls are normally 32–40 px, never below 24×24. No essential hover-only controls. In forced-colours mode, buttons/status boundaries and focus remain visible.
