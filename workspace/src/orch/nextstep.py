@@ -121,13 +121,13 @@ def _record(data, args) -> str:
 
 
 def _init(data, args) -> str:
+    from orch import config
     from orch import init as init_mod
 
-    if not getattr(args, "recommended", False) and init_mod.has_recommended(args.orch_root):
-        return "orch init --recommended"
-    if (data or {}).get("starter"):  # a person starts it (dashboard Start, or their helper)
+    # local tickets work after any init; the dashboard is an optional line, never the next step
+    if (data or {}).get("starter") and config.agent_name(args.orch_root):  # dashboard Start, or the helper
         return f"start the starter task to fill in the workspace profile: orch run start {data['starter']}"
-    return 'orch ticket new "<title>"'
+    return init_mod.FIRST_TICKET
 
 
 def _status(data, args) -> str:
@@ -140,6 +140,9 @@ def _status(data, args) -> str:
 def _list(data, args) -> str:
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
+        broken = getattr(args, "_broken_tickets", None)
+        if broken:
+            return f"{tickets.BROKEN_FIX}: .orch/tickets/{broken[0]}"
         return 'create one: orch ticket new "<title>"'
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
 
@@ -366,9 +369,11 @@ HINTS = {
     "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
+    "publish invite": lambda d, a: f"open {a.folder} in your helper; it is connected to publish.",
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
+    "relay invite": lambda d, a: f"open {a.folder} in your helper; it is connected to the relay.",
     "relay problem share": "carry on with your ticket: orch ticket list",
     "relay problem list": lambda d, a: (
         "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."

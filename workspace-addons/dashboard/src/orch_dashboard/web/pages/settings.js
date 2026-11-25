@@ -348,10 +348,12 @@ async function peopleRight(box) {
   await settingsSend('people.rights', {id:person.id, rights, revision:list.revision}, 'people');
 }
 // ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
-// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off. #1228: with the
+// pull-requests add-on on, the release switch lives on its own settings page instead (releaseMergeRow).
+const releaseInAddon = settings => array(settings?.addons).some(a => a.name === 'pull-requests' && a.active);
 function prSwitchCards(settings) {
   const has = settings.pull_requests === true;
-  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, !releaseInAddon(settings) && (has || settings.release_merge_on) ? releaseMergeCard(settings) : null];
 }
 // Put new versions live without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
@@ -359,8 +361,17 @@ function releaseMergeCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-release-merge'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Put new versions live without my click'),
-        settingsText('p', {className:'meta'}, 'A release where all tests passed goes live by itself with your GitHub login. You get the short highlights afterwards. Off: you decide on the card.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Put new versions live without my click', 'aria-checked':!!settings.release_merge_on, 'data-key':'settings-switch-release-merge', 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')}))));
+        settingsText('p', {className:'meta'}, RELEASE_MERGE_WORDS)),
+      releaseMergeButton(settings))));
+}
+const RELEASE_MERGE_WORDS = 'A release where all tests passed goes live by itself with your GitHub login. You get the short highlights afterwards. Off: you decide on the card.';
+function releaseMergeButton(settings, key = 'settings-switch-release-merge') {
+  return h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Put new versions live without my click', 'aria-checked':!!settings?.release_merge_on, 'data-key':key, 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')});
+}
+// The same switch as a row of the pull-requests add-on's own settings page (#1228), same words, same release_merge.set.
+function releaseMergeRow(row, settings) {
+  return row('Releases', h('div', {}, settingsText('p', {}, 'Put new versions live without my click'), settingsText('p', {className:'meta'}, RELEASE_MERGE_WORDS)),
+    releaseMergeButton(settings, 'addon-detail-release-merge'), 'addon-detail-release-merge-row');
 }
 // Prepare tickets when I save (ORCH-741, draft ORCH-730 section 4): on by default; off = Save without starting
 // keeps the ticket as written until Start. Only a person turns it on (it starts helpers).
@@ -596,7 +607,8 @@ function syncInfo(card) {
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
   if (!addon || snapshot) return null;
-  const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
+  // aria-busy until the setting is read: orch shot waits for it instead of picturing the placeholder (ORCH-2021)
+  const wrap = (body, busy = false) => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card', 'aria-busy':busy ? 'true' : 'false'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
     clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
@@ -670,7 +682,7 @@ function syncCard(settings) {
     warn,
     h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
     card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
-    remoteBox, review, details]);
+    remoteBox, review, details], !card);
 }
 async function syncSave() {
   const s = syncNow();
@@ -834,6 +846,7 @@ function addonDetailPage(addon) {
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+    addon.name === 'pull-requests' && addon.active && state.settings ? releaseMergeRow(row, state.settings) : null,
   ];
   // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
   const technical = settingsRows.splice(1, 1).filter(Boolean);
