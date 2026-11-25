@@ -275,9 +275,21 @@ def _file_here(root: Path, tid: str, ref: str) -> int | None:
     return None
 
 
+def _proof_changed(root: Path, tid: str, ev: dict) -> bool:
+    """The core's answer to "does the file on disk differ from this copied proof" (ORCH-1874); no core, no hint."""
+    try:
+        from orch.tickets import proof_changed
+    except ImportError:
+        return False
+    try:
+        return bool(proof_changed(root, tid, ev))
+    except Exception:  # noqa: BLE001 - a hint, never a reason for the page to fail
+        return False
+
+
 def _mark_missing_proofs(root: Path, t: dict, tail: int | None = None) -> None:
-    """`missing` / `size` on each file proof. tail=n: only the last n proofs per task (a live row shows no
-    more, slim_row)."""
+    """`missing` / `size` / `changed` on each file proof. tail=n: only the last n proofs per task (a live row
+    shows no more, slim_row)."""
     for c in t.get("checklist", []):
         evs = c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
         for ev in evs[-tail:] if tail else evs:
@@ -289,8 +301,11 @@ def _mark_missing_proofs(root: Path, t: dict, tail: int | None = None) -> None:
             ):
                 size = _file_here(root, str(t["id"]), ev["ref"])
                 ev["missing"] = size is None
+                ev.pop("changed", None)  # only ever from the files on disk, never from the ticket file
                 if size is not None:
                     ev["size"] = size
+                    if ev.get("source") and _proof_changed(root, str(t["id"]), ev):
+                        ev["changed"] = True
 
 
 SYNC_BY = "agent:sync"  # orch.history.SYNC_BY (the dashboard needs it when the core cannot be imported)

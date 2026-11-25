@@ -14,7 +14,7 @@ async function renewCall(op, args) {
   try {
     const body = JSON.stringify({op, args});
     const res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json', 'X-Orch-Op':op}, body});
-    if (res.status !== 200) return {ok:false, text:(await res.text()) || 'That did not work.'};
+    if (res.status !== 200) return {ok:false, text:window.DashHelpers.answerText(res.status, await res.text())};
     const next = await res.json();
     const answer = next.renew_result || {state:'failed'};
     if (['done', 'works', 'soon'].includes(answer.state) && typeof accept === 'function') accept(next);  // the warning goes

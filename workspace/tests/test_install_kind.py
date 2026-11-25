@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, pagelaunch
+from orch import addons, cli, pagelaunch
 from orch import home as home_mod
 from orch import tickets as tickets_mod
 from orch.errors import Refused
@@ -137,7 +137,7 @@ def test_addon_add_says_so_on_a_normal_install(proj, monkeypatch, capsys):
 
 @pytest.fixture
 def tws(tmp_path_factory, monkeypatch):
-    # a short base: snapshot folders carry a 64-character hash and Windows folders stop at 248 characters
+    # a short base: Windows folders stop at 248 characters
     acct = tmp_path_factory.mktemp("a") / "acct"
     ws = acct / ".orch-test" / "ws"
     (ws / ".orch").mkdir(parents=True)
@@ -188,6 +188,19 @@ def test_a_person_prints_a_sign_in_link_on_any_install(tws, tmp_path, monkeypatc
     monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: False)  # not the test-folder exception
     url = pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:8420")
     assert url.startswith("http://127.0.0.1:8420/#launch=")
+
+
+def test_a_refused_sign_in_link_says_why(tws, monkeypatch):
+    """ORCH-1869: a test install outside a test folder names the real reason and what to do, not only
+    'A sign-in link could not be made.'"""
+    monkeypatch.setattr(tickets_mod, "agent_tool", lambda: None)
+    other = tws.parents[1] / "real-ws"
+    (other / ".orch").mkdir(parents=True)
+    with pytest.raises(Refused, match="only works in test folders.*install orch normally"):
+        pagelaunch.printable_launch_url(other, "dashboard", "http://127.0.0.1:1")
+    why: list = []
+    assert pagelaunch.write_launch_token(other, "dashboard", why=why) is None
+    assert why == [home_mod.MSG_TEST_INSTALL]
 
 
 def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run):
@@ -747,3 +760,129 @@ def test_the_check_does_not_block_list_or_turning_on_in_the_workspace(throwaway,
     assert cli.main(["addon", "list"]) == 0
     assert cli.main(["update", "--project-only"]) in (0, 2)
     assert home_mod.MSG_ENV_CHANGE not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="HOME is a POSIX override; Windows uses USERPROFILE")
+def test_init_with_only_home_overridden_writes_nothing(tmp_path, monkeypatch, capsys):
+    """#905: HOME alone (no ORCH_HOME) must not make `orch init` use the account's real ~/.orch-tool."""
+    account = tmp_path / "account"
+    elsewhere = tmp_path / "elsewhere"
+    proj = tmp_path / "proj"
+    for d in (account, elsewhere, proj):
+        d.mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: account)
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(elsewhere))
+    monkeypatch.chdir(proj)
+    assert cli.main(["init", "--yes"]) == 2
+    assert "HOME points to" in capsys.readouterr().err
+    assert not (account / ".orch-tool").exists() and not (proj / ".orch").exists()
+
+
+def test_snapshot_folder_name_is_short_and_old_long_names_still_verify(tws):
+    """#1056: the snapshot folder is 16 characters, not 64; an older long name still verifies."""
+    from orch import addonsnap
+
+    snap = addons.prepare_local_add(tws, _folder_addon(tws.parent))
+    dest = Path(snap["snapshot"])
+    assert dest.name == snap["hash"][:16]
+    assert addonsnap.verify(dest, snap["hash"])
+    old = dest.with_name(snap["hash"])
+    shutil.copytree(dest, old)
+    assert addonsnap.verify(old, snap["hash"])
+
+
+# ---------------------------------------------------------------- install.ps1 stops (stubbed native commands)
+
+_PS_STUBS = r"""
+param([string]$Script, [string]$Mode)
+function powershell {
+    [Console]::Error.WriteLine("stub: uv's own installer could not finish")
+    $global:LASTEXITCODE = 7
+}
+if ($Mode -ne "bootstrap") {
+    function uv {
+        if ($args[0] -eq "tool" -and $args[1] -eq "install") {
+            [Console]::Error.WriteLine("stub: uv could not build orch-workspace")
+            $global:LASTEXITCODE = [int]$env:STUB_INSTALL_EXIT
+            return
+        }
+        if ($args -contains "--bin") { $env:STUB_BIN } else { $env:STUB_TOOLDIR }
+        $global:LASTEXITCODE = 0
+    }
+}
+if ($env:STUB_RAW) { & $Script; return }
+try { & $Script } catch { [Console]::Error.WriteLine("THROWN: " + $_.Exception.Message); exit 1 }
+"""
+
+
+def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("needs PowerShell 7 (pwsh)")
+    stubs = tmp_path / "stubs.ps1"
+    stubs.write_text(_PS_STUBS, encoding="utf-8")
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "tools" / "orch-workspace").mkdir(parents=True)
+    (tmp_path / "bin").mkdir()
+    orch_exe = tmp_path / "bin" / "orch.exe"
+    orch_exe.write_text("#!/bin/sh\necho stub: orch update --after-install\n")
+    orch_exe.chmod(0o755)
+    env = {
+        "PATH": str(tmp_path / "empty"),  # no real uv or powershell is ever found
+        "HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        "TEMP": str(tmp_path),
+        "TMP": str(tmp_path),
+        "ORCH_REPO": str(ROOT),
+        "STUB_TOOLDIR": str(tmp_path / "tools"),
+        "STUB_BIN": str(tmp_path / "bin"),
+        "STUB_INSTALL_EXIT": "0" if mode == "success" else "2",
+    }
+    r = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-File", str(stubs), "-Script", str(script), "-Mode", mode],
+        env=env, capture_output=True, text=True, timeout=120,
+    )  # fmt: skip
+    return r.returncode, r.stdout + r.stderr
+
+
+_STAGES = {
+    "bootstrap": (
+        "while setting up uv, the tool that installs orch (exit code 7",
+        "install uv yourself",
+        "own installer",
+    ),
+    "package": (
+        "while installing orch with uv (exit code 2",
+        "read uv's lines above",
+        "could not build orch",
+    ),
+}
+
+
+@pytest.mark.parametrize("mode", sorted(_STAGES))
+def test_install_ps1_names_the_stage_that_stopped(tmp_path, mode):
+    stage, step, diagnostic = _STAGES[mode]
+    code, out = _run_install_ps1(tmp_path, mode)
+    assert code != 0
+    assert f"THROWN: orch install stopped {stage}; its details are above). Next: " in out
+    assert step in out and "run the install line again" in out
+    assert diagnostic in out and out.index(diagnostic) < out.index("orch install stopped")
+    other = "setting up uv" if mode == "package" else "installing orch with uv"
+    assert other not in out
+    for never in ("orch is installed", "orch init", "uv install failed", "uv tool install failed"):
+        assert never not in out
+    assert not any(w in out.lower() for w in ("admin", "elevat", "runas"))
+    assert not (tmp_path / "tools" / "orch-workspace" / "orch-install.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_success_still_ends_with_init(tmp_path):
+    code, out = _run_install_ps1(tmp_path, "success")
+    assert code == 0, out
+    assert "stub: orch update --after-install" in out and "orch is installed." in out and "orch init" in out
+    assert "stopped" not in out
+    record = json.loads((tmp_path / "tools" / "orch-workspace" / "orch-install.json").read_text())
+    assert record["kind"] == "normal"
