@@ -469,7 +469,7 @@ final class AppModel {
                 answers[qid] = ""; markAnsweredElsewhere(qid)
             }
             await reloadMessages()
-            guard credentials != nil else { return }   // a 401 on /messages signed the phone out: keep that message, load nothing more
+            guard credentials != nil else { return }   // a 401 on /messages logged the phone out: keep that message, load nothing more
             applyTakenBack()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
