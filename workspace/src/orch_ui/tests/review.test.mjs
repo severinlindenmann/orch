@@ -529,3 +529,42 @@ test('one tap on a question answered elsewhere (Home, the phone): says so and re
   assert.equal(b.toasts[0].m, 'This card changed. Showing the new version.');
   assert.equal(b.decks[1].items[0].digest, 'd-new');
 });
+
+// Review overhaul (owner's picks 25 Nov 2026): the twelve card names, what holds up work first, the result card's title.
+test('R3 B: a card shows the name orch gave its kind; a card without one gets its lane from its plain kind', () => {
+  const {UI} = load();
+  const q = UI.review.mapCard(card('q', {card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}}), fakeApi([[]]), NOW);
+  assert.equal(q.kindLabel, 'Question'); assert.equal(q.icon, 'comment'); assert.equal(q.lane, 'holds_up'); assert.equal(q.laneName, 'Holds up work now');
+  const old = UI.review.mapCard(card('o'), fakeApi([[]]), NOW);
+  assert.equal(old.kindLabel, 'Draft'); assert.equal(old.lane, 'look');
+  const stuck = UI.review.mapCard(card('s', {card: {kind: 'stuck', title: 'x'}}), fakeApi([[]]), NOW);
+  assert.equal(stuck.lane, 'holds_up');
+  const bad = UI.review.mapCard(card('b', {card_kind: {name: 'X', lane: 'nowhere'}}), fakeApi([[]]), NOW);
+  assert.equal(bad.lane, 'look', 'an unknown lane is never trusted');
+});
+
+test('R2 A: the deck gets what holds up work first, the stack order inside a lane', async () => {
+  const look = (id) => card(id, {card_kind: {family: 'look', kind: 'pictures', name: 'Pictures', lane: 'look'}});
+  const ask = (id) => card(id, {card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}});
+  const live = (id) => card(id, {card_kind: {family: 'click', kind: 'put_live', name: 'Put it live', lane: 'click'}});
+  const {decks} = await mount(fakeApi([[look('l1'), ask('a1'), live('p1'), look('l2'), ask('a2')]]));
+  assert.deepEqual(decks.at(-1).items.map(i => i.id), ['a1', 'a2', 'p1', 'l1', 'l2']);
+});
+
+test('R6 A: a finished-work card says what changed as its title, the ticket stays in the quiet line', () => {
+  const {UI} = load();
+  const c = card('r', {ticket_title: 'Spring sale', card: {kind: 'check', title: 'Spring sale', preview: {type: 'doc', headline: 'The spring sale email is written, with a phone version.', paras: ['x']}}});
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.title, 'The spring sale email is written, with a phone version.');
+  assert.equal(it.ticketTitle, 'Spring sale');
+  assert.equal(it.preview.headline, undefined, 'the headline is not shown twice');
+});
+
+test('Reviewer mode propose: the card carries the proposal and suggests its button', () => {
+  const {UI} = load();
+  const c = card('p', {recommended: 'ok', proposal: {verdict: 'accept', why: 'every part has evidence'}, card: {kind: 'check', title: 'T'}});
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.deepEqual({...it.proposal}, {verdict: 'accept', why: 'every part has evidence'});
+  assert.equal(it.suggest, 'ok');
+  assert.equal(UI.review.mapCard(card('z', {proposal: {verdict: 'merge'}}), fakeApi([[]]), NOW).proposal, undefined);
+});

@@ -464,3 +464,43 @@ test('a question not marked one tap keeps tap an option, then Use it; one card w
   assert.equal(pics.host.children[0].hidden, false, 'options with pictures can be compared: the row and its All stay');
   assert.equal(pics.okBtn.hidden, false, 'not plain options: no one tap');
 });
+
+// Review overhaul (owner's picks 25 Nov 2026)
+test('R2 A: the list groups by lane (Holds up work now first), not by ticket', () => {
+  const {d} = deck([{...check('a'), laneName: 'Holds up work now', ticketTitle: 'One'}, {...check('b'), laneName: 'Look at the result', ticketTitle: 'Two'}, {...check('c'), laneName: 'Look at the result', ticketTitle: 'Three'}]);
+  const box = new N('div'); d.drawList(box);
+  const heads = box.querySelectorAll('.review-group-name').map(n => n.textContent);
+  assert.deepEqual(heads, ['Holds up work now', 'Look at the result']);
+});
+
+test('R4 A: words never open large; a picture does', () => {
+  const words = deck([draft('w'), draft('x')]);
+  assert.equal(words.host.querySelector('.swipe-expand'), null, 'no Make bigger on a text card');
+  const pic = deck([{id: 'p', kind: 'draft', kindLabel: 'Pictures', title: 'Banner', preview: {type: 'img', src: '/b.png'}}, draft('y')]);
+  assert.ok(pic.host.querySelector('.swipe-expand'), 'a picture opens large');
+});
+
+test('R6 A: a part still open sits on top of a result, and Send back is the filled button', () => {
+  const {host, noBtn, okBtn} = deck([check('a', {blocked: '1 step is not finished. Send it back to get it done.'}), check('b')]);
+  const open = host.querySelector('.swipe-open');
+  assert.ok(open && open.textContent.includes('Still open'));
+  assert.equal(noBtn.classList.contains('suggested'), true);
+  assert.equal(okBtn.classList.contains('suggested'), false);
+});
+
+test('R4 A: a written comment makes Send back the filled button, so Looks good never sends it along', async () => {
+  const {host, noBtn} = deck([check('a'), check('b')]);
+  assert.equal(noBtn.classList.contains('suggested'), false);
+  noBtn.click();
+  const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
+  ta.value = 'Make it 15%'; ta.listeners.input.forEach(f => f());
+  const close = sheet.querySelectorAll('button').find(b => /close|cancel/i.test(b.attrs['aria-label'] || b.textContent));
+  close.click(); await wait(300);
+  assert.equal(noBtn.classList.contains('suggested'), true);
+  assert.match(noBtn.textContent, /Send back with your comment/);
+});
+
+test('Reviewer mode propose: the card says what the Reviewer proposes', () => {
+  const {host} = deck([check('a', {proposal: {verdict: 'back', why: 'a part is open'}, suggest: 'no'}), check('b')]);
+  assert.ok(host.querySelectorAll('.swipe-why').some(n => n.textContent === 'The Reviewer proposes to send it back: a part is open'));
+});

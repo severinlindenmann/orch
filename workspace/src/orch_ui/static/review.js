@@ -53,6 +53,17 @@
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
 const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
+/* The twelve kinds of card in four families (owner's pick R3 B, 25 Nov 2026; orch/cardkinds.py names them on every
+   stack item as card_kind {family, kind, name, lane}). A card without one (a page's own card: stuck, a Factory draft)
+   gets its lane from its plain kind. Lanes are the list's groups, in order (R2 A): what holds up work first. */
+const CARD_ICON={question:'comment',choice:'cards',before_after:'compare',pictures:'image',document:'file',changed_words:'diff',numbers:'chart',check_result:'check',put_live:'link',run_it:'code',try_yourself:'user',stuck:'pause'};
+const LANES={holds_up:'Holds up work now',click:'Only you can press it',help:'Needs you in person',look:'Look at the result',proposed:'Checked by the Reviewer'};
+const LANE_ORDER=Object.keys(LANES);
+const PLAIN_LANE={choice:'holds_up',stuck:'holds_up',link:'click',run:'click'};
+const cardKindOf=c=>{const ck=c&&c.card_kind&&typeof c.card_kind==='object'?c.card_kind:null,k=(c&&c.card||{}).kind,kd=KIND[k]||[k||'Review','file'];
+ if(ck&&typeof ck.name==='string'&&ck.name&&LANES[ck.lane])return {name:ck.name.slice(0,40),icon:CARD_ICON[ck.kind]||kd[1],lane:ck.lane};
+ return {name:kd[0],icon:kd[1],lane:PLAIN_LANE[k]||'look'}};
+const laneRank=it=>{const i=LANE_ORDER.indexOf(it&&it.lane);return i<0?0:i};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -74,8 +85,11 @@ const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==
  .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'||f.type==='pdf'?f.type:/\.pdf$/i.test(f.name)?'pdf':'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);/* a PDF tile shows its first page (ORCH-477) */
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u:undefined;/* a link inside the same page (#ticket/<id>), opened in the same tab */
-const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
- return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
+/* R6 A (owner, 25 Nov): a finished-work card says what changed as its title (the helper's first summary sentence, orch's
+   headline); the ticket's name stays in the card's quiet line. The headline is then not shown twice. */
+const resultTitle=k=>k.kind==='check'&&k.preview&&typeof k.preview.headline==='string'&&k.preview.headline.trim()?k.preview.headline.trim().slice(0,200):'';
+const mapCard=(c,api,now)=>{const k0=c.card||{},head=resultTitle(k0),k=head?Object.assign({},k0,{title:head,preview:Object.assign({},k0.preview,{headline:undefined})}):k0,ck=cardKindOf(c),pr=c.proposal&&typeof c.proposal==='object'&&(c.proposal.verdict==='accept'||c.proposal.verdict==='back')?c.proposal:null;
+ return {id:c.id,kind:k.kind,kindLabel:ck.name,icon:ck.icon,lane:ck.lane,laneName:LANES[ck.lane],proposal:pr?{verdict:pr.verdict,why:typeof pr.why==='string'?pr.why.slice(0,300):''}:undefined,ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runLogin:c.run_login&&typeof c.run_login==='object'?c.run_login:undefined,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
 
@@ -252,7 +266,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
- const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
+ const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.',...(typeof o.empty==='function'?o.empty()||{}:{})}));waitCount(0);if(o.onChange)o.onChange(null);return}
   if(!items.length)return;/* everything answered here: keep the summary */
   if(deck){const have=deck.items.filter(i=>!deck.answers[i.id]).map(sig).sort().join('|');if(!force&&have===items.map(sig).sort().join('|'))return;
@@ -279,5 +293,5 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  if(typeof window.addEventListener==='function'){window.addEventListener('pagehide',flushAll);window.addEventListener('visibilitychange',onHide)}
  return {reload:()=>load(true),show:setView,destroy:()=>{flushAll();alive=false;clearInterval(timer);if(typeof window.removeEventListener==='function'){window.removeEventListener('pagehide',flushAll);window.removeEventListener('visibilitychange',onHide)}},get deck(){return deck},tick,get held(){return held.size}};
 };
-UI.review={mapCard,verdictWord,fmtTime,mapPreview,recordTitle,ticketLine};
+UI.review={mapCard,verdictWord,fmtTime,mapPreview,recordTitle,ticketLine,LANES,laneRank};
 })();

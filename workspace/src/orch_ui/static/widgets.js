@@ -292,7 +292,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&(it.kind==='check'||it.noWords===true);/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
- const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
+ const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?(words(it)?'Send back with your comment':'Send back'):"Don't do");
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
  const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
@@ -327,6 +327,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
  /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
  const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
+ /* R4 A (owner, 25 Nov): only a picture, a page or a before/after opens large and takes a spot; words are never zoomed */
+ const visual=it=>{const p=it&&it.preview;return !!p&&(p.type==='img'||p.type==='page'||p.type==='compare'||(p.type==='options'&&!plainOpts(it)))};
  /* ORCH-1847: a plain, reversible question (orch marks it one_tap): tapping the named answer answers it, as on Home;
     Undo, Comment, None of these and Later stay. Any other card keeps tap an option, then Use it. */
  const oneTap=it=>!!(it&&it.oneTap===true&&plainOpts(it)&&!it.blocked&&!ans[it.id]&&!ownAnswers(it)&&!isRun(it));
@@ -349,7 +351,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   host.querySelectorAll('.swipe-opt').forEach(b=>{const c=b.closest('.swipe-card,.swipe-viewer');if(c&&c.dataset.item===it.id)b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
   host.querySelectorAll('.swipe-pair-ok').forEach(b=>{if(b.dataset.item===it.id)drawOk(b,it)});
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
- const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
+ const words=it=>{const d=it&&drafts[it.id];return !!d&&(!!String(d.text||'').trim()||(d.clips||[]).length>0||(d.files||[]).length>0)};
+ /* R4 A / R6 A: a comment that waits, or a part still open, makes Send back the filled button: Looks good never sends it along */
+ const sugOf=it=>it&&sendsBack(it)&&(words(it)||it.blocked)?'no':it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
   const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(oneTap(it))okBtn.hidden=true;/* the answers are the buttons */if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
@@ -380,14 +384,16 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(oneTap(it)&&it.ticketTitle&&it.ticketTitle!==it.title)h.append(el('p','swipe-ticket',it.ticketTitle));
   if(it.about)h.append(el('p','swipe-about','About: '+it.about));
   if(it.why)h.append(el('p','swipe-why',it.why));
+  if(it.proposal){const p=it.proposal;h.append(el('p','swipe-why',(p.verdict==='accept'?'The Reviewer proposes to accept':'The Reviewer proposes to send it back')+(p.why?': '+p.why:'.')))}/* Reviewer mode "propose": its verdict, your click */
+  if(it.blocked&&it.kind==='check'){const b=el('div','banner slim attn swipe-open'),g=el('div','grow');g.append(el('strong','','Still open'),el('p','',it.blocked));b.append(g);h.append(b)}/* R6 A: an open part sits on top, never only in the footer */
   const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
   if(pv){pv.dataset.type=it.preview.type;pv.append(buildPreview(it,false));
-  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
+  if(visual(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
   const rb=isRun(it)&&!layer?runBox(it):null;
   const ft=el('footer','swipe-foot');/* "If you approve" is in the pinned answers bar (ORCH-477); why Looks good is off stays on the card (ORCH-548) */
-  if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
+  if(it.blocked&&it.kind!=='check'){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
   else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
@@ -398,7 +404,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
-  c.append(...[h,pv,rb,fl,ft].filter(Boolean));return c};
+  c.append(...(it.kind==='check'?[h,fl,pv,rb,ft]:[h,pv,rb,fl,ft]).filter(Boolean));return c};/* R6 A: a result shows its pictures first */
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
     other files, with "Open in new tab" in the viewer (UI.reviewViewer, ORCH-477). A PDF tile shows its first page through
     the browser's own PDF view, small and without its toolbar (FileViewer.thumb); without a PDF view the icon stays. */
@@ -545,7 +551,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     then "Compare" (filled once two are ticked) opens them side by side and "Cancel" ends picking. A group header is the
     ticket's name, with the count only when more than one waits; a lone card named like its ticket has no header. The
     page's list beside the deck (deck.drawList) and the phone's full list (the overview) draw the same rows. */
- const groupOf=it=>it.group||it.ticketTitle||it.ticket||'';
+ const groupOf=it=>it.laneName||it.group||it.ticketTitle||it.ticket||'';/* a lane (Review: what holds up work first, then by what you do) groups before a set or a ticket */
  const sameName=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
  const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title','All cards'),acts);
   if(!picking){const c=btn('btn outline sm review-list-compare',[ic('compare',16),el('span','','Compare')]);c.setAttribute('aria-pressed','false');c.onclick=()=>setPicking(true);acts.append(c);return hd}
@@ -617,7 +623,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    back.className=opt?'btn':'btn primary';
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'+(note?' “Add note” only saves your words: the card stays and the work goes on.':'')};
   ta.addEventListener('input',sync);
-  const close=()=>{box&&box.comp.recorder&&box.comp.recorder.stop();closeOverlay();reset(cur)};cancel.onclick=close;
+  const close=()=>{box&&box.comp.recorder&&box.comp.recorder.stop();closeOverlay();reset(cur);syncWords()};cancel.onclick=close;/* kept words make Send back the filled button (R4 A) */
   const leave=(verdict,note)=>{box&&box.comp.recorder&&box.comp.recorder.destroy();closeOverlay();const c=cur;busy=true;if(c&&c.dataset.item===it.id)c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note,it)},220)};
   const sent=()=>box?box.comp.files().map(({name,size,type,url})=>({name,size,type,url})):[];

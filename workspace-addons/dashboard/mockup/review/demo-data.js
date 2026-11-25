@@ -186,3 +186,23 @@ window.SWIPE_ITEMS=[
    ticket answer in one tap, Undo while it is held. Shown alone with review.html?one=1. */
 window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-70',ticketId:'DT-70',ticketTitle:'Answer the supplier about the delivery date',oneTap:true,when:'today 11:20',
  title:'The supplier can deliver on Tuesday or Thursday. Which day?',preview:{type:'options',options:[{id:'Tuesday',title:'Tuesday',suggested:true},{id:'Thursday',title:'Thursday'}]}};
+
+/* Review overhaul (owner's picks 25 Nov 2026): every card carries the name orch gives its kind and its lane (as
+   orch/cardkinds.py and UI.review.mapCard do), and the list shows what holds up work first, then by what you do. */
+(()=>{const LANE={holds_up:'Holds up work now',click:'Only you can press it',help:'Needs you in person',look:'Look at the result'},ORDER=Object.keys(LANE);
+ const of=it=>{const p=it.preview||{},files=it.files||[];
+  if(it.kind==='stuck')return ['Stuck','pause','holds_up'];
+  if(it.kind==='link')return ['Put it live','link','click'];
+  if(it.kind==='run')return it.run&&it.run.class==='orch'?['Run it','code','click']:['Try it yourself','user','help'];
+  if(p.type==='options')return p.before||(p.options||[]).some(o=>o.preview)?['Choice','cards','holds_up']:['Question','comment','holds_up'];
+  if(it.kind==='question')return ['Question','comment','holds_up'];
+  if(p.type==='compare')return ['Before and after','compare','look'];
+  if(p.type==='img'||p.type==='page'||files.some(f=>f.type==='img'||f.type==='page'))return ['Pictures','image','look'];
+  if(p.type==='table'||p.chart)return ['Numbers','chart','look'];
+  if(p.diff)return ['Changed words','diff','look'];
+  if(p.status||(p.chips||[]).length)return ['Check result','check','look'];
+  return ['Document','file','look']};
+ const put=list=>list.forEach(it=>{const [n,i,l]=of(it);it.kindLabel=n;it.icon=i;it.lane=l;it.laneName=LANE[l];
+  if(it.kind==='check'&&it.preview&&it.preview.headline){it.title=it.preview.headline;delete it.preview.headline}});
+ put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
+ window.SWIPE_ITEMS=window.SWIPE_ITEMS.map((it,i)=>[it,i]).sort((a,b)=>ORDER.indexOf(a[0].lane)-ORDER.indexOf(b[0].lane)||a[1]-b[1]).map(x=>x[0])})();
