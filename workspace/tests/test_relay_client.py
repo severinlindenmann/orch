@@ -1029,6 +1029,45 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert run("relay", "outbox")[1].startswith("Nothing is waiting to be sent.")
 
 
+def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
+    proj, run, rel, monkeypatch, new_ticket
+):
+    """R1.1: relay turned on, server gone (DNS fails). A relay command waits for it once, not once per request
+    (send what waits, the key, the send itself); the queue shows in `relay status`; ticket commands never
+    touch the network."""
+    import socket
+    import urllib.error
+
+    from test_publish_client import own_sleeps
+
+    from orch import net
+
+    connect(run, rel)
+    tid = new_ticket()
+    tries = []
+
+    def no_dns(req, timeout, **kw):
+        tries.append(req.full_url)
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided"))
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", no_dns)
+    own_sleeps(monkeypatch)
+    assert "Not sent yet" in run("relay", "send", PEER, "first")[1]
+    tries.clear()
+    code, out, _ = run("relay", "send", PEER, "second")
+    assert code == 0 and "Not sent yet" in out
+    # one wait (sending "first" again); "second" is kept at once, with no second wait
+    assert len(tries) == 1 + len(net.RETRY_DELAYS)
+    assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2
+    tries.clear()
+    code, out, _ = run("relay", "status")
+    assert code == 0 and "2 messages not sent yet" in out and "next orch relay command" in out
+    assert json.loads(run("relay", "status", "--json")[1])["waiting"] == 2
+    for cmd in (("ticket", "list"), ("ticket", "show", tid), ("check", "add", tid, "step"), ("status",)):
+        assert run(*cmd)[0] == 0, cmd
+    assert tries == []
+
+
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     proj, run, rel, monkeypatch, new_ticket
 ):

@@ -524,10 +524,13 @@ def _unreachable(e: Refused) -> bool:
     return status is None or status >= 500 or status in (408, 429)
 
 
+POST_TIMEOUT = 15  # seconds; a message is small (files go as blobs) and stays in the outbox when cut
+
+
 def _post_message(root: Path, raw: bytes) -> None:
     cfg = _cfg(root)
     headers = {**net.auth_headers(cfg), "Content-Type": "application/json"}
-    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, 60)
+    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, POST_TIMEOUT)
 
 
 def _outbox(root: Path) -> Path:
