@@ -154,3 +154,48 @@ test('review fixes: a person file used as evidence shows once; a Done ticket kee
   assert.equal(run(c, 'timeOf(1763460000000)'), 1763460000000);
   assert.equal(run(c, 'timeOf(null)'), null);
 });
+
+// #1781 / #1782 / #1783: what the helper said, the runs and the add-on that wrote a line, in plain words
+const T1 = '2026-11-19T09:00:00Z', T2 = '2026-11-19T09:52:00Z';
+const storyTicket = () => ({id:'t_said', created_at:T0, checklist:[{id:'c1', text:'Write it'}, {id:'c2', text:'Post it'}],
+  history:[{at:T0, by:'human:pat', text:'Created'}, {at:'2026-11-19T09:30:00Z', by:'agent:claude', chat_message:true, id:'m_aaaaaaaaaaaaaaaa', text:'The draft is in Files.\nOne open point.'},
+    {at:'2026-11-19T09:40:00Z', by:'system', addon:'automation', text:'Summary updated'}, {at:'2026-11-19T09:50:00Z', by:'system', addon:'dashboard', text:'Summary checked'}],
+  runs:[{id:'r_aaaa1111', agent:'claude', started:T1, ended:T2, minutes:52, tasks:['c1', 'c2']}, {id:'r_bbbb2222', agent:'claude', started:'2026-11-20T08:00:00Z'},
+    {id:'r_cccc3333', agent:'claude', started:T1, ended:T1, minutes:0}]});
+
+test('the Overview shows what the helper said as a message, each run as one line, and the add-on that wrote a line', () => {
+  const c = context();
+  const t = storyTicket(), r = entries(c, t);
+  assert.deepEqual([...r.entries.map(x => x.kind)], ['run', 'run', 'event', 'event', 'event', 'run', 'event']);
+  const shown = r.entries.map(x => run(c, 'overviewEntry(t, x)', {t, x}));
+  assert.equal(text(find(shown[0], n => n.tag === 'p')), 'Helper started working', 'a run without an end');
+  assert.match(text(shown[1]), /^Helper worked for 52 minutes · finished 2 tasks/);
+  const said = shown.find(n => n.attrs['data-key']?.startsWith('history-said-'));
+  assert.equal(said.tag, 'article');
+  assert.match(text(said), /^Helper.*The draft is in Files\.\nOne open point\./s);
+  assert.equal(find(said, n => n.tag === 'p')?.attrs.className, 'preserve-lines');
+  const tagged = shown.filter(n => find(n, x => x.attrs?.className === 'tag'));
+  assert.deepEqual([...tagged.map(n => text(find(n, x => x.attrs?.className === 'tag')))], ['Automation'], "the dashboard's own lines carry no tag");
+  assert.match(text(shown[5]), /^Helper worked for less than a minute/);
+});
+
+test('the Activity tab lists the runs with the helper lines, under All and Helper, never under People', () => {
+  const c = context({emptyRow:s => ({tag:'p', attrs:{}, children:[s]}), state:{me:'human:pat'}});
+  const t = storyTicket();
+  const panel = () => run(c, 'ticketHistoryPanel(t)', {t});
+  const lines = () => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; if (Array.isArray(n)) return n.forEach(walk); if (n.attrs?.className === 'ticket-event') out.push(text(find(n.children, x => x.tag === 'p'))); else walk(n.children); }; walk(panel()); return out; };
+  const all = lines();
+  assert.equal(all[0], 'Helper started working');
+  assert.ok(all.includes('Helper worked for 52 minutes · finished 2 tasks'));
+  assert.ok(all.some(l => /Updated the summary Automation$/.test(l.replace(/\s+/g, ' '))), 'the add-on tag on its line');
+  assert.match(text(find(panel(), n => n.attrs?.['data-key'] === 'history-show-Helper')), /Helper 4/, 'the count holds the runs');
+  run(c, "ticketHistoryActor = 'People'");
+  assert.ok(!lines().some(l => /^Helper (worked|started)/.test(l)));
+  run(c, "ticketHistoryActor = 'All'");
+});
+
+test('an older ticket without runs, chat lines or add-on names reads as before', () => {
+  const c = context();
+  const r = entries(c, {id:'t_old', history:[{at:T0, by:'human:pat', text:'Created'}, {at:T1, by:'agent:claude', text:'Note: looked at it'}]});
+  assert.deepEqual(kinds(r), ['event:Created']);
+});

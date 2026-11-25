@@ -435,7 +435,9 @@ def week_resets(rows: list[dict]) -> dict[str, str]:
 
 def view(root: Path, rows: list[dict]) -> dict:
     """The share read back for the command and the page: the sentence, what each number counts, open points,
-    the order of the accounts and the ready-made spreads. `rows`: accounts with their use (cli.gather)."""
+    the order of the accounts and the ready-made spreads. `rows`: accounts with their use (cli.gather); a removed
+    one is left out (#2692)."""
+    rows = [r for r in rows if not r.get("removed")]
     s = load(root)
     tool = tool_name(rows)
     notes = warnings(s, rows)
