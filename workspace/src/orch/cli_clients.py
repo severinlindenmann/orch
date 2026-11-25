@@ -130,7 +130,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
-    rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
+    rel.add_parser("status", parents=[common], help="is this folder connected to a relay, and does it answer")
     rel.add_parser(
         "key",
         parents=[common],
@@ -790,7 +790,18 @@ def run_relay(args, root: Path, out) -> None:
             st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
         except Refused:
             st = {"configured": False}
-        text = f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay."
+        text = "Not connected to a relay."
+        if st["configured"]:
+            try:
+                relay.whoami_quick(root)
+                st["reachable"] = True
+                text = f"Connected to {_host(st['url'])}."
+            except (Refused, OSError, TimeoutError) as e:
+                st["reachable"], st["error"] = False, str(e)
+                text = (
+                    f"Set up, but the relay does not answer right now ({_host(st['url'])}): {e}\n"
+                    "Local work is not affected. Messages wait and go out when it answers again."
+                )
         fp = _own_fingerprint(root)
         if fp:
             st["fingerprint"] = fp

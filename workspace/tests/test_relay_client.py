@@ -2950,6 +2950,19 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     assert not relay_view.is_update("text", "Lunch at noon?", None)
 
 
+def test_relay_status_checks_that_the_relay_answers(proj, run, rel):
+    """ORCH-2052: "Connected" only when the relay answers; else it says so, with the address."""
+    connect(run, rel)
+    code, out, _ = run("relay", "status")
+    assert code == 0 and out.startswith("Connected to ")
+    assert json.loads(run("relay", "status", "--json")[1])["reachable"] is True
+    rel.stop()
+    code, out, _ = run("relay", "status")
+    assert code == 0 and "Connected" not in out and "does not answer right now" in out
+    shown = json.loads(run("relay", "status", "--json")[1])
+    assert shown["reachable"] is False and shown["error"]
+
+
 def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monkeypatch):
     """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
     cards by ticket, then task; a question on no task sends neither (RULE A)."""

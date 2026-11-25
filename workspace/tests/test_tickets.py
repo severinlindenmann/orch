@@ -191,6 +191,24 @@ def test_ask_recommend_must_be_option(proj, run, new_ticket):
     assert run("ask", tid, "q?", "--option", "A", "--recommend", "B")[0] == 2
 
 
+def test_wait_until_without_a_zone_is_local_time_and_the_reply_says_so(proj, run, new_ticket, monkeypatch):
+    import time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("needs a POSIX TZ")
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        tid = new_ticket()
+        code, out, _ = run("wait", tid, "--until", "2030-11-20 08:00")
+        assert code == 0
+        assert read(proj, tid)["waiting_on"]["until"] == "2030-11-20T07:00:00Z"
+        assert "until Wed 20 Nov 08:00 (local time)" in out
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_wait_until_and_on(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("wait", tid, "--until", "2026-11-05T08:00:00+01:00")[0] == 0
