@@ -771,6 +771,44 @@ def test_a_copy_that_breaks_off_part_way_is_still_orchs(proj, monkeypatch):
     assert (dest / "two.md").read_text(encoding="utf-8") == "y"
 
 
+def test_a_copy_that_breaks_off_inside_a_file_is_still_orchs(proj, monkeypatch):
+    # ORCH-2011: a short write (disk full, file size limit) leaves a prefix newer than the marker
+    import errno
+
+    from orch import harness
+
+    src = proj / ".orch/harness/skills/orch"
+    src.mkdir(parents=True)
+    data = b"hello\r\n" * 8000
+    (src / "SKILL.md").write_bytes(data)
+    dest = proj / ".agents/skills/orch"
+    monkeypatch.setattr(harness.sys, "platform", "win32")  # the copy path (Windows, or no links allowed)
+    real = harness.shutil.copyfile
+
+    def short_write(a, b):
+        Path(b).write_bytes(Path(a).read_bytes()[:4096])
+        os.utime(b, (time_future(), time_future()))
+        raise OSError(errno.EFBIG, "File too large")
+
+    monkeypatch.setattr(harness.shutil, "copyfile", short_write)
+    with pytest.raises(OSError):
+        harness._copy_dir(src, dest)
+    monkeypatch.setattr(harness.shutil, "copyfile", real)
+    assert (dest / harness.COPY_MARK).is_file()
+    assert not (dest / "SKILL.md").exists()  # never a truncated skill in place
+    (dest / harness.COPY_PART).write_bytes(data[:4096])  # as left by a process killed mid-write
+    os.utime(dest / harness.COPY_PART, (time_future(), time_future()))
+    harness.link_skill(proj, ".agents/skills", "orch", src)
+    assert (dest / "SKILL.md").read_bytes() == data
+    assert not (dest / harness.COPY_PART).exists()
+
+    (dest / "SKILL.md").write_bytes(b"my own edit")
+    os.utime(dest / "SKILL.md", (time_future(), time_future()))
+    with pytest.raises(skills.Refused):
+        harness.link_skill(proj, ".agents/skills", "orch", src)
+    assert (dest / "SKILL.md").read_bytes() == b"my own edit"
+
+
 def time_future():
     import time
 

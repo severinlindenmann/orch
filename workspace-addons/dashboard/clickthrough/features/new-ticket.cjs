@@ -1,4 +1,4 @@
-// New ticket from Home: the New ticket page (#new, ORCH-1037), write what needs doing, "Save without starting", the
+// New ticket from Home: the New ticket page (#new, ORCH-1037), write what needs doing, "Save ticket", the
 // short saving moment, then the new ticket's page; reload, the ticket is in the list.
 module.exports = {
   name: 'New ticket: save without starting',
@@ -10,12 +10,14 @@ module.exports = {
     await reload();  // the address alone opens the page too
     const form = page.locator('.new-ticket-page');
     await form.getByPlaceholder(/What should the helper do/).fill('Order the cake for Friday');
-    // ORCH-1852: Save sits beside the request (right under it on a phone), in the first screen, with the line that says what Save and Start do
+    // ORCH-1852: Save ticket sits beside the request (right under it on a phone), in the first screen, with the line that says what Start now costs
     const box = await form.getByPlaceholder(/What should the helper do/).boundingBox();
-    const save = await form.getByRole('button', { name: 'Save without starting' }).boundingBox();
-    must(save.y < page.viewportSize().height && save.y + save.height >= box.y + box.height && save.y - (box.y + box.height) < 24, 'Save is not beside or right under the request');
-    must((await text()).includes('Start also puts your helper to work now'), 'the page does not say what Start costs');
-    await act('ticket.new', () => form.getByRole('button', { name: 'Save without starting' }).click());
+    const save = await form.getByRole('button', { name: 'Save ticket' }).boundingBox();
+    const beside = save.x >= box.x + box.width && save.y < box.y + box.height && save.y + save.height > box.y;
+    const under = save.y >= box.y + box.height && save.y - (box.y + box.height) < 24;
+    must(save.y + save.height <= page.viewportSize().height && (beside || under), 'Save ticket is not beside or right under the request');
+    must((await text()).includes('This uses its time and may cost money'), 'the page does not say what Start now costs');
+    await act('ticket.new', () => form.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });
     must((await text()).includes('Order the cake for Friday'), 'the new ticket page did not open after saving');
     await open('#tickets');
