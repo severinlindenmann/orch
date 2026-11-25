@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<title>orch is updating</title>
+<!-- Mockup of workspace/src/orch_ui/static/updating.html (ORCH-1794, option A): the page the Windows update finisher
+     shows on the dashboard address while the dashboard is off. Same markup and the same updating.js, fed a sample.
+     States: ?state=working (default), ?state=starting, ?state=failed, ?state=done. -->
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css">
+<script>
+(function () {
+  var t = Date.now() / 1000, names = ['Stopping the dashboard', 'Getting the new orch', 'Updating this workspace', 'Starting the dashboard again'];
+  var working = {orch_updating: true, n: 3, of: 4, names: names, took: [5, 48], usual: [6, 52, 290, 30], since: t - 180, began: t - 252, now: t, result: null};
+  var s = new URLSearchParams(location.search).get('state') || 'working';
+  window.ORCH_UPDATING_SAMPLE = s === 'failed'
+    ? {state: Object.assign({}, working, {n: 4, took: [5, 48], result: 'fail', bad: 2, reason: 'The download took too long. Nothing was changed.'}), back: true}
+    : s === 'done' ? {state: Object.assign({}, working, {n: 4, result: 'ok'})}
+    : s === 'starting' ? {state: Object.assign({}, working, {n: 4, took: [5, 48, 287], since: t - 4})}
+    : {state: working};
+})();
+</script>
+<script src="../../../../workspace/src/orch_ui/static/updating.js" defer></script>
+</head>
+<body>
+<main class="door" id="content">
+<div class="door-inner">
+  <svg class="door-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg>
+  <h1 class="door-title" data-u="title">orch is updating</h1>
+  <p class="door-text" data-u="lead">The dashboard is back in a few minutes. This page opens it by itself.</p>
+  <div class="door-card" data-u="card" role="status" aria-live="polite">
+    <div class="dialog-head" data-u="head"><h2 data-u="count">Updating</h2><span class="elapsed" data-u="all"></span></div>
+    <ol class="run-steps" data-u="steps"></ol>
+    <span class="progress indeterminate" data-u="bar" aria-hidden="true"><span></span></span>
+    <p data-u="opening" hidden><span class="spinner" aria-hidden="true"></span> Opening the dashboard…</p>
+    <a class="btn" data-u="open" href="/" hidden>Open it now</a>
+  </div>
+  <p class="door-text" data-u="foot">Your tickets are safe. Helpers that are working keep going.</p>
+</div>
+</main>
+</body></html>
