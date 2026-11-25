@@ -2095,6 +2095,9 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+            for h in t.get("history") or []:
+                if isinstance(h, dict):
+                    h.pop("addon", None)  # ORCH-1946 add-on lines: a snapshot does not name the add-on
     else:
         add_spend(root, tickets, background=with_settings)
     _shape_refs(root, tickets, with_settings)
