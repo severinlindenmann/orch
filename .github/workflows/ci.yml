@@ -146,8 +146,13 @@ jobs:
   # Mac jobs), whatever files changed: the trial of the Mac runner (MAC_RUNNER=this-mac-manual, ORCH-1125).
   # Dashboard pictures stay pull-request only (they need its number and its changed pages).
   # The phone suite never follows the route: it stays on GitHub's Mac (see the mobile job).
+  check-runner:
+    uses: ./.github/workflows/check-runner.yml
+    secrets:
+      runner_status: ${{ secrets.MAC_RUNNER_STATUS_TOKEN }}
   route:
-    if: github.event.pull_request.draft != true
+    needs: check-runner
+    if: ${{ !cancelled() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
@@ -156,6 +161,7 @@ jobs:
       where: ${{ steps.r.outputs.where || 'github' }}
       edge: ${{ steps.e.outputs.edge || '["ubuntu-latest"]' }}
       edge_where: ${{ steps.e.outputs.edge_where || 'github' }}
+      checks: ${{ needs.check-runner.outputs.machine || '"ubuntu-latest"' }}
     permissions:
       contents: read
     steps:
@@ -245,9 +251,11 @@ jobs:
         env:
           SMOKE_BUDGET_S: 480
   contracts:
-    needs: changes
-    if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true') }}
     uses: ./.github/workflows/contracts.yml
+    with:
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
   workspace:
     needs: [changes, route]
     # light pull requests skip it, except one that changes file, process or path code while Windows is green (oscode)
@@ -258,6 +266,7 @@ jobs:
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
       # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
       # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
       # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
@@ -294,6 +303,7 @@ jobs:
     uses: ./.github/workflows/addons.yml
     with:
       suites: ${{ needs.changes.outputs.proven != 'true' }}
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
       # the Services add-on with its real Linux run (ORCH-1126): with the suites, and always when it goes to orch edge
       services: ${{ needs.changes.outputs.proven != 'true' || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both' }}
       linux_runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
@@ -337,18 +347,16 @@ jobs:
       runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
-    needs: changes
-    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
-    runs-on: ubuntu-latest
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule') }}
+    runs-on: ${{ fromJSON(needs.route.outputs.checks || '"ubuntu-latest"') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pytest
-      - run: python -m pytest -q brand/tests
-      - run: python scripts/check_style.py
+      - uses: ./.github/actions/edge-job-home
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --no-project --python 3.12 --with pytest python -m pytest -q brand/tests
+      - run: python3 scripts/check_style.py
   dash-shots:
     # pictures of the dashboard pages a pull request changes, for its review card (ORCH-312); never in a merge queue
     # group: its pull requests took their pictures already (ORCH-1118)

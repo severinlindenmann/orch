@@ -6,7 +6,9 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -146,6 +148,22 @@ CI = (WF / "ci.yml").read_text()
 ON_EDGE = "needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both'"
 
 
+@pytest.mark.skipif(not shutil.which("jq"), reason="hosted lookup requires jq")
+@pytest.mark.parametrize("status,label,exit_code,edge", [
+    ("online", "orch-edge", 0, True), ("offline", "orch-edge", 0, False),
+    ("online", "orch-mac", 0, False), ("online", "orch-edge", 1, False),
+])
+def test_check_runner_lookup_requires_a_confirmed_online_linux_runner(tmp_path, status, label, exit_code, edge):
+    lookup = textwrap.dedent((WF / "check-runner.yml").read_text().split("        run: |\n")[1])
+    runner = {"status": status, "labels": [{"name": x} for x in ("self-hosted", "Linux", "ARM64", label)]}
+    out = tmp_path / "output"
+    out.touch()
+    env = {**os.environ, "GITHUB_OUTPUT": str(out), "RUNNERS": json.dumps({"runners": [runner]}), "RC": str(exit_code)}
+    subprocess.run(["bash", "-c", 'gh() { echo "$RUNNERS"; return "$RC"; }\n' + lookup], env=env, check=True)
+    value = out.read_text().removeprefix("machine=").strip() or '"ubuntu-latest"'
+    assert json.loads(value) == (["self-hosted", "Linux", "ARM64", "orch-edge"] if edge else "ubuntu-latest")
+
+
 def _job(text: str, name: str) -> str:
     m = re.search(rf"^  {re.escape(name)}:\n((?:    .*\n|\s*\n)*)", text, re.MULTILINE)
     assert m, name
@@ -234,8 +252,8 @@ def _hook(tmp_path, event, ref, pr, repo):
     return subprocess.run(["bash", str(RUNNER / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30, check=False)
 
 
-def _pr(base, head):
-    return {"base": {"ref": base}, "head": {"repo": {"full_name": head}}}
+def _pr(base, head, ref="topic"):
+    return {"base": {"ref": base}, "head": {"ref": ref, "repo": {"full_name": head}}}
 
 
 @pytest.mark.skipif(not Path("/usr/bin/python3").exists(), reason="the hook uses the system python3")
@@ -248,6 +266,8 @@ def _pr(base, head):
         ("pull_request", "refs/pull/1/merge", _pr("main", REPO), REPO, True),
         ("pull_request", "refs/pull/1/merge", _pr("main", "someone/orch"), REPO, False),
         ("pull_request", "refs/pull/1/merge", _pr("develop", REPO), REPO, False),
+        ("pull_request", "refs/pull/1/merge", _pr("develop", REPO, "orch-queue/group"), REPO, True),
+        ("pull_request", "refs/pull/1/merge", _pr("develop", "someone/orch", "orch-queue/group"), REPO, False),
         ("push", "refs/heads/feat/x", None, REPO, False),
         ("push", "refs/heads/develop", None, "someone/orch", False),
         ("pull_request_target", "refs/heads/develop", None, REPO, False),
