@@ -570,7 +570,7 @@ function needsToday() {
   const groups = homeNeeds(needs), all = tickets();
   // ORCH-1741: with the core's count, only the tickets whose Check card shows are results to check: one the merge queue
   // holds waits on nobody (one line, queueLine), one with another card (a question, a pull request to merge) is that card
-  const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question).map(i => i.ticket)) : null;
+  const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question && !i.stopped && !i.start).map(i => i.ticket)) : null;
   const review = all.filter(t => t.status === 'review' && (!checks || checks.has(t.id)));  // each result to check is one row and one count, like the Review page cards
   const queued = array(state.counts?.needs_you?.queue);
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
@@ -589,6 +589,9 @@ function needsToday() {
   // ORCH-476: questions and results are the core's (state.counts); an older core without it: counted here as before
   const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
   const questions = core ? core.questions : window.DashHelpers.needsYouCount(needs), resultCount = core ? core.results : review.length;
+  // #2385: the core counts the work that stopped (and leaves out the result a "Reviewer not sure" row stands for); an
+  // older core: the rows are added here
+  const stoppedCount = core && core.stopped != null ? core.stopped : stuck.length;
   // ORCH-1358: a helper that needs you on its screen (an OK in the terminal, no written question) is in Home's Helpers
   // list as Needs you and an orange chip in the live bar, so it counts here too; a ticket already counted is not again
   // (never a finished ticket, nor one already in the needs list or the core's count: a Home row, or one snoozed for
@@ -601,7 +604,7 @@ function needsToday() {
     // ORCH-1687: a ticket whose helper could not start is a row of Home's Needs you with its own Try again, so it is
     // part of THE number too (the Review badge said 2 above a Needs you list of 5); the Review page and the Tickets
     // Needs you view list it the same way
-    count:questions + resultCount + stuck.length - hiddenResults + screen + failed.length + drafts};
+    count:questions + resultCount + stoppedCount - hiddenResults + screen + failed.length + drafts};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review badge shows it (ORCH-1616:
 // only there), the Review page's line, the live bar's need-you end on a phone and the wall read the same one.

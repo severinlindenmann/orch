@@ -1062,3 +1062,27 @@ async fn apps_private_without_a_view_token_hash_has_no_cap() {
     assert!(r.text().contains("This app is private"));
     assert!(r.headers.get("access-control-allow-origin").is_none());
 }
+
+#[tokio::test]
+async fn apps_one_deploy_per_workspace_at_a_time() {
+    let t = setup();
+    let a = t.workspace("A", basic_rights()).await;
+    let b = t.workspace("B", basic_rights()).await;
+    let files = [("app.toml", STATIC_TOML), ("index.html", "<h1>hi</h1>")];
+    let held = t.st.app_lock.lock().await;
+    let (first, ()) = tokio::join!(deploy(&t, &a, "site", &files, "?days=7"), async {
+        while !t.st.deploys.lock().unwrap().contains(&a.0) {
+            tokio::task::yield_now().await;
+        }
+        let r = deploy(&t, &a, "site2", &files, "?days=7").await;
+        assert_eq!(r.status, 429, "{}", r.text());
+        assert_eq!(r.json()["error"], "rate_limited");
+        assert!(r.text().contains("still running"), "{}", r.text());
+        assert!(!t.st.deploys.lock().unwrap().contains(&b.0));
+        drop(held);
+    });
+    assert_eq!(first.status, 200, "{}", first.text());
+    assert!(t.st.deploys.lock().unwrap().is_empty());
+    let r = deploy(&t, &a, "site", &files, "?days=7").await;
+    assert_eq!(r.status, 200, "{}", r.text());
+}
