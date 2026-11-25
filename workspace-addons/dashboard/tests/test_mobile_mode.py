@@ -227,6 +227,24 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     assert r.fingerprint() != before
 
 
+def test_kept_addon_list_is_read_again_after_addon_remove(ws, tmp_path, monkeypatch):
+    """The add-on list kept 10 s is read again once `orch addon remove` rewrote .orch/addons.json: a rebuild right
+    after the removal must not store the old list under the new revision (it stayed until the 120 s rebuild)."""
+    from orch import addons
+
+    from orch_dashboard import data
+
+    monkeypatch.setattr(addons, "home", lambda root=None: tmp_path / "orchhome")
+    answers = iter([["on"], ["off"]])
+    monkeypatch.setattr(data, "_read", lambda *a: next(answers))
+    data.forget_static()
+    assert data.run_orch("orch", ["addon", "list", "--json"], ws) == ["on"]
+    assert data.run_orch("orch", ["addon", "list", "--json"], ws) == ["on"]  # kept
+    (ws / ".orch" / "addons.json").write_text('{"active": {"x": {}}}')
+    assert data.run_orch("orch", ["addon", "list", "--json"], ws) == ["off"]
+    data.forget_static()
+
+
 def test_terminal_changes_move_the_event_revision(ws, tmp_path, monkeypatch):
     """#1402: a login check added in the terminal, `git add` of the orch files and a saved problem report each move
     the revision, so the cached /api/state is rebuilt at once instead of waiting for a settings file change."""
