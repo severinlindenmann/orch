@@ -1,6 +1,8 @@
 """Time orch commands in a seeded workspace (ORCH-518): wall time (median of --repeat runs) and peak memory.
 
 usage: python e2e/perf/measure_cli.py <workspace> --orch <path to orch> [--repeat 3] [--json out.json]
+Use --baseline <develop.json> with matching seed size and commands on the same machine to check for
+regressions over 30%. Use separate identically seeded workspaces when measuring writes.
 
 Run it with the same throwaway HOME / ORCH_HOME (ORCH_HOME_STRICT=1) the workspace was made with; every
 command runs in that environment and in the workspace folder. Writing commands (ticket new, status) change
@@ -47,6 +49,7 @@ def commands(ws: Path) -> list[tuple[str, list[str]]]:
     if pick is None:
         raise SystemExit("No open ticket with steps in the workspace.")
     return [
+        ("--version", ["--version"]),
         ("ticket list", ["ticket", "list"]),
         ("ticket list --all", ["ticket", "list", "--all"]),
         ("ticket show", ["ticket", "show", pick]),
@@ -54,6 +57,8 @@ def commands(ws: Path) -> list[tuple[str, list[str]]]:
         ("ticket status", ["ticket", "status", pick, "waiting"]),
         ("ticket status back", ["ticket", "status", pick, "open"]),
         ("needs", ["needs"]),
+        ("counts", ["counts"]),
+        ("doctor", ["doctor"]),
     ]
 
 
@@ -64,7 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--only", default="", help="comma list of command names to time")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--baseline", type=Path, help="compare medians with measure_cli JSON from develop")
     a = ap.parse_args(argv)
+    if a.baseline and a.json and a.baseline.resolve() == Path(a.json).resolve():
+        ap.error("Write the new measurements somewhere other than the develop baseline.")
     ws = Path(a.workspace).resolve()
     if os.environ.get("ORCH_HOME_STRICT") != "1":
         raise SystemExit("Run it with ORCH_HOME=<throwaway folder> and ORCH_HOME_STRICT=1.")
@@ -85,12 +93,26 @@ def main(argv: list[str] | None = None) -> int:
             w, m = run_one(a.orch, ws, args, env)
             walls.append(w)
             peaks.append(m)
-        row = {"tickets": n, "command": name, "seconds": round(statistics.median(walls), 2),
+        row = {"tickets": n, "command": name, "seconds": round(statistics.median(walls), 4),
                "peak_mb": round(max(peaks))}  # fmt: skip
         rows.append(row)
         print(f"{n:>6}  {name:<20} {row['seconds']:>7.2f} s  {row['peak_mb']:>5} MB", flush=True)
     if a.json:
         Path(a.json).write_text(json.dumps(rows, indent=1) + "\n", encoding="utf-8")
+    if a.baseline:
+        if not rows:
+            raise SystemExit("No commands selected for comparison.")
+        baseline = {(r["tickets"], r["command"]): r["seconds"] for r in json.loads(a.baseline.read_text())}
+        failed = False
+        for row in rows:
+            name = row["command"]
+            old = baseline.get((n, name))
+            if not old or old <= 0:
+                raise SystemExit(f"No positive baseline for {name} at {n} tickets.")
+            if row["seconds"] > old * 1.30:
+                print(f"{name}: {row['seconds']:.4f} s, over 30% slower than {old:.4f} s on develop.")
+                failed = True
+        return int(failed)
     return 0
 
 
