@@ -964,7 +964,44 @@ def test_an_addon_command_gets_the_addons_own_words(tk, run, demo_on):
     }
     assert spec["changes"] == "Turns on notes in Demo" and spec["undo"] == "orch demo remove notes"
     spec = _card(run, tid, "orch demo notes folder '/Users/pat/My Notes'")["card"]["run"]
-    assert spec["changes"] == "Demo reads notes from /Users/pat/My Notes" and "undo" not in spec
+    full = os.path.realpath("/Users/pat/My Notes")
+    assert spec["changes"] == f"Demo reads notes from {full}" and "undo" not in spec
+
+
+def test_a_folder_slot_shows_the_full_path(tk, run, demo_on, monkeypatch, tmp_path):
+    """ORCH-1911: ~ and .. in a {folder} slot are shown as the full path the add-on will read."""
+    root, tid = tk
+    home = tmp_path / "home"
+    (home / "Notes").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    spec = _card(run, tid, "orch demo notes folder ~/x/../Notes")["card"]["run"]
+    assert spec["changes"] == f"Demo reads notes from {os.path.realpath(home / 'Notes')}"
+    assert spec["argv"][-1] == "~/x/../Notes"  # the command itself is run as it was shown
+    spec = _card(run, tid, "orch demo notes folder notes")["card"]["run"]
+    assert spec["changes"] == f"Demo reads notes from {os.path.realpath(Path(root) / 'notes')}"
+
+
+@pytest.mark.parametrize(
+    ("folder", "why"),
+    [
+        ("~/.ssh", "hidden folder in your home folder"),
+        ("~/Notes/../.config/gh", "hidden folder in your home folder"),
+        (".orch", "workspace's own files"),
+        ("./.orch/tickets", "workspace's own files"),
+    ],
+)
+def test_a_folder_slot_never_points_at_hidden_or_workspace_files(
+    tk, run, demo_on, monkeypatch, tmp_path, folder, why
+):
+    """ORCH-1911: a card cannot choose a dot-folder in home or the workspace's .orch folder."""
+    _root, tid = tk
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    code, out, err = _ask(run, tid, f"orch demo notes folder {folder}")
+    assert code != 0 and why in out + err and "cannot run from a card" not in out + err
 
 
 @pytest.mark.parametrize(
