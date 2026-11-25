@@ -299,3 +299,41 @@ def test_attach_refuses_a_recording_that_is_not_one(proj, run, hint, data):
     with pytest.raises(Refused, match="recording"):
         tickets.attach(proj, tid, hint, data, "human:t")
     assert tickets.artifacts_list(proj, tid) == []
+
+
+def test_the_request_keeps_its_first_note_and_its_files(proj, run, monkeypatch):
+    """#1812: the note stays editable, the request keeps what was first asked and the files sent with it."""
+    import io
+
+    code, out, _ = run("ticket", "new", "Report", "--note", "Make it short", "--json", "--by", "human:t")
+    tid = json.loads(out)["id"]
+
+    class In:
+        buffer = io.BytesIO(b"brief")
+
+    monkeypatch.setattr(sys, "stdin", In())
+    code, _, _ = run("ticket", "attach", tid, "--name", "brief.md", "--request", "--by", "human:t", "--json")
+    assert code == 0
+    tickets.attach(proj, tid, "later.md", b"later", "human:t")  # a file added afterwards is not the request
+    tickets.edit(proj, tid, None, "human:t", {"note": "Make it long"})
+    t = tickets.load(proj, tid)
+    assert t["note"] == "Make it long"
+    assert t["request"] == {"note": "Make it short", "files": ["brief.md"]}
+    tickets.attach(proj, tid, "x", b"once", "human:t", exact="brief.md", request=True)  # a retry adds nothing
+    assert tickets.load(proj, tid)["request"]["files"] == ["brief.md"]
+
+
+def test_a_file_a_helper_wrote_gets_one_history_line_at_its_time(proj, run):
+    """#1812: a result file written with plain file I/O gets an "Added file" line on the next write; a rewrite
+    never adds a second one, and a person's attached file keeps only its Attached line."""
+    tid = _new(run)
+    tickets.attach(proj, tid, "mine.md", b"mine", "human:t")
+    d = tickets.artifacts_dir(proj, tid)
+    (d / "out.md").write_text("v1")
+    os.utime(d / "out.md", (1_000_000_000, 1_000_000_000))  # before the ticket: the line gets its creation
+    tickets.set_status(proj, tid, "active", "agent:claude")
+    (d / "out.md").write_text("v2")
+    tickets.set_summary(proj, tid, "Wrote the report.", "agent:claude")
+    lines = [h for h in tickets.load(proj, tid)["history"] if h["text"].startswith("Added file ")]
+    assert [(h["text"], h["by"]) for h in lines] == [("Added file out.md", "agent:claude")]
+    assert lines[0]["at"] == tickets.load(proj, tid)["created_at"]

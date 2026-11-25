@@ -113,6 +113,23 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def invite(root: Path, name: str, folder: str, group: str | None, admin_url: str, token: str) -> dict:
+    """`orch relay invite`: add a workspace on the relay (admin API) and connect `folder` to it.
+    `group`: a group id (grp_…) or name; without it the workspace is in no group."""
+    body: dict = {"name": name.strip(), "description": "", "tags": []}
+    if not body["name"]:
+        raise Refused("Give the new workspace a name.")
+    if group:
+        groups = net.items(net.admin_call(admin_url, token, "GET", "/admin/api/groups"))
+        hit = [g for g in groups if group in (g.get("id"), g.get("name"))]
+        if not hit:
+            names = ", ".join(str(g.get("name")) for g in groups) or "none yet"
+            raise Refused(f"There is no group {group} on the relay (groups: {names}). Pick one of them.")
+        body["group"] = hit[0]["id"]
+    r = net.invite_service(root, "relay", folder, connect, admin_url, token, body)
+    return {**r, "group": body.get("group")}
+
+
 # Speech to text through the relay's one Deepgram key (relay-api.md: POST /v1/transcribe, workspace auth).
 # The key never comes here; the relay answers {text, language, duration}. Used by the dashboard's message box
 # (ORCH-696). Safari records audio/mp4, which the relay takes as audio/m4a.
@@ -640,6 +657,7 @@ def _message(
     .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
     msg = _build_message(root, to, type_, body, ticket, reply_to, mid, created_at)
     scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
+    scan_outgoing(root, {k: v for k, v in msg.items() if k != "body"})  # envelope fields too (#915)
     if _DRY_RUN.get():
         return {**msg, "dry_run": True}
     from orch import msgtrust

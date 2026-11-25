@@ -537,3 +537,99 @@ def test_list_shows_each_script_of_a_group_with_its_own_plan(ws, person, capsys)
     assert by["fast"]["cron"] == "*/5 * * * *" and by["slow"]["cron"] == "0 6 * * *"
     assert cli.main(["--dir", str(ws), "list"]) == 0
     assert "script slow" in capsys.readouterr().out
+
+
+# ---- paths, error paths -------------------------------------------------------------------------------
+
+
+def _ws_at(path):
+    (path / ".orch" / "tickets").mkdir(parents=True)
+    (path / ".orch" / "addons" / "automation").mkdir(parents=True)
+    return path
+
+
+def test_a_workspace_with_spaces_and_umlauts_runs_its_script(ws, tmp_path, person):
+    """The workspace folder, the script's argument and its output may all carry spaces and umlauts."""
+    root = _ws_at(tmp_path / "Jürg Müller" / "Mein Ordner")
+    out = root / "Ergebnis Größe.txt"
+    argv = py("import sys; open(sys.argv[1], 'w', encoding='utf-8').write(sys.argv[2])") + [str(out), "Grüße"]
+    scripts.add(root, "count", argv)
+    assert scripts.load(root)["count"] == argv and scripts.command(root, "count") == argv
+    add_ticket(root, "t_umlaut01")
+    fails = []
+    assert scripts.run(root, "t_umlaut01", "count", "2026-11-04T08:00:00Z", fails.append) == 0
+    assert fails == [] and out.read_text(encoding="utf-8") == "Grüße"
+    (row,) = [json.loads(x) for x in (root / ".orch/addons/automation/runs.jsonl").read_text().splitlines()]
+    assert row["ticket"] == "t_umlaut01" and row["exit"] == 0
+    assert not scripts.busy(root, "t_umlaut01")
+
+
+def test_a_program_that_is_not_there_fails_with_a_question_not_a_crash(ws, tmp_path, person):
+    scripts.add(ws, "gone", [str(tmp_path / "nicht da" / "läuft.exe")])
+    add_ticket(ws, "t_gone0001")
+    fails = []
+    assert scripts.run(ws, "t_gone0001", "gone", "2026-11-04T08:00:00Z", fails.append) == 127
+    assert len(fails) == 1 and "exit code 127" in fails[0] and "gone-output.txt" in fails[0]
+    assert "could not be started" in (ws / "attached.txt").read_text()
+    assert not scripts.busy(ws, "t_gone0001")  # the lock is given back
+
+
+def test_a_script_that_is_not_allowed_runs_nothing_and_says_how_to_allow_it(ws, agent):
+    scripts.add(ws, "later", ["true"])
+    fails = []
+    assert scripts.run(ws, "t_later001", "later", "2026-11-04T08:00:00Z", fails.append) == 2
+    assert "script allow later --key" in fails[0]
+    assert scripts.run(ws, "t_later001", "nope", "2026-11-04T08:00:00Z", fails.append) == 2
+    assert "script add nope --" in fails[1]
+
+
+def test_settings_in_another_encoding_are_never_rewritten(ws, person):
+    cfg = ws / ".orch/config.toml"
+    raw = "# Jürg\n[automation]\ninterval = 5\n".encode("latin-1")
+    cfg.write_bytes(raw)
+    assert scripts.load(ws) == {}
+    with pytest.raises(scripts.ScriptError, match="cannot be read"):
+        scripts.add(ws, "one", ["true"])
+    assert cfg.read_bytes() == raw
+
+
+def test_removing_from_a_broken_settings_file_leaves_it_alone(ws, person):
+    cfg = ws / ".orch/config.toml"
+    text = '[automation.scripts.one]\ncommand = ["true"]\n[automation]\na = 1\n[automation]\nb = 2\n'
+    cfg.write_text(text)
+    with pytest.raises(scripts.ScriptError, match="Edit it by hand"):
+        scripts.remove(ws, "one")
+    assert cfg.read_text() == text
+    assert scripts.remove(ws, "other") is False
+
+
+def test_allow_refuses_an_unknown_name_and_an_unshowable_command(ws, person):
+    with pytest.raises(scripts.ScriptError, match="no script named nope"):
+        scripts.allow(ws, "nope", "0" * 64)
+    (ws / ".orch/config.toml").write_text('[automation.scripts.odd]\ncommand = ["echo", "a\\u200bb"]\n')
+    argv = scripts.load(ws)["odd"]
+    with pytest.raises(scripts.ScriptError, match="cannot be shown safely"):
+        scripts.allow(ws, "odd", scripts.key(ws, "odd", argv))
+    assert scripts.command(ws, "odd") is None
+
+
+@pytest.mark.parametrize("content", ["not json", '{"a": 1}'])
+def test_a_damaged_allowed_list_is_replaced_not_trusted(ws, tmp_path, person, content):
+    (tmp_path / "allowed.json").write_text(content)
+    assert scripts.command(ws, "one") is None
+    scripts.add(ws, "one", ["true"])
+    assert scripts.command(ws, "one") == ["true"]
+    assert isinstance(json.loads((tmp_path / "allowed.json").read_text()), list)
+
+
+def test_a_start_that_fails_says_why(ws, person, monkeypatch):
+    scripts.add(ws, "one", ["true"])
+
+    def boom(*a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(scripts, "_start_runner", boom)
+    assert scripts.launch(ws, "t_one00001", "one") == (
+        "failed",
+        "the script could not be started (PermissionError)",
+    )

@@ -222,7 +222,7 @@ def test_reader_retries_invalid_json_and_never_rewrites(proj, other):
     syncgate.gate_path(proj).unlink()
     p.write_text("{ still broken")
     t0 = time.monotonic()
-    with pytest.raises(Refused, match="being updated"):
+    with pytest.raises(Refused, match="is broken"):  # no sync running: a file the person fixes (ORCH-2019)
         tickets.load(proj, tid)
     assert time.monotonic() - t0 < 0.2  # no gate held: no retry delay
     assert p.read_text() == "{ still broken"  # read-only: not rewritten, quarantined or deleted

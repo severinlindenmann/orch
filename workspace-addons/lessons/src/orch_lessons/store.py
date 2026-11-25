@@ -142,7 +142,7 @@ def load(root: Path) -> dict:
         except OSError:
             names = []
         for name in names:
-            if name == EXTRA or name.startswith("."):
+            if name == EXTRA or name.startswith(".") or not name.endswith(".md"):
                 continue
             row = _parse(d / name)
             if row is None:

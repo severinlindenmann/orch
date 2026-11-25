@@ -1,7 +1,7 @@
 [project]
 name = "orch-dashboard"
 version = "0.2.0"
-description = "orch dashboard add-on: read-only web view of the workspace tickets and add-on tabs"
+description = "orch dashboard add-on: web view of the workspace tickets, questions and add-on tabs"
 requires-python = ">=3.11"
 dependencies = []
 

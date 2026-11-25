@@ -188,7 +188,7 @@ def test_send_to_an_idle_agent_goes_in_at_once(proj, run, lab):
     run("run", "start", tid)
     _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
     code, out, _ = run("run", "send", tid, "Also October")
-    assert out.strip() == "Sent."
+    assert out.splitlines()[0] == "Sent."
     _until(lambda: len(_lines(lab, "input")) == 2)
 
 
@@ -364,7 +364,8 @@ def test_stop_ends_the_session_and_the_agent_but_keeps_the_work(proj, run, lab):
     assert runs.read(proj, tid) is None and not runs_live.session_exists(proj, tid)
     _until(lambda: not runs._running(rec["agent_pid"], rec["agent_pid_started"]), what="agent ended")
     assert not runs._running(rec["pid"], rec["pid_started"])
-    assert run("run", "stop", tid)[1].strip() == f"Nothing is running on {tickets.load(proj, tid)['key']}."
+    key = tickets.load(proj, tid)["key"]
+    assert run("run", "stop", tid)[1].splitlines()[0] == f"Nothing is running on {key}."
 
 
 @needs_tmux
