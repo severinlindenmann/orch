@@ -1453,8 +1453,9 @@ function paintAddon(id) {
     blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
+    // The master empty state keeps its own mark: an "opens elsewhere" arrow there read as a link that is not one.
     blocks.querySelectorAll('svg').forEach(n => {
-      n.replaceWith(iconEl('external'));
+      if (!n.closest('.empty-state')) n.replaceWith(iconEl('external'));
     });
     // Block text is supplied by add-ons; keep internal keys out of visible copy.
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);

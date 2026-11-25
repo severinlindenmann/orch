@@ -15,3 +15,4 @@ gitignore = [".orch/addons/lessons/"]
 label = "Lessons"
 icon = "book"
 place = "settings"
+subtitle = "What your helpers learned. Each new helper reads these when it starts."
