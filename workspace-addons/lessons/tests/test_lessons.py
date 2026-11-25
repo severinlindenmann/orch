@@ -210,4 +210,4 @@ def test_view_notices_unreadable_and_hidden(cli, ws):
     _, view = jrun(cli, "view")
     validator(VIEW).validate(view)
     assert len(view["blocks"][0]["items"]) == 50
-    assert "2 older are hidden" in view["notice"] and "1 lesson file is unreadable" in view["notice"]
+    assert "2 older are hidden" in view["notice"] and "1 lesson file could not be read" in view["notice"]
