@@ -198,7 +198,7 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         sys.stderr.write(text + "\nTurn these on? [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
-            raise Refused("Not confirmed. Nothing was changed.")
+            raise Refused("Not confirmed. Nothing was changed. Run orch init again and answer y to go on.")
     names = [r["name"] for r in rows]
     before = set(addons.active(root))  # whatever is on already stays on, whatever fails
     now: list[str] = []  # turned on at once (already installed); the rest wait for the one reinstall
