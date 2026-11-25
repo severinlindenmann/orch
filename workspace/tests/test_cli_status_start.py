@@ -66,7 +66,7 @@ def test_print_launch_url_names_this_computer_as_other_computers_reach_it(tmp_pa
     monkeypatch.setattr(services, "start", lambda root: rows)
     monkeypatch.setattr(worktrees, "schedule_sweep", lambda root: None)
     monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: True)
-    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server, life=0: "tok123")
+    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server, life=0, why=None: "tok123")
     args = argparse.Namespace(cmd="start", print_launch_url=True, json=False, no_open=False)
     cli_status._services_cmd(args, tmp_path)
     out = capsys.readouterr().out

@@ -430,6 +430,40 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
     return out
 
 
+def _ts(t) -> float | None:
+    try:
+        return _parse(str(t))
+    except ValueError:
+        return None
+
+
+def unread_for_finish(root: Path, tid: str) -> list[dict]:
+    """The undelivered input that keeps an agent from moving the ticket to Review or Done (ORCH-914): a
+    person's input (the human_waiting allowlist), or other input (an orch or relay event) newer than the
+    agent's last start (its last delivered input, or the live claim's start). A run's own start or slot
+    request and an agent's line (a watcher's nudge) never hold a status move."""
+    items = _pending_read(root, tid)
+    starts = [_ts(i["delivered_at"]) for i in items if i.get("delivered_at")]
+    rec = read(root, tid)
+    if rec and state(rec) != "dead":
+        starts.append(_ts(rec.get("started_at")))
+    last = max((s for s in starts if s is not None), default=None)
+    out = []
+    for i in items:
+        if i.get("delivered_at") or i.get("via") in ("start", "slots"):
+            continue
+        if _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone")) and i.get("human") in (
+            True,
+            None,
+        ):
+            out.append(i)
+        elif not str(i.get("by") or "").startswith("agent:") and last is not None:
+            at = _ts(i.get("at"))
+            if at is None or at > last:
+                out.append(i)
+    return out
+
+
 def human_sent(root: Path, tid: str) -> list[dict]:
     """The messages a person wrote to the ticket's helper, read or not, oldest first (the last 200 read ones
     are kept for dedupe): what the chat of a session shows as theirs after a reload. The same allowlist as
@@ -794,6 +828,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
         _release_locked(root, tid, rec)
+    with contextlib.suppress(Exception):  # the ticket's record of this run gets its end (history.md 'Runs')
+        tickets.run_ended(root, tid, rec["run"])
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
     from orch import worktrees
 
@@ -1718,17 +1754,25 @@ def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> l
 
 
 def _ask_addons(
-    root: Path, tid: str, by: str, mode: str | None, name: str, given: bool, notes: list[str]
+    root: Path,
+    tid: str,
+    by: str,
+    mode: str | None,
+    name: str,
+    given: bool,
+    notes: list[str],
+    over_limit: bool = False,
 ) -> tuple[str, str | None]:
     """Ask the add-ons with `before_start` (contracts/before-start.schema.json). Returns the tool and the
     model hint for this start. A wait answer holds an automatic start (the ticket shows why) and is only a
-    note for a person's own start. No such add-on: (name, None), nothing called."""
+    note for a person's own start and for an over_limit start (a red develop never waits, ORCH-699).
+    No such add-on: (name, None), nothing called."""
     from orch import startask
 
     try:
         out, said = startask.ask(root, tid, by, mode, name, given)
     except startask.Wait as w:
-        if brake.is_person(by):
+        if brake.is_person(by) or over_limit:
             notes.append(f"Started anyway: {w.why}")
             return name, None
         startask.hold(root, tid, w)
@@ -1807,7 +1851,7 @@ def start(
     # an API key start (keystart) or a prepare run is not re-routed either
     asks = not _prepare and not _helper_at_work(root, tid, take_over)
     if credit is None and asks:
-        name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes)
+        name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes, over_limit)
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     if credit is not None:
@@ -2065,10 +2109,11 @@ def workdir_for(root: Path, rec: dict | None, tid: str | None = None) -> Path:
 
 
 def _agent_environ(root: Path) -> dict:
-    """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
-    own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an agent working in a
-    copy of the folder still writes to the real tickets."""
-    return {**{k: v for k, v in os.environ.items() if k != "ORCH_VIA"}, "ORCH_ROOT": str(root)}
+    """The agent's environment: ours without ORCH_VIA and ORCH_ADDON. A page or an add-on that started the run
+    is not where the agent's own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an
+    agent working in a copy of the folder still writes to the real tickets."""
+    drop = ("ORCH_VIA", "ORCH_ADDON")
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, "ORCH_ROOT": str(root)}
 
 
 def open_log(path: Path):
@@ -2303,6 +2348,9 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
+    os.environ.pop("ORCH_ADDON", None)  # this wrapper's own lines are the run's, not an add-on's
+    with contextlib.suppress(Exception):
+        tickets.run_started(root, tid, run, name)
     env = {
         **_agent_environ(root),
         "ORCH_RUN": run,
@@ -2452,6 +2500,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
+    os.environ.pop("ORCH_ADDON", None)  # this wrapper's own lines are the run's, not an add-on's
+    with contextlib.suppress(Exception):
+        tickets.run_started(root, tid, run, name)
     env = {
         **_agent_environ(root),
         "ORCH_RUN": run,

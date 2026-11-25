@@ -57,7 +57,7 @@ TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
     "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop before_start docs "
-    "api-credits run_card".split()
+    "api-credits setup run_card".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1429,6 +1429,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("dashboard order is 0 to 99")
         d["order"] = order
     _check_selfcheck(m)
+    _check_setup(m)
     _check_run_card(m)
     tv = m.get("ticket_view", [])
     if not isinstance(tv, list) or len(tv) > 8:
@@ -1973,6 +1974,64 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+ARG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}")
+SETUP_TIMEOUT = 15 * 60
+
+
+def _args_ok(args: object) -> bool:
+    """The command after `orch <name>` a manifest names ([[selfcheck]] args, setup)."""
+    return (
+        isinstance(args, list)
+        and 1 <= len(args) <= 6
+        and all(isinstance(a, str) and ARG_RE.fullmatch(a) for a in args)
+    )
+
+
+def _check_setup(m: dict) -> None:
+    """`setup`: the command orch runs once the add-on is turned on and after every update."""
+    if "setup" in m and not _args_ok(m["setup"]):
+        raise _bad('setup is the command after orch <name>, e.g. ["setup"]')
+
+
+def run_setup(root: Path, names) -> list[str]:
+    """Each add-on's `setup` (manifest), run after it is turned on here and after every update, so what it
+    needs (a download) is there before its first use. One line each; a failure never fails either."""
+    found = discover()
+    lines = []
+    for name in sorted(names):
+        m = found.get(name)
+        args = (m or {}).get("setup")
+        if not args:
+            continue
+        again = " ".join(["orch", name, *args])
+        print(f"Getting {name} ready ({again}) ...", file=sys.stderr, flush=True)
+        env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
+        try:
+            r = subprocess.run(  # noqa: S603 - our own interpreter and the add-on's module
+                [sys.executable, "-P", "-m", m["run"], *args],
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=SETUP_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            lines.append(f"{name} is not ready yet. Run: {again}")
+            continue
+        said = [ln.strip() for ln in f"{r.stdout}\n{r.stderr}".splitlines() if ln.strip()]
+        last = said[-1].removeprefix("Refused: ") if said else ""
+        if r.returncode == 0:
+            lines.append(f"{name}: {last or 'ready.'}")
+        else:
+            lines.append(
+                f"{name} is not ready yet: {last}" if last else f"{name} is not ready yet. Run: {again}"
+            )
+    return lines
+
+
 def _check_selfcheck(m: dict) -> None:
     """[[selfcheck]] of a manifest: what orch runs after an update to see the add-on still works."""
     sc = m.get("selfcheck", [])
@@ -1985,13 +2044,7 @@ def _check_selfcheck(m: dict) -> None:
             or set(row) - {"label", "fails", "args"}
             or not _text_ok(row.get("label"), 40)
             or not _text_ok(row.get("fails"), 80)
-            or not isinstance(args, list)
-            or not 1 <= len(args) <= 6
-            or not all(
-                isinstance(a, str)
-                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}", a)
-                for a in args
-            )
+            or not _args_ok(args)
         ):
             raise _bad("a [[selfcheck]] entry needs label, fails and args (the command after orch <name>)")
     m["selfcheck"] = sc
@@ -2601,6 +2654,8 @@ def _activate(root: Path, name: str) -> None:
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
     _save_active(root, a)
     skillrender.refresh_skills(root)
+    for line in run_setup(root, [name]):
+        _say(line)
     if name == "relay":  # on again, still connected: its list of workspaces went with the skill folder
         from orch import relay
 
@@ -3336,6 +3391,11 @@ def update(
         done.append(f"orch-{n}")
     if a:
         _save_active(root, a)
+    setup_lines = run_setup(root, [n for n in on if n in found])
+    if setup_lines and not json_output:
+        _say("\n".join(setup_lines))
+    if notes is not None:
+        notes.extend(setup_lines)
     sha = _source_sha()
     if before is not None:
         lines, _changed = _update_lines(before, found, sha)

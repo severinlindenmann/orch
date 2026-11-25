@@ -1,0 +1,10 @@
+# orch Companion: the app in the Mac menu bar that records your calls for Meetings (Personal). Off until you turn
+# it on: orch personal ways on companion
+name = "orch Companion"
+part = "meetings"
+selfcheck = ["python3", "-B", "check.py"]
+
+[actions]
+now = ["python3", "-B", "now.py"]
+meetings = ["python3", "-B", "meetings.py"]
+meeting = ["python3", "-B", "meetings.py"]
