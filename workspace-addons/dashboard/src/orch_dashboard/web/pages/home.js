@@ -791,7 +791,7 @@ function loginBanner(stopped) {
   if (stopped.length === 1) {
     const item = stopped[0], name = clean(window.DashHelpers.needName(item));
     return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
-      h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
+      h('div', {className:'grow'}, h('strong', {}, 'The ' + name + window.DashHelpers.needStoppedWord(item)),
         lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
       loginAction(item, 'login-stopped-' + item.name));
   }
