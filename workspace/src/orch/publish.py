@@ -157,8 +157,7 @@ def _cfg(root: Path) -> dict:
         return net.load_service(root, "publish")
     except Refused:
         raise Refused(
-            "Publish isn't connected yet. Your admin gives you a short text: paste it on the Publish page "
-            "of the dashboard, or run: orch publish connect --paste"
+            "Publish isn't connected yet. Your admin gives you a short text: paste it with: orch publish connect --paste"
         ) from None
 
 
@@ -691,7 +690,7 @@ def view(root: Path) -> dict:
                     "more": 0,
                     "empty": {
                         "title": "Publish isn't connected yet",
-                        "text": "Your admin gives you a short text. Paste it here to connect, then share a file.",
+                        "text": "Your admin gives you a short text. Ask your agent to connect it (orch publish connect --paste), then share a file.",
                     },
                 }
             ],
