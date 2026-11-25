@@ -345,6 +345,10 @@ def _check_format(data: dict, tid: str) -> None:
         )
 
 
+# A ticket fixed by hand on Windows (Notepad, PowerShell 5) may start with a UTF-8 BOM; reading drops it.
+TICKET_ENCODING = "utf-8-sig"
+
+
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
     may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
@@ -352,7 +356,7 @@ def _read_ticket(p: Path, tid: str) -> dict:
     file."""
     for attempt in range(4):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding=TICKET_ENCODING))
             if not isinstance(data, dict) or data.get("id") != tid:
                 raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
             _check_format(data, tid)
@@ -364,7 +368,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
                 raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
             if attempt == 3:
                 if isinstance(e, PermissionError):
-                    raise
+                    raise Refused(
+                        f"Ticket {tid} can't be read: another program has its file open (a sync app like"
+                        " OneDrive, an editor). Wait a moment and try again."
+                    ) from None
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
@@ -509,7 +516,14 @@ def _write(root: Path, ticket: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(ticket, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        procs.replace(tmp, p)
+        try:
+            procs.replace(tmp, p)
+        except PermissionError:
+            how = "is read-only" if p.exists() and not os.access(p, os.W_OK) else "is open in another program"
+            raise Refused(
+                f"Ticket {ticket['id']} can't be saved: its file {how} (a sync app like OneDrive can do"
+                " this). Make the file writable or close that program, then try again."
+            ) from None
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -717,7 +731,7 @@ def save(root: Path, ticket: dict) -> None:
         p = ticket_path(root, ticket["id"])
         if p.exists():
             try:
-                on_disk = revision(json.loads(p.read_text(encoding="utf-8")))
+                on_disk = revision(json.loads(p.read_text(encoding=TICKET_ENCODING)))
             except (OSError, ValueError):
                 on_disk = revision(ticket)
             if on_disk != revision(ticket):
@@ -745,7 +759,7 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                text = p.read_text(encoding="utf-8")
+                text = p.read_text(encoding=TICKET_ENCODING)
                 if mark is not None and mark not in text:
                     continue
                 t = json.loads(text)  # no retry: a listing never stalls on a bad file
@@ -788,7 +802,7 @@ def _with_ext(root: Path, ext: str, include_general: bool) -> list[dict] | None:
 def is_general(root: Path, tid: str) -> bool:
     """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+        return json.loads(ticket_path(root, tid).read_text(encoding=TICKET_ENCODING)).get("general") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -813,7 +827,7 @@ def _hidden_tickets(root: Path) -> list[dict]:
 def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+        return json.loads(ticket_path(root, tid).read_text(encoding=TICKET_ENCODING)).get("manager") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -821,7 +835,8 @@ def is_manager(root: Path, tid: str) -> bool:
 def is_session(root: Path, tid: str) -> bool:
     """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
+        doc = json.loads(ticket_path(root, tid).read_text(encoding=TICKET_ENCODING))
+        return doc.get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 

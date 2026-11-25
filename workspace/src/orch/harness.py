@@ -350,7 +350,7 @@ def _general_lines_now(root: Path) -> list[str]:
             if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
                 continue
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
+                data = json.loads(f.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 continue
             if not isinstance(data, dict) or data.get("id") != stem:

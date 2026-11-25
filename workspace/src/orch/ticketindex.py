@@ -164,7 +164,7 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     from orch import history
 
     try:
-        text = p.read_text(encoding="utf-8")
+        text = p.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
         return None, False, True
     except OSError:
