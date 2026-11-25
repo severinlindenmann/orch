@@ -658,6 +658,31 @@ def test_proof_copy_says_when_the_project_file_changed_since(ws, server):
         assert read_source(ws, tid, name)[0] == 404
 
 
+def test_current_file_too_big_to_preview_is_not_called_gone(ws, server):
+    """ORCH-2009: a changed source over the preview limit still exists; say it is too big and where to open it.
+    Only a source that is really gone gets "not in the project any more"."""
+    from orch_dashboard.reffiles import read_source
+
+    tid, ev_dir = "t_weekly01", ws / ".orch/tickets/t_weekly01/evidence"
+    ev_dir.mkdir(parents=True)
+    (ev_dir / "welcome.md").write_text("Hi there!")
+    ev = {"type": "file", "ref": f".orch/tickets/{tid}/evidence/welcome.md", "source": "welcome.md"}
+    ticket = ws / f".orch/tickets/{tid}.json"
+    rec = json.loads(ticket.read_text())
+    rec["checklist"] = [{"id": "c1", "text": "Write it", "done": True, "evidence": [ev]}]
+    ticket.write_text(json.dumps(rec))
+    url = f"/api/ref-file?ticket={tid}&evidence=welcome.md"
+
+    (ws / "welcome.md").write_bytes(b"x" * 524288)
+    assert read_source(ws, tid, "welcome.md")[0] == 200
+    (ws / "welcome.md").write_bytes(b"x" * 524289)
+    code, body, headers = _get(server, url)
+    assert code == 413 and body == b"This file is too big to show here. Open welcome.md in your project to see it."
+    assert headers["Content-Type"].startswith("text/plain")
+    (ws / "welcome.md").unlink()
+    assert _get(server, url)[:2] == (404, b"This file is not in the project any more.")
+
+
 def test_ref_file_headers_and_foreign_origin(ws, server):
     ticket = ws / ".orch/tickets/t_weekly01.json"
     data = json.loads(ticket.read_text())
