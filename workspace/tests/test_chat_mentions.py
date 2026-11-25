@@ -324,3 +324,20 @@ def test_the_reviewer_never_answers_an_ask_to_add_card(proj, run, rel, chat):
     run("config", "set", "workflow.reviewer_answers", "on")
     with pytest.raises(Exception, match="waits for the owner|no recommended"):
         tickets.answer_for_owner(proj, chat, qq["id"], tickets.question_digest(qq), "routine")
+
+
+def test_an_add_answer_saved_before_a_crash_still_adds_on_the_next_sync(proj, run, rel, chat, monkeypatch):
+    q = cg.ask_to_add(proj, chat, BANK, "agent:claude")
+    real = cg.add_from_answer
+    monkeypatch.setattr(cg, "add_from_answer", lambda *a, **k: (_ for _ in ()).throw(SystemExit("crash")))
+    with pytest.raises(SystemExit):
+        tickets.answer(proj, chat, q["question"], "Add", "human:test", "dashboard", person=True)
+    monkeypatch.setattr(cg, "add_from_answer", real)
+    assert not cg._is_member(proj, chat, BANK)
+    run("relay", "inbox")  # the next sync adds it
+    assert cg._is_member(proj, chat, BANK)
+    run("relay", "inbox")
+    assert (
+        "add_pending" not in json.loads((proj / ".orch/secrets/groups.json").read_text())
+        or not json.loads((proj / ".orch/secrets/groups.json").read_text())["add_pending"]
+    )

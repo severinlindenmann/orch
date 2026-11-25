@@ -104,7 +104,7 @@ enum TicketBuilder {
         for u in updates {
             let key = "\(u.workspace)|\(u.ticket)"
             let statusView = u.ticketView?.overlaid(on: byKey[key]?.view)
-            let view = statusView ?? byKey[key]?.view
+            let view = (statusView ?? byKey[key]?.view)?.keepingChat(of: byKey[key]?.view)
             let text = u.ticketView?.light == true && u.text.isEmpty ? (byKey[key]?.text ?? u.text) : u.text
             var st = status(forKind: u.kind)
             if st == .needsYou { st = .working }   // only a real open question counts (below)

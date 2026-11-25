@@ -58,6 +58,9 @@ def test_health_needs_ok(site):
     assert "ok" in lc.health(site({"/health": (200, b"ok\n")}))
     with pytest.raises(AssertionError):
         lc.health(site({"/health": (502, b"bad gateway")}))
+    assert "ok b3b88f76" in lc.health(site({"/health": (200, b"ok b3b88f76\n")}))  # the release (#1208)
+    with pytest.raises(AssertionError):
+        lc.health(site({"/health": (200, b"okay")}))
 
 
 def test_admin_on_public_site_must_be_404(site):
