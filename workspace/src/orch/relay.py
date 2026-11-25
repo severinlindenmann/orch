@@ -1600,17 +1600,16 @@ def _send_review_result(root: Path, qmid: str, ticket: str, saved: dict) -> None
 TAKEN_BACK_REASON_MAX = 200  # relay-api.md "Question taken back"
 
 
-def _taken_back_asked(root: Path, tid: str, qid: str) -> tuple[str, dict] | None:
-    """(message id, record) of the question we sent to the phones, else None."""
-    for mid, rec in net.read_json(_asked_path(root), {}).items():
-        if (
-            isinstance(rec, dict)
-            and rec.get("ticket") == tid
-            and rec.get("question_id") == qid
-            and rec.get("to") == "phones"
-        ):
-            return mid, rec
-    return None
+def _taken_back_asked(root: Path, tid: str, qid: str) -> list[str]:
+    """Message ids of every send of the question to the phones (a re-send has a second id)."""
+    return [
+        mid
+        for mid, rec in net.read_json(_asked_path(root), {}).items()
+        if isinstance(rec, dict)
+        and rec.get("ticket") == tid
+        and rec.get("question_id") == qid
+        and rec.get("to") == "phones"
+    ]
 
 
 def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
@@ -1625,8 +1624,8 @@ def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
     if "relay" not in addons.active(root) or not isinstance(q.get("taken_back"), dict):
         return None
     reason = _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
-    found = _taken_back_asked(root, tid, q["id"])
-    return None if found is None else _send_closed(root, found[0], tid, reason)
+    sent = [_send_closed(root, mid, tid, reason) for mid in _taken_back_asked(root, tid, q["id"])]
+    return next((m for m in sent if m), None)
 
 
 REASON_ANSWERED = "Answered in orch"

@@ -370,7 +370,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
             raise BadRequest("That file could not be read.")
-        if len(f["name"]) > 240 or "\x00" in f["name"]:
+        if len(f["name"]) > 240 or any(c in f["name"] for c in "\x00\t\r\n"):
             raise BadRequest("That file name is not allowed.")
         if isinstance(f.get("text"), str) and f.get("data") is None:
             try:
