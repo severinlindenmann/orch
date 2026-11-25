@@ -481,7 +481,7 @@ const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
 // card = the add-on's last status answer; draft = the person's unsaved choice (the review line shows while it differs)
-const syncUi = {card:null, loading:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
+const syncUi = {card:null, loading:false, failed:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
 const syncSaved = card => ({where:card?.mode === 'remote' ? 'remote' : card?.mode === 'local' ? 'local' : 'off', addr:card?.mode === 'remote' ? card.remote || '' : '', every:String(card?.interval && card.mode === 'remote' ? card.interval : 15)});
 const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
 const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
@@ -526,7 +526,8 @@ async function syncLoad() {
   syncUi.loading = true;
   try {
     const result = await syncRead();
-    if (result.answer && typeof result.answer.shown === 'string') {
+    syncUi.failed = !(result.answer && typeof result.answer.shown === 'string');
+    if (!syncUi.failed) {
       syncUi.card = result.answer;
       // just turned on here: "On this computer only" is offered, the person saves it in the review line
       if (syncUi.wasOff && result.answer.mode === 'off' && !syncUi.draft) syncUi.draft = {where:'local', addr:'', every:'15'};
@@ -586,6 +587,7 @@ function syncWhen(value) {
 function syncInfo(card) {
   if (!card || card.mode === 'off') return null;
   const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
+  const count = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
   const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'card-row sync-info-body'}, h('div', {className:'stack'}, ...body)));
   const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
   const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
@@ -597,12 +599,12 @@ function syncInfo(card) {
     h('div', {className:'grid-3'},
       box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
         remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
-      box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
+      box('sync-what-info', 'What', h('strong', {}, count(c.tickets, 'ticket') + ' · ' + count(c.files, 'file') + ' · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
       box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
         h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
         h('p', {className:'meta', 'data-key':'sync-service'}, card.running ? 'Sync is running.' : 'Sync is stopped on this computer.'))),
     history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
-      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, e.text)))) : null);
+      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, capitalise(e.text || ''))))) : null);
 }
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
@@ -670,18 +672,24 @@ function syncCard(settings) {
       await syncLoad();
     }))) : null;
   const notSynced = array(card?.not_synced);
-  const details = card && card.mode !== 'off' ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
-    h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  const details = card && card.mode !== 'off' && (card.last_error || notSynced.length) ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
+    h('ul', {}, card.last_error ? h('li', {'data-key':'sync-last-error'}, syncLastError(card)) : null, notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  // The Sync page's When card already says "Last: …": its own card shows the status line only when it adds something.
+  const page = route().kind === 'addon';
+  const status = card && card.mode !== 'off' && (!page || syncUi.nowBusy || card.shown !== 'synced' || notSynced.length) ? syncStatusLine(card) : null;
+  const retry = () => { const b = button('Try again', 'outline sm', () => { syncUi.failed = false; render(); return syncLoad(); }); b.dataset.key = 'sync-unread-retry'; return b; };
+  const unread = card ? null : syncUi.failed
+    ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-unread'}, h('p', {}, 'Can’t read the sync setting right now. Nothing was changed.'), retry())
+    : h('p', {className:'meta sync-unread', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…');
   return wrap([
-    // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
-    (() => {
-      const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
-      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Backup') : null, status) : null;
-    })(),
+    // On the Sync page its heading already says Sync: the card heading names the choice instead, like the cards above it.
+    page ? h('header', {className:'card-h', 'data-key':'sync-where-head'}, h('h3', {id:'sync-where-title'}, 'Where to keep a copy'), status)
+      : h('div', {className:'sync-head'}, h('h3', {}, 'Backup'), status),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
-    h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
-    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
+    page ? h('fieldset', {className:'sync-where', 'aria-labelledby':'sync-where-title'}, radios)
+      : h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    unread,
     remoteBox, review, details], !card);
 }
 async function syncSave() {
