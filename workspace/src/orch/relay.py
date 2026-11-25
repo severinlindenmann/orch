@@ -72,7 +72,14 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
         else:
             raise Refused("orch can only send text or a file here, so nothing was sent.")
     cfg = _cfg(root)
-    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
+    try:
+        return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
+    except Refused as e:
+        if getattr(e, "status", 0) is None and not getattr(e, "blocked", False):  # no answer at all
+            err = Refused("The relay can't be reached right now. Check your internet and try again.")
+            err.status = None
+            raise err from None
+        raise
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
@@ -520,8 +527,8 @@ def resolve(root: Path, target: str) -> str:
     names = [w["name"] for w in _directory(root) if w.get("name")]
     known = " You can message: " + ", ".join(names) + "." if names else ""
     raise Refused(
-        f"No reachable workspace called {target}. Ask the admin.{known} "
-        "Run: orch relay refresh to update the list."
+        f"{target} is not in your list yet: your admin chooses who you can write to on the relay admin page."
+        f"{known} After that, run: orch relay refresh"
     )
 
 

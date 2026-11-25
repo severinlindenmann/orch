@@ -825,7 +825,7 @@ def run_relay(args, root: Path, out) -> None:
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n{line}",
+            f"Connected as {who['name']}.\n{_connect_line(root, line)}",
         )
     elif sub == "status":
         try:
@@ -833,17 +833,25 @@ def run_relay(args, root: Path, out) -> None:
             st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
         except Refused:
             st = {"configured": False}
-        text = "Not connected to a relay."
+        text = "Not connected yet."
         if st["configured"]:
             try:
-                relay.whoami_quick(root)
+                who = relay.whoami_quick(root)
                 st["reachable"] = True
-                text = f"Connected to {_host(st['url'])}."
+                names = [w["name"] for w in relay._directory(root) if w.get("name")]
+                st["can_write_to"] = names
+                me = who.get("name") if isinstance(who, dict) else None
+                text = f"Connected to {_host(st['url'])}" + (f" as {me}." if me else ".")
+                text += (
+                    "\nYou can write to: " + ", ".join(names) + "."
+                    if names
+                    else "\nYou can write to: nobody yet. Your admin chooses that on the admin page."
+                )
             except (Refused, OSError, TimeoutError) as e:
                 st["reachable"], st["error"] = False, str(e)
                 text = (
-                    f"Set up, but the relay does not answer right now ({_host(st['url'])}): {e}\n"
-                    "Local work is not affected. Messages wait and go out when it answers again."
+                    f"Can't reach {_host(st['url'])} right now. "
+                    "Messages wait here and go out by themselves. Local work is not affected."
                 )
         fp = _own_fingerprint(root)
         if fp:
@@ -1103,6 +1111,13 @@ def _target_name(root: Path, to: str) -> str:
         pass
     name = relay.name_of(root, to)
     return name if name != to else f"{to} (its name is not known here yet)"
+
+
+def _connect_line(root: Path, line: str) -> str:
+    """The refresh line, then who you can write to: nobody yet is the admin's step, said plainly."""
+    if any(w.get("name") for w in relay._directory(root)):
+        return line
+    return f"{line}\nYou can write to: nobody yet. Your admin chooses that on the admin page."
 
 
 def _own_fingerprint(root: Path) -> str | None:

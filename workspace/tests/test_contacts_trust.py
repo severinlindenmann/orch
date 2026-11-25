@@ -46,10 +46,11 @@ def test_view_lists_every_contact_with_fingerprint_and_state(ws, run):
 
 def test_contacts_that_need_an_accept_come_first(ws, run, rel, person):
     msgtrust.accept(ws, "ws_contoso001", "human:tester", "cli")
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")  # a first contact is trusted now; a taken-back one waits
     rel.inbox.append(signed_msg(SEED_PEER, body={"text": "Hello"}))
     run("relay", "inbox", "--json")
     rows = trust(ws)["items"]
-    assert [r["state"] for r in rows] == ["not_accepted", "accepted"]
+    assert [r["state"] for r in rows] == ["withdrawn", "accepted"]
     assert rows[0]["held"] == 1 and rows[1]["accepted_at"]
 
 

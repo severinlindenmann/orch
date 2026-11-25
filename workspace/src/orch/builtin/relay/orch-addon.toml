@@ -11,9 +11,9 @@ agents_block = "skills/orch-relay/AGENTS-block.md"
 gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", ".agents/skills/orch-relay/workspaces.json"]
 
 [dashboard]
-label = "Contacts"
-title = "Contacts"
-subtitle = "Send messages and files to other workspaces."
+label = "Relay"
+title = "Relay"
+subtitle = "Messages and tasks between your workspaces and phones."
 icon = "users"
 order = 70
 panel = "phone"

@@ -81,3 +81,10 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-24 (ORCH-1676, owner): No dev relay. relay.dev.severin.io is dropped (it failed every secure connection
   since the server move and no code uses it); the demo workspaces and the demo phone use the production relay as one
   more pair set by the admin. One relay is simpler.
+- 2026-11-25 (ORCH-2166, RP3 A, owner): No extra accept step. Two workspaces the admin paired on the relay trust each
+  other from the first message (no fingerprint compare, no Accept); it shows on Home as a new contact connected by the
+  admin. A task (delegate or start) still asks the receiver first (R3.2), and a key that changes later or a contact
+  taken back stays held until a person accepts. Security-relevant: the pairing on the relay is now the trust basis.
+- 2026-11-25 (ORCH-2166, RP8 B, owner): The two add-ons are called "Relay" and "Publish" on every screen, in menus,
+  Settings and the helper's texts; commands stay `orch relay` / `orch publish`. "Contacts", "Phone link" and
+  "Shared" are no longer names of them. Errors read "The relay can't be reached" / "Publish can't be reached".

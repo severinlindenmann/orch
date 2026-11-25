@@ -83,6 +83,11 @@ def _add(args, root: Path) -> None:
             addonjob.detach()
     if args.project_only:
         _out(args, {"ok": True}, f"{names[0]} is turned on in this workspace.")
+    if not args.json and not args.project_only and len(names) == 1 and names[0] in ("relay", "publish"):
+        from orch import nextstep
+
+        if not nextstep.configured(root, names[0]):
+            print("It is not connected yet.")
     if not args.json:
         from orch import harness
 
