@@ -53,6 +53,7 @@ ask; its list replaces the one above.
                                         # files, no new command or setting, no look or words); owner / due only where
                                         # their text says them (their title stays in the history)
     orch ticket kind <id> <kind>          # change the kind later; a kind a person set only a person changes
+    orch changes --since <date|tag>       # release notes: done tickets by kind, with their evidence links
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now

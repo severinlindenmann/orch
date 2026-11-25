@@ -327,6 +327,7 @@ HINTS = {
     "needs": "keep working on what does not wait: orch ticket list",
     "counts": "what each number stands for: orch needs",
     "tokens": "keep working: orch ticket list",
+    "changes": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
