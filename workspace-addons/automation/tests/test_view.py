@@ -38,8 +38,8 @@ def test_empty_view_is_valid(ws):
     v = build(ws, T(8))
     check(v)
     assert {b["type"] for b in v["blocks"]} == {"list", "footnote"}  # no schedules: no table, no week
-    (sch,) = blocks(v, "list", "Schedules")
-    assert sch["items"] == [] and sch["empty"]["title"] == "No schedules yet"
+    (sch,) = blocks(v, "list", "Repeating")  # the same word as the table it becomes, its title above the card
+    assert sch["items"] == [] and sch["above"] is True and sch["empty"]["title"] == "No repeats yet"
     assert "stopped" in v["notice"] and "Ask your helper" not in v["notice"] and "Press" not in v["notice"]
     assert v["button"] == {"label": "Start", "action": {"op": "addon.start"}}
 
@@ -379,11 +379,12 @@ def test_countdown_words_are_written_in_full():
     assert _in(timedelta(minutes=1)) == "in 1 minute"
 
 
-def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
+def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch, set_tz):
     """Coming up (with the week), Recent starts (heading above its card, empty state) and the incoming-work footnote."""
     from orch_automation import service
 
     monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    set_tz("Europe/Zurich")
     add_ticket(
         ws, "t_rec00009", title="Weekly report", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}}
     )
@@ -399,11 +400,33 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     (week,) = blocks(v, "calendar")
     assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
     (runs,) = blocks(v, "list", "Recent starts")
-    assert runs["above"] is True and runs["meta"] == "Latest activity" and runs["items"] == []
-    assert runs["empty"]["title"] == "Nothing has run yet" and "run it now" in runs["empty"]["text"]
+    assert runs["above"] is True and "meta" not in runs and runs["items"] == []
+    # the next start in plain words, by its title, never its number; the button it names is on the page
+    assert runs["empty"]["title"] == "Nothing has run yet"
+    assert runs["empty"]["text"] == "Daily note starts today at 10:00. Use Start now to run one sooner."
     foot = v["blocks"][-1]
     assert foot["type"] == "footnote" and foot["link"]["to"] == "app:addon/relay"
-    assert foot["text"].startswith("Incoming from your phone and other workspaces")
+    # plain words for a person who never heard of the relay (AGENTS.md section 0)
+    assert foot["text"] == "Incoming from your phone and other workspaces \u00b7 Off"
+
+
+def test_stopped_page_promises_no_start_and_footnote_says_why_in_plain_words(ws, monkeypatch):
+    """Stopped: Recent starts names no time (nothing starts by itself); a relay that can't be reached is said plainly."""
+    from orch_automation import listen, service
+
+    add_ticket(
+        ws, "t_rec00011", title="Daily note", ext={"automation": {"recurring": True, "cron": "0 9 * * *"}}
+    )
+    v = build(ws, T(7))
+    (runs,) = blocks(v, "list", "Recent starts")
+    assert runs["empty"]["text"] == "Use Start now to run one sooner."
+    assert v["blocks"][-1]["text"].endswith("\u00b7 Off")
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    listen._write(ws, listening=False, note="Not listening: the relay could not be reached just now")
+    foot = build(ws, T(7))["blocks"][-1]
+    assert (
+        foot["text"].endswith("\u00b7 Can't connect just now, trying again") and "relay" not in foot["text"]
+    )
 
 
 def test_recent_runs_and_last_result_read_the_same_runs(ws):
@@ -592,7 +615,7 @@ def test_one_time_wake_up_is_a_row_marked_once(ws, monkeypatch):
     assert rep["rows"][0]["cells"]["repeats"] == "Mondays at 07:00" and rep["rows"][0]["toggle"]
     assert [c["label"] for c in once["columns"]] == ["Ticket", "Starts"]
     (row,) = once["rows"]
-    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 04 Nov, 10:00"}
+    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 4 Nov, 10:00"}
     assert "subtitle" not in row and "toggle" not in row
     assert [a["label"] for a in row["actions"]] == ["Start now"]
     assert rep["compact"] and once["compact"] and rep["show"] == once["show"] == 5
@@ -671,11 +694,11 @@ def test_new_repeat_zone_is_the_zone_repeat_saves(ws, set_tz):
     ("here", "ext", "now", "shown"),
     [
         # a named zone, read on a computer in that zone
-        ("Europe/Zurich", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Mon 09 Nov, 08:00 CET"),
+        ("Europe/Zurich", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Mon 9 Nov, 08:00 CET"),
         # an old zone-less repeat runs at 08:00 UTC: on this computer that is 09:00, said with its zone
-        ("Europe/Zurich", {"cron": "0 8 * * 1"}, T(8), "Mon 09 Nov, 09:00 CET"),
+        ("Europe/Zurich", {"cron": "0 8 * * 1"}, T(8), "Mon 9 Nov, 09:00 CET"),
         # the computer is a day behind the repeat's zone: Monday 08:00 in Zurich is Sunday evening there
-        ("America/Los_Angeles", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Sun 08 Nov, 23:00 PST"),
+        ("America/Los_Angeles", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Sun 8 Nov, 23:00 PST"),
         # a daylight-saving change between now and the run (Zurich moves on 29 Mar 2026): 08:00 UTC is 10:00 CEST
         (
             "Europe/Zurich",
@@ -704,7 +727,7 @@ def test_next_time_names_its_zone_and_agrees_with_the_scheduler(
     check(v)
     assert _next_cell(v, "Report") == shown
     at = _scheduler_next(ws, "t_rep00001", now).astimezone()
-    assert shown == f"{at:%a %d %b, %H:%M} {at.tzname()}"
+    assert shown == f"{at:%a} {at.day} {at:%b, %H:%M} {at.tzname()}"
 
 
 def test_a_zone_less_repeat_in_a_workspace_with_a_zone_shows_the_scheduler_s_time(ws, set_tz, monkeypatch):
@@ -717,7 +740,7 @@ def test_a_zone_less_repeat_in_a_workspace_with_a_zone_shows_the_scheduler_s_tim
     add_ticket(ws, "t_old00001", title="Old", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
     v = build(ws, T(8))
     at = _scheduler_next(ws, "t_old00001", T(8)).astimezone()
-    assert _next_cell(v, "Old") == f"{at:%a %d %b, %H:%M} CET" == "Mon 09 Nov, 00:00 CET"
+    assert _next_cell(v, "Old") == f"{at:%a} {at.day} {at:%b, %H:%M} CET" == "Mon 9 Nov, 00:00 CET"
 
 
 def test_a_long_zone_name_becomes_its_offset():
