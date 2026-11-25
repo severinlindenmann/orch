@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
+import shutil
 import struct
+import subprocess
 import zlib
 from pathlib import Path
 
@@ -403,3 +406,31 @@ def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
     brave = "/usr/bin/brave-browser"
     monkeypatch.setattr(cli_shot.shutil, "which", lambda n: brave if n == "brave-browser" else None)
     assert cli_shot.find_browser() == "/usr/bin/brave-browser"
+
+
+_FAKE_DOM = """
+const doc = (busy, frames = []) => ({
+  querySelector: q => (q === '[aria-busy="true"]' && busy ? {} : null),
+  querySelectorAll: q => (q === 'iframe, frame' ? frames : []),
+});
+const frame = d => ({ contentDocument: d });
+const foreign = { get contentDocument() { throw new Error('cross-origin'); } };
+const cases = {
+  idle: doc(false, [frame(doc(false)), frame(null)]),
+  top: doc(true),
+  iframe: doc(false, [frame(doc(true))]),
+  nested: doc(false, [frame(doc(false, [frame(doc(true))]))]),
+  foreign: doc(false, [foreign]),
+};
+const out = {};
+for (const [name, document] of Object.entries(cases)) out[name] = eval(BUSY_JS);
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="no node here")
+def test_busy_check_looks_into_same_origin_iframes():
+    # ORCH-2021: add-on pages run in an iframe and say aria-busy there; the top page alone looked done.
+    src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
+    assert json.loads(out) == {"idle": False, "top": True, "iframe": True, "nested": True, "foreign": False}

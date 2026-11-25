@@ -725,10 +725,12 @@ def build(root: Path, now: datetime | None = None) -> dict:
             }
         )
 
+    # R1.1: with the relay off here, nothing on the page names the phone, other workspaces or the relay
+    relay = bool(orchcli.addon_on(root, "relay"))
     ls = listen.read(root) if pid else {}
     sources = _sources(tickets, ls, bool(pid))
     # the first row is the phone and workspaces inbox: with nothing arrived it is just the footnote below
-    waiting_hooks = sources if (ls.get("recent") or []) else sources[1:]
+    waiting_hooks = sources if relay and (ls.get("recent") or []) else sources[1:]
     warn = needs.rows(root, now)
     if warn:
         blocks.append(
@@ -825,23 +827,24 @@ def build(root: Path, now: datetime | None = None) -> dict:
                 },
             }
         )
-    state = (
-        "Listening"
-        if ls.get("listening")
-        else clean(ls.get("note") or ("Not listening" if pid else "Automation is stopped"), 80)
-    )
-    arrived = (ls.get("recent") or [None])[-1] if ls.get("recent") else None
-    blocks.append(
-        {
-            "type": "footnote",
-            "text": clean(
-                "Incoming from your phone and other workspaces \u00b7 "
-                + (state if not arrived else f"{state}, last message {_arrival(arrived)['subtitle']}"),
-                200,
-            ),
-            "link": {"label": "Manage incoming work", "to": "app:addon/relay"},
-        }
-    )
+    if relay:
+        state = (
+            "Listening"
+            if ls.get("listening")
+            else clean(ls.get("note") or ("Not listening" if pid else "Automation is stopped"), 80)
+        )
+        arrived = (ls.get("recent") or [None])[-1] if ls.get("recent") else None
+        blocks.append(
+            {
+                "type": "footnote",
+                "text": clean(
+                    "Incoming from your phone and other workspaces \u00b7 "
+                    + (state if not arrived else f"{state}, last message {_arrival(arrived)['subtitle']}"),
+                    200,
+                ),
+                "link": {"label": "Manage incoming work", "to": "app:addon/relay"},
+            }
+        )
 
     # "today" is the person's day on this computer, not the UTC date (ORCH-89: 00:00-01:00 counted yesterday's runs)
     today = now.astimezone().date()

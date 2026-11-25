@@ -98,9 +98,10 @@ def test_a_new_check_file_runs_only_once_approved(proj, databricks):
     _write(proj, "db-dev", doc)
     rows = health.overview(proj, NOW)
     assert databricks == []  # nothing ran
-    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == (
-        f"orch checks approve db-dev --hash {checkfiles.short(checkfiles.digest(proj, 'db-dev'))}"
-    )
+    short = checkfiles.short(checkfiles.digest(proj, "db-dev"))
+    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == f"orch checks approve db-dev --hash {short}"
+    # the dashboard's Approve shows what it runs and sends this hash back (#1549)
+    assert rows[0]["runs"] == "databricks current-user me --profile dev" and rows[0]["hash"] == short
     _ok(proj, "db-dev")
     rows = health.overview(proj, NOW)
     assert rows[0]["state"] == "works" and not rows[0].get("approve") and len(databricks) == 1
