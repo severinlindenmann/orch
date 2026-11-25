@@ -156,6 +156,9 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--prompt-file", help="use this text as the prompt instead of the ticket summary")
     w = r.add_parser("_wrap", help=argparse.SUPPRESS)
     w.add_argument("rest", nargs=argparse.REMAINDER)
+    w = r.add_parser("_resume", parents=[common], help=argparse.SUPPRESS)  # runs_live.resume_soon
+    w.add_argument("ticket")
+    w.add_argument("question")
 
 
 def _out(args, data, text: str) -> None:
@@ -479,6 +482,15 @@ def dispatch(args, root: Path) -> bool:
     sub = args.sub
     if sub == "_wrap":
         _wrap_cmd(root, args.rest)
+        return True
+    if sub == "_resume":  # detached after a person's answer: start the agent that asked, if still due
+        tid = tickets.resolve(root, args.ticket)
+        q = next(
+            (x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == args.question), None
+        )
+        if q is None or q.get("answer") is None:
+            raise Refused("orch run _resume is internal.")
+        runs_live.resume_after_answer(root, tid, q, args.by or tickets.current_actor())
         return True
     if sub is None:
         raise Refused(
