@@ -337,3 +337,19 @@ def test_the_plain_terminal_has_its_own_typing_switch_off_by_default(proj, run):
     assert run("config", "set", "focus.terminal_typing", "off")[0] == 0
     assert config.focus_terminal_typing(proj) is False
     assert run("config", "set", "focus.terminal_typing", "maybe")[0] == 2
+
+
+def test_crash_while_replacing_keeps_the_old_config(proj, monkeypatch):
+    p = proj / ".orch" / "config.toml"
+    p.parent.mkdir()
+    p.write_text('[workspace]\nagent = "a"\n', encoding="utf-8")
+    before = p.read_bytes()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config.procs, "replace", boom)
+    with pytest.raises(OSError):
+        config.set_key(proj, "workspace", "agent", "b")
+    assert p.read_bytes() == before
+    assert [x.name for x in p.parent.iterdir()] == ["config.toml"]

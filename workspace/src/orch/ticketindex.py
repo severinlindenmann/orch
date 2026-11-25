@@ -267,6 +267,12 @@ def rows(root: Path, include_hidden: bool = False) -> list[dict]:
     return out
 
 
+def unreadable(root: Path) -> list[Path]:
+    """The ticket files `ticket list` leaves out (broken JSON, wrong id, a newer format), for one message."""
+    d = root / ".orch" / "tickets"
+    return sorted(d / f"{tid}.json" for tid, f in _fresh(root).items() if f.get("row") is None)
+
+
 def load_where(root: Path, keep, include_hidden: bool = False) -> list[dict]:
     """The stored tickets whose index row passes `keep(row)`, by creation time, as tickets.list_all reads
     them: only their files are read (ORCH-1621: a read that needs a few tickets never opens all 10,000).

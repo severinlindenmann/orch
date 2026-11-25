@@ -320,14 +320,19 @@ def _read_ticket(p: Path, tid: str) -> dict:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("id") != tid:
-                raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+                raise Refused(
+                    f"Ticket {tid} is invalid: its id does not match its filename ({p}). Fix it by hand."
+                )
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
                     raise
-                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+                raise Refused(
+                    f"Ticket {tid} is being updated or {p} is broken. Try again in a moment;"
+                    " if it stays, fix that file by hand."
+                ) from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
 

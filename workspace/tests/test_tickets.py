@@ -292,6 +292,43 @@ def test_stale_lock_does_not_block(proj, run, new_ticket):
     assert run("log", tid, "x")[0] == 0 and not lock.exists()
 
 
+def test_crash_mid_write_keeps_the_old_ticket_file(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    p = proj / ".orch" / "tickets" / f"{tid}.json"
+    before = p.read_bytes()
+    t = tickets.load(proj, tid)
+    t["title"] = "New"
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tickets.json, "dump", boom)
+    with pytest.raises(OSError):
+        tickets.save(proj, t)
+    assert p.read_bytes() == before
+    assert not list(p.parent.glob(".tmp-*"))
+
+
+def test_two_writers_on_one_ticket_do_not_corrupt_it(proj, new_ticket):
+    import threading
+
+    tid = new_ticket()
+    errors = []
+
+    def add(n):
+        try:
+            tickets.check_add(proj, tid, f"step {n}", "human:tester")
+        except Refused as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=add, args=(n,)) for n in range(6)]
+    [x.start() for x in threads]
+    [x.join() for x in threads]
+    t = read(proj, tid)
+    assert len(t["checklist"]) + len(errors) == 6 and len(t["checklist"]) >= 1
+    assert not list((proj / ".orch" / "tickets").glob(".tmp-*"))
+
+
 def test_edit_and_show_json(proj, run, new_ticket):
     tid = new_ticket()
     assert run("ticket", "edit", tid, "--title", "New title")[0] == 0

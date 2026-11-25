@@ -176,7 +176,9 @@ def test_broken_json_is_refused_and_not_overwritten(one_ticket, proj, run):
             assert code == 2 and err.startswith("Refused: Ticket "), (garbage, argv, err)
             assert "Traceback" not in err + out
         assert p.read_text(encoding="utf-8") == garbage
-        assert run("ticket", "list")[0] == 0
+        assert str(p) in err
+        code, out, _ = run("ticket", "list")
+        assert code == 0 and "Not listed:" in out and str(p) in out
 
 
 def test_old_proof_fields_load_show_as_plain_and_are_kept(proj, run):

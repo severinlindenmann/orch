@@ -1372,6 +1372,10 @@ def run(args: argparse.Namespace) -> None:
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        bad = [] if args.json or args.ext else ticketindex.unreadable(root)
+        if bad:
+            more = f" (+{len(bad) - 1} more)" if len(bad) > 1 else ""
+            txt += f"\nNot listed: {bad[0]}{more} can't be read. Fix it by hand or update orch."
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
