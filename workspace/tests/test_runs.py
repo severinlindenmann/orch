@@ -740,6 +740,7 @@ def test_a_refused_start_on_a_live_ticket_is_not_counted_and_queues_once(proj, n
     """#1293: 21 automatic starts on a ticket a helper works on: none counts toward the cap, one note."""
     from orch import brake
 
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
     tid = new_ticket()
     runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
     for _ in range(brake.CAP_PER_DAY + 1):
@@ -758,6 +759,7 @@ def test_a_refused_start_on_a_live_ticket_is_not_counted_and_queues_once(proj, n
 
 def test_a_busy_refusal_says_how_to_go_on(proj, new_ticket, run):
     """#2055: the refusal names the way on for each kind of claim (the local time is ORCH-1872's test)."""
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
     tid = new_ticket()
     key = tickets.load(proj, tid).get("key") or tid
     runs.claim(proj, tid, "agent:claude", "generic")  # by hand: no process
