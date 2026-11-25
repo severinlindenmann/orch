@@ -243,3 +243,83 @@ def test_a_done_ticket_that_does_not_link_the_pull_request_is_not_opened(ws, mon
     r.run()
     assert tickets.load(ws, t["id"])["status"] == "done"
     assert "is Done and does not link" in store.find(store.read(ws), url(1))["why"]
+
+
+def _said_merge(ws, n, head, answer="Merge", action="approve", by="human:severin"):
+    """A ticket with the Merge card of pull request n, answered as given at commit head (ORCH-1118)."""
+    from orch import tickets
+
+    t = tickets.create(ws, "CI change", by="human:p")
+    t = tickets.load(ws, t["id"])
+    t["questions"] = [{
+        "id": "q9", "text": "Merge the CI change?", "answer": answer, "answered_by": by,
+        "decision": {"action": action}, "action": {"merge": url(n), "head": head},
+        "card": {"kind": "link", "open": url(n), "ok_label": "Merge"},
+    }]  # fmt: skip
+    tickets.save(ws, t)
+    return t["id"], str(t.get("key") or t["id"])
+
+
+class SaidGitHub(FakeGitHub):
+    """Also takes the queue's review and its merge of the pull request itself."""
+
+    def __init__(self, prs, review_err="", merge_err=""):
+        super().__init__(prs)
+        self.review_err, self.merge_err, self.reviews, self.merged = review_err, merge_err, [], []
+
+    def approve(self, u, head, body):
+        self.reviews.append((u, head, body))
+        return self.review_err
+
+    def merge_pr(self, u, head):
+        if self.merge_err:
+            return self.merge_err
+        self.merged.append((u, head))
+        self.prs[int(u.rsplit("/", 1)[1])]["state"] = "MERGED"
+        return ""
+
+
+def test_the_persons_merge_on_their_own_workflow_change_is_approved_and_merged_by_the_queue(ws):
+    """ORCH-1118 (#2829 q9): the owner wrote the pull request, so GitHub refused his own review and nobody could
+    land it. Their Merge on the card at this commit lets the queue approve it with its login and merge it."""
+    tid, key = _said_merge(ws, 1, f"{1:040d}")
+    add(ws, 1, ticket=tid)
+    asked = []
+    gh = SaidGitHub({1: {"files": [".github/workflows/ci.yml"]}})
+    r, calls = make(ws, gh, FakeGit(), ask=lambda *a: asked.append(a) or "X")
+    r.run()
+    assert members(gh, calls) == [[1]] and states(ws) == {1: "merged"} and not asked
+    assert gh.merged == [(url(1), f"{1:040d}")]
+    assert gh.reviews[0][:2] == (url(1), f"{1:040d}") and f"Merge card {key} q9" in gh.reviews[0][2]
+    assert f"as the Merge on {key} q9 said" in store.find(store.read(ws), url(1))["why"]
+
+
+def test_a_review_github_does_not_count_says_what_the_owner_changes(ws):
+    tid, _ = _said_merge(ws, 1, f"{1:040d}")
+    add(ws, 1, ticket=tid)
+    gh = SaidGitHub(
+        {1: {"files": [".github/workflows/ci.yml"]}}, merge_err="the base branch policy prohibits the merge"
+    )
+    r, _ = make(ws, gh, FakeGit())
+    r.run()
+    why = store.find(store.read(ws), url(1))["why"]
+    assert states(ws) == {1: "out"} and gh.prs[1].get("state", "OPEN") == "OPEN"
+    assert "base branch policy prohibits" in why and "code owner of these files in .github/CODEOWNERS" in why
+
+
+@pytest.mark.parametrize(
+    "head, action, by",
+    [
+        ("f" * 40, "approve", "human:severin"),
+        (f"{1:040d}", "send_back", "human:severin"),
+        (f"{1:040d}", "approve", "agent:x"),
+    ],
+)
+def test_only_a_persons_merge_on_this_very_commit_lets_the_queue_merge_it(ws, head, action, by):
+    tid, _ = _said_merge(ws, 1, head, action=action, by=by)
+    add(ws, 1, ticket=tid)
+    asked = []
+    gh = SaidGitHub({1: {"files": [".github/workflows/ci.yml"]}})
+    r, _ = make(ws, gh, FakeGit(), ask=lambda root, t, u: asked.append(u) or "ORCH-9")
+    r.run()
+    assert not gh.reviews and not gh.merged and asked == [url(1)]  # a new card for the person, as before

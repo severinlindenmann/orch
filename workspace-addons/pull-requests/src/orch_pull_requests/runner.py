@@ -37,7 +37,9 @@ branch, in line order:
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card,
-  made on its ticket also when the ticket is Done (it opens again as Waiting). A lone one takes a scheduled turn,
+  made on its ticket also when the ticket is Done (it opens again as Waiting). When a person already answered
+  Merge on its card for that very commit (their own pull request, whose review GitHub never takes from its
+  author, ORCH-1118), the queue approves that commit with its own login and merges the pull request itself. A lone one takes a scheduled turn,
   at most one round in three (LONE_EVERY), so the groups behind it go on meanwhile (ORCH-1377).
 - a pull request from a fork is never put on a branch of the repository: it leaves the queue, a person merges it.
 - fixes go first (`--first`, or a red-run ticket of the release keeper, ORCH-1023), on a green base branch too:
@@ -108,6 +110,12 @@ LABEL_LINE = (
 NO_ROOM = "this computer's GitHub write limit had no room for the group"
 # what a look at one pull request found
 OK, GONE_MERGED, LEAVE, AGAIN, UNKNOWN = "ok", "merged", "out", "again", "unknown"
+MERGED_ON_GITHUB = "MERGED"
+# ORCH-1118: what the owner changes when GitHub does not count the queue's review on a code-owned change
+NOT_OWNER = (
+    "add the queue's login as a code owner of these files in .github/CODEOWNERS, or another code owner "
+    "approves it on GitHub."
+)
 NO_WAKE = ("closed", "owner merges", "draft", "fork")  # left the queue on purpose: nobody is woken for it
 BAD_REVIEW = {"CHANGES_REQUESTED": "changes were requested", "REVIEW_REQUIRED": "it still needs a review"}
 
@@ -1297,6 +1305,16 @@ class Runner:
                 self.retry([e], f"its group {url} was green, but the queue's mark was not set on it")
                 return []
             line = f"{e['url']} was checked green in its own queue group {url} on top of {base}; "
+            said = (approved_merges(self.root) or {}).get(pr_key(e["url"]))
+            if said and said["head"] == e["head"]:  # the person said Merge on this commit (ORCH-1118)
+                got = self.merge_said(e, said, line)
+                if got is None:
+                    self.retry(
+                        [e], f"its group {url} was green, but the write limit had no room for the review"
+                    )
+                else:
+                    self.finish(e, *got)
+                return []
             self.finish(e, OUT, line + self.owner_card(e), "owner merges")
             return []
         if o.status == "checks failed" and not unknown:
@@ -1306,6 +1324,36 @@ class Runner:
             return [e]
         self.retry([e], f"the group {url} gave no verdict: {o.line}")
         return []
+
+    def merge_said(self, e: dict, said: dict, line: str) -> tuple[str, str, str] | None:
+        """ORCH-1118 (#2829): a person answered Merge on the card of their own pull request, and GitHub never
+        takes a review from the author. The queue approves that very commit with its own login (the code
+        owner's review, when the rules count it) and merges the pull request itself. (state, line, status), or
+        None when the write limit had no room (it waits in line again)."""
+        u, card = e["url"], said["card"]
+        approve, merge = getattr(self.gh, "approve", None), getattr(self.gh, "merge_pr", None)
+        if approve is None or merge is None:
+            return OUT, line + f"a person merges it on GitHub ({card} said Merge).", "owner merges"
+        if not self.take("other", f"{u} review"):
+            return None
+        body = f"{said['by']} said Merge on the orch Merge card {card}; the merge queue checked it green."
+        why = approve(u, e["head"], body)
+        if why:
+            return OUT, line + f"GitHub did not take the queue's review ({why}); {NOT_OWNER}", "owner merges"
+        why = merge(u, e["head"])
+        if why:
+            got = self.gh.pr(u)
+            if not (got and got.get("state") == MERGED_ON_GITHUB):
+                return OUT, line + f"GitHub did not merge it ({why}); {NOT_OWNER}", "owner merges"
+        with contextlib.suppress(Exception):  # counted like the group merges; it never waits for the count
+            from orch import ghlimit
+
+            ghlimit.count("merge", u)
+        return (
+            MERGED,
+            line + f"the merge queue merged it as {self.me}, as the Merge on {card} said.",
+            "merged",
+        )
 
     def owner_card(self, e: dict) -> str:
         """Who merges a proved pull request, making the Merge card on its ticket when there is none yet."""
@@ -1729,6 +1777,35 @@ def pr_key(url: str) -> str | None:
     """One spelling per pull request: GitHub owner and repository names do not care about case."""
     m = store.PR_URL.fullmatch((url or "").strip())
     return f"{m[1].lower()}#{int(m[2])}" if m else None
+
+
+def approved_merges(root: Path) -> dict[str, dict] | None:
+    """{pull request key: {"card": "<ticket key> <question>", "head", "by"}} for every Merge card a person
+    answered Merge that did not merge it (ORCH-1118: their own pull request, which GitHub wants another login to
+    approve): the queue may merge exactly that commit. None when the tickets cannot be read."""
+    from orch import review, tickets
+
+    out = {}
+    try:
+        rows = tickets.list_all(root)
+    except Exception:  # noqa: BLE001 - unreadable tickets: nothing counts as said
+        return None
+    for t in rows:
+        for q in t.get("questions") or []:
+            if not isinstance(q, dict) or q.get("answer") is None or tickets.taken_back_text(q):
+                continue
+            u = review.merge_url(q)
+            k = pr_key(u) if u else None
+            by = str(q.get("answered_by") or "")
+            head = (q.get("action") or {}).get("head") if isinstance(q.get("action"), dict) else None
+            if (
+                k
+                and by.startswith("human:")
+                and (q.get("decision") or {}).get("action") == "approve"
+                and head
+            ):
+                out[k] = {"card": f"{t.get('key') or t.get('id')} {q.get('id')}", "head": str(head), "by": by}
+    return out
 
 
 def merge_cards(root: Path) -> dict[str, str] | None:

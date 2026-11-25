@@ -29,6 +29,16 @@ class MergeFailed(Refused):
     """GitHub (or the pull request itself) refused the merge: the review card sends it back to the helper."""
 
 
+class OwnPullRequest(Refused):
+    """ORCH-1118 (#2829, 25 Nov): the person who clicked Merge wrote the pull request and the branch rules
+    want a review, which GitHub never takes from a pull request's own author. Nothing was tried on GitHub.
+    `base` is the branch it goes into, so the caller can tell whether the merge queue takes it from here."""
+
+    def __init__(self, text: str, base: str = ""):
+        super().__init__(text)
+        self.base = base
+
+
 class GitHubUnreachable(Refused):
     """GitHub gave no answer (connection refused, timeout, no network, a 5xx): nothing was refused, so a
     merge card stays open and the person presses Merge again (ORCH-1415). Never a MergeFailed."""
@@ -65,10 +75,14 @@ def _answered(cp: subprocess.CompletedProcess) -> subprocess.CompletedProcess:
 
 
 OPEN_IT = "Open the pull request and merge it there."
-JQ_VIEW = '[.state, (.reviewDecision // ""), .headRefOid] | @tsv'
+JQ_VIEW = '[.state, (.reviewDecision // ""), .headRefOid, (.author.login // ""), .baseRefName] | @tsv'
 SHA = re.compile(r"[0-9a-f]{40}")
 CHANGED = "The pull request changed after the card was made. Ask the helper for a new card."
 REVIEW_BODY = "Merge clicked on the orch card."
+OWN_PR = (
+    "GitHub does not let you approve your own pull request, so it goes to the merge queue, which approves "
+    "and merges it once its checks are green."
+)
 NO_GH = "The merge needs the GitHub command line (gh) signed in with your own account. " + OPEN_IT
 
 
@@ -114,16 +128,17 @@ def _parts(url: str) -> tuple[str, str]:
     return m[1], m[2]
 
 
-def _view(gh: str, url: str, env_own: bool) -> tuple[str, str, str]:
-    """(state, review decision, head commit) of the pull request."""
-    args = ["pr", "view", url, "--json", "state,reviewDecision,headRefOid", "--jq", JQ_VIEW]
+def _view(gh: str, url: str, env_own: bool) -> tuple[str, str, str, str, str]:
+    """(state, review decision, head commit, author's login, base branch) of the pull request."""
+    fields = "state,reviewDecision,headRefOid,author,baseRefName"
+    args = ["pr", "view", url, "--json", fields, "--jq", JQ_VIEW]
     v = _answered(_gh(gh, args, 15)) if env_own else _gh_plain(gh, args, 15)
     if v.returncode != 0:
         raise Refused(f"GitHub did not show the pull request: {_first_line(v.stderr)}. {OPEN_IT}")
-    state, review, head = ([*v.stdout.rstrip("\r\n").split("\t"), "", ""])[:3]
+    state, review, head, author, base = ([*v.stdout.rstrip("\r\n").split("\t"), "", "", "", ""])[:5]
     if not SHA.fullmatch(head):
         raise Refused(f"GitHub did not show the pull request's newest commit. {OPEN_IT}")
-    return state, review, head
+    return state, review, head, author, base
 
 
 def _gh_plain(gh: str, args: list[str], timeout: int) -> subprocess.CompletedProcess:
@@ -614,7 +629,7 @@ def head_of(url: str) -> str:
     gh = shutil.which("gh")
     if gh is None:
         raise Refused("--merge needs the GitHub command line (gh) to read the pull request.")
-    state, _, head = _view(gh, url, env_own=False)
+    state, _, head, _, _ = _view(gh, url, env_own=False)
     if state != "OPEN":
         raise Refused("That pull request is not open on GitHub, so there is nothing to merge.")
     return head
@@ -684,7 +699,7 @@ def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> di
     login = who.stdout.strip()
     if who.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login):
         raise Refused(NO_GH)
-    state, review, now = _view(gh, url, env_own=True)
+    state, review, now, author, base = _view(gh, url, env_own=True)
     if state == "MERGED":
         return {"login": login, "already": True}
     if state != "OPEN":
@@ -705,7 +720,9 @@ def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> di
     if add_review and (
         review == "REVIEW_REQUIRED" or (review == "" and workflow_check(url, head, own=True) is not None)
     ):
-        # the person's own pull request: GitHub says no, and the merge below tells what is missing
+        if author.lower() == login.lower():  # GitHub refuses an author's own review (ORCH-1118)
+            diag.log("ghmerge.own_pull_request", "info", repo=repo, number=num)
+            raise OwnPullRequest(OWN_PR, base)
         got = _answered(_gh(
             gh,
             ["api", "-X", "POST", f"repos/{repo}/pulls/{num}/reviews", "-f", f"commit_id={head}",
