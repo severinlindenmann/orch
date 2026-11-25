@@ -86,6 +86,12 @@
         },
         "prompt_via": { "enum": ["arg", "stdin"] },
         "model_args": { "$ref": "#/$defs/argv", "description": "Optional, built-in adapters only. Added to every fresh and resumed argv (before '--') when orch passes the ticket's model ({model} = sonnet or opus; modelpick.py). Absent = the tool keeps its own default model." },
+        "model_names": {
+          "type": "object",
+          "propertyNames": { "enum": ["haiku", "sonnet", "opus", "fable"] },
+          "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$" },
+          "description": "Optional, with model_args. The tool's own name for each orch model ({model} becomes it). A model left out gets no model_args: the tool keeps its own default. Absent = {model} is orch's name as is."
+        },
         "oneshot": {
           "type": "object", "required": ["fresh", "resume"], "additionalProperties": false,
           "properties": {
@@ -376,7 +382,7 @@
               "properties": {
                 "dir_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$", "description": "Environment variable naming the tool's folder; else home is used." },
                 "home": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "description": "The tool's folder in the person's home." },
-                "path": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^([A-Za-z0-9_.-]{1,64}|\\{folder\\}|\\{session\\}\\.[a-z]{1,8})$" }, "description": "Parts below the folder: {folder} = the workspace path with every other character than A-Z, a-z, 0-9 as '-'; the last part {session}.<ext>." }
+                "path": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^([A-Za-z0-9_.-]{1,64}|\\{folder\\}|\\{session\\}(\\.[a-z]{1,8})?)$" }, "description": "Parts below the folder: {folder} = the workspace path with every other character than A-Z, a-z, 0-9 as '-'; the session's own file {session}.<ext>, or a {session} folder with a fixed file name below it." }
               }
             }
           }

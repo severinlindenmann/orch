@@ -301,17 +301,16 @@ def claim(root: Path, batch: list[dict]) -> list[dict]:
 
 def start_part(root: Path, urls: list[str]) -> list[str]:
     """The part of a split red group that is checked now (ORCH-1377): those of urls still running (not taken
-    out meanwhile) lose their split mark in one step, so `queue remove` refuses them from here on. Their clock
-    starts again: the part's own run starts now, not when the first group was taken (#1914)."""
+    out meanwhile) lose their split mark in one step, so `queue remove` refuses them from here on."""
 
     def go(rows):
         got = []
-        at = now()
+        started = now()  # the clock of the smaller group restarts (ORCH-914)
         for u in urls:
             row = find(rows, u)
             if row is not None and row.get("state") == RUNNING:
                 row.pop("split", None)
-                row["taken"] = at
+                row["taken"] = started
                 got.append(u)
         return got
 

@@ -293,3 +293,17 @@ def test_a_red_group_checks_the_member_the_failing_suite_imports_alone_first(ws)
     assert git.asked == ("c" * 40, ["test_board.py"])
     assert states(ws) == {1: "merged", 2: "out", 3: "merged"}
     assert any("#2 touch that and run alone first" in x for x in lines)
+
+
+def test_the_clock_restarts_when_a_red_group_is_split(ws):
+    for n in (1, 2):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    store.claim(ws, store.waiting(ws))
+    rows = store.read(ws)
+    for r in rows:
+        r["taken"] = "2000-01-01T00:00:00Z"
+        r["split"] = True
+    store.change(ws, lambda cur: cur.__setitem__(slice(None), rows))
+    store.start_part(ws, [url(2)])
+    assert store.find(store.read(ws), url(2))["taken"] != "2000-01-01T00:00:00Z"
+    assert store.find(store.read(ws), url(1))["taken"] == "2000-01-01T00:00:00Z"

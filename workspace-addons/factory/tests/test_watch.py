@@ -540,3 +540,20 @@ def test_watcher_stop_refused_by_the_guard_does_not_stop(ws, monkeypatch):
     monkeypatch.setattr(cli, "background", lambda args, root: stopped.append(root) or 0)
     assert cli.main(["--dir", str(ws), "stop"]) != 0
     assert stopped == []
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_a_closed_order_wakes_nobody_and_its_run_ends(ws, run, monkeypatch, status):
+    """#1828, #2739: a person closed the order while its run was on: the watcher wakes no helper for crew news or a
+    standstill, `next` says done instead of a refusal, and the list no longer says running."""
+    order, _ = started(ws, run)
+    watch.once(ws)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    edit(ws, order, lambda t: t.update(status=status))
+    n = len(runs(ws))
+    assert watch.once(ws) == []
+    monkeypatch.setattr(watch, "_now", lambda: time.time() + watch.STILL_AFTER + 1)
+    assert watch.once(ws) == [] and len(runs(ws)) == n
+    assert run("next", order) == {"order": order, "step": "done", "closed": True}
+    assert [o["stage"] for o in run("list") if o["order"] == order] == [status]

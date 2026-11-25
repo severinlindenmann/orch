@@ -43,7 +43,8 @@
   let view = null;
   const ok = async () => ({ok: true});
   const control = {take: async () => { if (view) view.control({state: 'finishing', mine: true}); setTimeout(() => view && view.control({state: 'person', mine: true, sites: ['office-partners.example']}), 1500); return {ok: true}; },
-    give: async () => { if (view) view.control({state: 'helper'}); return {ok: true, text: 'Given back to the helper.'}; }, cancel: ok, send: ok,
+    // the broker's answer (orch_browse/takeover.py GIVEN_BACK): a fresh page at the site's start, the sign-in may stay
+    give: async () => { if (view) view.control({state: 'helper'}); return {ok: true, text: 'Given back to the helper. Its browser starts again on a fresh page (office-partners.example). The helper can see what the site itself shows after you give back (for example your sign-in or recent searches); orch kept nothing you typed.'}; }, cancel: ok, send: ok,
     allowSends: async site => { if (view) view.control({state: 'person', mine: true, sites: ['office-partners.example'], send_site: site || undefined}); return {ok: true}; }};
   document.querySelectorAll('[data-mk-peek]').forEach(host => { const p = host.lastChild && host.lastChild.__peek; if (p) p.control(CTL); });
   document.querySelectorAll('[data-mk-view]').forEach(host => {

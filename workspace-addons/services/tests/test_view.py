@@ -358,3 +358,84 @@ def test_stop_on_a_job_marked_important_asks_once_everywhere(ws):
     f, g = _facts(by["fwd"])["Important"], _facts(by["plain"])["Important"]
     assert f["value"] == "Yes, Stop asks first" and f["switch"]["action"]["args"]["verb"] == "important-off"
     assert g["value"] == "No" and g["switch"]["action"]["args"]["verb"] == "important-on"
+
+
+# ---------------------------------------------------------------- what a failure affects (ORCH-1854)
+
+
+def test_the_records_depends_reaches_the_page_before_the_switches(cli, ws):
+    # the dependency fact was only drawn in tests: list never carried the record's `depends` to the page
+    _add(cli, "web", "Web preview", "--start")
+    p = ws / ".orch/addons/services/services/web.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    rec["depends"] = ["The demo for Lea"]
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    item = _view(cli)["blocks"][0]["groups"][0]["items"][0]
+    labels = [f["label"] for f in item["panel"]["facts"]]
+    assert labels[:3] == ["State", "Depends on it", "Starts by itself"]
+    assert _facts(item)["Depends on it"]["value"] == "The demo for Lea"
+
+
+def _failing(**extra):
+    q = {
+        "ticket": "t_abc1234",
+        "id": "q1",
+        "title": "Budget guard keeps stopping",
+        "text": "What it affects…",
+    }
+    return {
+        "id": "b",
+        "name": "Budget guard",
+        "state": "failing",
+        "since": None,
+        "auto": False,
+        "health": {"ok": True, "text": "Process alive"},
+        "question": {**q, **extra.pop("question", {})},
+        **extra,
+    }
+
+
+def test_a_failing_service_with_no_known_dependents_says_not_known(ws):
+    from orch_services.view import build
+
+    view = build(ws, ([_failing(), {"id": "a", "name": "Alpha", "state": "running", "since": None}], 0, None))
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    failing, fine = view["blocks"][0]["groups"][0]["items"]
+    assert [f["label"] for f in failing["panel"]["facts"]][:2] == ["State", "Depends on it"]
+    assert _facts(failing)["Depends on it"]["value"] == "Not known"
+    assert "Depends on it" not in _facts(fine)  # a healthy one without dependents adds no line
+    assert [b["label"] for b in failing["question"]["buttons"]] == ["Restart", "Stop", "Look into it"]
+    assert "notice" not in view
+
+
+def test_the_suggested_look_into_it_comes_first_and_stop_keeps_its_check(ws):
+    from orch_services.view import build
+
+    row = _failing(question={"suggested": "Look into it"}, important=True, depends=["Every helper run"])
+    view = build(ws, ([row], 0, None))
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    buttons = view["blocks"][0]["groups"][0]["items"][0]["question"]["buttons"]
+    assert [b["label"] for b in buttons] == ["Look into it", "Restart", "Stop"]
+    assert buttons[0] == {"label": "Look into it", "link": "t_abc1234"}
+    assert "These stop working: Every helper run." in buttons[2]["confirm"]["lines"]
+    # no ticket to look into: the suggestion cannot be a link, Restart stays first
+    row["question"]["ticket"] = None
+    buttons = build(ws, ([row], 0, None))["blocks"][0]["groups"][0]["items"][0]["question"]["buttons"]
+    assert [b["label"] for b in buttons] == ["Restart", "Stop"]
+
+
+def test_running_fine_again_is_the_notice_and_a_good_fact(ws):
+    from orch_services.view import build
+
+    row = {"id": "b", "name": "Budget guard", "state": "running", "since": None, "auto": False}
+    row["recovered"] = {"since": "2026-11-24T09:52:00Z"}
+    view = build(ws, ([row], 0, None))
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    assert view["notice_tone"] == "good"
+    assert view["notice"].startswith("Runs fine again. Budget guard kept stopping; it has run fine since ")
+    fact = _facts(view["blocks"][0]["groups"][0]["items"][0])["Last problem"]
+    assert fact["tone"] == "good" and fact["value"].startswith("Kept stopping, runs fine since ")
+    two = build(ws, ([row, {**row, "id": "c", "name": "Mailer"}], 0, None))
+    assert two["notice"] == "Runs fine again. Budget guard and 1 more kept stopping; they run fine again."
+    # a platform problem says more than a recovery: it keeps the notice
+    assert build(ws, ([row], 0, "no session"))["notice_tone"] == "warn"

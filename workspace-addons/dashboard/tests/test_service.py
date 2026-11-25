@@ -260,15 +260,21 @@ def test_windows_stop_checks_record_before_taskkill(ws, monkeypatch, matches):
 
 
 def test_start_waits_for_old_listener_before_spawn(ws, monkeypatch):
+    from types import SimpleNamespace
     from unittest.mock import MagicMock
 
     from orch import procs
 
     now = [0.0]
-    monkeypatch.setattr(procs.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(procs.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    # procs gets its own fake time and socket: patching the shared modules let other threads move this clock
+    fake_time = SimpleNamespace(**vars(time))
+    fake_time.monotonic = lambda: now[0]
+    fake_time.sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+    monkeypatch.setattr(procs, "time", fake_time)
     probe = MagicMock(side_effect=[MagicMock(), MagicMock(), ConnectionRefusedError()])
-    monkeypatch.setattr(procs.socket, "create_connection", probe)
+    fake_socket = SimpleNamespace(**vars(socket))
+    fake_socket.create_connection = probe
+    monkeypatch.setattr(procs, "socket", fake_socket)
 
     def spawn(*args, **kwargs):
         assert probe.call_count == 3
