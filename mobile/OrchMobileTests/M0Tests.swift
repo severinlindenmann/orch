@@ -149,6 +149,51 @@ final class OutboxTests: XCTestCase {
     override func setUp() async throws { dir = tmpDir(); scratch = tmpDir(); UserDefaults.standard.removeObject(forKey: "mockFail") }
     override func tearDown() async throws { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: scratch) }
 
+    func testNewTopicReviewChoiceSurvivesPersistenceAndSend() async throws {
+        let ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        for choice in [true, false] {
+            let item = try ob.enqueue(MessageDraft(text: "A new request", humanReview: choice),
+                                      to: .newTopic(workspace: MockRelay.pilatus))
+            let restored = try JSONDecoder().decode(OutboxItem.self, from: JSONEncoder().encode(item))
+            XCTAssertEqual(restored.humanReview, choice)
+            let request = try Outbox.request(for: restored)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(request)) as? [String: Any])
+            XCTAssertEqual(json["human_review"] as? Bool, choice)
+            XCTAssertNil(json["ticket"])
+            XCTAssertNil(json["general"])
+            let relay = MockRelay(latency: .zero)
+            _ = await ob.flush(using: relay)
+            let requests = await relay.requests
+            XCTAssertEqual(requests.last?.humanReview, choice)
+            ob.discard(item.clientId)
+        }
+    }
+
+    func testReviewChoiceIsOmittedForExistingTopicsGeneralAndJoinedMemos() throws {
+        let ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let draft = MessageDraft(text: "Follow up", humanReview: false)
+        for target: SendTarget in [.general(workspace: MockRelay.pilatus), .topic(workspace: MockRelay.pilatus, ticket: "t_q3sum1")] {
+            let item = try ob.enqueue(draft, to: target)
+            XCTAssertNil(item.humanReview)
+            XCTAssertNil(try Outbox.request(for: item).humanReview)
+        }
+        let joined = try ob.enqueue(draft, to: .newTopic(workspace: MockRelay.pilatus), joinAfter: "first-message")
+        XCTAssertNil(joined.humanReview)
+        XCTAssertNil(try Outbox.request(for: joined).humanReview)
+    }
+
+    func testOlderOutboxItemsKeepWorkspaceDefault() throws {
+        let ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let item = try ob.enqueue(MessageDraft(text: "Old request"), to: .newTopic(workspace: MockRelay.pilatus))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as? [String: Any])
+        json.removeValue(forKey: "humanReview")
+        let restored = try JSONDecoder().decode(OutboxItem.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(restored.humanReview)
+        let request = try Outbox.request(for: restored)
+        let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(request)) as? [String: Any])
+        XCTAssertNil(wire["human_review"])
+    }
+
     func testQueuedThenSentThenReconciled() async throws {
         let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
         let item = try ob.enqueue(MessageDraft(text: "  hello  "), to: .general(workspace: MockRelay.pilatus))

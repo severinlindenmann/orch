@@ -39,6 +39,24 @@ def test_file_is_copied_with_metadata(proj, run, validate, tid):
     assert (proj / ev["ref"]).parent == proj / ".orch" / "tickets" / tid / "evidence"
 
 
+def test_copy_knows_when_the_file_changed_since(proj, run, validate, tid):
+    """ORCH-1874: the copy remembers where it came from, so a rewrite of that file afterwards shows."""
+    (proj / "docs").mkdir()
+    (proj / "docs" / "welcome.md").write_text("Hi there!")
+    run("check", "done", tid, "c1", "--file", "docs/welcome.md")
+    t = read(proj, tid)
+    validate(t)
+    ev = t["checklist"][0]["evidence"][0]
+    assert ev["source"] == "docs/welcome.md"
+    assert not tickets.proof_changed(proj, tid, ev)
+    (proj / "docs" / "welcome.md").write_text("Dear visitor.")
+    assert tickets.proof_changed(proj, tid, ev)
+    assert tickets.proof_source(proj, tid, ev) == b"Dear visitor."
+    (proj / "docs" / "welcome.md").unlink()
+    assert not tickets.proof_changed(proj, tid, ev)  # gone is not "changed": the copy is all there is
+    assert not tickets.proof_changed(proj, tid, {**ev, "source": "../outside.md"})
+
+
 def test_same_name_twice_keeps_both(proj, run, tid):
     (proj / "f.txt").write_text("1")
     run("check", "done", tid, "c1", "--file", "f.txt")

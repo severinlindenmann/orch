@@ -499,3 +499,33 @@ test('without api.run the card says it cannot run', async () => {
   const res = await decks[0].o.onRun(decks[0].items[0], {});
   assert.equal(res.ok, false);
 });
+
+// ORCH-1847: orch marks a plain reversible question one_tap; the page passes it on and saves the tap as the usual answer
+const plainQ = (extra = {}) => card('core:q:t_1:q1', {key: 'q1', ticket_key: 'PIL-2', recommended: 'Tuesday', one_tap: true, text: 'The supplier can deliver on Tuesday or Thursday. Which day?',
+  card: {kind: 'choice', title: 'The supplier can deliver on Tuesday or Thursday. Which day?', preview: {type: 'options', options: [{id: 'Tuesday', title: 'Tuesday'}, {id: 'Thursday', title: 'Thursday'}]}}, ...extra});
+test('one tap: mapCard passes one_tap only for a choice; the tap is saved once as the plain answer, after the Undo time', async () => {
+  const {UI} = load();
+  assert.equal(UI.review.mapCard(plainQ(), fakeApi([[]]), NOW).oneTap, true);
+  assert.equal(UI.review.mapCard(plainQ({one_tap: 'yes'}), fakeApi([[]]), NOW).oneTap, false);
+  assert.equal(UI.review.mapCard(card('a', {one_tap: true}), fakeApi([[]]), NOW).oneTap, false, 'not a choice: never one tap');
+  const sent = [];
+  const {decks} = await mount(fakeApi([[plainQ()]], async b => { sent.push(b); return {ok: true}; }), {hold: 20});
+  decks[0].o.onDecide(decks[0].items[0], 'ok', {picked: 'Thursday'});
+  await flush();
+  assert.equal(sent.length, 0, 'held for Undo first');
+  await new Promise(r => setTimeout(r, 40));
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{id: 'core:q:t_1:q1', digest: 'd-core:q:t_1:q1', verdict: 'ok', picked: 'Thursday', note: null}]);
+});
+test('one tap on a question answered elsewhere (Home, the phone): says so and reloads; a stale one shows the new version', async () => {
+  const api = fakeApi([[plainQ()], []], async () => ({ok: false, error: {code: 'decided', message: 'Answered already on Home by severin.'}}));
+  const {decks, toasts} = await mount(api);
+  decks[0].o.onDecide(decks[0].items[0], 'ok', {picked: 'Thursday'});
+  await flush(); await flush();
+  assert.equal(toasts[0].m, 'Answered already on Home by severin.');
+  const st = fakeApi([[plainQ()], [plainQ({digest: 'd-new'})]], async () => ({ok: false, error: {code: 'changed', message: 'x'}}));
+  const b = await mount(st);
+  b.decks[0].o.onDecide(b.decks[0].items[0], 'ok', {picked: 'Thursday'});
+  await flush(); await flush();
+  assert.equal(b.toasts[0].m, 'This card changed. Showing the new version.');
+  assert.equal(b.decks[1].items[0].digest, 'd-new');
+});

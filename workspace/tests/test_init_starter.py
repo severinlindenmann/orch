@@ -162,3 +162,40 @@ def test_empty_clears_the_tags(ws, run):
     assert run("config", "set", "workspace.tags", "")[0] == 0
     assert config.workspace_tags(ws) == []
     assert "tags" not in (config.read(ws).get("workspace") or {})
+
+
+# ---- Ctrl-D / Ctrl-C at a question (ORCH-1868: a traceback and a half .orch folder)
+
+
+@pytest.mark.parametrize("stop", [EOFError, KeyboardInterrupt])
+@pytest.mark.parametrize("found", [True, False])  # "Pick [1]:" or, with no agent found, "Name for it"
+def test_stopping_at_the_agent_question_leaves_nothing(proj, run, monkeypatch, stop, found):
+    from orch import adapters
+
+    agents = [{"name": "claude", "label": "Claude", "found": True, "version": None}] if found else []
+    monkeypatch.setattr(adapters, "detect", lambda: agents)
+    monkeypatch.setattr(term, "is_terminal", lambda f: True)
+
+    def ask(prompt=""):
+        raise stop
+
+    monkeypatch.setattr("builtins.input", ask)
+    code, out, err = run("init")
+    assert code == 2 and "Traceback" not in err
+    assert err.strip() == "Stopped. Nothing was set up. Run orch init again."
+    assert not (proj / ".orch").exists()
+
+
+def test_stopping_at_the_name_question_says_orch_is_set_up(proj, run, monkeypatch):
+    monkeypatch.setattr(term, "is_terminal", lambda f: True)
+
+    def ask(prompt=""):
+        if prompt.startswith("Your name"):
+            raise KeyboardInterrupt
+        return ""
+
+    monkeypatch.setattr("builtins.input", ask)
+    code, _, err = run("init")
+    assert code == 2 and "Traceback" not in err and "Refused" not in err
+    assert "Stopped. orch is set up in this folder" in err and "Run orch init again" in err
+    assert (proj / ".orch" / "tickets").is_dir()

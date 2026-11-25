@@ -74,6 +74,17 @@ def test_helper_sees_only_attached_notes(cli, vault, monkeypatch, fake_orch, ws)
     assert "Kunde seit" not in log and "read" in log
 
 
+def test_note_names_the_ticket_it_is_attached_to(cli, vault, monkeypatch, fake_orch):
+    """The note page links to the ticket by its key, so the person can open it and check (ORCH-1853)."""
+    setup_notes(cli, vault)
+    assert jrun(cli, "use", "DM1-12", "notes", "Projects/Helvetia Logistik")[0] == 0
+    show = jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]
+    assert show["tickets"] == ["t_abc123"] and show["keys"] == {"t_abc123": "DM1-12"}
+    assert jrun(cli, "notes", "show", "Projects/Preismodell 2027")[1]["keys"] == {}
+    as_helper(monkeypatch)
+    assert jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]["keys"] == {}
+
+
 def test_rules_never_and_all(cli, vault, monkeypatch):
     setup_notes(cli, vault, read="never", write="never")
     as_helper(monkeypatch)

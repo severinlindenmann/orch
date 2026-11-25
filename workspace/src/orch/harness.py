@@ -291,6 +291,7 @@ ORCH_IGNORE = [
     "local/",
     "chat/",
     "tickets/.lock-*",  # per-ticket write locks
+    "cache/",  # add-on caches (ORCH-1873): stay ignored after `orch addon remove` without --purge
     # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
     # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
     "tickets/",

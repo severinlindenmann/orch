@@ -43,7 +43,10 @@ MSG_ENV_CHANGE = (
     "install from here. Start orch normally (without ORCH_HOME) to update it or add things."
 )
 MSG_TEST_WS = "This is a test workspace; start it with its own test orch folder."
-MSG_TEST_INSTALL = "This is a test install of orch; it only works in test folders."
+MSG_TEST_INSTALL = (
+    "This is a test install of orch; it only works in test folders under .orch-test in your home folder, "
+    "so install orch normally to use it here."
+)
 
 
 class HomeRefused(Refused):
