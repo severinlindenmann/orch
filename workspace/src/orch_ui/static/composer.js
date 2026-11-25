@@ -68,7 +68,7 @@ UI.voiceRecorder=(o={})=>{
  const icon=n=>(window.icon?window.icon(n,16):'');
  const button=document.createElement('button');button.type='button';button.className='btn sm voice-record';
  const idle=()=>{button.innerHTML=icon('mic')+'<span>Record</span>';button.classList.remove('rec');button.setAttribute('aria-pressed','false');button.title='Record a voice note';button.setAttribute('aria-label','Record a voice note');button.disabled=false};idle();
- let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false,dropped=false,asking=0;
+ let rec=null,stream=null,chunks=[],t0=0,timer=null,speech=null,words=[],gone=false,dropped=false,asking=false,reqs=0;
  const secs=()=>Math.max(1,Math.round((Date.now()-t0)/1000)),clock=n=>Math.floor(n/60)+':'+String(n%60).padStart(2,'0');
  const tick=()=>{const n=secs();button.lastChild.textContent='Stop · '+clock(n);if(n>=maxSecs)stop()};
  const release=()=>{clearInterval(timer);timer=null;stream?.getTracks().forEach(t=>t.stop());stream=null;try{speech?.stop()}catch(_){/* already ended */}speech=null};
@@ -82,10 +82,10 @@ UI.voiceRecorder=(o={})=>{
   const r=new SR();r.lang=lang;r.processLocally=true;r.continuous=true;r.interimResults=false;
   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)words.push(e.results[i][0].transcript.trim())};
   r.onerror=()=>{};try{r.start();speech=r}catch(_){/* no words, the sound file is kept */}}
- async function start(){if(rec||gone||button.disabled)return;button.disabled=true;dropped=false;const ask=++asking;let got;
-  try{got=await md.getUserMedia({audio:true})}catch(e){if(ask!==asking||gone)return;asking=0;idle();const blocked=!!e&&(e.name==='NotAllowedError'||e.name==='SecurityError');o.onError?.(blocked?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.',blocked?'blocked':'none');return}
-  if(ask!==asking||gone){got.getTracks().forEach(t=>t.stop());return}  /* cancelled while the browser asked: cancel() told the page */
-  asking=0;stream=got;
+ async function start(){if(rec||gone||button.disabled)return;button.disabled=true;dropped=false;const ask=++reqs;asking=true;let got;
+  try{got=await md.getUserMedia({audio:true})}catch(e){if(ask!==reqs||gone)return;asking=false;idle();const blocked=!!e&&(e.name==='NotAllowedError'||e.name==='SecurityError');o.onError?.(blocked?'The microphone is blocked. Allow it for this page in the browser, then record again.':'No microphone was found.',blocked?'blocked':'none');return}
+  if(ask!==reqs||gone){got.getTracks().forEach(t=>t.stop());return}  /* cancelled while the browser asked: cancel() told the page */
+  asking=false;stream=got;
   chunks=[];words=[];try{rec=new MR(stream,{mimeType:kind[0]})}catch(_){rec=new MR(stream)}
   rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
   rec.onstop=()=>{const n=secs(),type=rec.mimeType||kind[0];rec=null;release();idle();if(!gone)o.onState?.(false,{cancelled:dropped,empty:!chunks.length});if(gone||dropped||!chunks.length)return;
@@ -95,8 +95,8 @@ UI.voiceRecorder=(o={})=>{
   button.innerHTML=icon('stop')+'<span></span>';tick();timer=setInterval(tick,500);o.onState?.(true,{});listen()}
  function stop(){if(rec&&rec.state!=='inactive'){try{speech?.stop()}catch(_){/* ended */}setTimeout(()=>{if(rec&&rec.state!=='inactive')rec.stop()},speech?400:0)}}
  function cancel(){dropped=true;if(rec&&rec.state!=='inactive'){rec.stop();return}
-  if(asking){asking=0;idle();if(!gone)o.onState?.(false,{cancelled:true,empty:true})}}  /* still asking: at once; a microphone granted later is released */
+  if(asking){asking=false;reqs++;idle();if(!gone)o.onState?.(false,{cancelled:true,empty:true})}}  /* still asking: at once; a microphone granted later is released */
  button.onclick=()=>rec?stop():start();
- return {button,start,stop,cancel,secs:()=>rec?secs():0,get recording(){return !!rec},destroy(){gone=true;asking=0;if(rec&&rec.state!=='inactive')rec.stop();release()}};
+ return {button,start,stop,cancel,secs:()=>rec?secs():0,get recording(){return !!rec},destroy(){gone=true;asking=false;reqs++;if(rec&&rec.state!=='inactive')rec.stop();release()}};
 };
 document.addEventListener('DOMContentLoaded',()=>document.querySelectorAll('[data-composer-demo]').forEach(root=>UI.composer(root,root.dataset.composerDemo==='voice'?{voice:true,accept:[...DEMO_EXT,'webm','ogg','m4a'],attachLabel:'Add file'}:root.dataset.composerDemo==='row'?{layout:'row',interrupt:false,attachLabel:'Add files',sendLabel:'Send',placeholder:'Message the helper',hint:'Paste a screenshot or drop files here · up to 10 files, 25 MB each'}:{})));})();

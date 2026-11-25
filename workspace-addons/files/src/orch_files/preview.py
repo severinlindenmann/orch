@@ -126,17 +126,20 @@ def build(root: Path, path: str) -> dict | None:
     return out
 
 
-def secret_text(root: Path, row: dict, data: bytes) -> bool:
-    """True when a file's text holds what the orch secret check flags (it is then never served): plain text over
-    everything that would be sent, Office files and PDFs over the text inside them."""
+def secret_check(root: Path, row: dict, data: bytes) -> str | None:
+    """None when a file may be served; "secret" when its text holds what the orch secret check flags, "unchecked"
+    when it could not be read all the way through (it is then not served either). Plain text is checked over
+    everything that would be sent; Office files and PDFs over every part of them."""
     if row["kind"] in ("picture", "video", "audio", "archive"):
-        return False
+        return None
     if row["kind"] in ("doc", "pdf") or extract.ext_of(row["name"]) == "xlsx":
-        _, text, title = extract.text_of(row["name"], row["kind"], data)
-        return bool(text or title) and index.secret_in(text + "\n" + (title or ""), root)
+        text = extract.pdf_scan(data) if row["kind"] == "pdf" else extract.office_scan(data)
+        if text is None:
+            return "unchecked"
+        return "secret" if index.secret_in(text, root) else None
     if not extract.looks_text(data):
-        return False
-    return index.secret_in(extract.decode(data), root)
+        return None
+    return "secret" if index.secret_in(extract.decode(data), root) else None
 
 
 def _mtime_ns(root: Path, path: str) -> int | None:
@@ -163,6 +166,8 @@ def _zip_based(root: Path, path: str, row: dict, ext: str, kind: str) -> dict | 
     data = walk.read_head(str(root), path, extract.NAME_ONLY)
     if data is None:
         return {"state": "error"}
+    if (ext == "xlsx" or kind == "doc") and secret_check(root, row, data):
+        return dict(PRIVATE_ITEM)  # a secret in any part, or a part that cannot be read: name only
     if ext == "xlsx":
         rows, sheets = extract.xlsx_rows(data, max_rows=TABLE_ROWS + 1)
         if index.secret_in("\n".join("\t".join(r) for r in rows) + "\n" + "\n".join(sheets), root):

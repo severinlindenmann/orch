@@ -167,20 +167,33 @@ def _when(at) -> str:
 # ------------------------------------------------------------------ cards for `orch ask`
 
 
-def _file_preview(root: Path, src: str, where: str) -> dict:
+def _read_small(root: Path, tid: str | None, src: str) -> bytes | None:
+    """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
+    and pages are), anything else a file in the workspace. None when missing, too large or not allowed."""
+    try:
+        if src.startswith("artifacts/"):
+            if tid is None:
+                return None
+            return safefile.read_ticket_file(root, tid, "artifacts", src[len("artifacts/") :], 64 * 1024)
+        return safefile.open_file_ref(root, src, 64 * 1024)
+    except safefile.TooLarge:
+        return None
+
+
+def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> dict:
     ext = Path(src).suffix.lower()
     kind = review.FILE_TYPES.get(ext)
     if kind in ("img", "page"):
         return {"type": kind, "src": src}
     if ext in (".md", ".txt"):
-        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        data = _read_small(root, tid, src)
         if data is None:
             raise Refused(f"{where}: '{src}' was not found or is too large for a text card.")
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
         return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
     if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
-        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        data = _read_small(root, tid, src)
         try:
             pv = json.loads(data.decode("utf-8")) if data is not None else None
         except ValueError:
@@ -191,7 +204,7 @@ def _file_preview(root: Path, src: str, where: str) -> dict:
     raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
 
-def _option(root: Path, spec: str) -> dict:
+def _option(root: Path, spec: str, tid: str | None = None) -> dict:
     ident, eq, rest = spec.partition("=")
     if not eq or not ident.strip() or not rest.strip():
         raise Refused(f'An option is "ID=Title" or "ID=Title:file", got "{spec[:40]}".')
@@ -200,7 +213,7 @@ def _option(root: Path, spec: str) -> dict:
         out = {
             "id": ident.strip(),
             "title": title.strip(),
-            "preview": _file_preview(root, tail.strip(), "option"),
+            "preview": _file_preview(root, tail.strip(), "option", tid),
         }
     else:
         out = {"id": ident.strip(), "title": rest.strip()}
@@ -265,7 +278,7 @@ def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     return card, [no_label], args.suggest, title
 
 
-def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+def build_card(root: Path, args, tid: str | None = None) -> tuple[dict, list[str], str | None, str]:
     if getattr(args, "run", None) is not None:
         return build_run_card(root, args)
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
@@ -276,7 +289,7 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
             card[k] = v
     options: list[str] = []
     if kind == "choice":
-        opts = [_option(root, o) for o in args.option]
+        opts = [_option(root, o, tid) for o in args.option]
         if len(opts) < 2:
             raise Refused('A choice needs at least two --option "ID=Title[:file]".')
         if args.after or args.file:
@@ -287,7 +300,7 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 o["text"] = about[o["id"]]
         card["preview"] = {"type": "options", "options": opts}
         if args.before:  # how it is today, beside the options (the person compares, then picks one)
-            card["preview"]["before"] = _file_preview(root, args.before, "before")
+            card["preview"]["before"] = _file_preview(root, args.before, "before", tid)
         options = [o["id"] for o in opts]
     elif args.option:
         raise Refused("A card takes --option only with --choose.")
@@ -300,11 +313,11 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     elif args.before:
         card["preview"] = {
             "type": "compare",
-            "before": _file_preview(root, args.before, "before"),
-            "after": _file_preview(root, args.after, "after"),
+            "before": _file_preview(root, args.before, "before", tid),
+            "after": _file_preview(root, args.after, "after", tid),
         }
     elif args.file:
-        card["preview"] = _file_preview(root, args.file, "file")
+        card["preview"] = _file_preview(root, args.file, "file", tid)
     elif kind == "link":
         if not args.open:
             raise Refused("A link card needs --open URL (or --file).")
@@ -448,7 +461,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
         if not args.open:
             args.open = args.ci_shots
-    card, options, suggest, _title = _guard(build_card, root, args)
+    card, options, suggest, _title = _guard(build_card, root, args, tid)
     links = _guard(links_of, getattr(args, "ref", None) or [])
     if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
         links = [*(links or []), {"label": "Workflow changes", "url": args.open + "/files"}]

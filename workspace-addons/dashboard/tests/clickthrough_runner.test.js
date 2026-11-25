@@ -266,3 +266,26 @@ test('--part: the parts share the click-throughs out and each checks only its ow
   assert.deepEqual(partFeatures(all, p1, features, { n: 1, of: 2 }), ['x', 'z', 'nobody']);   // part 1 names the unclaimed one
   assert.deepEqual(partFeatures(all, p2, features, { n: 2, of: 2 }), ['y']);
 });
+
+test('a lane whose browser was left logged out gets a fresh context; a logged-in one is kept (#2456)', async () => {
+  const { stayLoggedIn } = require('../clickthrough/run.cjs');
+  const base = 'http://127.0.0.1:5000';
+  const ctx = (ok, secret) => ({
+    closed: false,
+    request: { get: async () => ({ ok: () => ok }) },
+    storageState: async () => ({ origins: [{ origin: base, localStorage: secret ? [{ name: 'orch_page_secret', value: secret }] : [] }] }),
+    async close() { this.closed = true; },
+  });
+  const log = console.log;
+  console.log = () => {};
+  try {
+    const fresh = ctx(true, 's2');
+    const good = ctx(true, 's1');
+    assert.equal(await stayLoggedIn(good, base, async () => fresh), good);
+    assert.equal(good.closed, false);
+    for (const bad of [ctx(false, 's1'), ctx(true, null)]) {   // refused reads (403), or the page secret is gone
+      assert.equal(await stayLoggedIn(bad, base, async () => fresh, 'm-token-login.cjs'), fresh);
+      assert.equal(bad.closed, true);
+    }
+  } finally { console.log = log; }
+});

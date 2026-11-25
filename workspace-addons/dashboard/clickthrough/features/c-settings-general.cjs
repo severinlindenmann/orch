@@ -7,6 +7,15 @@ module.exports = {
   async run({ page, open, reload, act, must, workspace, git }) {
     const sw = key => page.locator(`[data-key="${key}"]`);
     const checked = async key => (await sw(key).getAttribute('aria-checked')) === 'true';
+    // after a reload the page draws its last copy first, then the newer state (#2589): wait for the switch to say it
+    const shows = async (key, want) => {
+      for (const end = Date.now() + 15000; ;) {
+        const v = await sw(key).getAttribute('aria-checked', { timeout: 2000 }).catch(() => null);
+        if ((v === 'true') === want && v !== null) return true;
+        if (Date.now() > end) return false;
+        await page.waitForTimeout(250);
+      }
+    };
     // flip a switch, reload: it stayed flipped; flip it back, reload: the default is there again
     const flip = async (op, key, review) => {
       const was = await checked(key);
@@ -16,10 +25,10 @@ module.exports = {
       };
       await act(op, click);
       await reload();
-      must((await checked(key)) === !was, `${key} did not stay flipped after a reload`);
+      must(await shows(key, !was), `${key} did not stay flipped after a reload`);
       await act(op, click);
       await reload();
-      must((await checked(key)) === was, `${key} did not go back to its first state`);
+      must(await shows(key, was), `${key} did not go back to its first state`);
     };
 
     await open('#settings/general');
@@ -29,7 +38,7 @@ module.exports = {
     await page.locator('[data-key="pf-name"]').fill('Pilatus Lunch Club');
     await page.locator('[data-key="pf-description"]').fill('Lunches and tables for the team');
     await act('workspace.set', () => page.locator('[data-key="pf-save"]').click());
-    await page.locator('[data-key="lk-status"]').getByText('Saved.').waitFor();  // name, then description, are sent one after the other
+    await page.locator('[data-key="lk-status"]').getByText('Saved.').waitFor();  // name, then description, are sent one after the other (a reload before brings them back, #1402)
     await reload();
     let seen = await page.locator('[data-key="settings-profile"]').innerText();
     must(seen.includes('Pilatus Lunch Club') && seen.includes('Lunches and tables for the team'), 'the saved name and description are gone after a reload');
@@ -38,7 +47,7 @@ module.exports = {
     await page.locator('[data-key="pf-name"]').fill('Pilatus');
     await page.locator('[data-key="pf-description"]').fill('');
     await act('workspace.set', () => page.locator('[data-key="pf-save"]').click());
-    await page.locator('[data-key="lk-status"]').getByText('Saved.').waitFor();  // name, then description, are sent one after the other
+    await page.locator('[data-key="lk-status"]').getByText('Saved.').waitFor();  // name, then description, are sent one after the other (a reload before brings them back, #1402)
     await reload();
     seen = await page.locator('[data-key="settings-profile"]').innerText();
     must(seen.includes('Pilatus') && !seen.includes('Lunch Club'), 'the name did not go back to Pilatus');
@@ -76,9 +85,10 @@ module.exports = {
     await dlg.getByText('Report ready').waitFor({ timeout: 60000 });
     await dlg.getByRole('button', { name: /Close|Done/ }).first().click().catch(() => page.keyboard.press('Escape'));
     await reload();
-    const count = () => page.locator('[data-key="settings-diag-reports"]').innerText();
-    for (let i = 0; i < 6 && /^0 reports/.test(await count()); i++) { await page.waitForTimeout(2000); await reload(); }  // the count is read from the folder
-    must(!/^0 reports/.test(await count()), 'the made report is not counted, also not after 10 seconds');
+    // the reports folder is watched (#1402): the open page is told and draws the new count by itself, no reload
+    const reports = page.locator('[data-key="settings-diag-reports"]');
+    const counted = await reports.filter({ hasNotText: /^0 reports/ }).waitFor({ timeout: 15000 }).then(() => true, () => false);
+    must(counted, 'the made report is not counted: ' + await reports.innerText());
     await act('diag.delete_reports', () => page.locator('[data-key="settings-diag-delete-reports"]').click());
     await reload();
     must(/^0 reports/.test(await page.locator('[data-key="settings-diag-reports"]').innerText()), 'the reports are still there after Delete all');

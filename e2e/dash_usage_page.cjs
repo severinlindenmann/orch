@@ -1,4 +1,5 @@
 // USG-1 browser half: changes every rule on the dashboard's Usage page once, like a person (ORCH-893).
+// Not a node --test file: it needs the real services its scenario starts. Run it as `e2e/run.sh USG-1` (scenarios_usage.py).
 // usage: PW_DIR=<node_modules holding playwright> node dash_usage_page.cjs <dashboard url> <sign-in link> page|home [shots dir]
 //   page: limit, a refused limit, order, on/off, end date and Keep it, no end, a ready-made spread, Switch by itself
 //   home: the Usage warning row on Home and its Got it

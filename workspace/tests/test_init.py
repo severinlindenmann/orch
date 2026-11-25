@@ -734,6 +734,43 @@ def test_an_untouched_copy_is_still_synced_and_removed(proj):
     assert not dest.exists()
 
 
+def test_an_empty_skill_folder_left_by_a_broken_copy_is_replaced(proj):
+    # ORCH-1787: an older copy broke off after mkdir and left an empty folder without the marker
+    from orch import harness
+
+    (proj / ".orch/harness/skills/s1").mkdir(parents=True)
+    (proj / ".orch/harness/skills/s1/SKILL.md").write_text("x", encoding="utf-8")
+    (proj / ".agents/skills/s1/sub").mkdir(parents=True)
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (proj / ".agents/skills/s1/SKILL.md").read_text(encoding="utf-8") == "x"
+
+
+def test_a_copy_that_breaks_off_part_way_is_still_orchs(proj, monkeypatch):
+    # ORCH-1787: the marker comes first, so the next run replaces a half copy
+    from orch import harness
+
+    src = proj / ".orch/harness/skills/s1"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("x", encoding="utf-8")
+    (src / "two.md").write_text("y", encoding="utf-8")
+    dest = proj / ".agents/skills/s1"
+    real, calls = harness.shutil.copyfile, []
+
+    def copy_once(a, b):
+        if calls:
+            raise OSError("broken off")
+        calls.append(a)
+        return real(a, b)
+
+    monkeypatch.setattr(harness.shutil, "copyfile", copy_once)
+    with pytest.raises(OSError):
+        harness._copy_dir(src, dest)
+    monkeypatch.setattr(harness.shutil, "copyfile", real)
+    assert (dest / harness.COPY_MARK).is_file()
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (dest / "two.md").read_text(encoding="utf-8") == "y"
+
+
 def time_future():
     import time
 

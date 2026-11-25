@@ -737,3 +737,40 @@ def test_footer_does_not_mark_input_shown_under_another_author(proj, new_ticket,
     tickets.log(proj, tid, "Answered q9: yes", "human:other")
     run("log", tid, "working", "--by", "agent:claude")
     assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_a_refused_start_on_a_live_ticket_is_not_counted_and_queues_once(proj, new_ticket):
+    """#1293: 21 automatic starts on a ticket a helper works on: none counts toward the cap, one note."""
+    from orch import brake
+
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
+    tid = new_ticket()
+    runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
+    for _ in range(brake.CAP_PER_DAY + 1):
+        with pytest.raises(runs.Busy) as e:
+            runs.start(proj, tid, "agent:automation", mode="oneshot")
+        assert e.value.extra["pending"] is True
+    starts = proj / ".orch" / "run" / "starts.json"
+    assert not starts.exists() or not json.loads(starts.read_text("utf-8"))["starts"].get(tid)
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == [
+        "agent:automation asked for more work on this ticket."
+    ]
+    runs.release(proj, tid)
+    brake.count_start(proj, tid, "agent:automation")  # a start that really began is counted
+    assert len(json.loads(starts.read_text("utf-8"))["starts"][tid]) == 1
+
+
+def test_a_busy_refusal_says_how_to_go_on(proj, new_ticket, run):
+    """#2055: the refusal names the way on for each kind of claim (the local time is ORCH-1872's test)."""
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
+    tid = new_ticket()
+    key = tickets.load(proj, tid).get("key") or tid
+    runs.claim(proj, tid, "agent:claude", "generic")  # by hand: no process
+    code, _, err = run("run", "start", tid, "--by", "human:p", "--text", "Use the new file")
+    assert code == 2
+    assert "started by agent:claude today " in err
+    assert f"orch run release {key}" in err
+    runs.release(proj, tid)
+    runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
+    code, _, err = run("run", "start", tid, "--by", "human:p", "--text", "Use the new file")
+    assert code == 2 and f'orch run send {key} "<text>"' in err

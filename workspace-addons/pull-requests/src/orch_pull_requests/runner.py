@@ -1411,16 +1411,7 @@ class Runner:
         from orch import tickets
         from orch.errors import Refused as CoreRefused
 
-        with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
-            tickets.note_history(self.root, tid, BY, line)
-            if status:
-                tickets.ref_set(self.root, tid, e["url"], status, BY)
-        if state == MERGED:  # ORCH-1741: its last pull request merged and nothing else open: no card
-            with contextlib.suppress(ImportError, AttributeError):
-                from orch import reviewer
-
-                reviewer.close_now(self.root, tid)
-            return
+        _tell_ticket(self.root, tid, e["url"], line, status, merged=state == MERGED)
         if state != OUT or status in NO_WAKE:
             return
         # the helper put it in line and finished: it is woken to fix what the queue said
@@ -1430,6 +1421,43 @@ class Runner:
             how = f"the helper could not be woken ({x.__class__.__name__})"
         with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
             tickets.note_history(self.root, tid, BY, f"{e['url']} left the merge queue: {how}.")
+
+
+def _tell_ticket(root: Path, tid: str, url: str, line: str, status: str, merged: bool) -> None:
+    """The line in the ticket's history and the link's status; merged: ORCH-1741, its last pull request merged and
+    nothing else open: no card."""
+    from orch import tickets
+    from orch.errors import Refused as CoreRefused
+
+    with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
+        tickets.note_history(root, tid, BY, line)
+        if status:
+            tickets.ref_set(root, tid, url, status, BY)
+    if merged:
+        with contextlib.suppress(ImportError, AttributeError):
+            from orch import reviewer
+
+            reviewer.close_now(root, tid)
+
+
+def end_merged(root: Path, url: str) -> bool:
+    """A waiting entry GitHub shows merged (merged by a person, or marked merged late) leaves the line as merged,
+    its ticket's link too (#1458). Only a waiting one: a running one is the runner's. True when it ended here."""
+    line = f"{url} is merged already."
+
+    def go(rows):
+        row = store.find(rows, url)
+        if row is None or row.get("state") != WAITING:
+            return None
+        row.update(state=MERGED, why=line, ended=store.now())
+        return dict(row)
+
+    row = store.change(root, go)
+    if row is None:
+        return False
+    if row.get("ticket"):
+        _tell_ticket(root, row["ticket"], row["url"], line, "merged", merged=True)
+    return True
 
 
 class _Shadow:
