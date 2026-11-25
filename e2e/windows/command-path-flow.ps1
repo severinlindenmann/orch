@@ -1,7 +1,8 @@
-# Which orch a person reaches after the Windows install (ORCH-2101). Four windows, each a fresh PowerShell process:
-# uv's default command folder; a custom one (UV_TOOL_BIN_DIR, with a space, an umlaut and an apostrophe); a custom one
-# with an older orch.exe first on Path; and a uv that names a folder without orch.exe. In each window the installer
-# runs, the line it suggests (if any) is run as printed, then `orch --version` shows which orch really starts.
+# Which orch a person reaches after the Windows install (ORCH-2101). Five windows, each a fresh PowerShell process:
+# uv's default command folder; a custom one (UV_TOOL_BIN_DIR) while ~\.local\bin is not on Path; a custom one with a
+# space, an umlaut and an apostrophe; the same with an older orch.exe first on Path; and a uv that names a folder
+# without orch.exe. In each window the installer runs, the line it suggests (if any) is run as printed, then
+# `orch --version` shows which orch really starts.
 # Started by run-as-standard-user.ps1 -Flows command-path, never by hand. ORCH_INSTALL_PS1 (env) is the installer to
 # test, ORCH_REPO (env) the source. Transcripts go to ~\orch-shots (the harness copies them out).
 $ErrorActionPreference = "Continue"
@@ -54,6 +55,17 @@ for ($k = 0; $k -lt $all.Count - 1; $k++) {
     if ($all[$k] -match "run this line" -and $all[$k].TrimEnd().EndsWith(":")) { $line = $all[$k + 1].Trim(); break }
 }
 if ($line) { $t.Add("$p $line"); try { Invoke-Expression $line } catch { $t.Add("$_") } }
+if (($all -join "`n") -match 'open a new terminal') {
+    # What the advice promises: a new window, with the saved Path (machine, then user)
+    $saved = $env:Path
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    $t.Add("(a new PowerShell window)")
+    $t.Add("$p orch --version")
+    $nw = @(powershell -NoProfile -Command 'try { (orch --version 2>&1 | Out-String).Trim() } catch { $_.Exception.Message }')
+    foreach ($x in $nw) { $t.Add("$x") }
+    $env:Path = $saved
+    $t.Add("(back in the first window)")
+}
 $cmd = Get-Command orch -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $src = if ($cmd) { $cmd.Source } else { "" }
 $t.Add("$p orch --version")
@@ -83,17 +95,24 @@ $r = Window "default" $base
 Check ((-not $r.line) -and $r.src -eq "$dflt\orch.exe" -and (Fresh $r.ver)) "default folder: no extra line, plain orch is the installed one"
 Check ("$($r.out)" -match 'orch is installed\.' -and "$($r.out)" -match 'run: orch init') "default folder: the usual end, then orch init"
 $withUv = "$dflt;$base"
-# 2. a custom folder; the default copy is removed so no other orch is on Path
-Remove-Item "$dflt\orch.exe" -Force -ErrorAction SilentlyContinue
+Remove-Item "$dflt\orch.exe" -Force -ErrorAction SilentlyContinue  # from here on no other orch is on Path
+# 2. a custom folder with a space and an apostrophe; uv in a folder of its own, so ~\.local\bin is not on Path
+$plain = "$env:USERPROFILE\Jo's tools\bin"
+$uvOnly = "$env:USERPROFILE\uv only"; New-Item -ItemType Directory -Force $uvOnly | Out-Null
+Copy-Item "$dflt\uv.exe" $uvOnly -Force
+$r = Window "plain" "$uvOnly;$base" $plain
+Check ($r.line -and $r.src -eq "$plain\orch.exe" -and (Fresh $r.ver)) "custom folder, .local\bin not on Path: the suggested line makes plain orch the installed one"
+Check ($r.userPathSame -and (NoNewWindowClaim $r.out)) "custom folder, .local\bin not on Path: saved Path unchanged, no claim about new windows"
+# 3. a custom folder with a space, an umlaut and an apostrophe
 $r = Window "custom" $withUv $custom
 Check ($r.line -and $r.src -eq "$custom\orch.exe" -and (Fresh $r.ver)) "custom folder: the suggested line makes plain orch the installed one"
 Check ($r.userPathSame -and (NoNewWindowClaim $r.out)) "custom folder: saved Path unchanged, no claim about new windows"
-# 3. an older orch.exe first on Path
+# 4. an older orch.exe first on Path
 $r = Window "older" "$old;$withUv" $custom
 Check ("$($r.out)" -match [regex]::Escape("another orch: $old\orch.exe")) "older copy first: the installer names it"
 Check ($r.line -and $r.src -eq "$custom\orch.exe" -and (Fresh $r.ver)) "older copy first: after the suggested line the new orch runs"
 Check ($r.userPathSame) "older copy first: saved Path unchanged"
-# 4. uv names a folder without orch.exe
+# 5. uv names a folder without orch.exe
 $r = Window "missing" $withUv $custom $empty
 Check ($r.threw -and "$($r.out)" -notmatch 'orch is installed' -and -not $r.line) "missing orch.exe: stops, no success and no line to run"
 Check ($r.userPathSame) "missing orch.exe: saved Path unchanged"
