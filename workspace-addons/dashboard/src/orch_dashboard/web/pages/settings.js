@@ -115,7 +115,7 @@ function shareCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Tell teammates about orch'),
         settingsText('p', {}, 'Adds a short note to your project’s guide file so your teammates’ helpers know orch is used here.'),
         settingsText('p', {className:'meta'}, 'Example: a colleague’s helper learns how to open your tickets.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
       reviewPanel('share', settings)));
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
@@ -149,7 +149,7 @@ function diagCard(settings) {
     h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Problem log'),
       settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
       settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Problem log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Problem log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
     h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
       h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
       snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all')),
@@ -170,7 +170,7 @@ function workflowCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
         settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
         settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.agents_may_finish ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
 // Auto Reviewer (ORCH-1798, owner 24 Nov): turned on here (off by default); the Review page shows its card only while
@@ -186,7 +186,7 @@ function reviewerCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
         settingsText('p', {className:'meta'}, 'Merged work where all tests passed and no change to looks, words or rules is marked Done for you. You see it on Review and can send any back.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.reviewer_on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
       reviewerKindsRow(settings)));
 }
 // ORCH-645: which kinds of tickets it accepts by itself (the helper sets a ticket's kind). Draft or design is shown
@@ -232,7 +232,7 @@ const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-peopl
 function peoplePanel(settings) {
   const list = settings.people_list || {state:'off', people:[]};
   const busy = settingsBusy.has('people');
-  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this, at this computer.');
+  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this.');
   if (list.state === 'broken') return [intro, h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.'))))];
   if (list.state !== 'on') return [intro, h('div', {className:'empty', 'data-key':'settings-people'},
@@ -362,7 +362,7 @@ function releaseMergeCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Put new versions live without my click'),
         settingsText('p', {className:'meta'}, RELEASE_MERGE_WORDS)),
-      releaseMergeButton(settings))));
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.release_merge_on ? 'On' : 'Off'), releaseMergeButton(settings))));
 }
 const RELEASE_MERGE_WORDS = 'A release where all tests passed goes live by itself with your GitHub login. You get the short highlights afterwards. Off: you decide on the card.';
 function releaseMergeButton(settings, key = 'settings-switch-release-merge') {
@@ -380,7 +380,7 @@ function prepareCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare tickets when I save'),
         settingsText('p', {className:'meta'}, 'When you save a ticket without starting it, a helper writes the title, description, done-when, estimate and first steps. It does no work until you press Start. At most ' + (settings.prepare_daily_limit ?? 30) + ' tickets a day.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Prepare tickets when I save', 'aria-checked':settings.prepare_on_save !== false, 'data-key':'settings-switch-prepare', 'data-action':'prepare-set', disabled:snapshot || settingsBusy.has('prepare')}))));
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.prepare_on_save !== false ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Prepare tickets when I save', 'aria-checked':settings.prepare_on_save !== false, 'data-key':'settings-switch-prepare', 'data-action':'prepare-set', disabled:snapshot || settingsBusy.has('prepare')}))));
 }
 async function prepareSwitch() {
   await settingsSend('prepare.set', {on:state.settings?.prepare_on_save === false}, 'prepare');
@@ -453,7 +453,7 @@ function copiesCard(settings) {
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Several helpers at once'),
         settingsText('p', {}, 'Each helper works in its own copy of your folder, so two helpers never change the same file.'),
         settingsText('p', {className:'meta'}, 'Example: one helper writes the newsletter while another fixes the website.')),
-        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+        h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
       reviewPanel('copies-switch', settings),
       !on ? null : h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
         h('div', {className:'stack copies-more'},
@@ -615,7 +615,7 @@ function syncCard(settings) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
     clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
   const card = syncUi.card;
   if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
@@ -899,7 +899,7 @@ function settingsPage() {
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
-      switchBusy(addon),
+      switchBusy(addon), h('span', {className:'switch-text', 'aria-hidden':'true'}, addon.active ? 'On' : 'Off'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name) || !!window.addonJobLive?.()}, addon.active ? 'On' : 'Off'));
   };
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
@@ -1126,7 +1126,7 @@ function autoUpdateCard(info) {
     h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
       settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
       auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a test version: it gets every new change as soon as it is ready, not only releases.') : null),
-    h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
+    h('span', {className:'switch-text', 'aria-hidden':'true'}, auto.on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
 }
 async function autoUpdateSwitch() {
   if (settingsBusy.has('auto-update')) return;
