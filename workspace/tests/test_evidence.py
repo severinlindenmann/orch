@@ -57,6 +57,32 @@ def test_copy_knows_when_the_file_changed_since(proj, run, validate, tid):
     assert not tickets.proof_changed(proj, tid, {**ev, "source": "../outside.md"})
 
 
+def test_copy_sees_a_swapped_in_file_with_the_same_size_and_time(proj, run, tid):
+    """ORCH-2010: a different file moved onto the source with equal size and mtime still shows as changed."""
+    import shutil
+
+    src = proj / "report.md"
+    src.write_bytes(b"old\r\n")
+    run("check", "done", tid, "c1", "--file", "report.md")
+    ev = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert (proj / ev["ref"]).read_bytes() == b"old\r\n"
+    assert not tickets.proof_changed(proj, tid, ev)
+    assert not tickets.proof_changed(proj, tid, ev)  # unchanged stays unchanged
+
+    def swap(data: bytes, n: int) -> None:
+        new = proj / f"swap-{n}.md"
+        new.write_bytes(data)
+        shutil.copystat(src, new)
+        src.replace(proj / f"kept-{n}.md")  # keep the old file so its id is not reused for the new one
+        new.replace(src)
+        assert src.read_bytes() == data
+
+    swap(b"new\r\n", 1)
+    assert tickets.proof_changed(proj, tid, ev)
+    swap(b"old\r\n", 2)
+    assert not tickets.proof_changed(proj, tid, ev)
+
+
 def test_same_name_twice_keeps_both(proj, run, tid):
     (proj / "f.txt").write_text("1")
     run("check", "done", tid, "c1", "--file", "f.txt")

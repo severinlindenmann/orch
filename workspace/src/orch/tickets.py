@@ -100,6 +100,8 @@ _WIN_RESERVED = {
     *(f"lpt{i}" for i in range(1, 10)),
 }
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
+# the ticket id of the unattributed record run (secretrun); never a real ticket
+RESERVED_OUTSIDE_ID = "t_outside"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
@@ -172,7 +174,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid) or tid == RESERVED_OUTSIDE_ID:
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -5414,7 +5416,8 @@ def _stat_key(p: Path):
         st = os.stat(p, follow_symlinks=False)
     except (OSError, ValueError):
         return None
-    return st.st_size, st.st_mtime_ns
+    # identity and ctime too: a file swapped in with the same size and copied mtime is still a different file
+    return st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino, st.st_ctime_ns
 
 
 def proof_changed(root: Path, tid: str, ev: dict) -> bool:
