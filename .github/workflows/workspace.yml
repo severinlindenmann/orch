@@ -192,11 +192,12 @@ jobs:
   windows-standard-user:
     if: inputs.windows
     # The README's Windows install as a standard user (no admin), no git, default execution
-    # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/).
+    # policy, from this commit's GitHub zip; then init, a ticket, an add-on and an update (e2e/windows/); then which
+    # orch plain `orch` starts with a default or custom uv command folder, an older copy first, no orch.exe (ORCH-2101).
     runs-on: windows-latest
-    timeout-minutes: 15  # ~6 min
+    timeout-minutes: 20  # ~6 min, plus ~4 for the command-path flow
     steps:
       - uses: actions/checkout@v4
       - name: Install and first steps as a standard user
         shell: powershell
-        run: .\e2e\windows\run-as-standard-user.ps1 -Ref "${{ github.event.pull_request.head.sha || github.sha }}"
+        run: .\e2e\windows\run-as-standard-user.ps1 -Ref "${{ github.event.pull_request.head.sha || github.sha }}" -Flows standard-user,scheduler,command-path

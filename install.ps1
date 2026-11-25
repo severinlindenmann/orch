@@ -52,12 +52,24 @@ if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTA
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
-& (Join-Path $toolBin "orch.exe") update --after-install
+# uv's command folder can be a custom one (UV_TOOL_BIN_DIR): every line below uses the orch.exe uv really made there.
+$exe = [IO.Path]::GetFullPath((Join-Path "$toolBin".Trim() "orch.exe"))
+if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw "orch install stopped: uv finished, but there is no orch.exe in its command folder $toolBin. Next: run 'uv tool list' to see what uv installed, then run the install line again."
+}
+& $exe update --after-install
 if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
 Write-Host "orch is installed."
-$bin = "$env:USERPROFILE\.local\bin"
-if (($env:Path -split ";") -notcontains $bin) {
-    Write-Host "Run this line in PowerShell, then open a new terminal:"
-    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+# What plain `orch` starts in this window. When that is not the copy just installed (no orch, or another one comes
+# first), print one line that puts uv's command folder first for this window only; nothing here changes the saved Path.
+$found = Get-Command orch -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $found -or [IO.Path]::GetFullPath($found.Source) -ne $exe) {
+    if ($found) { Write-Host "This window would start another orch: $($found.Source)" }
+    else { Write-Host "This window does not find orch yet." }
+    # Single quotes: spaces, umlauts and $ stay as they are; an apostrophe (also a typographic one) is doubled.
+    $q = [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent([IO.Path]::GetDirectoryName($exe) + ";")
+    Write-Host "To use the orch just installed ($exe) here, run this line:"
+    Write-Host "  `$env:Path = '$q' + `$env:Path"
+    Write-Host "It changes only this PowerShell window and what you start from it, not other or new windows."
 }
 Write-Host "Then go to your project folder and run: orch init"

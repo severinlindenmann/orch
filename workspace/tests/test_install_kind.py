@@ -817,7 +817,7 @@ try { & $Script } catch { [Console]::Error.WriteLine("THROWN: " + $_.Exception.M
 """
 
 
-def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
+def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1", bin_dir=None, orch_exe=True, path_first=None):
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("needs PowerShell 7 (pwsh)")
@@ -825,12 +825,15 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
     stubs.write_text(_PS_STUBS, encoding="utf-8")
     (tmp_path / "empty").mkdir()
     (tmp_path / "tools" / "orch-workspace").mkdir(parents=True)
-    (tmp_path / "bin").mkdir()
-    orch_exe = tmp_path / "bin" / "orch.exe"
-    orch_exe.write_text("#!/bin/sh\necho stub: orch update --after-install\n")
-    orch_exe.chmod(0o755)
+    bin_dir = bin_dir or tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    if orch_exe:
+        exe = bin_dir / "orch.exe"
+        exe.write_text("#!/bin/sh\necho stub: orch update --after-install\n")
+        exe.chmod(0o755)
+    path = [str(path_first)] if path_first else []
     env = {
-        "PATH": str(tmp_path / "empty"),  # no real uv or powershell is ever found
+        "PATH": os.pathsep.join([*path, str(tmp_path / "empty")]),  # no real uv or powershell is ever found
         "HOME": str(tmp_path),
         "USERPROFILE": str(tmp_path),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
@@ -838,7 +841,7 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
         "TMP": str(tmp_path),
         "ORCH_REPO": str(ROOT),
         "STUB_TOOLDIR": str(tmp_path / "tools"),
-        "STUB_BIN": str(tmp_path / "bin"),
+        "STUB_BIN": str(bin_dir),
         "STUB_INSTALL_EXIT": "0" if mode == "success" else "2",
     }
     r = subprocess.run(
@@ -886,3 +889,44 @@ def test_install_ps1_success_still_ends_with_init(tmp_path):
     assert "stopped" not in out
     record = json.loads((tmp_path / "tools" / "orch-workspace" / "orch-install.json").read_text())
     assert record["kind"] == "normal"
+
+
+_SCOPE = "It changes only this PowerShell window and what you start from it, not other or new windows."
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_points_to_a_custom_command_folder(tmp_path):
+    """ORCH-2101: the line names uv's real command folder (not ~/.local/bin), quoted so it runs as printed."""
+    custom = tmp_path / "Zoë's tools \u2019x\u2019 $HOME" / "bin"
+    code, out = _run_install_ps1(tmp_path, "success", bin_dir=custom)
+    assert code == 0, out
+    assert "This window does not find orch yet." in out and _SCOPE in out
+    assert f"To use the orch just installed ({custom / 'orch.exe'}) here, run this line:" in out
+    line = next(ln.strip() for ln in out.splitlines() if ln.startswith("  $env:Path = "))
+    assert ".local" not in line and "SetEnvironmentVariable" not in out and "new terminal" not in out
+    assert out.index("orch is installed.") < out.index(line) < out.index("Then go to your project folder and run: orch init")
+    r = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", f"{line}; $env:Path.Split(';')[0]"],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}, capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert r.stdout.strip() == str(custom), r.stdout + r.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_names_another_orch_that_comes_first(tmp_path):
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "orch").write_text("#!/bin/sh\necho orch 0.0.1\n")
+    (old / "orch").chmod(0o755)
+    code, out = _run_install_ps1(tmp_path, "success", path_first=old)
+    assert code == 0, out
+    assert f"This window would start another orch: {old / 'orch'}" in out and _SCOPE in out
+    assert f"  $env:Path = '{tmp_path / 'bin'};' + $env:Path" in out
+
+
+def test_install_ps1_stops_when_uv_made_no_orch_exe(tmp_path):
+    code, out = _run_install_ps1(tmp_path, "success", orch_exe=False)
+    assert code != 0
+    assert f"THROWN: orch install stopped: uv finished, but there is no orch.exe in its command folder {tmp_path / 'bin'}." in out
+    for never in ("orch is installed", "$env:Path =", "orch init", "after-install"):
+        assert never not in out

@@ -2,7 +2,7 @@
 # Windows' default (Restricted). Needs an admin shell on a THROWAWAY machine (CI runner, winvm clone): it creates a
 # user, grants it "log on as a batch job" and sets the machine policy.
 #   run-as-standard-user.ps1 -Ref <branch|sha> [-Installer <path to install.ps1>] [-Repo <local source folder>]
-#                            [-Flows standard-user,scheduler,dashboard]   (the *-flow.ps1 scripts to run, in this order)
+#                            [-Flows standard-user,scheduler,dashboard,command-path]   (the *-flow.ps1 scripts to run, in this order)
 #                            [-EnvFile <KEY=VALUE lines>]   (set for the flows, e.g. relay settings from relay-pair.py)
 param([Parameter(Mandatory)] [string]$Ref, [string]$Installer = "", [string]$Repo = "",
     [string[]]$Flows = @("standard-user", "scheduler"), [int]$MaxSec = 1800, [string]$EnvFile = "")
