@@ -13,7 +13,10 @@ struct RootView: View {
             guard watching else { return }
             await model.watchWhileOpen()
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active && model.phase == .ready { model.persistForBackground() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.reloadCredentialsIfNeeded() }
+            else if model.phase == .ready { model.persistForBackground() }
+        }
         .onChange(of: model.answerTick + model.sendTick + model.errorTick + model.noticeTick) { _, _ in
             if let text = model.announcement { AccessibilityNotification.Announcement(text).post() }
         }
