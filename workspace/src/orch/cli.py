@@ -154,6 +154,16 @@ def _line(t: dict) -> str:
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
+def _picked_text(args, ts: list[dict], txt: str) -> str:
+    """`orch ticket list --search/--waiting/--blocked` with no hit says so (nextstep says where to look)."""
+    if ts:
+        return txt
+    words = (args.search or "").strip()
+    if words:
+        return f'No tickets match "{words}".'
+    return "No tickets wait on a person." if args.waiting else "No tickets wait on something else."
+
+
 def _ago(iso: str) -> str:
     import datetime as dt
 
@@ -712,6 +722,16 @@ def _ticket_parsers(sub, common):
         "--ext",
         metavar="ADDON",
         help="only tickets with this add-on's data (no children counts); fast for an add-on's own tickets",
+    )
+    x.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="only tickets with these words in the title, tasks, note or description, or this number",
+    )
+    wait = x.add_mutually_exclusive_group()
+    wait.add_argument("--waiting", action="store_true", help="only tickets waiting on a person: a question")
+    wait.add_argument(
+        "--blocked", action="store_true", help="only tickets waiting on a time, a ticket or the outside"
     )
     x = t.add_parser("show", parents=[common])
     x.add_argument("id")
@@ -1409,21 +1429,25 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads, ticketindex
+        from orch import reads, ticketindex, ticketsearch
 
+        search = ticketsearch.needle(args.search)
+        picked = bool(search or args.waiting or args.blocked)
         if args.ext:  # an add-on's own tickets, read once (ORCH-603)
             ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
-        elif args.json:  # the dashboard reads the same rows in-process
+        elif args.json or search:  # the dashboard reads these rows in-process; a search needs the full texts
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
         else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
             with ticketindex.reuse():
                 ts, everything = reads.index_list(root, args.status, args.all)
                 args._broken_tickets = ticketindex.broken(root)
+        if picked:  # the dashboard's own search and waiting split (R4.3)
+            ts = ticketsearch.pick(ts, search, only_blocked=args.blocked, only_waiting=args.waiting)
         ids = {x["id"] for x in everything}
         hidden = (
             0
-            if args.status or args.all or args.ext
+            if args.status or args.all or args.ext or picked
             else sum(1 for t in everything if t["status"] in ("done", "dropped"))
         )
         txt = (
@@ -1438,6 +1462,8 @@ def run(args: argparse.Namespace) -> None:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
             txt += "\n" + tickets.broken_file(name)
+        if picked and not args.json:
+            txt = _picked_text(args, ts, txt)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))

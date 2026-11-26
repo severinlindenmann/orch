@@ -252,3 +252,9 @@ holds "Move to" (every place, the current one ticked) and "This ticket" (Copy li
 Repeat…, Properties on small screens) side by side, plus "For developers" (the two terminal commands) while a helper
 works. No "⋯". In Check, Looks good / Send back stay as a row of their own under the bar. Drawn in
 `ticket-idle.html` and `ticket-working.html`; product shots in `shots/topright-a/`.
+
+## ORCH-2051: Replaced by, type a key to jump (25 Nov)
+
+- `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
+  (Replaced by, Cancel, Move to Superseded). The dialog opens with focus on the choice. Typing a whole key (ORCH-97)
+  jumps to that ticket; typing never chooses, Enter or a click does. The long title and the long word wrap in full.
