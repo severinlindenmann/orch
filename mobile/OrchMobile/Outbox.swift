@@ -230,6 +230,8 @@ final class Outbox {
         self.directory = directory; self.phone = phone
         IndexWriter.queue.sync {}      // a write from an earlier Outbox on this folder must have landed before we read it
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        // No owner (not paired, or the pairing could not be read): read nothing, so nothing is dropped as another phone's.
+        guard !phone.isEmpty else { return }
         if let d = try? Data(contentsOf: indexURL), let all = try? JSONDecoder().decode([OutboxItem].self, from: d) {
             items = all.filter { $0.phone == phone }
             onDisk = Set(all.map(\.clientId))
