@@ -14,7 +14,7 @@ def test_view_without_a_publish_server_is_the_plain_empty_page(proj, run):
     first = v["blocks"][0]
     assert first["type"] == "list" and first["items"] == []
     assert first["empty"]["title"] == "Publish isn't connected yet"
-    assert "orch publish connect --paste" in first["empty"]["text"]
+    assert "Paste it here to connect" in first["empty"]["text"]
     json.dumps(v)
 
 
