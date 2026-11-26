@@ -14,7 +14,7 @@
 .settings .agent-card.off{opacity:1}
 .settings .permission-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .settings [data-key=settings-permissions]>.card{border:0;background:transparent}
-.settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:wrap}
+.settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:nowrap}
 .settings .permission-choices .sel{border-color:var(--text-muted);background:var(--surface-2)}
 .settings-addon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .settings .ad-h{padding:16px;flex-wrap:wrap;gap:16px}
@@ -100,7 +100,7 @@
 .settings .sync-review{margin:0 16px 14px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface-2);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-review p{flex:1;min-width:180px;margin:0}
 .settings .sync-review .row{flex-wrap:wrap;gap:8px}
-.settings .sync-warn{margin:12px 16px 4px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-warn{margin:12px 16px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-warn p{flex:1;min-width:180px;margin:0}
 .settings .sync-warn .row{flex-wrap:wrap;gap:8px}
 .settings .sync-details{border-top:1px solid var(--border)}
@@ -124,7 +124,7 @@
 /* SN-1: plain folder row, add-ons list, compact shared links (no Details toggles). */
 .settings .folder-row{align-items:flex-start}
 .settings .folder-row .folder-path{margin-top:4px}
-.settings .sync-details{padding:12px 16px 14px}
+.settings .sync-details,.settings .sync-unread{padding:12px 16px 14px}
 .settings .consent-details{margin:8px 0}
 .settings .ad-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .settings .ad-row{display:flex;align-items:center;gap:16px;border:0;border-top:1px solid var(--border);padding:16px}
@@ -149,11 +149,13 @@
 .settings .addon-about{padding:0 4px;display:grid;gap:4px}
 .settings .addon-about h3{font-size:14px;font-weight:600}
 .settings .addon-about p{margin:0;overflow-wrap:anywhere}
-.settings .ad-row>.btn{flex:none}
-.sk-columns.sk-settings{grid-template-columns:156px minmax(0,1fr)}
-.sk-settings .sk-tab{height:44px;border-radius:8px}
+/* a row that starts with its label keeps its button on the left edge when it wraps at phone width */
+.settings .ad-row>.btn,.settings .card-row.name-row>.btn{flex:none;margin-left:0}
+/* tabs on top, like the page */
+.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}
+.sk-settings .sk-tab{height:44px;width:96px;border-radius:8px}
 .sk-settings .sk-short{height:88px}
-@media(max-width:760px){.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}.sk-settings .sk-side{display:none}}
+.sk-settings .sk-side{display:flex;gap:4px;overflow:hidden}
 .settings .lk-sw{width:36px;height:36px;min-height:36px}
 .settings .lk-swatches{gap:10px}
 

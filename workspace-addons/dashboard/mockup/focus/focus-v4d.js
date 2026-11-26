@@ -6,7 +6,7 @@
     [1, 'Live wall', 'Focus opens on every session in bands: Pinned, Needs you, Working, In line, Idle and no session. One summary line on top; each tile says in a plain sentence what its helper does and shows its last lines live.', 'orch run list gives the signal per ticket (working, idle, waiting); the sentence comes from the helper messages, the peek from the read-only screen, refreshed every few seconds.', 'Medium', 'a new page; the data exists', { page: 'focus', view: 'wall' }],
     [2, 'Needs you is an orange tile', 'A session that waits for you is its normal tile, in orange, first after the pinned ones, with the question as its one sentence. You open it to answer; nothing is decided on the wall.', 'The "waiting on" value of orch run list plus the open question on the ticket; the answer is sent into the session.', 'Small', 'a colour and a sort order', { page: 'focus', view: 'wall', need: 'ORCH-238' }],
     [3, 'Focus button and Open ticket', 'Every ticket has one Focus button (Watch, Answer, Open or Start). Every session has Open ticket to go the other way.', 'The run signal of the ticket decides the word on the button; the session name is the ticket id.', 'Small', 'one button per ticket, one link per session', { page: 'ticket', tk: 'ORCH-189' }],
-    [4, 'Continue, fresh start or an earlier session', 'Start asks one thing: continue the last conversation, make a fresh start, or reopen an earlier session from the history list.', 'The session id is kept on the ticket, so the next start resumes it. Built (ORCH-363): orch keeps the last 10 sessions per ticket and Reopen continues one (orch run start --session). Built (ORCH-362): the Start choice on orch run start (--fresh, --agent), with the helper places in use and the line.', 'Medium', 'the Start choice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-189', need: 'ORCH-189' }],
+    [4, 'Continue, fresh start or an earlier session', 'Start asks one thing: continue the last conversation, make a fresh start, or reopen an earlier session from the history list.', 'The session id is kept on the ticket, so the next start resumes it. Built (ORCH-363): orch keeps the last 10 sessions per ticket and Reopen continues one (orch run start --session). Built (ORCH-362): the Start choice on orch run start (--fresh, --agent), with the helpers working and the line.', 'Medium', 'the Start choice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-189', need: 'ORCH-189' }],
     [5, 'Chat or real terminal', 'Chat shows plain messages with results inside. Terminal is the real screen of the helper: click it and type, select, copy and paste like in the Terminal app.', 'Every helper runs in its own tmux session. Chat is helper messages plus ticket events; no transcript exists.', 'Large', 'a terminal in the browser (xterm.js and a bridge) is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: true }],
     [6, 'Sessions without a ticket', 'Empty helper, Chat helper, Plain terminal and Manager are buttons at the top of Focus and in the New menu of the bar. They are pinned by default.', 'The same per-workspace tmux socket, with a name that is not a ticket id. To build: orch starts helpers only on tickets today.', 'Medium', 'sessions outside the ticket limit need rules', { page: 'home', mode: 'bar', menu: 'new' }],
     [7, 'Focus on every page, split in up to 3', 'A calm bar under every page opens Focus at the bottom, on the right or full screen. Inside, 1, 2 or 3 sessions sit next to each other. Every pane has its own small controls: pin, add one beside, move, minimise and close.', 'Pages are separate full loads today. Cheapest honest path: soft page swaps that keep the layer; fallback: a pop-out window. Each pane attaches to its own tmux session.', 'Large', 'no layer survives a page change today', { page: 'home', mode: 'bottom', panes: ['ORCH-228', 'ORCH-232', 'Manager'], cur: 'ORCH-228', term: true }],
@@ -49,7 +49,7 @@
       files: [['table', 'helpers.csv', 'Table · 3 rows', [['ORCH-228', 'working'], ['ORCH-232', 'working'], ['ORCH-238', 'waits for you']]]] }
   ];
   var S0 = JSON.stringify(S), EXTRA = null;
-  var MORE = [['201', 'Newsletter for November', 'wait'], ['214', 'Price list as a table', 'wait'], ['203', 'Welcome mail for new customers', 'run'], ['205', 'Search in the help pages', 'queue'], ['207', 'Export tickets to a table', 'queue'], ['209', 'Faster first page', 'queue'], ['211', 'Monthly report for sales', 'queue'], ['216', 'Tidy the settings page', 'queue'], ['218', 'Spelling check in mails', 'queue'], ['219', 'New logo on every page', 'queue'], ['222', 'Reminder one day before', 'queue'], ['224', 'Sort the customer list', 'queue'], ['226', 'Holiday notice', 'none'], ['229', 'Bigger text on phones', 'none'], ['231', 'Old links that end nowhere', 'none'], ['234', 'Invoice as a file', 'none'], ['236', 'Colours of the charts', 'none'], ['240', 'Support answers as drafts', 'none']];
+  var MORE = [['201', 'Newsletter for November', 'wait'], ['214', 'Price list as a table', 'wait'], ['203', 'Welcome mail for new customers', 'run'], ['205', 'Search in the help pages', 'queue'], ['207', 'Export tickets to a table', 'queue'], ['209', 'Faster first page', 'queue'], ['211', 'Monthly report for sales', 'queue'], ['216', 'Tidy the settings page', 'queue'], ['218', 'Spelling check in mails', 'queue'], ['219', 'New logo on every page', 'queue'], ['222', 'Reminder one day before', 'queue'], ['224', 'Sort the customer list', 'queue'], ['226', 'Holiday notice', 'none'], ['229', 'Bigger text on phones', 'none'], ['231', 'Old links that end nowhere', 'none'], ['234', 'Invoice as a file', 'none'], ['236', 'Colours of the charts', 'none'], ['240', 'Support answers as drafts', 'none'], ['412', 'Price page for schools', 'check']];
   var QS = [{ t: 'Send the newsletter today or on Monday morning?', why: 'The helper suggests Monday: more people open it.', a: ['Send on Monday', 'Send today'] }, { t: 'Show prices with or without tax?', why: 'The helper suggests with tax: it is what customers pay.', a: ['With tax', 'Without tax'] }];
   var NOWS = ['Writing the first draft.', 'Running the tests.', 'Reading the files on the ticket.', 'Taking pictures at three widths.', 'Fixing two failed checks.', 'Waiting for the checks.'];
   var ST = { wait: ['◆', 'Needs you'], run: ['●', 'Working'], idle: ['◐', 'Idle'], none: ['○', 'No session'], queue: ['◷', 'In line'], open: ['▸', 'Open'] };
@@ -71,7 +71,8 @@
   function live(s) { return s.s === 'run' || s.s === 'wait' || s.s === 'idle' || s.s === 'open'; }
   function max() { return st.many ? 8 : 6; }
   function used() { return S.filter(function (s) { return s.kind !== 'shell' && live(s); }).length; }
-  function sorted() { return S.slice().sort(function (a, b) { var w = (b.s === 'wait' ? 1 : 0) - (a.s === 'wait' ? 1 : 0); return w || (b.pin ? 1 : 0) - (a.pin ? 1 : 0) || ORDER[a.s] - ORDER[b.s]; }); }
+  function asks(s) { return s.s === 'wait' || !!s.ask; }
+  function sorted() { return S.slice().sort(function (a, b) { var w = (asks(b) ? 1 : 0) - (asks(a) ? 1 : 0); return w || (b.pin ? 1 : 0) - (a.pin ? 1 : 0) || ORDER[a.s] - ORDER[b.s]; }); }
   function phone() { return window.innerWidth <= 720; }
   function nm(s) { return s.name || s.t; }
   function word(s) { return s.sl && (s.s === 'idle' || s.s === 'none') ? s.sl : ST[s.s][1]; }
@@ -431,30 +432,36 @@
   }
 
   /* ---------- Focus page: the wall in bands, and zoom ---------- */
-  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : ''); }
+  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' && !s.ask ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : ''); }
   function openB(s, cls, inner) { return btn(cls, 'zoom', inner, { 'data-k': s.k, 'aria-label': 'Open ' + s.k + ', ' + nm(s) + ', ' + word(s) }); }
   function tile(s) {
     return '<article class="mw-tile mw-work" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-topen', '<span class="mw-thead">' + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span></span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-now" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>' + (live(s) ? '<span class="mw-peek" data-peek="' + esc(s.k) + '" aria-hidden="true">' + esc(peekText(s)) + '</span>' : '')) + meta(s) + '<footer class="mw-tfoot">' + steps(s) + tileActs(s) + '</footer></article>';
   }
   function line(s) {
-    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
+    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' && !s.ask ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
   }
   function band(id, title, list, draw, cls, empty, extra) {
     var col = !!st.col[id];
     return '<section class="mw-band" data-band="' + id + '"><div class="mw-bh"><h2>' + btn('mw-bt', 'col', '<span class="mw-chev" aria-hidden="true">' + (col ? '▸' : '▾') + '</span>' + title + ' (' + list.length + ')', { 'data-id': id, 'aria-expanded': String(!col) }) + '</h2>' + (extra || '') + '</div>' + (col ? '' : (list.length ? '<div class="' + cls + '">' + list.map(draw).join('') + '</div>' : '<p class="meta mw-none">' + empty + '</p>')) + '</section>';
   }
   function bandsHTML() {
-    var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s)).toLowerCase().indexOf(f) >= 0; });
+    // the filter finds one that asks by "Needs you" too (its band, the summary), and by its own reason such as "Check" (ORCH-2045)
+    var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s) + (asks(s) ? ' ' + ST.wait[1] : '')).toLowerCase().indexOf(f) >= 0; });
     var pin = all.filter(function (s) { return s.pin; }), rest = all.filter(function (s) { return !s.pin; });
-    var act = rest.filter(function (s) { return s.s === 'wait' || grp(s) === 'run'; }), inl = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'idle'; });
-    if (f && !all.length) return '<p class="meta mw-none">No session matches "' + esc(st.f) + '".</p>';
-    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.');
+    var act = rest.filter(function (s) { return asks(s) || grp(s) === 'run'; }), inl = rest.filter(function (s) { return !asks(s) && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return !asks(s) && grp(s) === 'idle'; });
+    // the wall's states are the master empty state (kit UI.state), as in the product (pages/livewall.js): ?wall=loading|error|empty
+    if (st.wall === 'loading') return '<div class="wall-tiles" aria-busy="true"><p class="sr-only" role="status">Loading the sessions…</p>' + '<div class="skeleton sk-card" aria-hidden="true"></div>'.repeat(3) + '</div>';
+    if (st.wall === 'error') return '<div class="empty-state err" role="alert"><span class="ico"><span class="dot-err"></span></span><strong>The sessions did not load</strong><p>orch did not answer just now. It tries again by itself.</p>' + btn('btn primary sm', 'wallretry', 'Try again') + '</div>';
+    if (st.wall === 'empty') return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No sessions yet</strong><p>A session shows here as soon as a helper starts work on a ticket.</p></div>';
+    if (f && !all.length) return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No session matches “' + esc(st.f.trim()) + '”</strong><p>Try another word, or show all sessions again.</p>' + btn('btn outline sm', 'wallclear', 'Clear filter') + '</div>';
+    // with a filter, a band without a match is left out (its "nothing here" line would not be true)
+    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + (act.length || !f ? band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) : '') + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + (idle.length || !f ? band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.') : '');
   }
   function wallHTML() {
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };
-    S.forEach(function (s) { c[s.s === 'wait' ? 'wait' : grp(s)]++; });
+    S.forEach(function (s) { c[asks(s) ? 'wait' : grp(s)]++; });
     var part = function (n, g, w) { return n ? '<span class="mw-st" data-s="' + g + '"><span class="mw-sym" aria-hidden="true">' + ST[g][0] + '</span>' + n + ' ' + w + '</span>' : ''; };
-    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helpers working</p></div>';
+    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.filter(function (s) { return !s.ask; }).length + ' sessions · ' + used() + ' of ' + max() + ' helpers working</p></div>';
     h += '<div class="mw-new" role="group" aria-label="New session without a ticket">' + mk(6) + NEW.map(function (o) { return btn('btn outline sm', 'new', (has(o[0]) ? '' : '<span aria-hidden="true">+</span> ') + o[0], { 'data-k': o[0], title: has(o[0]) ? 'Already open: go to it' : o[1] }); }).join('') + '</div></header>';
     h += pickHTML();
     h += '<div class="mw-tools"><label class="sr-only" for="mw-filter">Filter sessions</label><input class="input" id="mw-filter" type="search" placeholder="Filter by name, ticket or status" value="' + esc(st.f) + '" autocomplete="off">' + mk(11) + '</div>';
@@ -764,6 +771,8 @@
         var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
+        // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
+        if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
         if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
         if (m[2] === 'queue') { s.now = 'Waits in line for a free helper place.'; s.lines = []; s.chat = []; s.step = [0, 4 + i % 3]; }
         if (m[2] === 'run' && i % 3 === 0) s.feed = ['⏺ ' + NOWS[(i + 1) % NOWS.length], '⏺ ' + NOWS[(i + 2) % NOWS.length]];
@@ -858,6 +867,8 @@
     else if (a === 'mode') setMode(b.dataset.m);
     else if (a === 'menu') { st.menu = st.menu === b.dataset.m ? '' : b.dataset.m; st.list = ''; render(st.menu ? '.mw-pop .mw-opt' : '[data-act=menu][data-m=' + b.dataset.m + ']'); }
     else if (a === 'list') { st.list = st.list === b.dataset.l ? '' : b.dataset.l; st.menu = ''; st.lq = ''; render(st.list ? '#mw-lq, .mw-pop .mw-opt' : '[data-act=list][data-l=' + b.dataset.l + ']'); }
+    else if (a === 'wallretry') { st.wall = ''; $('mw-bands').innerHTML = bandsHTML(); }
+    else if (a === 'wallclear') { st.f = ''; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
     else if (a === 'col') { st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
     else if (a === 'fold') { st.foldR = !st.foldR; render('[data-act=fold]'); }
     else if (a === 'pin') pin(k);
@@ -976,6 +987,7 @@
     var q = new URLSearchParams(location.search), v, ov = document.createElement('div');
     ov.id = 'mw-ov'; ov.className = 'mw-ov'; ov.hidden = true; document.body.appendChild(ov);
     if (q.get('many') === '1') many(true);
+    if (/^(loading|error|empty)$/.test(v = q.get('wall') || '')) st.wall = v;
     if (PG[v = q.get('page')] || v === 'focus') st.page = v;
     if ((v = q.get('cur')) && has(v)) { st.cur = v; if (by(v).kind === 'ticket') st.tk = v; }
     if ((v = q.get('tk')) && has(v)) st.tk = v;

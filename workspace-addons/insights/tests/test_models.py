@@ -125,13 +125,13 @@ def test_team_time_cost_finished_stuck_and_people():
         usage(seconds=0, cost=0, finished=0, team=[{"owner": "human:anna", "seconds": 0, "cost": 0}])
     )
     assert none["cost"] == "–" and none["time"] == "–" and none["people"][0]["cost"] == "–"
-    assert none["note"].startswith("Not recorded") and team["note"] == ""
+    assert none["note"] == "No time or cost recorded yet" and team["note"] == ""
 
 
 def test_time_without_cost_has_no_dash_sentence_and_says_why():
     team = build_team(usage(seconds=240, cost=0, finished=2, team=[]))
     assert team["each"] == "about 2 min each" and "–" not in team["each"]
-    assert team["cost"] == "–" and team["note"].startswith("No cost recorded")
+    assert team["cost"] == "–" and team["note"] == "No cost recorded yet"
     assert build_team(usage(seconds=0, cost=6, finished=2, team=[]))["each"] == "about $3.00 each"
 
 

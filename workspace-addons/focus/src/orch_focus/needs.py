@@ -27,7 +27,8 @@ def rows(root: Path, now: datetime | None = None) -> list[dict]:
         if not TID.fullmatch(f.stem) or f.is_symlink():
             continue
         rec = runs.read(root, f.stem)
-        live = (rec or {}).get("live") or {}
+        live = (rec or {}).get("live")
+        live = live if isinstance(live, dict) else {}  # a hand-edited claim file must not break every row
         if (
             not rec
             or rec.get("mode") != "live"

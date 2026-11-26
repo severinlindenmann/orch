@@ -57,11 +57,12 @@
     return [h ? h + ' h' : '', m || !h ? m + ' min' : ''].filter(Boolean).join(' ');
   }
   const capital = value => { const t = text(value).replace(/[-_]/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
-  const tagWord = tag => tag === 'cant-undo' ? "can't undo" : text(tag).replace(/[-_]/g, ' ');
+  // the same words as the question text the core shows (render.TAG_WORDS)
+  const tagWord = tag => ({taste: 'your call', 'cant-undo': "can't be undone"})[tag] || text(tag).replace(/[-_]/g, ' ');
   // The proposal's own label when it gave one, else the capitalized stage name; the ship stage is always a question.
   const stageLabel = item => item.label || (item.stage === 'ship' ? 'Put it live?' : capital(item.stage));
   const stageName = (order, stage) => stageLabel(array(order?.line).find(x => x.stage === stage) || {stage});
-  const yourTime = min => Number.isFinite(Number(min)) && min !== null ? "you're needed ~" + min + ' min' : '';
+  const yourTime = min => Number.isFinite(Number(min)) && min !== null ? 'about ' + min + ' min of your time' : '';
   function link(label, href, primary = false) {
     const el = node('a', label, primary ? 'btn primary' : 'btn outline sm');
     el.classList.add('f-btn');
@@ -77,7 +78,7 @@
     const el = link('Open the preview', url.href); el.target = '_blank'; el.rel = 'noopener noreferrer'; return el;
   }
   function ticket(id, label = 'Answer in the ticket', primary = true) {
-    return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('Ticket reference unavailable.');
+    return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('This ticket cannot be opened.');
   }
   const validQuestion = q => typeof q === 'string' && /^q[A-Za-z0-9_-]{0,31}$/.test(q);
   const embedded = () => { try { return window.top !== window; } catch (_) { return true; } };
@@ -275,7 +276,7 @@
     const need = yourTime(order.owner_min);
     return meta('Next pause: ' + stageLabel(stop) + (need ? ' · ' + need : ''));
   }
-  // Plain title for an open question, from the structured stop/change data. The raw core text stays behind Details.
+  // Plain title for an open question, from the structured stop/change data.
   function openTitle(order, open) {
     const data = open.data || {};
     if (open.kind === 'stop') return data.stage === 'ship' ? 'Put it live?' : 'Check at ' + stageName(order, data.stage);
@@ -289,10 +290,8 @@
       const items = array(data.items);
       if (items.length) parts.push(list(items.map(i => text(i.title) + ' (' + tagWord(i.tag) + ')')));
       const checked = array(data.checked).length, not = array(data.not_checked).length;
-      parts.push(meta('Checked: ' + checked + ' · Not checked: ' + not));
-      if (full) {
-        if (not) parts.push(meta('Not checked: ' + array(data.not_checked).join(', ')));
-      }
+      if (checked || not) parts.push(meta('Your helper checked ' + plural(checked, 'thing', 'things') + ' · ' + not + ' not checked'));
+      if (full && not) parts.push(meta('Not checked: ' + array(data.not_checked).join(', ')));
     } else if (open.kind === 'change') {
       parts.push(meta('+' + text(data.adds_min) + ' min' + (data.new_eta ? ' · new ETA ' + when(data.new_eta) : '')));
       if (data.what) parts.push(p(data.what));
@@ -302,22 +301,19 @@
     }
     return parts;
   }
-  function rawDetails(open) {
-    const el = node('details', null, 'f-details');
-    el.append(node('summary', 'Details'), meta(open.text), ...(array(open.options).length ? [meta('Options: ' + open.options.join(' · '))] : []));
-    return el;
-  }
+  // The answers you can give, shown plainly under the question (no Details toggle; the items are listed above it).
+  const choices = open => array(open.options).length ? [meta('You can answer: ' + listWords(open.options.map(text)))] : [];
   function budget(order) {
     const b = order.budget || {};
     const used = Number(b.used), cap = Number(b.cap);
-    if (b.used == null || b.cap == null || !Number.isFinite(used) || !Number.isFinite(cap) || cap <= 0) return meta('Budget health · not available yet.');
+    if (b.used == null || b.cap == null || !Number.isFinite(used) || !Number.isFinite(cap) || cap <= 0) return meta('Budget health: not known yet.');
     const percent = Math.max(0, Math.round(used / cap * 100));
     const bar = node('progress'); bar.max = 100; bar.value = Math.min(100, percent);
     bar.setAttribute('aria-label', 'Active time budget used');
     bar.setAttribute('aria-valuetext', percent + '% · ' + used + ' of ' + cap + ' minutes');
-    return group('f-budget', group('row between', meta('Budget health'), meta(percent + ' % · time is the tightest')), bar,
-      meta(used + ' / ' + cap + ' active min · waiting for you never counts'),
-      ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
+    return group('f-budget', group('row between', meta('Budget health'), meta(percent + ' % used')), bar,
+      meta(used + ' of ' + cap + ' min of helper time used · time waiting for you does not count'),
+      ...(b.warn ? [meta('The time limit is nearly used up. Open the order to decide what happens next.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
   // The page never writes by itself. "Ask me at every pause" goes to your helper in Chat as typed text (you press Send
@@ -474,7 +470,8 @@
       }],
       ['proposals', orders.filter(o => o.phase === 'proposed'), o => {
         const need = yourTime(o.owner_min);
-        const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
+        const c = card(o.title, meta('Your helper planned the run. Read it, then start it or say not now.'),
+          ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
         c.classList.add('f-attention'); return c;
       }],
       ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
@@ -506,7 +503,7 @@
     };
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
-      ? card(o.title, meta('Autopilot order'), p('Routine pauses answered by your helper · Putting it live still asks you'), tail(link('What it decided', '#/autopilot')))
+      ? card(o.title, meta('Autopilot order'), p('Your helper answers routine pauses. Putting it live still asks you.'), tail(link('What it decided', '#/autopilot')))
       : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
@@ -571,7 +568,7 @@
   function proposal(order) {
     const data = order.proposal;
     view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
-    if (!data) { view.append(card('No frozen proposal yet', p('Your helper is still planning this order.'), answer(order))); return; }
+    if (!data) { view.append(card('No plan yet', p('Your helper is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
       const parts = [];
@@ -588,7 +585,7 @@
     const summary = [];
     if (time.active_min != null) summary.push('~' + duration(time.active_min));
     if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
-    if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
+    if (time.owner_min != null) summary.push(yourTime(time.owner_min));
     if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
     if (summary.length) view.append(node('p', summary.join(' · '), 'f-summary'));
     view.append(group('f-three', card('Stages', line(data.line)),
@@ -606,12 +603,11 @@
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
     view.append(assumptions, answer(order));
-    const details = node('details', null, 'f-details');
-    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Team'), crewPlan(data.crew),
-      node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
-      node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
-      node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
-    view.append(details);
+    // The whole plan, shown plainly lower down (no Details toggle); stages and team are in the cards above.
+    const plan = card('The whole plan', node('h3', 'Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage)), 'No tasks planned yet.'));
+    if (array(data.skipped).length) plan.append(node('h3', 'Skipped stages'), list(data.skipped.map(s => capital(s.stage) + ' — ' + text(s.why))));
+    if (array(data.handovers).length) plan.append(node('h3', 'Handed to other workspaces'), list(data.handovers.map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why))));
+    view.append(plan);
   }
   // A task handed to another workspace that nobody has picked up for a day: one click asks your helper to propose "Do it here instead".
   const DAY = 24 * 3600 * 1000, handoverOpen = ['waiting_start', 'waiting_allow', 'queued'];
@@ -627,7 +623,7 @@
     });
     return group('actions', button, status);
   }
-  function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
+  function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'Nothing changed during the run.')); }
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
@@ -641,7 +637,7 @@
     const main = group('stack', lineCard, ...reviews(order).map(r => reviewCard(order, r, false)), card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Team now');
     for (const c of array(order.crew)) {
-      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent ? toolName(c.agent) : '', statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');
       if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
       row.append(meta(c.title));
@@ -664,7 +660,7 @@
     }
     if (order.phase === 'parked') aside.append(parkedCard(order));
     if (order.open) {
-      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
+      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), ...choices(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
     aside.append(...questionCards(order));
@@ -801,7 +797,7 @@
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
-    view.append(heading('Autopilot', 'Bounded permission for your helper. Putting it live still asks you.'));
+    view.append(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
       node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open project ticket', false))));
@@ -844,7 +840,7 @@
     notices.replaceChildren();
     if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
     if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
-    if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
+    if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
   }
   async function render() {
     const serial = ++request;
@@ -893,7 +889,7 @@
           showNotices(homeData, order, draft);
           // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
           const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
-          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

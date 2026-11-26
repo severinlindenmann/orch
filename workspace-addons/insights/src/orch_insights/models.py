@@ -40,7 +40,7 @@ def _parts(models):
     return parts
 
 
-NOT_RECORDED = "Not recorded: helper actions left no time or cost."
+NOT_RECORDED = "No time or cost recorded yet"
 
 
 def _seconds_words(seconds):
@@ -61,7 +61,7 @@ def _money(cost):
 def _note(seconds, cost):
     if round(cost, 2) > 0:
         return ""
-    return NOT_RECORDED if not seconds else "No cost recorded: helper actions left no cost."
+    return NOT_RECORDED if not seconds else "No cost recorded yet"
 
 
 def _person(owner, me=None):
