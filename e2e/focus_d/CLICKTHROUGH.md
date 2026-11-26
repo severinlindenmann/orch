@@ -123,8 +123,8 @@ Do:
 
 Must be seen:
 
-- The pinned session moves to the Pinned band and gets a chip in the bar.
-- The new name shows on its tile, its pane and its chip.
+- The pinned session moves to the Pinned band and comes first in its group of the bar's Helpers menu.
+- The new name shows on its tile, its pane and its row in the Helpers menu.
 - Both stay after a reload; Unpin moves it back.
 
 ## 8. Works with 24 and more sessions
@@ -154,14 +154,14 @@ Must be seen:
 Do:
 
 1. Open Home, then Tickets, then Review.
-2. Press the "in line" count in the bar.
-3. Type in the list's search.
+2. Press Helpers in the bar.
+3. Type in the menu's search.
 
 Must be seen:
 
 - The bar is under every page, calm, on one line that never wraps.
-- Chips only for sessions that need you and pinned ones; the rest are counts such as "9 in line".
-- A count opens a list you can search.
+- One Helpers menu (ORCH-2198) instead of chips and counts; a ◆ on it when something needs you.
+- The menu groups the sessions as Needs you, Working and Quiet with their counts, opens inside the window and has a search.
 
 ## 10. The layer at the bottom, on the right, full screen, to the bar, to the side
 

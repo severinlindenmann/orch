@@ -1299,6 +1299,12 @@ body.mk-focus-v4d .mw-pop{position:absolute;left:var(--s3);bottom:calc(100% + va
 body.mk-focus-v4d .mw-poph{font-weight:600}
 body.mk-focus-v4d .mw-plist{display:grid;gap:var(--s1);align-content:start;min-height:0;overflow:auto}
 body.mk-focus-v4d .mw-lrow{grid-template-columns:auto auto minmax(0,1fr) minmax(0,1fr);gap:var(--s2);align-items:center}
+/* ORCH-2198: the Helpers menu (groups .lbar-gh from the kit); in full screen the bar is at the top, so menus open below it */
+body.mk-focus-v4d .mw-pop-list{display:flex;flex-direction:column}
+body.mk-focus-v4d .mw-lrow.mw-hrow{grid-template-columns:auto auto minmax(0,1fr) auto;gap:var(--s2);align-items:center;min-height:32px;padding:var(--s1) var(--s3);border:0}
+body.mk-focus-v4d .mw-hrow[aria-current=true]{background:var(--surface-3)}
+body.mk-focus-v4d .mw-hrow .mw-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mk-focus-v4d #mw-layer[data-mode=full] .mw-pop{top:calc(100% + var(--s2));bottom:auto}
 body.mk-focus-v4d .mw-edge{position:fixed;right:0;top:50%;z-index:60;display:flex;flex-direction:column;gap:var(--s2);align-items:center;min-width:32px;padding:var(--s3) var(--s1);border:1px solid var(--border-strong);border-right:0;border-radius:var(--r1) 0 0 var(--r1);background:var(--surface);color:var(--text);box-shadow:var(--lift-shadow);transform:translateY(-50%)}
 body.mk-focus-v4d .mw-edge:hover{background:var(--surface-2)}
 body.mk-focus-v4d .mw-edget{writing-mode:vertical-rl;font-weight:600}
