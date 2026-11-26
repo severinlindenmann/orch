@@ -1875,7 +1875,7 @@ function repeatsDialog(only = null, addonName = null) {
   const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket), replaces,
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
-  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
+  if (!ticket.options.length) fields.append(stateNote('No open tickets yet', 'A repeat needs a ticket to start from. Make one first.', 'empty', {label:'New ticket', onClick:async () => { await window.orch.close(d); location.hash = '#new'; }}));
   const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
