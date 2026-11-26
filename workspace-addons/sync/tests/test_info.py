@@ -19,6 +19,7 @@ def test_counts_and_folder(root):
     c = card(root)
     assert c["counts"]["tickets"] == 1 and c["counts"]["files"] == 1 and c["counts"]["bytes"] >= 100
     assert c["folder"] == root.name
+    assert c["folder_path"] == str(root.resolve() / ".orch")
 
 
 def test_history_last_five_newest_first(root):
