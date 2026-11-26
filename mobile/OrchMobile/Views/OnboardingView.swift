@@ -104,8 +104,7 @@ struct OnboardingView: View {
     }
 
     private func pasteLink() {
-        if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           (try? PairingLink(value)) != nil {
+        if let value = InvitePaste.take() {
             model.openInvite(value)
         } else { showLink = true }
     }
