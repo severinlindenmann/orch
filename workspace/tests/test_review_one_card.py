@@ -106,7 +106,9 @@ def test_unmerged_row_takes_the_place_of_the_check_card(proj, run, new_ticket):
     rows = [r for r in needs.core_rows(proj) if r["ticket"] == tid]
     assert [r["kind"] for r in rows] == ["helper:unmerged"]
     assert _cards(proj, tid) == []
-    assert tid not in _needs(proj)["tickets"]  # the page counts the row itself
+    # #2385: the needs-you number counts the row itself, once, in place of the Check card
+    items = [i for i in _needs(proj)["items"] if i["ticket"] == tid]
+    assert [i.get("stopped") for i in items] == ["helper:unmerged"]
 
 
 def test_no_unmerged_row_while_the_queue_holds_it(proj, run, new_ticket):
