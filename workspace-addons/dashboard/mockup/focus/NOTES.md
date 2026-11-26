@@ -27,6 +27,15 @@ dock-side, full-screen, full-exit.
   numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
 - New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
 
+## One Helpers menu (ORCH-2198, 26 Nov, owner pick J b: "calmer")
+
+- The bar holds the name, one **Helpers ▾** button and New: no chips, no counts. A ◆ on the button when something needs
+  you (no number; the number is on the Review badge). `chipsHTML` draws that button; `?list=helpers` opens the menu.
+- The menu groups every session as Needs you, Working and Quiet (in line, idle) with their counts (`.lbar-gh`); each
+  row has Open and More and opens its pane. Built the same in `pages/livebar.js`.
+- The menu opens inside the window: above the bar at the bottom, below it in full screen where the bar sits at the
+  top (before, the list opened above the top edge and could not be seen).
+
 ## The split, built (ORCH-339, 17 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus the layer now holds

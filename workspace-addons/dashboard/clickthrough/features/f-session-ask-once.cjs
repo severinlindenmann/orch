@@ -38,6 +38,7 @@ module.exports = {
     }] } }));
 
     await open('#home');
+    await page.locator('#live-bar [data-lbar-list="helpers"]').click();  // its row in the Helpers menu (ORCH-2198)
     await page.locator(`#live-bar [data-lbar-open="${own}"]`).first().click();
     const pane = page.locator(`#live-dock [data-live-body="${own}"]`);
     const ask = pane.locator('[data-live-ask] .live-ask-q');
