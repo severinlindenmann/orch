@@ -440,7 +440,14 @@ def test_busy_check_looks_into_same_origin_iframes():
     src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
     out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
     assert json.loads(out) == {
-        "idle": False, "top": True, "iframe": True, "nested": True, "foreign": False,
-        "hiddenPanel": False, "hiddenFrame": False, "hiddenNestedFrame": False,
-        "visibleFrameWithHiddenPanel": False, "hiddenPanelAndVisibleFrame": True,
+        "idle": False,
+        "top": True,
+        "iframe": True,
+        "nested": True,
+        "foreign": False,
+        "hiddenPanel": False,
+        "hiddenFrame": False,
+        "hiddenNestedFrame": False,
+        "visibleFrameWithHiddenPanel": False,
+        "hiddenPanelAndVisibleFrame": True,
     }
