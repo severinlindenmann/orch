@@ -1746,12 +1746,13 @@ def test_allow_question_once_applied_once(proj, run, rel):
     t = _allow_ticket_of(run)
     assert len(_tickets(run)) == 1 and t["status"] == "waiting"
     q = t["questions"][0]
-    assert q["kind"] == "relay:allow" and q["options"] == ["Allow once", "Always", "Ignore"]
-    assert "wants" in q["text"] and "Add rate limit" in q["text"]
+    assert q["kind"] == "relay:allow" and q["options"][0] == "Allow this task" and q["options"][2] == "Decline"
+    assert q["options"][1].startswith("Always allow tasks from ")
+    assert q["text"].startswith("Task from ") and "Add rate limit" in q["text"] and "If you allow it" in q["text"]
     assert q["action"]["message"] == mid and q["action"]["peer"] == PEER
     assert relay.allowed(proj, msg(mid, "delegate", {"title": "Add rate limit"})) is None
     # answered on the dashboard; the next relay command applies it once
-    run("answer", t["id"], q["id"], "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("answer", t["id"], q["id"], "Allow this task", "--via", "dashboard", "--by", "human:Marco")
     run("relay", "inbox")
     run("relay", "inbox")
     run("relay", "outbox")
@@ -2166,7 +2167,7 @@ def test_delegate_allowed_by_cli_is_one_ticket(proj, run, rel):
     assert a["ticket"] == b["ticket"] == q_ticket and len(_tickets(run)) == 1
     t = json.loads(run("ticket", "show", q_ticket, "--json")[1])
     assert t["title"] == f"From {PEER}: Add rate limit" and t["status"] == "active"
-    assert t["questions"][0]["answer"] == "Allow once"
+    assert t["questions"][0]["answer"] == "Allow this task"
     assert [c["text"] for c in t["checklist"]] == [f"From {PEER}: Code"]
     assert t["ext"]["relay"]["message"] == mid and t["ext"]["relay"]["from"] == PEER
 
@@ -3063,3 +3064,31 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     relay.send_question(proj, t, t["questions"][1])
     assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
     assert "task" not in sent[1] and "about" not in sent[1]
+
+
+def test_allow_words_rp4(proj, run, rel):
+    """RP4 A: the three buttons say what they do; the sender's own words are on the card; old words still count."""
+    from orch import relay
+
+    assert relay.allow_choice("Allow this task") == "once"
+    assert relay.allow_choice("  always allow tasks from  Marketing ") == "always"
+    assert relay.allow_choice("Decline") == "no"
+    assert relay.allow_choice("Always allow tasks from ") is None
+    assert [relay.allow_choice(w) for w in ("Allow once", "Always", "Ignore", "No")] == ["once", "always", "no", "no"]
+    assert relay.allow_choice("maybe") is None
+    connect(run, rel)
+    mid, deny = "m_deleg0000000rp41", "m_deleg0000000rp42"
+    rel.inbox.append(msg(mid, "delegate", {"title": "Price list", "text": "PDF, valid from 1 Jan."}))
+    rel.inbox.append(msg(deny, "delegate", {"title": "Delete all", "text": "x"}))
+    run("relay", "inbox")
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run) if t.get("ext", {}).get("relay")}
+    q = by_msg[mid]["questions"][0]
+    assert '"PDF, valid from 1 Jan."' in q["text"]
+    run("answer", by_msg[mid]["id"], "q1", q["options"][1], "--via", "dashboard", "--by", "human:Marco")
+    run("answer", by_msg[deny]["id"], "q1", "Decline", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "outbox")
+    allows = [m for m in rel.sent if m["type"] == "allow"]
+    assert [a["body"]["mode"] for a in allows] == ["permanent"]
+    dropped = json.loads(run("ticket", "show", by_msg[deny]["id"], "--json")[1])
+    assert dropped["status"] == "dropped"
