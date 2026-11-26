@@ -295,7 +295,8 @@
     if (!look) return null;
     const on = look.shared_pages !== false;
     return n('div', {className: 'stack', 'data-key': 'settings-look', 'data-testid': 'settings-look'},
-      n('h2', {className: 'set-sub'}, 'Shared pages'),
+      // the sharing add-on's own menu name (RP8 B: one word for it everywhere); the page code never names an add-on
+      n('h2', {className: 'set-sub'}, (typeof addons === 'function' && typeof addonLabel === 'function' && addons().some(a => a.dashboard?.panel === 'links')) ? addonLabel(addons().find(a => a.dashboard?.panel === 'links')) : 'Shared pages'),
       n('div', {className: 'card'},
         ownerRow(),
         // Like every other switch row: the words left, the switch right, one row at any width.

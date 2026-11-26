@@ -2098,7 +2098,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
     tickets, skipped = got[0], got[1]
     counts = got[2] if len(got) > 2 else ticket_counts(tickets)
     raw = f_raw.result()
-    addons = hide_unset_sharing(load_addons(root, orch_bin, raw), root, orch_bin) if with_addons else []
+    addons = load_addons(root, orch_bin, raw) if with_addons else []
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
@@ -2269,23 +2269,6 @@ def _update_check() -> dict | None:
     return update.check_card()
 
 
-def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
-    """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
-    tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_set_up(root):
-        return addons
-    return [{**a, "dashboard": None} if a in tabs else a for a in addons]
-
-
-def publish_set_up(root: Path) -> bool:
-    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
-    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
-    cfg = _load(root / ".orch" / "secrets" / "publish.json")
-    return isinstance(cfg, dict) and all(
-        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
-    )
-
-
 def publish_connected(root: Path, orch_bin: str | None) -> bool:
     rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
     if not isinstance(rows, list) or not any(
@@ -2299,8 +2282,8 @@ def publish_connected(root: Path, orch_bin: str | None) -> bool:
 def load_links(root: Path, orch_bin: str | None) -> dict:
     if not publish_connected(root, orch_bin):
         return {"links": []}
-    raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
-    if not isinstance(raw, dict):  # the sharing server did not answer: say so, never "no links"
+    raw = run_orch(orch_bin, ["publish", "list", "--quick", "--json"], root)
+    if not isinstance(raw, dict):  # the CLI gave nothing at all: say so, never "no links"
         return {"links": [], "unreachable": True}
     files = raw.get("files", []) if isinstance(raw, dict) else []
     # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
@@ -2343,7 +2326,8 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
                 "copy": link is not None,
             }
         )
-    return {"links": links}
+    # publish gave no answer: these rows are this computer's own record (the page greys out share and stop)
+    return {"links": links, **({"unreachable": True} if raw.get("unreachable") is True else {})}
 
 
 # Workspace DM reads use the same CLI boundary as Chat History.

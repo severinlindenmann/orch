@@ -851,8 +851,8 @@ function addonDetailPage(addon) {
     addon.page?.live_session === true && addon.active && typeof state.settings?.terminal_typing_on === 'boolean' ? row('Plain terminal', h('div', {}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.terminal_typing_on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'addon-detail-terminal-typing', disabled:snapshot || settingsBusy.has('terminal-typing')}, state.settings.terminal_typing_on ? 'On' : 'Off'), 'addon-detail-terminal-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
-    links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+    links && shown !== null ? row(label, settingsText('p', {}, 'Show workspace name and icon'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on published pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
     addon.name === 'pull-requests' && addon.active && state.settings ? releaseMergeRow(row, state.settings) : null,
   ];
   // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
@@ -1398,6 +1398,35 @@ globalThis.addEventListener?.('message', event => {
   document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
 });
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
+// Sharing not connected yet (ORCH-2170, RP2): the admin's whole text is pasted on the add-on's own page and Connect
+// runs its connect from that text (the core finds the connect line). The view asks for it with its Connect button.
+const linkUi = {text:'', busy:false, error:''};
+const linkNeedsConnect = id => isPublish(id) && !snapshot && addonViews[id]?.view?.header?.button?.action?.op === 'link.connect';
+function linkPaste(id) {
+  const a = addons().find(a => a.name === id);
+  const input = h('textarea', {rows:4, className:'input', 'data-native':'link-text', 'data-key':'link-connect-text', 'aria-label':'Text from your admin', placeholder:'Paste the whole text here. It starts with “Connect this workspace…”', autocomplete:'off', spellcheck:'false', disabled:linkUi.busy});
+  input.value = linkUi.text;
+  return h('section', {className:'card pad stack-sm', 'data-key':'link-connect'},
+    settingsText('h2', {}, 'Connect ' + addonTitle(a)),
+    settingsText('p', {className:'meta'}, 'Your admin gives you a short text. Paste all of it here, then share a file.'),
+    input,
+    linkUi.error ? settingsText('p', {className:'meta', role:'alert', 'data-key':'link-connect-error'}, linkUi.error) : null,
+    h('div', {className:'row'}, h('button', {type:'button', className:'btn sm primary', 'data-native':'link-connect', 'data-key':'link-connect-button', disabled:linkUi.busy}, linkUi.busy ? 'Connecting…' : 'Connect')));
+}
+async function linkConnect(id) {
+  const text = linkUi.text.trim();
+  if (linkUi.busy || !id) return;
+  linkUi.error = text ? '' : 'Paste the text from your admin first.';
+  linkUi.busy = !!text;
+  paintAddon(id);
+  if (!text) return;
+  const result = await act('link.connect', {text});
+  linkUi.busy = false;
+  if (!result.ok) { linkUi.error = result.text || 'That did not work. Copy the whole text from your admin again and paste it here.'; paintAddon(id); return; }
+  linkUi.text = '';
+  window.orch.toast('Connected. You can share a file now.', 'ok');
+  await loadAddon(id);
+}
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
 const sharingOn = () => addons().some(a => a.active !== false && isPublish(a.name));
@@ -1484,7 +1513,8 @@ function paintAddon(id) {
   const template = addonBody(a, addonViews[id]);
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
-    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
+    if (linkNeedsConnect(id)) blocks.append(linkPaste(id));   // not connected yet: the paste box is the page (RP2)
+    else blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     // Block text is supplied by add-ons; keep internal keys out of visible copy.
@@ -2044,8 +2074,11 @@ async function sharedLinkAction(control) {
 }
 // Rebind after reconciliation: retained DOM nodes must use the current link data.
 function bindAddonControls(host) {
+  const down = isPublish(shownAddon()) && addonViews[shownAddon()]?.view?.notice_tone === 'warn';   // sharing can't be reached: share, extend and stop sharing wait
   host.querySelectorAll('[data-native]').forEach(control => {
-    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : sharedLinkAction(control);
+    if (down && ['link-share', 'link-extend', 'link-stop'].includes(control.dataset.native)) control.disabled = true;
+    if (control.dataset.native === 'link-text') { control.oninput = () => { linkUi.text = control.value; }; return; }
+    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : control.dataset.native === 'link-connect' ? linkConnect(shownAddon()) : sharedLinkAction(control);
   });
 }
 
