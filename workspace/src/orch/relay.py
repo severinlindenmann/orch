@@ -113,6 +113,11 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def whoami_quick(root: Path) -> dict:
+    """The same call with a short wait, for `orch relay status`."""
+    return _api(root, "GET", "/v1/whoami", timeout=5)[1]
+
+
 def invite(root: Path, name: str, folder: str, group: str | None, admin_url: str, token: str) -> dict:
     """`orch relay invite`: add a workspace on the relay (admin API) and connect `folder` to it.
     `group`: a group id (grp_…) or name; without it the workspace is in no group."""

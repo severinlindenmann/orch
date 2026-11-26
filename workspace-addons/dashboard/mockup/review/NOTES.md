@@ -134,3 +134,10 @@ switch with no count, and the master empty state ("Nothing waits for you" / "New
 you."). With nothing in the rail (no cards, no Auto Reviewer, nothing the Reviewer did) the page is one column: the
 switch lines up with the heading and the empty state sits in the card's 760 px column under it (before: an empty left
 column pushed both to the right). Master rule in `widgets.css`, no page CSS.
+
+## One card alone (25 Nov 2026, ORCH-2113)
+
+`review.html?one=1` uses the product's layout too: one card alone draws no All cards list, so with nothing else in the
+rail the page is one column; the switch and the card line up with the heading (before: an empty left column pushed
+both to the right at 1280 to 1920). Two or more cards show the list in the left column as before. Same master rule in
+`widgets.css` as ORCH-2024, no longer tied to the empty state.
