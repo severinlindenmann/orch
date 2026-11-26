@@ -17,6 +17,9 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | a question the helper withdrew | Taken back: <reason> | `--take-back`, `taken_back` | Cancelled, Deleted, Withdrawn |
 | the task a question belongs to, on its card | About: <task text> | `--check c1` | Regarding, Subject |
 | the suggested option | Suggested | `recommended` | Recommended |
+| how much attention a Review card needs (owner, 26 Nov, ORCH-2184) | Quick look / Short decision / Take your time (tiles over the lanes); a round of up to 5 ends on What you decided | `attention.group` quick, short, time; `orch review list --group` | Decide (as a group name), about N min |
+| put a Review card off (owner, 26 Nov) | Later (one button; the choices under it are times only) | - | Remind me |
+| sort a list of ideas on Review (owner, 26 Nov, ORCH-2186) | Keep / Later / No per idea; Save (Save, N left for later) | `orch ask --idea`, `ideas`, `left_from` | Approve, Reject, Maybe, Remind me |
 | evidence on a task | Evidence | `evidence` | Proof, Artifact |
 | repeating work | Repeats | `ext.scheduler` | Scheduler, Cron, Schedule |
 | an AI tool working | its adapter label (Claude, Codex, ...) | `agent:<tool>` | Bot, Agent, Agents (the screen word is helper; add-on texts are word-checked too) |
@@ -40,6 +43,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | Home warning when several stopped | <n> things stopped working · See what to fix | - | <n> problems |
 | the place a key is typed in | Key entry | - | Safe key entry, Vault |
 | private network | private network (VPN) | - | NetBird (any product name) |
+| the card for a ticket's result to look at (owner, 26 Nov, ORCH-2178) | Test results | `test_results` | Check result |
 
 Rules
 - Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Evidence on this task".

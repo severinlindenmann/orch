@@ -59,6 +59,15 @@ _EMBEDDED = re.compile(
 _TICKET_RE = re.compile(r"^tickets/t_[a-z0-9]{6,16}\.json$")
 
 
+def _outside_pixels(data):
+    """A PNG without its proven Huffman-coded pixel runs (orch.pngpixels): a header searched inside compressed
+    pixels matches by chance (#2702). Anything the proof can't cover (a stored block, data after IEND, another
+    format) is searched whole."""
+    from orch import pngpixels
+
+    return pngpixels.label_view(data) or data if data.startswith(pngpixels.MAGIC) else data
+
+
 @dataclass(frozen=True)
 class Finding:
     path: str
@@ -183,7 +192,7 @@ def scan_blob(path, data):
     why = "archive" if archive else None
     if not why and data.startswith(b"%PDF-"):
         why = "pdf"
-    elif not why and _is_media(data) and _EMBEDDED.search(data, 8):
+    elif not why and _is_media(data) and _EMBEDDED.search(_outside_pixels(data), 8):
         why = "media-with-archive"
     elif not why and not (_is_media(data) or _is_text(data)):
         why = "unknown-format"

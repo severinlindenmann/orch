@@ -44,6 +44,7 @@ The profile change waits for the owner's approval. Then this skill is rewritten 
     orch relay download <message id> # the file of a file message -> received/
     orch relay outbox                # what is saved but not sent yet (goes out with the next relay command)
     orch relay view                  # who you can reach and the recent messages (the dashboard Relay tab)
+    orch relay needs --json          # Home notices for new contacts connected by your admin (no network)
     orch relay pickups               # texts and files from other workspaces passed on to a ticket, and their runs
     orch relay contacts list         # other workspaces: accepted, or waiting for a person's Accept
     orch relay contacts refused      # messages refused as forged or changed
@@ -72,7 +73,7 @@ the owner; they get a linked copy.
 Share a short summary and only the items the other side needs, not a whole ticket.{{#delegate}} `delegate --ticket <id> --full`
 shares the whole ticket; use it only when the person wants that.{{/delegate}} Check what leaves this machine
 first: add `--dry-run` to `send`{{#delegate}}, `delegate`{{/delegate}}{{#start}} or `start`{{/start}}; it prints the
-message and sends nothing.
+message and sends nothing. Every real send ends with one line on what left this machine.
 {{/workspaces}}
 
 {{#workspaces}}

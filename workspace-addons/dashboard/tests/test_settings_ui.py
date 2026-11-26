@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Phone link'",
+        "'Connection'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -337,7 +337,7 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
     ]
 
     def run(binary, args, root):
-        return rows if args == ["addon", "list", "--json"] else None
+        return rows if args == ["addon", "list", "--catalog", "--json"] else None
 
     monkeypatch.setattr(data, "run_orch", run)
     out = data.load_settings(ws, "orch")
@@ -358,7 +358,9 @@ def test_settings_rows_say_what_can_be_removed_and_the_label_is_never_lower_case
         {"name": "insights", "installed": False, "active": False, "description": "I"},
     ]
     monkeypatch.setattr(
-        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+        data,
+        "run_orch",
+        lambda b, args, root: rows if args == ["addon", "list", "--catalog", "--json"] else None,
     )
     out = data.load_settings(ws, "orch")
     assert {a["name"]: a["removable"] for a in out["addons"]} == {"relay": False, "factory": True}

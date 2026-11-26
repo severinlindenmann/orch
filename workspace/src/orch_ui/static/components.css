@@ -502,8 +502,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .nav-row>.nav-item{padding-right:52px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
-/* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) keeps the button on the left edge */
-.card-row:has(>:first-child:not(.grow))>.btn{margin-left:24px}
+/* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
+.card-row:has(>:first-child:not(.grow,.btn))>.btn{margin-left:24px}
 .card-row time{margin-left:24px}
 .card-row time+.btn{margin-left:auto}
 .file-row{flex-wrap:wrap}
@@ -594,6 +594,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 @media(max-width:900px){.demo-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){
   .btn,.icon-btn,.input{height:var(--touch)}
+  .check-label{min-height:var(--touch)}
   .icon-btn{width:var(--touch)}
   .qoption{height:auto;min-height:var(--touch)}
   .ev-technical summary{min-height:var(--touch)}
@@ -618,7 +619,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
    dark strip on the right of every page (bug hunt 17 Nov). */
 @media(min-width:721px){html{scrollbar-gutter:stable}}
 /* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
-.ticket-table .who,.ticket-table .due-cell,.ticket-table .spend-cell{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
+.ticket-table .who,.ticket-table .due-cell,.ticket-table .spend-cell{white-space:nowrap}.ticket-table td:nth-child(3 of :not(.pick-cell)){min-width:112px}
 /* A quiet ticket's "No news since Friday 14:32" wraps in its own column: as one line it stretched Last change until the table was wider than the page and the Answer buttons were cut off at 1280 px (ORCH-1464). */
 .ticket-table .when.quiet{white-space:normal;min-width:96px;max-width:150px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}

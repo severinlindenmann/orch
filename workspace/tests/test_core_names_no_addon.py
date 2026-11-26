@@ -10,13 +10,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CORE = [*sorted((ROOT / "workspace/src/orch").rglob("*.py")), ROOT / "workspace/src/orch_entry.py"]
 ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "src").is_dir())
+ADDON_MODULES = {
+    package.name
+    for name in ADDONS
+    for package in (ROOT / "workspace-addons" / name / "src").iterdir()
+    if (package / "__init__.py").is_file()
+}
 DISTRIBUTIONS = {
     tomllib.loads((ROOT / "workspace-addons" / n / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "name"
     ]
     for n in ADDONS
 }
-MODULES = {n.replace("-", "_") for n in DISTRIBUTIONS}
 
 # file (relative to workspace/src) -> {literal: reason / issue}. Everything else must be clean.
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
@@ -118,12 +123,12 @@ def test_core_imports_no_addon_package():
             mods = [a.name for a in node.names] if isinstance(node, ast.Import) else []
             if isinstance(node, ast.ImportFrom) and node.module:
                 mods.append(node.module)
-            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in MODULES]
+            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in ADDON_MODULES]
     assert not bad, bad
 
 
 def test_core_has_no_addon_name_literals():
-    names = set(ADDONS) | MODULES | DISTRIBUTIONS
+    names = set(ADDONS) | ADDON_MODULES | DISTRIBUTIONS
     bad = []
     for f in CORE:
         rel = f.relative_to(ROOT / "workspace/src").as_posix()

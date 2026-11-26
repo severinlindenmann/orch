@@ -68,11 +68,17 @@
       dialog.dataset.state='opening';dialog.showModal();
       dialog.oncancel=e=>{e.preventDefault();api.close(dialog);};
     },
-    async close(dialog) {
+    /* Settles once the dialog is really closed and focus is back. With overlay.js (dashboard, add-ons, gallery) its one
+       lifecycle does the fade, the close and the focus (ORCH-2060); the portals without it fade here first. */
+    close(dialog) {
       if(typeof dialog==='string') dialog=document.querySelector(dialog);
-      if(!dialog?.open || dialog.dataset.state==='closing') return;
-      dialog.dataset.state='closing';await wait(reduce()?0:200);dialog.close();delete dialog.dataset.state;
-      const state=overlayState.get(dialog);state?.trigger?.focus();
+      if(dialog && window.UI?.overlay?.close) return window.UI.overlay.close(dialog);
+      return (async () => {
+        if(!dialog?.open || dialog.dataset.state==='closing') return;
+        const exit=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-exit'));
+        dialog.dataset.state='closing';await wait(reduce()?0:Number.isFinite(exit)?exit:120);dialog.close();delete dialog.dataset.state;
+        overlayState.get(dialog)?.trigger?.focus();
+      })();
     },
     reduce,
     /* A thing grows or moves from where it was (`from`, a DOMRect) to where it is now: transform and opacity only,
