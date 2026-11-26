@@ -33,9 +33,11 @@ def _at(value):
     return at if at.tzinfo else at.replace(tzinfo=UTC)
 
 
-def done_at(ticket):
+def done_at(root, ticket):
     """When the ticket last moved to Done: its newest history line that says so, else its last change."""
-    for h in reversed(ticket.get("history") or []):
+    from orch import history
+
+    for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and DONE_LINE.fullmatch(str(h.get("text", ""))):
             at = _at(h.get("at"))
             if at:
@@ -84,7 +86,7 @@ def collect(root, now=None):
     for t in found:
         if t.get("status") != "done" or not _counted(t):
             continue
-        at = done_at(t)
+        at = done_at(root, t)
         if at is None or at > now or at < before:
             continue
         if at < start:
