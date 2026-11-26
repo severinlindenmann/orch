@@ -112,7 +112,7 @@ test('ORCH-2199: no switch; a click into the screen types there, a drag only sel
   screen.fire('pointerup', {clientX: 11, clientY: 10});
   assert.equal(ui.typing(), true, 'a click types');
   assert.equal(xt.options.disableStdin, false);
-  assert.equal(byKey(ui.el, 'term-type').getAttribute('aria-pressed'), 'true', 'the keyboard sign is lit');
+  assert.equal(byKey(ui.el, 'term-type').getAttribute('aria-pressed'), 'true', 'the keyboard icon is lit');
   xt.type('l'); xt.type('s'); xt.type('\r');
   await wait(40);
   assert.deepEqual(sent, ['ls\r'], 'typed data goes out in one request');
@@ -167,7 +167,7 @@ test('typing stays off when the workspace setting is off, and a refused request 
   xt.type('a');
   await wait(40);
   assert.equal(ui.typing(), false);
-  assert.equal(byKey(ui.el, 'term-type').hidden, true, 'no keyboard sign once the server said no');
+  assert.equal(byKey(ui.el, 'term-type').hidden, true, 'no keyboard icon once the server said no');
 });
 
 test('ORCH-2199: a paste goes in as one block without a question and never presses Enter by itself', async () => {

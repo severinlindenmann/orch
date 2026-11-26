@@ -1,6 +1,6 @@
 /* The helper's real screen (term.js, UI.term; ORCH-744). A quiet box with the screen in the mono font; its tools (the
-   keyboard sign, Copy) sit in the Focus pane header (ORCH-2199) or in a slim row on top elsewhere. No switch: a click
-   into the screen types there. Typing on: a 2 px brand outline and the keyboard sign lit (owner pick B a).
+   keyboard icon, Copy) sit in the Focus pane header (ORCH-2199) or in a slim row on top elsewhere. No switch: a click
+   into the screen types there. Typing on: a 2 px brand outline and the keyboard icon lit (owner pick B a).
    The screen is xterm.js (vendored, LICENSE-xterm.txt); its colours come from the tokens in term.js. The rules of
    xterm.css the page needs are below, on tokens; xterm.css itself is not linked. */
 .term{display:flex;flex-direction:column;flex:1 1 0;min-height:calc(var(--s9) * 3);font-family:var(--font-ui);border:1px solid var(--border);border-radius:var(--r1);background:var(--sidebar);overflow:hidden;position:relative}

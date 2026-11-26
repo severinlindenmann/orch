@@ -16,7 +16,7 @@
        plain                              true for a plain terminal (no helper): the words say "this terminal"
        toolsOut                           the page puts handle.tools itself (a Focus pane header); else a slim row on top
        handle.el                          the element to put in the page
-       handle.tools                       the typing sign (keyboard), Copy and Turn typing on
+       handle.tools                       the typing icon (keyboard), Copy and Turn typing on
        handle.hello({typing_allowed})     the bridge's first word: may this workspace type at all
        handle.typingBy('you'|'other'|'none')  who types into this session now; 'other' stops typing here
        handle.screen({cols, rows, data})  the whole screen (data: base64 terminal bytes), first and after a gap
@@ -138,9 +138,9 @@
   function term(opts) {
     const o = opts || {};
     const label = o.label || 'the helper';
-    /* only a state worth a word shows (watch only, another page types); the rest is the keyboard sign's tooltip */
+    /* only a state worth a word shows (watch only, another page types); the rest is the keyboard icon's tooltip */
     const say = el('span', {className: 'meta term-say', role: 'status'});
-    /* the typing sign (owner pick B a): a keyboard, lit while your keys go to the screen; a click turns typing on or off */
+    /* the typing icon (owner pick B a): a keyboard, lit while your keys go to the screen; a click turns typing on or off */
     const sw = el('button', {type: 'button', className: 'btn xs ghost icon term-kbd', 'aria-pressed': 'false', 'aria-label': 'Type into the screen of ' + label, 'data-key': 'term-type', hidden: true});
     if (typeof window.icon === 'function') sw.innerHTML = window.icon('keyboard', 16); else sw.textContent = '\u2328';
     /* Copy: its icon and word; a narrow pane keeps the icon, the word stays its name and tooltip */

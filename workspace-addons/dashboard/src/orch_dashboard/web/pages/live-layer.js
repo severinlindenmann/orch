@@ -690,7 +690,7 @@ function livePane(key, where, s, o) {
         : h('span', {className:'live-pt', title}, title),
       plain && state?.workspace ? h('span', {className:'meta live-pfolder', title:String(state.workspace)}, '\u00b7 ' + state.workspace) : null,
       o.phone || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
-      h('span', {className:'live-term-tools', 'data-live-term-tools':key}),  // the screen's keyboard sign and Copy (pages/liveterm.js)
+      h('span', {className:'live-term-tools', 'data-live-term-tools':key}),  // the screen's keyboard icon and Copy (pages/liveterm.js)
       h('span', {className:'live-ctl'},
         ...(sess ? liveEndHere(key, label) : []),
         leave || (o.phone ? null : livePaneBtn('full', 'Full screen', 'full-screen', 'Full screen', {'data-key':'live-full'})),

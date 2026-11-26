@@ -2,7 +2,7 @@
 // The terminal view of a session in the layer (ORCH-744, draft D feature 5): the helper's real screen in the master
 // terminal (kit term.js, UI.term) where the pane shows Terminal. No switch (ORCH-2199, owner pick B a): a click into the
 // screen types there, Esc twice or a click outside stops; the server checks again (the typing setting and the
-// sign-in). The screen's tools (keyboard sign, Copy) sit in the pane header, so the screen gets the pane's height.
+// sign-in). The screen's tools (keyboard icon, Copy) sit in the pane header, so the screen gets the pane's height.
 // The screen comes from the terminal bridge (ORCH-743) as server-sent events, GET /api/term/stream?ticket=<id>:
 // hello {typing_allowed, page}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, typing {by}, end
 // {state}. One page types at a time (ORCH-883): "Let me type" claims it with POST /api/term/typing {ticket, page, on}

@@ -1206,7 +1206,7 @@ async function terminalView(page, dash, width) {
   // a click into the screen starts typing (no switch), then a command
   await page.click(pane + ' .term-screen');
   await page.waitForFunction(t => document.querySelector(t)?.dataset.typing === 'on', term, { timeout: 3000 }).catch(() => { throw new Error('a click into the screen did not turn typing on'); });
-  if (await page.$(pane + ' [data-key="term-type"][hidden]')) throw new Error('the keyboard sign is hidden while typing');
+  if (await page.$(pane + ' [data-key="term-type"][hidden]')) throw new Error('the keyboard icon is hidden while typing');
   // the keys go where the screen has the keyboard: wait for it, then for what went out (a busy first width is slow)
   await page.waitForFunction(t => document.activeElement?.matches(t + ' .xterm-helper-textarea'), term, { timeout: 3000 });
   await page.keyboard.type('ls');
@@ -3067,7 +3067,7 @@ const STEPS = [
     n: 22, pic: 'fd-22-terminal', area: 'terminal', title: 'A real terminal: type, select, copy and paste', feature: [5],
     do: ['Switch a session to Terminal.', 'Press a key: nothing is sent (watching only).', 'Click into the screen, type a command and press Enter.',
       'Paste two lines.', 'Select text and copy it.'],
-    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after a click into the screen (a small keyboard sign shows while typing).',
+    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after a click into the screen (a small keyboard icon shows while typing).',
       'A paste goes in at once as one block, without its last line end and without a question.', 'Selecting and copying works like on any page; Copy copies the selection or the screen.',
       'While typing the screen follows the size of its pane.', 'It can only be reached from this computer (the bridge, ORCH-743).'],
     async run({ page, dash, width }) {

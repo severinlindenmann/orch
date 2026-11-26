@@ -411,7 +411,7 @@ Do:
 Must be seen:
 
 - The helper's real screen with its colours; it starts watching only.
-- Keys go to the helper only after a click into the screen (a small keyboard sign shows while typing).
+- Keys go to the helper only after a click into the screen (a small keyboard icon shows while typing).
 - A paste goes in at once as one block, without its last line end and without a question.
 - Selecting and copying works like on any page; Copy copies the selection or the screen.
 - While typing the screen follows the size of its pane.
