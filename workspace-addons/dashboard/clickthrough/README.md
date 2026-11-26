@@ -63,7 +63,7 @@ sign-in (`features/f-sync-page.cjs`).
 One file per feature (or a small group of features done in one flow) in `features/`:
 
 ```js
-// New ticket from Home: write what needs doing, "Save without starting", reload, the ticket is in the list.
+// New ticket from Home: write what needs doing, "Save ticket", reload, the ticket is in the list.
 module.exports = {
   name: 'New ticket: save without starting',
   covers: ['ticket.new', 'page:home', 'page:tickets'],
@@ -72,7 +72,7 @@ module.exports = {
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('dialog[open]');
     await dlg.getByPlaceholder(/What should the helper do/).fill('Order the cake for Friday');
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await open('#tickets');
     await reload();
     must((await text()).includes('Order the cake for Friday'), 'the new ticket is not in the list after a reload');

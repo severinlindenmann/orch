@@ -385,6 +385,7 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict
     who = tickets.current_actor(by)
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
+    tickets.no_secret(root, {"text": text}, "Chat text")
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new)
@@ -419,6 +420,7 @@ def reply(
     text = (text or "").strip()
     if not text or len(text) > MAX_TEXT:
         raise Refused("A Chat text has 1 to 20000 characters.")
+    tickets.no_secret(root, {"text": text}, "Chat text")
     gid = tickets.general_id(root)
     if not gid or tickets.resolve(root, ticket) != gid:
         raise Refused("A Chat answer belongs to the Chat ticket.")
@@ -467,6 +469,7 @@ def say_ticket(root: Path, ref: str, text: str, by: str | None = None, by_name: 
     helper does; orch's hint line before it says where to answer. Nothing works on the ticket: it waits there
     and the next helper reads it first (the dashboard starts one, like Add to this ticket)."""
     text = _ticket_text(text)
+    tickets.no_secret(root, {"text": text}, "chat message")
     who = tickets.current_actor(by)
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused(
@@ -491,6 +494,7 @@ def reply_ticket(root: Path, ref: str, text: str) -> dict:
     """The helper answers in a ticket's chat (`orch chat reply --ticket <id>` on a ticket that is not the
     workspace Chat): one chat line on the ticket by the helper."""
     text = _ticket_text(text)
+    tickets.no_secret(root, {"text": text}, "chat message")
     t = _chat_ticket(root, ref)
     who = tickets.current_actor()
     mid = tickets.chat_line_id()
@@ -771,7 +775,7 @@ def last_moved(root: Path) -> dict | None:
 # "run" (the wrapper's hooks) must be the Chat ticket and, when given, the helper's own run (ORCH_RUN).
 HELPER_COMMANDS = {
     ("ticket", "show"): ("read", {"id"}, ("id",)),
-    ("ticket", "list"): ("read", {"status", "all"}, ()),
+    ("ticket", "list"): ("read", {"status", "all", "search", "waiting", "blocked"}, ()),
     ("ticket", "tree"): ("read", {"id"}, ("id",)),
     ("log", None): ("write", {"id", "text"}, ("id",)),
     ("check", "add"): ("write", {"id", "text"}, ("id",)),

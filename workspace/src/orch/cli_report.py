@@ -67,6 +67,9 @@ def report(
     text = str(text or "").strip()
     if not text:
         raise Refused("Say in a few words " + ("what happened." if about == "problem" else "what you want."))
+    from orch import tickets
+
+    tickets.no_secret(root, {"text": text, "expected": expected, "more": more}, "report")
     made = diag_report.make(
         root,
         ticket=ticket,

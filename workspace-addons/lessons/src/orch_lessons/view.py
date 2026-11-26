@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from . import store
 
 PROMPT = "Edit lesson"
+MAX_ROWS = 50  # maxItems of a list block in the view schema
 
 
 def _day(iso: str) -> str:
@@ -37,7 +38,7 @@ def _ticket_label(root, tid: str) -> str:
 def build(root) -> dict:
     data = store.load(root)
     items = []
-    for r in data["lessons"][:50]:
+    for r in data["lessons"][:MAX_ROWS]:
         sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
         if r.get("ticket"):
             sub += f" · from {_ticket_label(root, r['ticket'])}"
@@ -77,7 +78,18 @@ def build(root) -> dict:
         "generated_at": store.now(),
         "blocks": [block],
     }
+    notes = []
     if data["shown"] < len(data["lessons"]):
-        view["notice"] = "Helpers see only the newest lessons. Merge or delete some."
+        notes.append("Helpers see only the newest lessons. Merge or delete some.")
+    hidden = len(data["lessons"]) - MAX_ROWS
+    if hidden > 0:
+        notes.append(f"This page lists the newest {MAX_ROWS}; {hidden} older are hidden.")
+    n = data["unreadable"]
+    if n:
+        notes.append(
+            f"{n} lesson file{' is' if n == 1 else 's are'} unreadable and skipped. Fix or remove them."
+        )
+    if notes:
+        view["notice"] = " ".join(notes)
         view["notice_tone"] = "warn"
     return view

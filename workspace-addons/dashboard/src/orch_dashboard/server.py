@@ -319,7 +319,7 @@ def _link_msg(session, name: str) -> bytes:
         return REVOKED_MSG.encode()
     if getattr(session, "active", True) is False:  # a helper started this server: watch-only
         return WATCH_ONLY_MSG.encode()
-    return b"This link was already used. Sign in again: run orch dashboard open in your terminal."
+    return b"This sign-in link was already used or has ended. Sign in again: run orch dashboard open in your terminal."
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).

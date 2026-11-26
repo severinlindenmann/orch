@@ -52,3 +52,16 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - automation-edit.html: the Time field names the zone it is read in beside it ("Europe/Zurich"), on one line at phone width too. In the product the name comes from the automation add-on, never from the browser: a new repeat shows the zone `orch automation repeat` saves without `--tz`; a saved one its own, an old one saved without a zone "UTC" (as the scheduler reads it).
 - `?mode=edit&zone=utc`: an old repeat read in UTC; below the field "Saving changes the time zone to Europe/Zurich.", because saving sends no zone.
 - automation.html list: the product's Next time now ends with the zone of this computer ("Mon 30 Nov, 08:00 CET").
+
+## Polish (ORCH-2097, 25 Nov)
+
+- automation.html follows the product's block order: Coming up, then Repeating and Once, then Recent starts; the "Compact rows" toggle the product never had is gone.
+- Recent starts has no "Latest activity" line (it repeated the title); its empty text names the next start in plain words, by title, never the ticket number: "<title> starts Monday at 08:00. Use Start now to run one sooner." While automation is stopped it names no time.
+- Empty page (`?state=empty`): the same word as the loaded table, "Repeating" above its card, "No repeats yet"; the one button is New repeat in the page header.
+- Footnote: "Incoming from your phone and other workspaces · On / Off / Can't connect just now, trying again", never "relay" or "listening".
+- Dates in the tables have no leading zero ("Tue 1 Dec"), as the week strip writes them.
+- Product fix behind it: the dashboard no longer swaps every icon in an add-on page for an "open in new tab" arrow (the empty states showed it).
+
+## Relay off: no incoming footnote (ORCH-2022, 25 Nov)
+
+- automation.html: the footnote "Incoming from your phone and other workspaces · … / Manage incoming work →" is the relay-on demo. `?relay=off` shows the page of a workspace without the relay: no footnote, no link, no phone or relay words (R1.1). The product does the same (`orch automation view` and `status` read `orch addon list`).

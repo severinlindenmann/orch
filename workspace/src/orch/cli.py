@@ -7,14 +7,12 @@ import contextlib
 import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
 from orch import (
     addons,
     cli_addons,
-    cli_chat,
     cli_checks,
     cli_clients,
     cli_config,
@@ -22,13 +20,11 @@ from orch import (
     cli_diag,
     cli_github,
     cli_health,
-    cli_job,
     cli_leave,
     cli_look,
     cli_manager,
     cli_needs,
     cli_people,
-    cli_record,
     cli_report,
     cli_review,
     cli_run,
@@ -157,6 +153,16 @@ def _line(t: dict) -> str:
     if quiet := tickets.quiet_label(t.get("quiet_since")):
         bits.append(quiet)  # G2: only `ticket list` sets quiet_since
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
+
+
+def _picked_text(args, ts: list[dict], txt: str) -> str:
+    """`orch ticket list --search/--waiting/--blocked` with no hit says so (nextstep says where to look)."""
+    if ts:
+        return txt
+    words = (args.search or "").strip()
+    if words:
+        return f'No tickets match "{words}".'
+    return "No tickets wait on a person." if args.waiting else "No tickets wait on something else."
 
 
 def _ago(iso: str) -> str:
@@ -432,7 +438,7 @@ def visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
+_PLACEHOLDERS = {"share", "chat", "private"}  # hidden until built
 ADVANCED_TOP = {
     "update",
     "wait",
@@ -448,15 +454,18 @@ ADVANCED_TOP = {
     "checks",  # ORCH-529: --help-all only
     "skill",  # ORCH-532: for helpers and scripts
     "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
+    "run",  # ORCH-1877: --help-all only
+    "agents",
+    "config",
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
 _EXAMPLES = {
     "orch ticket new": 'A ticket needs a title, for example: orch ticket new "Fix the login"',
-    "orch check add": 'A checklist item needs a ticket and text, e.g.: orch check add t_abc "Write the test"',
-    "orch check done": 'Say which ticket and item, for example: orch check done t_abc c1 --command "pytest"',
-    "orch ticket show": "Say which ticket, for example: orch ticket show t_abc. List them: orch ticket list",
+    "orch check add": 'A task needs a ticket and text, for example: orch check add ABC-1 "Write the text"',
+    "orch check done": 'Say which ticket and task, e.g.: orch check done ABC-1 c1 --note "what you did"',
+    "orch ticket show": "Say which ticket, for example: orch ticket show ABC-1. List them: orch ticket list",
     "orch relay send": 'Say who and what, for example: orch relay send "Design" "The report is ready"',
 }
 
@@ -497,6 +506,16 @@ class _Parser(argparse.ArgumentParser):
         if self.prog in _EXAMPLES:
             self.exit(2, _EXAMPLES[self.prog] + "\n")
         m = re.search(r"required: (.*)", message)
+        sp = next((a for a in self._actions if isinstance(a, argparse._SubParsersAction)), None)
+        if m and sp is not None and m.group(1) == sp.dest:  # a command is missing, not a value
+            seen: set[int] = set()  # an alias names the same command once
+            hidden = getattr(sp, "_hidden", set())
+            names = ", ".join(
+                n for n, c in sp.choices.items() if n not in hidden and not (id(c) in seen or seen.add(id(c)))
+            )
+            self.exit(
+                2, f"Say what to do: {self.prog} <command>, one of: {names}.\nMore help: {self.prog} --help\n"
+            )
         if m:
             usage = self.format_usage().replace("usage: ", "").strip()
             self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
@@ -508,6 +527,7 @@ def _drop_hidden(parser: argparse.ArgumentParser) -> None:
     Leave such subcommands out of every help list, at every level (they still run)."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
+            action._hidden = {a.dest for a in action._choices_actions if a.help == argparse.SUPPRESS}
             action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
             for child in {id(c): c for c in action.choices.values()}.values():
                 _drop_hidden(child)
@@ -517,6 +537,7 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
     def hide(sp, names):
+        sp._hidden = getattr(sp, "_hidden", set()) | set(names)
         sp._choices_actions[:] = [a for a in sp._choices_actions if a.dest not in names]
 
     top = parser._subparsers._group_actions[0]
@@ -562,10 +583,11 @@ def build_parser(
     show_all: bool = False,
     addon_lines: list[str] | None = None,
     on: frozenset[str] = frozenset(),
-    helps: bool = True,
+    *,
+    command: str | None = None,
 ) -> argparse.ArgumentParser:
     """`on`: the built-in add-ons (relay, publish) that are on here; help names the others nowhere (R1.1).
-    `helps=False` leaves out the examples and next steps, for a command that prints no help (speed)."""
+    Help, examples and next steps are only built for a help request (`command` is None)."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -574,6 +596,43 @@ def build_parser(
     p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
+    # For an everyday invocation argparse only needs this command's branch. Help, discovery and
+    # unrecognised commands still use the complete tree, in the original display order.
+    branch = {
+        "ticket": _ticket_parsers,
+        "needs": cli_needs.add_parsers,
+        "counts": cli_needs.add_parsers,
+        "doctor": cli_leave.add_parsers,
+    }.get(command)
+    if branch:
+        branch(sub, common)
+        _drop_hidden(p)
+        return p
+    if command == "--version":
+        return p
+
+    _leading_parsers(sub, common)
+    _ticket_parsers(sub, common)
+    _remaining_parsers(sub, common)
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
+    notes = []
+    if addon_lines:
+        notes.append("Add-ons:\n" + "\n".join(addon_lines))
+    if not show_all:
+        _hide_advanced(p)
+        notes.append("More commands: orch --help-all")
+    p.epilog = "\n\n".join(notes) or None
+    # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
+    top = p._subparsers._group_actions[0]
+    top._choices_actions[:] = [
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
+    ]
+    _drop_hidden(p)
+    helptext.apply(p, on)
+    return p
+
+
+def _leading_parsers(sub, common):
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
     x.add_argument("--yes", action="store_true", help="do not ask; take the first AI tool found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
@@ -622,6 +681,8 @@ def build_parser(
     cli_skill.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
 
+
+def _ticket_parsers(sub, common):
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common], help="make a ticket")
     x.add_argument("title")
@@ -669,6 +730,16 @@ def build_parser(
         "--ext",
         metavar="ADDON",
         help="only tickets with this add-on's data (no children counts); fast for an add-on's own tickets",
+    )
+    x.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="only tickets with these words in the title, tasks, note or description, or this number",
+    )
+    wait = x.add_mutually_exclusive_group()
+    wait.add_argument("--waiting", action="store_true", help="only tickets waiting on a person: a question")
+    wait.add_argument(
+        "--blocked", action="store_true", help="only tickets waiting on a time, a ticket or the outside"
     )
     x = t.add_parser("show", parents=[common], help="one ticket: its tasks, evidence and questions")
     x.add_argument("id")
@@ -807,6 +878,7 @@ def build_parser(
     x.add_argument(
         "--feedback", action="store_true", help="a person's feedback file: kept in the feedback folder"
     )
+    x.add_argument("--request", action="store_true", help="the file came with the request of a new ticket")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common], help="the ticket waits for a time, a ticket or an answer")
@@ -829,6 +901,10 @@ def build_parser(
     )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
+
+
+def _remaining_parsers(sub, common):
+    from orch import cli_chat, cli_job, cli_record
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
@@ -1072,23 +1148,6 @@ def build_parser(
     cli_chat.add_parsers(sub, common)
     cli_manager.add_parsers(sub, common)
     cli_session.add_parsers(sub, common)
-    p.formatter_class = argparse.RawDescriptionHelpFormatter
-    notes = []
-    if addon_lines:
-        notes.append("Add-ons:\n" + "\n".join(addon_lines))
-    if not show_all:
-        _hide_advanced(p)
-        notes.append("More commands: orch --help-all")
-    p.epilog = "\n\n".join(notes) or None
-    # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
-    top = p._subparsers._group_actions[0]
-    top._choices_actions[:] = [
-        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
-    ]
-    _drop_hidden(p)
-    if helps:
-        helptext.apply(p, on)
-    return p
 
 
 def _addon_note(root: Path, q: dict) -> str | None:
@@ -1199,26 +1258,46 @@ def run(args: argparse.Namespace) -> None:
         root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
-        new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
+        new = init_mod.is_new(root)  # before anything is written
+        lines = [*init_mod.init(root, args.code, new), init_mod.CONSENT]  # local tickets work from here on
+        text = [init_mod.READY, *lines]
+
+        def shown() -> None:  # a person in a terminal reads what is in place before the next question
+            if asking and text:
+                print("\n".join(text), flush=True)
+                text.clear()
+
         try:
+            shown()
             agent = init_mod.choose_agent(root, args.yes, asking)
-        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback, no half .orch
-            if new:
-                shutil.rmtree(root / ".orch", ignore_errors=True)
-            raise init_mod.stopped("Stopped. Nothing was set up. Run orch init again.") from None
-        lines = init_mod.init(root, args.code, new)
-        try:
-            if you := init_mod.ask_name(root, asking and not args.yes):
-                lines.append(you)
+            from orch import config
+
+            more = [init_mod.CAN_USE] if config.agent_name(root) else []
             start = None
             if new and (asking if args.starter is None else args.starter):
                 t = init_mod.starter(root, by())
                 start = t["key"]
-                lines.append(
+                more.append(
                     f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
                 )
-            on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
-        except (EOFError, KeyboardInterrupt):
+            text += [agent, *more]
+            on = []
+            if args.recommended:
+                shown()
+                on = init_mod.recommended(root, args.yes, asking)
+                if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
+                    more.append(you)
+                    text.append(you)
+                text.append(
+                    f"Turned on: {', '.join(on)}"
+                    if on
+                    else "Add-ons     nothing to turn on "
+                    "(the recommended ones are on, or this install has none)"
+                )
+            elif names := init_mod.recommended_names(root):
+                more.append(init_mod.optional_line(names))
+                text.append(more[-1])
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback
             raise init_mod.stopped(
                 "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
             ) from None
@@ -1227,16 +1306,12 @@ def run(args: argparse.Namespace) -> None:
             {
                 "ok": True,
                 "root": str(root),
-                "details": lines,
+                "details": lines + more,
                 "agent": agent,
                 "recommended": on,
                 "starter": start,
             },
-            "orch is ready in this folder. "
-            + agent
-            + "\n"
-            + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else ""),
+            "\n".join(text),
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
@@ -1322,17 +1397,22 @@ def run(args: argparse.Namespace) -> None:
         or cli_config.dispatch(args, root)
     ):
         pass
-    elif (
-        cli_conn.dispatch(args, root)
-        or cli_job.dispatch(args, root)
-        or cli_record.dispatch(args, root)
-        or cli_secret.dispatch(args, root)
-        or cli_github.dispatch(args, root)
-    ):
+    elif cmd == "job":
+        from orch import cli_job
+
+        cli_job.dispatch(args, root)
+    elif cmd == "record":
+        from orch import cli_record
+
+        cli_record.dispatch(args, root)
+    elif cmd == "chat":
+        from orch import cli_chat
+
+        cli_chat.dispatch(args, root)
+    elif cli_conn.dispatch(args, root) or cli_secret.dispatch(args, root) or cli_github.dispatch(args, root):
         pass
     elif (
-        cli_chat.dispatch(args, root)
-        or cli_look.dispatch(args, root)
+        cli_look.dispatch(args, root)
         or cli_shot.dispatch(args, root)
         or cli_manager.dispatch(args, root)
         or cli_session.dispatch(args, root)
@@ -1365,19 +1445,25 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads, ticketindex
+        from orch import reads, ticketindex, ticketsearch
 
+        search = ticketsearch.needle(args.search)
+        picked = bool(search or args.waiting or args.blocked)
         if args.ext:  # an add-on's own tickets, read once (ORCH-603)
             ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
-        elif args.json:  # the dashboard reads the same rows in-process
+        elif args.json or search:  # the dashboard reads these rows in-process; a search needs the full texts
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
-        else:  # the text list needs only the index rows (ORCH-521)
-            ts, everything = reads.index_list(root, args.status, args.all)
+        else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
+            with ticketindex.reuse():
+                ts, everything = reads.index_list(root, args.status, args.all)
+                args._broken_tickets = ticketindex.broken(root)
+        if picked:  # the dashboard's own search and waiting split (R4.3)
+            ts = ticketsearch.pick(ts, search, only_blocked=args.blocked, only_waiting=args.waiting)
         ids = {x["id"] for x in everything}
         hidden = (
             0
-            if args.status or args.all or args.ext
+            if args.status or args.all or args.ext or picked
             else sum(1 for t in everything if t["status"] in ("done", "dropped"))
         )
         txt = (
@@ -1390,6 +1476,10 @@ def run(args: argparse.Namespace) -> None:
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
+            txt += "\n" + tickets.broken_file(name)
+        if picked and not args.json:
+            txt = _picked_text(args, ts, txt)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
@@ -1575,7 +1665,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         folder = tickets.FEEDBACK_DIR if args.feedback else None
-        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder)
+        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder, request=args.request)
         _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
@@ -1611,7 +1701,11 @@ def run(args: argparse.Namespace) -> None:
             f"{t['id']} wait cleared"
             if args.clear
             else f"{t['id']} is waiting"
-            + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
+            + (
+                f" until {net.when(t['waiting_on']['until'])} (local time)"
+                if args.until
+                else f" on {args.on}"
+            ),
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
@@ -2184,6 +2278,8 @@ def _sub_word(argv: list[str]) -> str:
 def main(argv: list[str] | None = None, watchdog=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if is_record_hook(argv):  # a tool's hook: exit 0 whatever happens (only --strict refuses), no parser
+        from orch import cli_record
+
         return cli_record.hook_main(argv, watchdog)
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
@@ -2210,10 +2306,14 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
-        helping = "-h" in argv or "--help" in argv or not argv
-        lines = addons.help_lines(root) if helping else None
-        on = frozenset(addons.active(root)) & set(addons.CORE_ADDONS) if helping and root else frozenset()
-        parser = build_parser(show_all, lines, on, helping)
+        help_requested = "-h" in argv or "--help" in argv or not argv
+        lines = addons.help_lines(root) if help_requested else None
+        on = (
+            frozenset(addons.active(root)) & set(addons.CORE_ADDONS)
+            if help_requested and root
+            else frozenset()
+        )
+        parser = build_parser(show_all, lines, on, command=None if help_requested else argv[0])
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
             raise Refused(addons.not_on_message(root, argv[0]))  # built-in add-on that is off: no command
         if (

@@ -65,6 +65,7 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
     "checks approve": ("orch checks approve github-login",),
     "checks remove": ("orch checks remove github-login",),
     "checks run": ("orch checks run", "orch checks run github-login"),
+    "checks show": ("orch checks show github-login",),
     "skill": ("orch skill list", "orch skill check"),
     "skill check": ("orch skill check", "orch skill check <name>"),
     "skill list": ("orch skill list",),
@@ -189,6 +190,9 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
     "agents test": ("orch agents test <name>",),
     # built-in add-ons: their help is reachable only once they are on
     "publish": ("orch publish list", "orch publish file report.pdf"),
+    "publish invite": (
+        "orch publish invite web --folder ~/work/web --admin-url https://publish-admin.example.com",
+    ),
     "publish connect": ("orch publish connect https://files.example.com --workspace web --token <token>",),
     "publish whoami": ("orch publish whoami",),
     "publish profile": (
@@ -205,6 +209,9 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
     "publish stop": ("orch publish stop myapp",),
     "publish delete": ("orch publish delete f_ab12", "orch publish delete myapp"),
     "relay": ('orch relay send Design "The report is ready"', "orch relay inbox"),
+    "relay invite": (
+        "orch relay invite web --folder ~/work/web --admin-url https://relay-admin.example.com",
+    ),
     "relay connect": ("orch relay connect https://relay.example.com --workspace web --token <token>",),
     "relay whoami": ("orch relay whoami",),
     "relay status": ("orch relay status",),
@@ -281,6 +288,9 @@ NEXT = {
     "uninstall": "orch init  (to set this folder up again later)",
     "ticket artifacts-dir": "save the files there, then: orch check done <ticket> <task> --file <file>",
     "publish new": "orch publish app <folder>",
+    "publish invite": "open the folder in your helper; it is connected to publish.",
+    "relay invite": "open the folder in your helper; it is connected to the relay.",
+    "config get": "change one: orch config set <key> <value>",
     "ticket status": "orch ticket list",
     "ticket show": 'orch check add <ticket> "<step>"  (one task per step)',
     "ticket tree": "orch ticket show <ticket>",
