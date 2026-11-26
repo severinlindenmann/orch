@@ -148,6 +148,25 @@ def tws(tmp_path_factory, monkeypatch):
     return ws
 
 
+def test_scheduler_ticket_json_needs_a_paired_test_workspace(tws, monkeypatch, capsys):
+    """The Windows smoke merges stderr into stdout before parsing ticket new as JSON."""
+    from orch import secretscan
+
+    outside = tws.parents[1] / "orch-sched"
+    (outside / ".orch").mkdir(parents=True)
+    for root, readable in ((outside, False), (tws, True)):
+        monkeypatch.chdir(root)
+        monkeypatch.delenv("ORCH_ROOT", raising=False)
+        monkeypatch.setattr(secretscan, "_noted", False)
+        assert cli.main(["ticket", "new", "Scheduled smoke", "--json", "--by", "human:owner"]) == 0
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["id"]
+        if readable:
+            assert captured.err == ""
+        else:
+            assert secretscan.NOTE_SKIPPED in captured.err
+
+
 def test_launch_url_on_a_test_install(tws):
     url = pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]

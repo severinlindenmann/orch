@@ -62,7 +62,9 @@ def test_css_is_scoped_small_screens_and_touch_targets():
     assert "@media" in CSS and "prefers-reduced-motion" in CSS
     selectors = re.findall(r"(?m)^([^{@}/]+)\{", CSS)
     # the one rule outside .chat-page lets the Chat frame fill the page (ORCH-2171: full height, no page title)
-    assert selectors and all(s.strip().startswith(".chat-page") or s.strip() == ".page:has(>.chat-frame)" for s in selectors)
+    assert selectors and all(
+        s.strip().startswith(".chat-page") or s.strip() == ".page:has(>.chat-frame)" for s in selectors
+    )
 
 
 def test_group_talk_is_marked_by_the_data_layer(ws):
