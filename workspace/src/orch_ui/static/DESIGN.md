@@ -337,6 +337,10 @@ the bands sit side by side. A tile opens its session in the layer; nothing is an
 The filter finds a session by its key, name, title and the words on its tile ("Check", "Idle"); one that sits in Needs
 you is also found by "Needs you" (ORCH-2045). The summary keeps counting the whole workspace, and with a filter a band
 without a match is left out. Typing only filters: nothing is sent or started.
+A search opens a folded band that holds a match for as long as the search runs (`aria-expanded` says what is on
+screen); a fold click during a search counts for that search only, and clearing it brings back the saved folds
+(ORCH-2063). The filter sits between the summary and the bands in the page order too, so Tab goes from it to the first
+match. A one-line title that is too long ends in an ellipsis.
 
 ### Pin and rename (ORCH-361)
 Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
