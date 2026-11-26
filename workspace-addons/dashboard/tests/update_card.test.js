@@ -122,6 +122,15 @@ test('no build known: no badge and no switch', async () => {
   assert.doesNotMatch(text(c.aboutPanel()), /Release|Test version|Switch/);
 });
 
+test('while checking: skeleton lines for Installed, Newest and Tools, never a bare "…"', () => {
+  const {c} = context(INFO);
+  c.skeletonLines = (label, n, key) => node('div', {className:'skeleton-late', 'data-key':key}, [label]);
+  const keys = [], walk = n => { if (!n || typeof n !== 'object') return; if ((n.attrs?.className || '').includes('skeleton-late')) keys.push(n.attrs['data-key']); (n.children || []).forEach(walk); };
+  const view = c.aboutPanel(); walk(view);
+  assert.deepEqual(keys, ['update-installed', 'update-loading', 'tools-loading']);
+  assert.ok(!all(view, n => n.tag === 'strong' && text(n) === '…').length);
+});
+
 // orch Companion (ORCH-1721): version, what it does, Mac only and one Download link
 test('orch Companion card: newest version and its download, the release list when GitHub had no answer', async () => {
   const card = view => { let hit = null; const walk = n => { if (!n || typeof n !== 'object') return; if (n.attrs?.['data-key'] === 'settings-companion') hit = n; (n.children || []).forEach(walk); }; walk(view); return hit; };
