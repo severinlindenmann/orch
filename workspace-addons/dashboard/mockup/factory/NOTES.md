@@ -43,6 +43,14 @@ the workspace “Demo”." and "Whoever runs orch for that workspace can start i
 Factory then starts helpers again on its started runs." There is no button: the dashboard's Start starts every add-on
 of the workspace, not only Factory, and starting Factory can start helpers, so it stays a deliberate step.
 
+## Keeps your place on update (25 Nov, ORCH-2046)
+`factory.html?state=updated` ("After an update"): the page after a background update while the keyboard was on
+"Open order" of Online booking page. A new order (Gift card checkout) came in above it and Usage report changed; focus,
+its name ("Open order: Online booking page") and its spot on screen stay. No skeleton, no entry motion, no jump to the
+heading. `state=moved` ("Order gone after an update"): Online booking page left Running, so focus goes to the next
+order's "Open order" (Usage report) and the hidden status line says it once. Every action on an order card is named
+"<action>: <order>" for screen readers. Opening a page on purpose still puts focus on its heading.
+
 ## Polish (25 Nov, ORCH-2103)
 No Details toggles on the Factory page: the proposal's "Details · all stages, who works on it, plan & tasks" is a plain
 "The whole plan" card lower down (tasks, skipped stages, hand-overs; stages and team stay in the cards above). Budget

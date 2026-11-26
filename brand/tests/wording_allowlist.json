@@ -97,9 +97,6 @@
   "Agents": 1,
   "agent": 7
  },
- "workspace/src/orch/cli_diag.py": {
-  "agent": 1
- },
  "workspace/src/orch/cli_leave.py": {
   "agent": 2
  },
