@@ -94,7 +94,7 @@ def test_allow_once_types_only_the_yes_key_of_the_prompt_the_person_saw(asking, 
     assert not got.exists()  # nothing was typed
     assert termsession.answer(tmp_path, orch, TID, "yes", p["digest"]) == (200, "{}")
     for _ in range(150):
-        if got.exists():
+        if got.exists() and got.read_text():  # open() makes the file before the key is written
             break
         time.sleep(0.1)
     assert got.read_text() == "1"
