@@ -1101,6 +1101,11 @@ body.mk-focus-v4d .mw-pmain{display:flex;flex-direction:column;gap:var(--s3);min
 body.mk-focus-v4d .mw-chat{display:flex;flex-direction:column;gap:var(--s3);flex:1;min-height:64px;overflow:auto}
 body.mk-focus-v4d .mw-msg{display:grid;gap:var(--s1);max-width:var(--reading-width)}
 body.mk-focus-v4d .mw-msg p{padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2)}
+body.mk-focus-v4d .mw-cmd{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+body.mk-focus-v4d .mw-cmd code{font-family:var(--font-mono);overflow-wrap:anywhere;min-width:0}
+body.mk-focus-v4d .mw-run{position:relative;flex:none}
+body.mk-focus-v4d .mw-runmenu{position:absolute;right:0;top:calc(100% + 4px);display:grid;min-width:176px;z-index:6;padding:var(--s1);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
+body.mk-focus-v4d .mw-runmenu .btn{justify-content:flex-start}
 body.mk-focus-v4d .mw-msg[data-w=y]{align-self:flex-end;justify-items:end}
 body.mk-focus-v4d .mw-msg[data-w=y] p{background:var(--brand-soft)}
 body.mk-focus-v4d .mw-comp{display:flex;gap:var(--s2)}
