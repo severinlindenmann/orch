@@ -34,7 +34,7 @@ class El {
 }
 
 async function page(home, embedded = true) {
-  const els = {'factory-view':new El('div'), notices:new El('div'), content:new El('main')};
+  const els = {'factory-view':new El('div'), notices:new El('div'), 'factory-said':new El('p'), content:new El('main')};
   const posts = [], fetched = [];
   const win = {addEventListener(){}, parent:null, OrchFrame:{chan:'c1'}};
   win.parent = {postMessage:(m, o) => posts.push([m, o])};
