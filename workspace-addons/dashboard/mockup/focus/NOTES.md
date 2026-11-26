@@ -113,6 +113,14 @@ the layer, then the wall. Not in this task: the pin button on a tile and renamin
 session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
 steps 4, 5, 8 and 11.
 
+## A search reaches a folded band (ORCH-2063, 25 Nov)
+
+The draft and the wall now agree on a search with folded bands: a folded band that holds a match opens by itself while
+the search runs (its chevron and `aria-expanded` follow what is on screen), so the match is visible and the next Tab
+stops on it. A fold click during the search counts for that search only; clearing the search brings back the folds the
+person saved, and their saved choice never changes. A long one-line title ends in an ellipsis instead of running over
+the line. No new control, no second search field.
+
 ## Pin and rename, built (ORCH-361, 18 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus every wall tile and

@@ -1501,7 +1501,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-line+.wall-line{border-top:1px solid var(--border)}
 .wall-line:hover{background:var(--surface-2)}
 .wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.wall-line .wall-tt{white-space:nowrap}
+.wall-line .wall-tt{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}  /* a long title ends in … and never runs over the line (ORCH-2063) */
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
 /* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;

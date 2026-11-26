@@ -373,7 +373,7 @@
   let open = null;
   function show(opts) {
     if (open) open.close(false);
-    const files = opts.files, trigger = document.activeElement;
+    const files = opts.files;
     let index = Math.max(0, Math.min(opts.index || 0, files.length - 1)), token = 0, done = false;
     const d = el('dialog', 'fv'); d.setAttribute('aria-labelledby', 'fv-title');
     const head = el('header', 'fv-head'), titles = el('div', 'fv-titles');
@@ -420,20 +420,21 @@
     document.body.append(d);
 
     const go = i => { if (i >= 0 && i < files.length && i !== index) { index = i; draw(); } };
-    // × Close, Esc, a click outside and the focus trap come from the shared overlay (kit/overlay.js).
+    // × Close, Esc, a click outside, the focus trap and the focus going back to the opener come from the one shared
+    // close lifecycle (kit/overlay.js, ORCH-2060); the viewer only tidies up once that has settled.
     function close(restore = true) {
       if (done) return;
-      if (!restore) finish(false); else window.orch.close(d);
+      if (!restore) finish(); else window.orch.close(d);
     }
-    function finish(restore) {
+    function finish() {
       if (done) return; done = true; open = null;
       token++;
       window.removeEventListener('keydown', escFull, true); window.removeEventListener('message', escFrame);
       d.remove();
-      if (restore && trigger && trigger.isConnected) trigger.focus({preventScroll: true});
       if (opts.onClose) opts.onClose();
     }
-    d.addEventListener('close', () => finish(true));
+    d._uiRestore = finish; // runs inside the lifecycle, before focus goes back
+    d.addEventListener('close', finish);
     function draw() {
       const f = files[index], kind = kindOf(f.name), mine = ++token;
       d.dataset.kind = kind;

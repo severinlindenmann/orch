@@ -17,10 +17,17 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("day", parents=[common], help="one past or present day, read only")
     x.add_argument("day", help="YYYY-MM-DD")
     x = s.add_parser("say", parents=[common], help="a person writes in Chat from the dashboard")
-    x.add_argument("text")
+    x.add_argument("text", nargs="?", default="", help="the words (may be empty when --file is given)")
     x.add_argument("--new", action="store_true", help="start a new conversation")
     x.add_argument("--ticket", help="write in this ticket's chat (and tell its helper)")
     x.add_argument("--name", help="the name the person typed (shown as typed, not signed in)")
+    x.add_argument(
+        "--file",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a file already attached to the Chat ticket that goes with the message (repeat)",
+    )
     x = s.add_parser("reply", parents=[common], help="the helper answers in Chat (with or without a phone)")
     x.add_argument("text")
     x.add_argument("--ticket", help="the Chat ticket, or a ticket whose chat you answer")
@@ -98,13 +105,15 @@ def dispatch(args, root: Path) -> bool:
         if args.ticket:
             if args.new:
                 raise Refused("--new is for the workspace Chat, not a ticket chat.")
+            if args.file:
+                raise Refused("--file is for the workspace Chat; add files on the ticket page.")
             r = chat.say_ticket(root, args.ticket, args.text, who, args.name)
             s = r["send"]
             _out(args, r, f"Saved in the chat of {r['key']}. " + runs_live.send_text(s, r["key"]))
             return True
         if args.name:
             raise Refused("--name goes with --ticket.")
-        r = chat.say(root, args.text, who, new=args.new)
+        r = chat.say(root, args.text, who, new=args.new, files=args.file)
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )
