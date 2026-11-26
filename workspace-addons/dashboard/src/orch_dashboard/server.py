@@ -1270,7 +1270,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             )
         m = re.fullmatch(r"/api/talk/(t_[a-z0-9]{6,16})", path)
         if m:  # the newest turns of the helper's real conversation for the pane's Chat (ORCH-2204), read only
-            return self._send(200, json.dumps(sessiontalk.talk(self.root, m.group(1))).encode(), "application/json")
+            return self._send(
+                200, json.dumps(sessiontalk.talk(self.root, m.group(1))).encode(), "application/json"
+            )
         m = re.fullmatch(r"/api/role/(t_[a-z0-9]{6,16})", path)
         if m:  # a repeating ticket's runs, results, findings and totals for the role page (ORCH-827)
             return self._send(
