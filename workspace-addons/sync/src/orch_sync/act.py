@@ -152,6 +152,7 @@ def status(root, settings):
         "running": result["running"],
         "next_run": result["next_run"],
         "folder": Path(root).name[:80],
+        "folder_path": str(Path(root).resolve() / ".orch"),
         "counts": _counts(root),
         "history": history.read(root),
     }
