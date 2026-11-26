@@ -577,11 +577,15 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
         out["signed"] = {"origin": s["origin"], "created_ms": s["created_ms"], "key_id": env.get("key_id")}
         if "expires_ms" in s:
             out["signed"]["expires_ms"] = s["expires_ms"]
+        if s["type"] == "answer":  # the question it answers, by id and signed bytes (relay._answer_asked)
+            out["signed"]["question_id"] = s.get("question_id")
+            out["signed"]["question_sha256"] = s.get("question_sha256")
         key = f"{frm}/{s['id']}"
         old = st["seen"].get(key)
         if old is not None:
             if old[1] == digest:
-                return Verdict("duplicate", "seen", out, frm)  # the relay sent it again (a lost ack)
+                # the relay sent it again (a lost ack); "dropped": a held person action that is never run
+                return Verdict("duplicate", "dropped" if old[3:] == ["dropped"] else "seen", out, frm)
             return _refuse(st, m, "replayed")
         ga = _group_author(root, st, m, now_ms)
         if ga is not None:
@@ -720,7 +724,7 @@ def _tombstone(root: Path, m: dict) -> None:
     now = _now_ms()
     with _state(root) as st:
         st["seen"].setdefault(
-            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now]
+            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now, "dropped"]
         )
 
 
@@ -847,6 +851,7 @@ def contacts(root: Path) -> list[dict]:
                 "relay_name": relay_name,
                 "kind": "phone" if peer.startswith("ph_") else "workspace",
                 "accepted_at": keys[0].get("accepted_at"),
+                "accepted_by": keys[0].get("by"),  # relay-pairing: taken in on first contact (RP3 A)
                 "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
                 "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else _kept_fp(c),

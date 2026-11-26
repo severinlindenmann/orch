@@ -38,15 +38,15 @@ const head = slice(ssrc, '// The add-on\'s name, the same', 'const asList');
 test('an add-on has the same display name on or off (never the lower-case package name)', () => {
   const c = load(settingsCtx(), head);
   for (const n of ['factory', 'insights', 'sync', 'publish', 'relay']) assert.equal(c.rowLabel({name: n, active: false}), capitalise(n));
-  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Relay'}}), 'Relay');
 });
 
-// ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
+// ORCH-141: the Settings list says the menu name (Publish, Relay), the same as the sidebar
 test('the Settings list row uses the menu name that the sidebar shows', () => {
   const c = load(settingsCtx(), head);
-  assert.equal(c.rowLabel({name: 'publish', label: 'Shared'}), 'Shared');
-  assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
-  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'publish', label: 'Publish'}), 'Publish');
+  assert.equal(c.rowLabel({name: 'relay', label: 'Relay'}), 'Relay');
+  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Relay'}}), 'Relay');
   assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
 });
 

@@ -166,6 +166,52 @@ final class SendSigningTests: XCTestCase {
         XCTAssertNil(MessageSigner.sign(r, phoneId: ph, key: Curve25519.Signing.PrivateKey()) { _ in nil })
     }
 
+    /// ORCH-1204 c9: an answer to a signed question is signed with the body the relay builds and names the question.
+    func testAnAnswerIsSignedWithTheRelaysBodyAndTheQuestionHash() throws {
+        let wsKey = Curve25519.Signing.PrivateKey()
+        let q = MessageSigner.Draft(from: ws, to: "phones", type: "question", body: ["question_id": "q1", "text": "OK?"], ticket: "t_abc123")
+        let qEnv = try MessageSigner.envelope(q, key: wsKey)
+        let sha = try XCTUnwrap(MessageSigner.questionSha256(envelope: qEnv))
+        let k = Curve25519.Signing.PrivateKey()
+        let r = AnswerRequest(questionMessageId: q.id, answer: "yes", clientId: cid)
+        let e = try XCTUnwrap(MessageSigner.signAnswer(r, to: ws, ticket: "t_abc123", questionId: "q1", questionEnvelope: qEnv,
+                                                       phoneId: ph, key: k) { _ in nil })
+        let m = try check(e, key: k)
+        XCTAssertEqual(m["type"]?.string, "answer")
+        XCTAssertEqual(m["body"], .object(["question_id": .string("q1"), "answer": .string("yes"),
+                                           "answered_by": .string("human:\(ph)"), "client_id": .string(cid)]))
+        XCTAssertEqual(m["reply_to"]?.string, q.id)
+        XCTAssertEqual(m["ticket"]?.string, "t_abc123")
+        XCTAssertEqual(m["question_id"]?.string, "q1")
+        XCTAssertEqual(m["question_sha256"]?.string, sha)
+        // On the wire the envelope sits next to today's answer fields.
+        var wire = r
+        wire.envelope = e
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(wire)) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), ["question_message_id", "answer", "client_id", "envelope"])
+    }
+
+    func testAnAnswerToAnUnreadableQuestionEnvelopeGoesUnsigned() {
+        let r = AnswerRequest(questionMessageId: "m_aaaaaaaaaaaaaaaa", answer: "yes", clientId: cid)
+        XCTAssertNil(MessageSigner.signAnswer(r, to: ws, ticket: nil, questionId: "q1", questionEnvelope: ["sig_v": 1],
+                                              phoneId: ph, key: Curve25519.Signing.PrivateKey()) { _ in nil })
+    }
+
+    func testAnOutboxAnswerKeepsWhatItsSignatureNeeds() throws {
+        let env = SignedEnvelope(sigV: 1, keyId: "0123456789abcdef", signed: "e30", sig: String(repeating: "A", count: 86))
+        var msg = QuestionMessage(schema: "orch.msg/1", id: "m_aaaaaaaaaaaaaaaa", from: ws, to: "phones", type: "question",
+                                  createdAt: "2026-11-26T10:00:00Z", ticket: "t_abc123",
+                                  body: QuestionBody(questionId: "q1", title: "T", text: "OK?", options: ["yes", "no"], recommended: nil))
+        msg.envelope = env
+        var item = OutboxItem(clientId: cid, phone: ph, kind: .answer, workspace: ws, createdAt: "2026-11-26T10:00:00Z")
+        Outbox.remember(Question(message: msg, workspaceName: "Dev"), in: &item)
+        XCTAssertEqual(item.questionEnvelope, env)
+        XCTAssertEqual(item.questionId, "q1")
+        XCTAssertEqual(item.questionTicket, "t_abc123")
+        let back = try JSONCoding.decoder.decode(OutboxItem.self, from: JSONCoding.encoder.encode(item))
+        XCTAssertEqual(back, item, "kept across a restart, so a retry signs the same")
+    }
+
     func testLocalFileFacts() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("facts-\(UUID().uuidString)")
         try Data("abc".utf8).write(to: url)

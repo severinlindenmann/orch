@@ -850,6 +850,9 @@ def _card_of(q: dict) -> dict:
     """The card of a question; a plain question gets a plain options card."""
     if isinstance(q.get("card"), dict):
         return q["card"]
+    if isinstance(q.get("ideas"), list):  # ORCH-2186: a page that cannot sort them shows the ideas as a list
+        steps = list(q["ideas"])
+        return {"kind": "draft", "title": q.get("text", ""), "preview": {"type": "doc", "steps": steps}}
     return {
         "kind": "choice" if q.get("options") else "draft",
         "title": q.get("text", ""),
@@ -926,9 +929,59 @@ def _option_ids(q: dict, card: dict) -> list[str]:
     return list(q.get("options") or [])
 
 
+IDEAS_SORT = ("keep", "no", "later")
+
+
+def _ideas_sorted(q: dict, note) -> tuple[dict, object]:
+    """ORCH-2186: how the person sorted an ideas question: the note's {"ideas": {"keep": [1, 3], "no": [2],
+    "later": [4]}} (numbers from 1, as the list shows them). An idea not named stays for later. No sorting at
+    all keeps every idea (a page without the Keep / Later / No rows answers with Looks good).
+    Returns ({keep, no, later: [idea text]}, the note without "ideas")."""
+    ideas = q["ideas"]
+    if isinstance(note, str) and note.strip():
+        try:
+            note = json.loads(note)
+        except ValueError as e:
+            raise BadVerdict("A note must be JSON.") from e
+    got = note.get("ideas") if isinstance(note, dict) else None
+    rest = {k: v for k, v in note.items() if k != "ideas"} if isinstance(note, dict) else note
+    if got is None:
+        return {"keep": list(ideas), "no": [], "later": []}, rest
+    if not isinstance(got, dict) or set(got) - set(IDEAS_SORT):
+        raise BadVerdict('Sort ideas as {"keep": [1, 3], "no": [2], "later": [4]}.')
+    seen: dict[int, str] = {}
+    for word in IDEAS_SORT:
+        nums = got.get(word) or []
+        if not isinstance(nums, list):
+            raise BadVerdict(f'"{word}" is a list of idea numbers.')
+        for i in nums:
+            if isinstance(i, bool) or not isinstance(i, int) or not 1 <= i <= len(ideas):
+                raise BadVerdict(f"Idea numbers go from 1 to {len(ideas)}.")
+            if i in seen:
+                raise BadVerdict(f"Idea {i} is sorted twice.")
+            seen[i] = word
+    if not seen:
+        raise BadVerdict("Sort at least one idea, then save.")
+    word = [seen.get(i, "later") for i in range(1, len(ideas) + 1)]
+    return {w: [x for x, got in zip(ideas, word, strict=True) if got == w] for w in IDEAS_SORT}, rest
+
+
+def ideas_summary(sorted_: dict) -> str:
+    """One plain line for the helper: "Keep: A; B. No: C. Later: D." (empty parts left out)."""
+    names = {"keep": "Keep", "no": "No", "later": "Later"}
+    return " ".join(f"{names[w]}: {'; '.join(sorted_[w])}." for w in IDEAS_SORT if sorted_.get(w))
+
+
 def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
     if verdict not in VERDICTS:
         raise BadVerdict(f"verdict is one of {', '.join(VERDICTS)}.")
+    if verdict == "ok" and isinstance(q.get("ideas"), list) and "card" not in q:
+        if picked is not None:
+            raise BadVerdict("An ideas question has no options to pick: sort the ideas.")
+        sorted_, note = _ideas_sorted(q, note)
+        d = _bare("approve", None, [], _note_bv(note))
+        d["ideas"], d["summary"] = sorted_, ideas_summary(sorted_)
+        return d
     n = _note_bv(note)
     ids = _option_ids(q, card)
     choose = bool(ids)
@@ -1770,8 +1823,13 @@ def stack(root: Path) -> list[dict]:
     from orch import runs
 
     every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
-    shown = history.shown_json(root, _stack_tickets(root))
-    from orch import counts  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+    stored = _stack_tickets(root)
+    raw = {t.get("id"): t for t in stored if isinstance(t, dict)}  # cardcontext reads the stored ticket
+    shown = history.shown_json(root, stored)
+    from orch import (
+        cardcontext,  # ORCH-2183: the person's quoted words on a card
+        counts,  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+    )
 
     hidden = counts.quiet(root, shown)
     skip = set(hidden["queue"]) | set(hidden["folded"])
@@ -1798,6 +1856,9 @@ def stack(root: Path) -> list[dict]:
                     card = _with_plan(card, q, t, (every or {}).get(t["id"], []))
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
+                # ORCH-2183: the quoted words; out of date asks again (no suggested answer, no one tap)
+                said = cardcontext.shown(root, raw.get(t["id"], t), q) if "said" in q else None
+                again = bool(said and said.get("stale"))
                 out.append(
                     {
                         **base,
@@ -1809,9 +1870,9 @@ def stack(root: Path) -> list[dict]:
                         "digest": tickets.question_digest(q),
                         "since": needs._asked_at(root, t, q["id"]),
                         "options": list(q.get("options") or []),
-                        "recommended": q.get("recommended"),
+                        "recommended": None if again else q.get("recommended"),
                         "text": q.get("text") or "",
-                        "one_tap": one_tap(t, q),
+                        "one_tap": False if again else one_tap(t, q),
                         "card_kind": cardkinds.look(
                             card,
                             question_kind=q.get("kind") if isinstance(q.get("kind"), str) else None,
@@ -1819,6 +1880,23 @@ def stack(root: Path) -> list[dict]:
                         ),
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
+                        # ORCH-2182: the decision-first card's "If you wait" and "What matters" lines
+                        **({"if_wait": q["if_wait"]} if isinstance(q.get("if_wait"), str) else {}),
+                        **(
+                            {"facts": [f for f in q["facts"] if isinstance(f, str)]}
+                            if isinstance(q.get("facts"), list)
+                            else {}
+                        ),
+                        **({"said": said} if said else {}),
+                        # ORCH-2184: the deadline the helper gave (orch ask --due), for "Next deadline"
+                        **({"due": q["due"]} if isinstance(q.get("due"), str) else {}),
+                        # ORCH-2186: the ideas to sort (Keep / Later / No), and the card they were left from
+                        **(
+                            {"ideas": [i for i in q["ideas"] if isinstance(i, str)]}
+                            if isinstance(q.get("ideas"), list)
+                            else {}
+                        ),
+                        **({"left_from": q["left_from"]} if isinstance(q.get("left_from"), str) else {}),
                         **run_last(t, q, card, root),
                     }
                 )
@@ -1858,7 +1936,10 @@ def stack(root: Path) -> list[dict]:
             r["id"],
         )
     )
-    return out
+    # ORCH-2184: Quick look / Short decision / Take your time (only orders the work)
+    from orch import attention
+
+    return attention.tag(out)
 
 
 # ---------------------------------------------------------------- what a helper reads

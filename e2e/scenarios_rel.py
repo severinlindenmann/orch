@@ -581,3 +581,50 @@ def r18(e):
     e.cleanup.append(lambda i=p.json()["phone_id"]: e.rel.admin.call("DELETE", f"/admin/api/phones/{i}"))
     check([w["id"] for w in p.json()["workspaces"]] == [names["R18-Alp"]], f"phone reaches {p.json()['workspaces']}")
     return "group, rule and phone code made on the page; admin pages at 390"
+
+
+@scenario("R19", local_only=True)
+def r19(e):
+    """R3.1 at-least-once (ORCH-1998): Reports offline while Pilatus sends; the relay restarts with two messages
+    waiting in Pilatus's outbox; a Chat send after the restart never overtakes them; the relay keeps what it stored
+    before the restart; a raw duplicate is shown once; unknown fields from a newer peer are ignored, not refused."""
+    import subprocess
+
+    from lib import wait_http
+    from scenarios_v2 import _restart_relay
+
+    i = ids(e)
+    rep = i["Reports"]
+    e.orch("Pilatus", "relay", "send", rep, "r19-msg-1")
+    binary, env = _restart_relay(e)
+    e.rel.proc.terminate()
+    e.rel.proc.wait(timeout=15)
+    try:
+        for n in (2, 3):
+            r = e.orchj("Pilatus", "relay", "send", rep, f"r19-msg-{n}")
+            check(r.get("sent") is False, f"a send with the relay down must report sent=false: {r}")
+        waiting = e.orchj("Pilatus", "relay", "outbox")["waiting"]
+        check(len(waiting) == 2, f"orch relay outbox does not show the two queued messages: {waiting}")
+    finally:
+        log = open(e.tmp / "relay-r19.log", "w")
+        e.rel.proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log, cwd=e.tmp)
+        e.pids.append(e.rel.proc.pid)
+    check(wait_http(e.rel.url + "/health", 30), "relay did not come back")
+    # Chat sends through the same path as every helper, without the CLI's resend first: it must wait its turn
+    e.orch("Pilatus", "chat", "send", rep, "r19-msg-4", by="human:e2e")
+    check(not e.orchj("Pilatus", "relay", "outbox")["waiting"], "outbox not empty after the relay came back")
+    raw = e.rapi("Reports", "GET", "/v1/inbox").json()["items"]
+    want = [f"r19-msg-{n}" for n in (1, 2, 3, 4)]
+    order = [m["body"].get("text") for m in raw if m["type"] == "text" and str(m["body"].get("text", "")).startswith("r19-msg")]
+    check(order == want, f"relay order after restart: {order}")
+    # a newer peer: unknown top-level and body fields; the same message posted twice
+    m = e.msg(i["Pilatus"], rep, "text", {"text": "r19-newer", "future_body_field": {"x": 1}}, future_top_field="v9")
+    a, b = e.rapi("Pilatus", "POST", "/v1/messages", m), e.rapi("Pilatus", "POST", "/v1/messages", m)
+    check(a.status == 201 and b.status == 200 and (b.json() or {}).get("duplicate") is True, f"dup post {a} {b}")
+    items = inbox(e, "Reports")
+    cli = [x["body"].get("text") for x in items if x["type"] == "text" and str(x["body"].get("text", "")).startswith("r19-")]
+    check(cli == want + ["r19-newer"], f"CLI inbox (order, once each, newer fields): {cli}")
+    again = [x for x in inbox(e, "Reports") if str(x.get("body", {}).get("text", "")).startswith("r19-")]
+    check(not again, f"a delivered message was shown again: {again}")
+    seen = json.loads((e.ws("Reports") / ".orch/inbox-seen.json").read_text())
+    check(m["id"] in seen, "the newer peer's message is not marked seen")

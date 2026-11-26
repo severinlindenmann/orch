@@ -49,6 +49,7 @@ KEYS = (
     "workflow.reviewer_mode",
     "workflow.reviewer_look",
     "workflow.release_merge",
+    "workflow.decision_first",
     "workflow.prepare_on_save",
     "workflow.prepare_daily_limit",
     "workflow.dispatcher",
@@ -318,6 +319,7 @@ def _config(args, root: Path) -> None:
             "workflow.reviewer_mode": lambda: config.reviewer_mode(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
+            "workflow.decision_first": lambda: config.decision_first_on(root),
             "workflow.prepare_on_save": lambda: config.prepare_on_save_on(root),
             "workflow.prepare_daily_limit": lambda: config.prepare_daily_limit(root),
             "workflow.dispatcher": lambda: config.dispatcher_on(root),
@@ -567,6 +569,16 @@ def _config(args, root: Path) -> None:
                 if value
                 else "off."
             ),
+        )
+    elif args.sub == "set" and args.key == "workflow.decision_first":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_decision_first(root, args.value == "on")
+        _out(
+            args,
+            {"workflow.decision_first": value},
+            "Saved: Review cards show "
+            + ("You decide, If you wait and What matters first." if value else "as before."),
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
