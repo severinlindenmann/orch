@@ -80,3 +80,7 @@ One word, "topic", for a work thread: "Make topic", "Making topic…", "Topic ma
 ## 21 Nov team chat step 2 in the app (ORCH-1175)
 
 New page `team-chat.html`: in a ticket chat a strip under the title names who is in it (“Pilatus, Sales and Bank”) with + Add. Add opens a sheet with the Workspaces list (your workspaces on this phone that are not in the chat yet) and the line “They see this ticket and the earlier messages in this chat, including places, voice notes and file names. If you remove them later, what they already got stays with them.” Messages from another workspace carry “Helper · Sales” and its mark. The helper’s ask is a plain Add / Not now card. Chat info lists each workspace with “Added by you · 4 Nov” / “Added by Pilatus · 4 Nov”, “older orch” for a workspace on an older version, and “Adding…” until a workspace you asked for joined. An older relay: “Adding from the phone is not ready yet. Add it on the computer.”
+
+## 25 Nov voice play button says its next action (ORCH-2064)
+
+The play button on a sent voice memo and on a spoken reply is named for what a tap does and matches its symbol: “Play voice message, 0:18” or “Pause voice message, 0:18”, the length kept in every state. The state (Playing, Paused, Listened, Loading) is a separate value that changes only with the state, never with the time. Starting another message resets the earlier one to Play. The position slider is named “Voice message position”, as in the app. Unavailable audio keeps “Audio not available, try again”.
