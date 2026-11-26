@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from orch import (
+    cardkinds,
     dashshots,
     ghmerge,
     history,
@@ -606,10 +607,16 @@ def _list(args, root: Path) -> None:
         return
     cards = review.stack(root)
     n = len(cards)
-    lines = [
-        f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{c['kind']}]  {c['card'].get('title', '')}"
-        for c in cards
-    ]
+    lines, lane = [], None
+    for c in cards:  # grouped as on the Review page (R2 A): what holds up work first, then by what you do
+        ck = c.get("card_kind") or {}
+        if ck.get("lane") != lane:
+            lane = ck.get("lane")
+            lines.append(cardkinds.LANES.get(lane, ""))
+        name = ck.get("name") or c["kind"]
+        lines.append(
+            f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{name}]  {c['card'].get('title', '')}"
+        )
     text = (
         "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.", *lines])
         if cards
