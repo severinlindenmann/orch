@@ -62,7 +62,7 @@ def init(root: Path, code: str | None = None, new: bool | None = None) -> list[s
         lines.append(_checks_line(root))
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
-    for fn in skills.local_instruction_files(root):
+    for fn in skills.local_instruction_files(skills.detected_agents(root)):
         try:
             ours = harness.LOCAL_MARK[0] in harness._read(root / fn)
         except (Refused, OSError, UnicodeDecodeError):

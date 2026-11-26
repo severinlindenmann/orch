@@ -118,7 +118,7 @@ def install_checks(root: Path) -> list[dict]:
         )
     )
     agents = skills.detected_agents(root)
-    for fn in skills.local_instruction_files(root):
+    for fn in skills.local_instruction_files(agents):
         text = _read_quiet(root / fn)
         has = harness.LOCAL_MARK[0] in text
         left = None if has else harness.local_file_left(root, fn)
