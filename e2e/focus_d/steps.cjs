@@ -438,6 +438,8 @@ async function chatView(page, dash) {
     if (body.op === 'run.send') st.send_result = { id: 'p_17', delivered: 1, state: 'idle' };  // as the server answers
     route.fulfill({ json: st });
   });
+  // ORCH-2204: this session's tool keeps no conversation orch can read, so the chat is the ticket's summary and says so
+  await page.route('**/api/talk/**', route => route.fulfill({ json: { available: false, turns: [] } }));
   await page.goto(dash + '/#home');
   await mainHasText(page);
   await page.evaluate(() => { try { localStorage.removeItem('orch.live.view'); } catch {} });
@@ -445,9 +447,9 @@ async function chatView(page, dash) {
   if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
-  await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
+  await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || '') && document.querySelector(c + ' [data-key="live-chat-src"]'), chat, { timeout: 10000 });
   const rows = await page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim()));
-  const want = [/^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
+  const want = [/^e Summary from the ticket ?Open terminal$/, /^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
     /^h Helper · .*above or below the files\?$/, /^y Demo · .*Below$|^y You · .*Below$/];
   if (rows.length !== want.length || want.some((re, i) => !re.test(rows[i]))) throw new Error('the chat reads:\n' + rows.join('\n'));
   if (await page.isVisible(`${pane} [data-live-lines]`)) throw new Error('Chat also shows the last lines');
