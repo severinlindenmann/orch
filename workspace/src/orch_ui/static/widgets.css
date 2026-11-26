@@ -1341,26 +1341,22 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .doc-line{white-space:pre-wrap;overflow-wrap:anywhere}.doc-line.risk{box-shadow:inset 3px 0 0 var(--danger),inset 0 0 0 1px var(--danger);background:var(--danger-soft);color:var(--danger)}
 .doc-risk{display:inline-block;margin-left:8px;padding:0 6px;border-radius:999px;border:1px solid currentColor;font-family:var(--font-sans,inherit);font-size:11px;white-space:nowrap}
 .doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
-/* ---- Live bar (draft D, ORCH-337): one calm row under every page. Groups with a small label: needs-you chips
-   (orange), pinned chips, then quiet counts that open a list with search. It never wraps: data-fold says how far it
-   folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols and counts, 4 needs you and More).
-   Fixed under the page beside the side bar; at phone width above the tab bar (--lbar-bottom, set by the page).
-   .lbar-sample shows it inline in the gallery. ---- */
+/* ---- Live bar (draft D, ORCH-337; ORCH-2198): one calm row under every page: the page's name, one Helpers menu
+   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) lists the sessions in groups (.lbar-gh:
+   Needs you, Working, Quiet, with counts); each row opens its pane. It opens on the side of the bar with room
+   (data-at=above|below, set by the page), so it stays inside the window with the bar at the bottom or the top (full
+   screen). It never wraps: data-fold 3 and up shows New as an icon. Fixed under the page beside the side bar; at phone
+   width above the tab bar (--lbar-bottom, set by the page). .lbar-sample shows it inline in the gallery. ---- */
 .lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
 .lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
-.lbar-chip[aria-current=true]{background:var(--surface-3);color:var(--text)}
 .lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
 .lbar-home:hover{background:var(--surface-2)}
 .lbar-sw{display:flex;flex:1 1 0;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-width:0;overflow:hidden}
 .lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw{gap:var(--s1)}
-.lbar-g{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
-.lbar-l{display:inline-flex;align-items:center;margin-right:var(--s1);font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap}
-.lbar-g[data-g=wait] .lbar-l{color:var(--needs-you);font-weight:600}
-.lbar-chip,.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
-.lbar-chip:hover,.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
-.lbar-chip[data-s=wait]{color:var(--needs-you)}
-.lbar-chip:focus-visible,.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
+.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
+.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
+.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
 .lbar-cnt[aria-expanded=true]{background:var(--surface-3);color:var(--text)}
 .lbar-sym{font-family:var(--font-mono);color:var(--text-muted)}
 [data-s=wait]>.lbar-sym,.lbar-sym[data-s=wait]{color:var(--needs-you)}
@@ -1368,24 +1364,28 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar .ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .lbar-end{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
 .lbar-end:empty{display:none}
-.lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
-.lbar-pop-h{margin:0;font-weight:600}
+.lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:flex;flex-direction:column;gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
+.lbar-pop[data-at=below]{top:calc(100% + var(--s2));bottom:auto}
+.lbar-helpers{border:1px solid var(--border);color:var(--text)}
+.lbar-gh{display:flex;justify-content:space-between;gap:var(--s2);margin:var(--s2) 0 0;padding:0 var(--s3);color:var(--text-muted);font-size:var(--fs-meta);font-weight:600;line-height:16px;letter-spacing:.04em;text-transform:uppercase}
+.lbar-gh:first-child{margin-top:0}
+.lbar-gh b{font-weight:600;color:var(--text-muted)}
+.lbar-gh[data-g=wait]{color:var(--needs-you)}
+.lbar-go{color:var(--text-muted);font-size:var(--fs-meta);white-space:nowrap}
+.lbar-row:hover .lbar-go{color:var(--text)}
+.lbar-row[aria-current=true]{background:var(--surface-3)}
 .lbar-list{display:grid;align-content:start;gap:var(--s1);min-height:0;overflow:auto;overscroll-behavior:contain}
-.lbar-row{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:var(--s2);align-items:center;min-height:var(--s7);padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none}
+.lbar-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:var(--s2);align-items:center;min-height:var(--s7);padding:var(--s1) var(--s3);border:0;border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none}
 .lbar-row:hover{background:var(--surface-2)}
-.lbar-row .lbar-st{display:inline-flex;gap:var(--s1);align-items:center;font-size:var(--fs-meta);font-weight:600;color:var(--text-muted);white-space:nowrap}
-.lbar-row .lbar-st[data-s=wait]{color:var(--needs-you)}
-.lbar-row .lbar-st[data-s=run]{color:var(--working)}
 .lbar-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
 .lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
 body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
-.lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
-  .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
+  .lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
   /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
@@ -1393,7 +1393,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
   body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
   .chat-page:has(.chat-welcome){height:auto}
 }
-@media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
+@media(prefers-reduced-motion:reduce){.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
 
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
@@ -1617,8 +1617,8 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
    in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets
    indented, small helpers with a dashed guide and tag, earlier sessions) and strip (the same rows in one line that
    scrolls inside itself: a narrow pane, a split, a phone). The selected row has a brand edge; a helper that needs you
-   is orange. The message box of a pane names who receives it (.live-msg). The bar's group chip carries the helper
-   count (.lbar-n). Tokens only. ---- */
+   is orange. The message box of a pane names who receives it (.live-msg). The group's row in the bar's Helpers menu
+   carries the helper count (.lbar-n). Tokens only. ---- */
 .gtree{display:flex;flex-direction:column;gap:var(--s1);min-width:0}
 .gtree-h{display:grid;gap:2px;margin:0;padding:0 var(--s2) var(--s1)}
 .gtree-gt{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1702,6 +1702,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-vhint[role=alert]{color:var(--text)}
 @keyframes live-voice-bar{from{height:20%}to{height:100%}}
 @media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
+.lbar-rn .lbar-n{display:inline-block;margin-left:var(--s2)}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
 /* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
@@ -1729,6 +1730,8 @@ button.gtree-row:hover{background:var(--surface-2)}
 .lbar-rw{display:flex;gap:var(--s1);align-items:center}
 .lbar-rw .lbar-row{flex:1;min-width:0}
 .lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap[data-at=below]{top:100%;bottom:auto}
+.lbar-endwrap[data-at=below] .live-pop{top:var(--s2);bottom:auto}
 .lbar-endwrap .live-pop{right:auto;left:0}
 .lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
 .lbar-newrow .live-opt{flex:1;min-width:0}
