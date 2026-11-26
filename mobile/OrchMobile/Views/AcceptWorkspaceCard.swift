@@ -22,7 +22,7 @@ struct AcceptWorkspaceCard: View {
             if let fingerprint {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(state == .changed ? "\(name) has a new fingerprint" : "Accept \(name)?").themeFont(17)
-                    Text(fingerprint).font(.system(size: 15, design: .monospaced)).foregroundStyle(Theme.text)
+                    Text(fingerprint).themeFont(15, design: .monospaced).foregroundStyle(Theme.text)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("accept-fingerprint")
                     Text("Check that it matches the fingerprint \(name) shows on its own Settings page.")
