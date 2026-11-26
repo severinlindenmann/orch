@@ -344,6 +344,7 @@ function sync(target, source) {
   }
   reconcile(target, source);
   if (target.matches('[data-settings-agent],[data-settings-permissions],[data-sync-where]')) target.checked = source.checked;
+  if (target.matches('[data-pick]')) { target.checked = source.checked; target.indeterminate = source.dataset.mixed === 'true'; }
   if (target.matches('[data-settings-field]')) {
     if (target.type === 'checkbox') target.checked = source.checked;
     else if (target.value !== source.value) target.value = source.value;
@@ -1083,6 +1084,8 @@ main.addEventListener('keydown', event => {
 });
 // A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
 main.addEventListener('change', event => {
+  const pick = event.target.closest?.('input[data-pick]');  // ORCH-2034: a tick in the Tickets list
+  if (pick) { pickTicket(pick.dataset.pick, pick.checked); return; }
   const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
   if (radio) addonRadio(radio);
 });
@@ -1244,6 +1247,8 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'bulk-set') { await bulkAction(control); return; }  // ORCH-2034: pick several (pages/tickets.js)
+  if (action === 'bulk-clear') { picked.clear(); render(); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';
