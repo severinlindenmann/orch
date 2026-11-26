@@ -4862,7 +4862,7 @@ def record_answered(
     root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
-    a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
+    a Test results card, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
     decision.replaced_by. One apply_op, one history line "Answered <qid>: <summary>"."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")

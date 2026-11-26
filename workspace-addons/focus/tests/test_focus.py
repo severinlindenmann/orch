@@ -186,6 +186,46 @@ def test_needs_names_a_live_helper_waiting_for_the_ok_and_nothing_else(ws, monke
     assert needs.rows(root) == []
 
 
+@pytest.mark.parametrize("pos", [199, 200, 201])
+def test_needs_finds_the_only_waiting_helper_past_the_first_200_run_records(ws, monkeypatch, capsys, pos):
+    root, t = ws
+    from orch import runs
+
+    tdir, d = root / ".orch" / "tickets", runs.run_dir(root) / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    tpl = json.loads((tdir / f"{t['id']}.json").read_text())
+    outside = root / "elsewhere.json"
+
+    def rec(tid, alive="alive", state="attention"):
+        return {"ticket": tid, "run": "r1", "mode": "live", "renewed_at": "2026-11-19T10:00:00Z",
+                "fake_alive": alive, "live": {"state": state, "why": f"OK for {tid}?"}}  # fmt: skip
+
+    kinds = ["working", "dead", "stale", "general", "manager", "broken", "symlink"] * 29
+    ids = [f"t_s{n:07d}" for n in range(1, 202)]
+    for i, tid in enumerate(ids, 1):
+        p, k = d / f"{tid}.json", "eligible" if i == pos else kinds.pop()
+        extra = {"general": True} if k == "general" else {"manager": True} if k == "manager" else {}
+        (tdir / f"{tid}.json").write_text(json.dumps({**tpl, "id": tid, "title": f"Sample {i}", **extra}))
+        if k == "broken":
+            p.write_text("{not json")
+        elif k == "symlink":
+            outside.write_text(json.dumps(rec(tid)))
+            p.symlink_to(outside)
+        else:
+            alive = {"dead": "dead", "stale": "maybe-stale"}.get(k, "alive")
+            p.write_text(json.dumps(rec(tid, alive, "working" if k == "working" else "attention")))
+    monkeypatch.setattr(runs, "state", lambda r, at=None: r.get("fake_alive", "dead"))
+    want = ids[pos - 1]
+    found, scanned = needs.scan(root)
+    assert scanned == 201 - 29  # every record is read, the 29 symlinks are skipped unread; 1 is returned
+    assert [(r["kind"], r["ticket"], r["title"], r["text"], r["cli"]) for r in found] == [
+        ("focus:waiting", want, f"Sample {pos}", f"OK for {want}?", f"orch focus open {want}")
+    ]
+    assert set(found[0]) == {"id", "source", "kind", "ticket", "title", "text", "tone", "since", "cli"}
+    assert cli.main(["needs", "--json"]) == 0 and json.loads(capsys.readouterr().out) == found
+    assert cli.main(["needs"]) == 0 and capsys.readouterr().out == f"Sample {pos}: OK for {want}?\n"
+
+
 @pytest.mark.parametrize("argv", [["serve"], ["start"], ["stop"], ["status"], ["view"], ["area", "list"]])
 def test_the_old_page_commands_are_gone(argv, ws):
     with pytest.raises(SystemExit):
@@ -320,3 +360,126 @@ def test_python_dash_m_runs_the_cli_and_passes_its_exit_code(tmp_path):
     p = subprocess.run([sys.executable, "-m", "orch_focus", "--dir", str(tmp_path), "needs"],
                        check=False, capture_output=True, text=True, env=env, timeout=60)  # fmt: skip
     assert p.returncode == 2 and "orch init" in p.stderr
+
+
+def _claim(root, tid, **over):
+    from orch import runs
+
+    d = runs.run_dir(root) / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    rec = {"ticket": tid, "run": "r1", "mode": "live", "renewed_at": "2026-11-19T10:00:00Z",
+           "live": {"state": "attention"}}  # fmt: skip
+    rec.update(over)
+    (d / f"{tid}.json").write_text(json.dumps(rec))
+    return rec
+
+
+def test_needs_row_falls_back_when_the_helper_gave_no_reason_or_time(ws, monkeypatch):
+    root, t = ws
+    from orch import runs
+
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    _claim(root, t["id"])
+    [row] = needs.rows(root)
+    assert row["text"] == "Waiting for your OK in the live session."
+    assert row["since"] == "2026-11-19T10:00:00Z"
+    _claim(root, t["id"], renewed_at=None)
+    from datetime import UTC, datetime
+
+    [row] = needs.rows(root, now=datetime(2026, 11, 20, 8, 30, 5, tzinfo=UTC))
+    assert row["since"] == "2026-11-20T08:30:05Z"
+    _claim(root, t["id"], live={"state": "attention", "why": "x" * 900})
+    assert len(needs.rows(root)[0]["text"]) == 400
+
+
+def test_needs_skips_non_live_runs_and_hidden_conversations(ws, monkeypatch):
+    root, t = ws
+    from orch import runs, tickets
+
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    _claim(root, t["id"], mode="headless")
+    assert needs.rows(root) == []
+    _claim(root, t["id"])
+    assert len(needs.rows(root)) == 1
+    for flag in ("general", "manager"):
+        tk = tickets.load(root, t["id"])
+        tk[flag] = True
+        tickets.save(root, tk)
+        assert needs.rows(root) == []
+        tk[flag] = False
+        tickets.save(root, tk)
+
+
+def test_needs_ignores_a_claim_whose_ticket_is_broken_and_keeps_the_others(ws, monkeypatch):
+    root, t = ws
+    from orch import runs
+
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    _claim(root, "t_deadbeef1")
+    _claim(root, t["id"])
+    d = runs.run_dir(root) / "tickets"
+    (d / "t_notanid.json").write_text("{}")
+    assert [r["ticket"] for r in needs.rows(root)] == [t["id"]]
+
+
+def test_needs_title_is_plain_text(ws, monkeypatch):
+    assert needs._title({"title": "<b>Hi</b>"}) == "bHi/b"
+    assert needs._title({"title": "  "}) == "A ticket"
+    assert needs._title({}) == "A ticket"
+    assert len(needs._title({"title": "y" * 500})) == 200
+
+
+def test_needs_command_prints_lines_or_json_or_the_empty_message(ws, monkeypatch, capsys):
+    root, t = ws
+    from orch import runs
+
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    assert cli.main(["needs"]) == 0
+    assert capsys.readouterr().out.strip() == "Nothing needs you here."
+    _claim(root, t["id"], live={"state": "attention", "why": "Allow?"})
+    assert cli.main(["needs"]) == 0
+    assert capsys.readouterr().out.strip() == f"{t['title']}: Allow?"
+    assert cli.main(["needs", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)[0]["ticket"] == t["id"]
+
+
+def test_commands_refuse_outside_a_workspace_and_find_it_from_a_subfolder(ws, tmp_path_factory, capsys):
+    root, _ = ws
+    sub = root / "a" / "b"
+    sub.mkdir(parents=True)
+    assert cli.find_workspace(sub) == root.resolve()
+    assert cli.find_workspace(tmp_path_factory.mktemp("bare")) is None
+    assert cli.main(["--dir", str(tmp_path_factory.mktemp("bare2")), "needs"]) == 2
+    assert "orch init" in capsys.readouterr().err
+
+
+def test_open_says_why_when_the_dashboard_will_not_start(ws, monkeypatch, capsys):
+    _, t = ws
+    from orch import addons, services
+
+    monkeypatch.setattr(addons, "active_manifests", lambda r: {"dashboard": {}, "focus": {}})
+    monkeypatch.setattr(services, "running", list)
+    monkeypatch.setattr(
+        services, "start", lambda r, only=None: [{"addon": "dashboard", "error": "port busy"}]
+    )
+    assert cli.main(["open", t["id"], "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "The dashboard did not start: port busy"
+    monkeypatch.setattr(services, "start", lambda r, only=None: [])
+    assert cli.main(["open", t["id"], "--no-open"]) == 2
+    assert "Run orch start." in capsys.readouterr().err
+
+
+def test_needs_does_not_follow_a_symlinked_claim_folder(ws, monkeypatch, tmp_path):
+    root, t = ws
+    from orch import runs
+
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    _claim(root, t["id"])
+    d = runs.run_dir(root) / "tickets"
+    real = tmp_path / "elsewhere"
+    d.rename(real)
+    try:
+        d.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need a privilege here")
+    assert needs.rows(root) == []

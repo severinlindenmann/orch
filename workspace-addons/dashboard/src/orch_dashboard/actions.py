@@ -292,7 +292,7 @@ def _review_answer(a):
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
     codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
-    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
+    "refused". decided (ORCH-548): the Test results card was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
@@ -982,12 +982,20 @@ def _log(a):
 def _chat_say(a):
     """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
     With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
-    _only(a, ("text", "new", "ticket"))
+    _only(a, ("text", "new", "ticket", "files"))
     if a.get("ticket") is not None:
-        if _flag(a.get("new")):
-            raise BadRequest("A ticket chat has no new conversation.")
+        if _flag(a.get("new")) or a.get("files"):
+            raise BadRequest("A ticket chat has no new conversation and no files here.")
         return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
-    return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+    # files: names already attached to the Chat ticket (ticket.attach first, as the ticket page does)
+    files = a.get("files") or []
+    if not isinstance(files, list) or len(files) > 10:
+        raise BadRequest("A Chat message takes up to 10 files.")
+    flags = ["--new"] if _flag(a.get("new")) else []
+    for name in files:
+        # one argv item, even for a name that starts with "-"
+        flags.append("--file=" + _text(name, "file name", limit=255))
+    return ["chat", "say"], flags, [_text(a.get("text"), empty=bool(files))]
 
 
 TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
