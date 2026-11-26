@@ -445,8 +445,8 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        # D5 (26 Nov): what happened and what to do, one button to the place that connects it (the dashboard draws the
-        # header link as the notice's button); RP8: the page says Relay.
+        # D5 (26 Nov): what happened and what to do, one button to the place that connects it (the dashboard
+        # draws the header link as the notice's button); RP8: the page says Relay.
         out["notice"] = "Relay is not connected yet. Paste the text from your admin to connect it."
         out["notice_tone"] = "warn"
         out["header"] = {"link": {"label": "Connect Relay", "to": "app:settings/phone"}}

@@ -1518,7 +1518,7 @@ function addonBody(a, res) {
     h('div', {id:'addon-blocks'}));
 }
 // D5: a warning notice without a button of its own takes the heading's link (to a page of the dashboard) as its one
-// green button, so what to do sits with what happened (Contacts: "Connect Contacts").
+// green button, so what to do sits with what happened (Relay: "Connect Relay").
 // The first sentence says what happened (bold), the rest what still works.
 const noticeParts = text => { const t = clean(text), m = /^(.+?[.!?])\s+(.+)$/.exec(t); return m ? {what:m[1], still:m[2]} : {what:t}; };
 const noticeTakesLink = view => !!view?.notice && !view.button && ['warn', 'needs-you', 'bad'].includes(view.notice_tone) && !!OrchBlocks.appHash(view.header?.link?.to);
