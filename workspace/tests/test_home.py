@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,14 @@ def _loosen(path):
 
 def test_test_workspace_uses_test_home(tws):
     assert hp.guarded_home(tws) == tws.parent / "home"
+
+
+def test_windows_scheduler_workspace_works_with_test_install(tws):
+    script = Path(__file__).resolve().parents[2] / "e2e/windows/scheduler-flow.ps1"
+    relative = re.search(r'\$p = "\$env:USERPROFILE\\([^"]+)"', script.read_text()).group(1)
+    workspace = tws.parent.parent.joinpath(*relative.split("\\"))
+    workspace.mkdir(parents=True)
+    assert hp.guarded_home(workspace) == tws.parent / "home"
 
 
 def test_normal_install_real_workspace_with_env_home_is_refused(tws, monkeypatch):
