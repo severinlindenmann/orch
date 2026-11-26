@@ -66,7 +66,7 @@ focus-v4d.html stays the source of truth; nothing in the draft changed. The bar 
 sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
 line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
 when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
-("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+("Helper · Opus · open 38 min · stays open while it works"), updated in place every 3 s. The wall builds on the same
 list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
 guide: Live layer); click-through step 16.
 
@@ -161,3 +161,13 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## Focus after ship: Open chips, words on the phone bar, plain words (ORCH-1684, 25 Nov)
+
+The product bar now has the Open group of this draft: every session open in the layer that has no chip of its own
+(not needs you, not pinned) gets a chip, also a pane with no room in the panel (Add beside at 1280, or a quiet pane
+folded while the page has cards to answer; its tooltip "Not in sight in the panel: click to show it"). The "Room for 2
+sessions here, so … waits on the bar" line is said to a screen reader only, no toast over the page's cards. On a phone
+and beside the right dock each count keeps a short word ("2 need you", "3 working", "1 in line"); only the narrowest
+fold is the numbers alone (`BL` 4 here, `data-fold` 5 in the product, each still named). Words: "stays open while it
+works", "closed, you can continue it later" (no "stays warm", no "the conversation is kept").
