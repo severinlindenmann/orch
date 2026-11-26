@@ -1122,10 +1122,24 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-panel[data-mode=bottom]{height:var(--live-h);animation:live-up var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:0;bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
-.live-pane{display:flex;flex:1 1 0;flex-direction:column;min-width:0;min-height:0;container:live-pane/inline-size}
-.live-pane+.live-pane{border-left:1px solid var(--border-strong)}
+.live-pane{display:flex;flex:var(--f,1) 1 0;flex-direction:column;min-width:0;min-height:0;container:live-pane/inline-size}
 .live-panel[data-mode=right]{flex-direction:column}
-.live-panel[data-mode=right] .live-pane+.live-pane{border-left:0;border-top:1px solid var(--border-strong)}
+/* ORCH-2200 (owner pick F a): free splits. A split is a row (side by side) or a column (stacked) of panes and splits,
+   each taking its share (--f, set by the page); between two a 1 px divider with a wider grab area: drag it, arrow keys
+   move it, double click makes the split equal. Hover, focus and drag show it in the brand colour with a small handle. */
+.live-split{display:flex;flex:var(--f,1) 1 0;min-width:0;min-height:0}
+.live-split[data-dir=col]{flex-direction:column}
+.live-div{position:relative;z-index:3;flex:none;background:var(--border-strong);touch-action:none}
+.live-split[data-dir=row]>.live-div{width:1px;cursor:col-resize}
+.live-split[data-dir=col]>.live-div{height:1px;cursor:row-resize}
+.live-div::before{content:"";position:absolute;inset:calc(-1 * var(--s1)) 0}
+.live-split[data-dir=row]>.live-div::before{inset:0 calc(-1 * var(--s1))}
+.live-div::after{content:"";position:absolute;top:50%;left:50%;border-radius:2px;background:var(--brand);opacity:0;transform:translate(-50%,-50%);transition:opacity var(--dur-fast) var(--ease-move)}
+.live-split[data-dir=row]>.live-div::after{width:4px;height:var(--s7)}
+.live-split[data-dir=col]>.live-div::after{width:var(--s7);height:4px}
+.live-div:hover,.live-div:focus-visible,.live-div[data-drag]{background:var(--brand)}
+.live-div:hover::after,.live-div:focus-visible::after,.live-div[data-drag]::after{opacity:1}
+.live-div:focus-visible{outline:none}
 .live-panel:not([data-n="1"]) .live-pane[data-on]>.live-ph{box-shadow:inset 0 2px 0 var(--brand)}
 .live-panel:not([data-n="1"]) .live-pane:not([data-on])>.live-ph{background:var(--sidebar)}
 .live-pane[data-new]{animation:live-in var(--dur-base) var(--ease-enter)}
@@ -1228,9 +1242,6 @@ button.live-pt:hover{color:var(--brand)}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-why{margin:0;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
-.live-meta{margin:0}
-.live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
-.live-info>.btn{margin-inline-start:auto}
 /* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
    first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
 .live-view{flex:none}
@@ -1244,8 +1255,6 @@ button.live-pt:hover{color:var(--brand)}
    of a split pane stays on one row beside Open ticket */
 .live-pb[data-live-body]:has(>.live-ask:not([hidden]))>.live-chat:has(>.live-chat-empty){min-height:0}
 .live-pb[data-live-body]:has(>.live-ask:not([hidden])) .live-chat-empty{display:none}
-.live-panel:not([data-n="1"]) .live-info{flex-wrap:nowrap}
-.live-panel:not([data-n="1"]) .live-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
    the bottom) never covers its last line in a short pane (ORCH-1328) */
 .live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}

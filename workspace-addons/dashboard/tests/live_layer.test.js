@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy, liveLayerBottomCap};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy, liveLayerBottomCap, liveTreeLeaves, liveTreeSplit, liveTreeDrop, liveTreeSize, liveTreeEqual, liveTreeOk, liveTreeAt};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -135,22 +135,53 @@ test('place and size are kept per browser; full screen too (ORCH-1661), and Esc 
   assert.doesNotThrow(() => L.liveLayerWrite({setItem() { throw new Error('full'); }}, s));
 });
 
-test('Add beside splits into two, then three panes; the third is the most and the new pane is selected', () => {
+test('Add beside (a wall tile) splits right of the selected pane up to four; the new pane is selected', () => {
   let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}]);
   assert.deepEqual([...s.panes], ['t_1', 't_2']);
   assert.equal(s.cur, 't_2');
   assert.equal(s.mode, 'bottom');
-  s = L.liveLayerStep(s, {type:'beside', key:'t_3'});
-  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_3']);
-  assert.equal(L.LIVE_MAX, 3);
-  s = L.liveLayerStep(s, {type:'beside', key:'t_4'});
-  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_4'], 'a fourth takes the last pane');
-  assert.deepEqual([...L.liveLayerStep(s, {type:'beside', key:'t_1'}).panes], ['t_1', 't_2', 't_4'], 'a shown session is only selected');
+  s = run(s, [{type:'beside', key:'t_3'}, {type:'beside', key:'t_4'}]);
+  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_3', 't_4']);
+  assert.equal(L.LIVE_MAX, 4);
+  s = L.liveLayerStep(s, {type:'beside', key:'t_5'});
+  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_3', 't_5'], 'a fifth takes the last pane');
+  assert.deepEqual([...L.liveLayerStep(s, {type:'beside', key:'t_1'}).panes], ['t_1', 't_2', 't_3', 't_5'], 'a shown session is only selected');
   assert.equal(L.liveLayerStep(s, {type:'beside', key:'t_1'}).cur, 't_1');
   assert.equal(L.liveLayerStep(s, {type:'beside'}), s, 'nothing to add');
-  const min = run(s, [{type:'min'}, {type:'beside', key:'t_9'}]);
+  const min = run(s, [{type:'min'}, {type:'close', key:'t_5'}, {type:'beside', key:'t_9'}]);
   assert.equal(min.mode, 'bottom', 'Add beside from the bar opens the layer again');
-  assert.deepEqual([...min.panes], ['t_1', 't_2', 't_9'], 'the split stays when it opens again');
+  assert.deepEqual([...min.panes], ['t_1', 't_2', 't_3', 't_9'], 'the split stays when it opens again');
+});
+
+test('ORCH-2200: split any pane right or down; dividers share the room; closing gives it back; panes keep their place', () => {
+  let s = run(L.liveLayerFresh(), [{type:'open', key:'chat'}, {type:'split', at:'chat', dir:'right', key:'term'}, {type:'split', at:'term', dir:'down', key:'mgr'}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.tree)), {d:'row', k:['chat', {d:'col', k:['term', 'mgr'], z:[0.5, 0.5]}], z:[0.5, 0.5]}, 'Z1680: helper left, terminal and Manager stacked right');
+  assert.deepEqual([...s.panes], ['chat', 'term', 'mgr']);
+  assert.equal(s.cur, 'mgr', 'the new pane is selected');
+  assert.equal(L.liveLayerStep(s, {type:'split', at:'chat', dir:'down', key:'term'}), s, 'a shown session is not shown twice');
+  assert.equal(L.liveLayerStep(s, {type:'split', at:'nope', dir:'down', key:'x'}), s, 'only from a shown pane');
+  s = L.liveLayerStep(s, {type:'resize', path:'', i:0, share:0.62});
+  assert.deepEqual([...s.tree.z], [0.62, 0.38]);
+  assert.deepEqual([...L.liveLayerStep(s, {type:'resize', path:'', i:0, share:0.99}).tree.z], [0.85, 0.15], 'a pane keeps at least 15 %');
+  s = L.liveLayerStep(s, {type:'resize', path:'1', i:0, share:0.3});
+  assert.deepEqual([...s.tree.k[1].z], [0.3, 0.7]);
+  assert.deepEqual([...L.liveLayerStep(s, {type:'equal', path:'1'}).tree.k[1].z], [0.5, 0.5], 'double click: equal');
+  const swapped = L.liveLayerStep(s, {type:'swap', from:'term', key:'t_9'});
+  assert.equal(swapped.tree.k[1].k[0], 't_9', 'another session in a pane takes the same place');
+  const opened = run(s, [{type:'select', key:'term'}, {type:'open', key:'t_7'}]);
+  assert.deepEqual([...opened.panes], ['chat', 't_7', 'mgr'], 'open from the bar takes the selected pane in place');
+  const closed = L.liveLayerStep(s, {type:'close', key:'term'});
+  assert.deepEqual(JSON.parse(JSON.stringify(closed.tree)), {d:'row', k:['chat', 'mgr'], z:[0.62, 0.38]}, 'its split folds into the neighbour');
+  const st = store();
+  L.liveLayerWrite(st, s);
+  assert.deepEqual(JSON.parse(JSON.stringify(L.liveLayerRead(st).tree)), JSON.parse(JSON.stringify(s.tree)), 'the layout survives a reload');
+  assert.equal(L.liveTreeOk({d:'row', k:['a', 'a', 'bad key'], z:[1, 1, 1]}), 'a', 'a stored tree is made safe');
+  assert.equal(L.liveTreeOk({d:'diag', k:['a', 'b']}), null);
+});
+
+test('ORCH-2200: panes stay where the person put them when a status or a pin changes (no sorting by the bar)', () => {
+  assert.doesNotMatch(source.slice(source.indexOf('function liveLayerDo('), source.indexOf('// After Add beside')), /liveLayerSort\(/);
+  assert.doesNotMatch(source.slice(source.indexOf("window.addEventListener('orch:live-pins'"), source.indexOf('// Renaming a session')), /liveLayerSort\(/);
 });
 
 test('opening a session from the bar selects it when shown, else it takes the selected pane', () => {
@@ -181,15 +212,15 @@ test('closing a pane gives its room to the others and selects its neighbour; the
   assert.equal(s.cur, '');
 });
 
-test('the split and the selected pane are kept per browser, at most three', () => {
+test('the split and the selected pane are kept per browser, at most four', () => {
   const st = store();
   const s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}, {type:'select', key:'t_1'}]);
   L.liveLayerWrite(st, s);
   const back = L.liveLayerRead(st);
   assert.deepEqual([...back.panes], ['t_1', 't_2']);
   assert.equal(back.cur, 't_1');
-  const many = L.liveLayerRead(store({[L.LIVE_LAYER_KEY]:JSON.stringify({mode:'bottom', panes:['a', 'a', 'b', 'c', 'd'], cur:'zz'})}));
-  assert.deepEqual([...many.panes], ['a', 'b', 'c'], 'twice is once, four is three');
+  const many = L.liveLayerRead(store({[L.LIVE_LAYER_KEY]:JSON.stringify({mode:'bottom', panes:['a', 'a', 'b', 'c', 'd', 'e'], cur:'zz'})}));
+  assert.deepEqual([...many.panes], ['a', 'b', 'c', 'd'], 'twice is once, five is four');
   assert.equal(many.cur, 'a', 'an unknown selection falls back to the first pane');
 });
 
@@ -290,7 +321,7 @@ test('a split, narrow or small pane is compact: its title gets a row of its own'
 
 test('ORCH-2199 (owner pick G a): full screen, split, pin and close are visible; More keeps Stop, End, History and the place', () => {
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
-  for (const w of ['Full screen', 'Split', 'Pin', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  for (const w of ['Full screen', 'Split right', 'Split down', 'Pin', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
   const more = source.slice(source.indexOf('function liveMoreMenu('), source.indexOf('// The status pill of a pane'));
   for (const w of ['At the bottom', 'On the right', 'Bar only', 'Closed to the side']) assert.match(more, new RegExp(`'${w}'`), w);
   assert.match(more, /liveMoreEnd\(key\)/, 'Stop and End session');
@@ -300,7 +331,7 @@ test('ORCH-2199 (owner pick G a): full screen, split, pin and close are visible;
   assert.match(pane, /'data-key':'live-pin', 'data-fold':''/);
   assert.doesNotMatch(pane, /liveHistButton|liveModelRow|livePermPaneRow/, 'no row above the screen, no History word');
   assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
-  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'split-right', 'Split', \{'data-menu':besideMenu/);
+  assert.match(pane, /'data-key':'live-split-' \+ dir, 'data-fold':''/, 'ORCH-2200: split right and split down, folded into More when narrow');
   assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
   assert.doesNotMatch(source, /act === 'beside'\)/, 'no click adds a session unasked');
   const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
@@ -423,11 +454,14 @@ test('the bar, the panel, the side tab and the message box keep toasts clear (OR
 test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
   assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
   assert.match(L.liveBesideNote(1, 0), /^No other session is live\. Start one/);
-  assert.match(L.liveBesideNote(3, 2), /^Three sessions show at once, the most\. Close one/);
+  assert.match(L.liveBesideNote(4, 2), /^Four sessions show at once, the most\. Close one/);
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The body of a pane'));
-  const beside = pane.slice(pane.indexOf("'Add beside', {"), pane.indexOf('}),', pane.indexOf("'Add beside', {")));
-  assert.doesNotMatch(beside, /disabled/, 'Add beside is never greyed');
-  assert.match(pane, /s\.menu === besideMenu \? liveBesideMenu\(key, label, o\.others, besideNone\)/);
+  const split = pane.slice(pane.indexOf("['right', 'down'].map"), pane.indexOf("livePaneBtn('pin'"));
+  assert.doesNotMatch(split, /disabled/, 'Split is never greyed');
+  assert.match(pane, /liveSplitMenu\(s\.menu, key, label, o\.others, besideNone\)/);
+  const sm = source.slice(source.indexOf('function liveSplitMenu('), source.indexOf('let liveSplitWant'));
+  assert.match(sm, /'data-key':'live-split-none'\}, note\)/, 'its menu says why nothing can go there');
+  for (const w of ['Chat with\\u2026', "'Terminal'", "'Plain terminal'"]) assert.ok(sm.includes(w), w);
   const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
   assert.match(menu, /note \? h\('p', \{className:'meta', role:'status', 'data-key':'live-beside-none'\}, note\)/);
   const more = source.slice(source.indexOf('function liveMoreEnd('), source.indexOf('// ORCH-817: Stop (the current step)'));

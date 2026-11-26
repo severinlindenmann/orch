@@ -14,7 +14,7 @@
 const LIVE_LAYER_KEY = 'orch.live.layer';
 const LIVE_PLACES = ['bottom', 'right'];
 const LIVE_SIZE = {height:[200, 0.85], width:[320, 0.7]};  // smallest px, largest share of the window
-const LIVE_MAX = 3;  // sessions side by side
+const LIVE_MAX = 4;  // sessions shown at once (ORCH-2200: free splits, e.g. 2 x 2)
 const LIVE_NARROW = 600;  // a pane narrower than this folds pin, place and Chat | Terminal into More (draft D; the full header needs about 600 px)
 const LIVE_TIGHT = 400;  // a pane narrower than this folds pin and place into More too (draft D shows them down to about 430 px, ORCH-1568)
 const LIVE_CROWDED = 1500;  // a single wide pane under this puts Pin, Add beside and Minimise in More, so its title shows whole (ORCH-1600)
@@ -25,6 +25,93 @@ const LIVE_ROOMY = 1200;
 const LIVE_PANE_MIN = 480, LIVE_RIGHT_MAX = 2, LIVE_PAGE_MIN = 600;  // a single pane narrower than this is compact too: its title gets a row of its own (ORCH-463)
 
 // --- the model: plain data, no page (tested in tests/live_layer.test.js) ---
+// ORCH-2200 (owner pick F a): free splits. The panes sit in a tree: a leaf is a session key (one pane), a node is
+// {d:'row'|'col', k:[child, ...], z:[share, ...]} (row = side by side, col = stacked; the shares add up to 1). A pane
+// keeps its place in the tree when its session changes or a status changes (the bar's order no longer moves panes);
+// splitting right or down puts the new pane beside the one it was split from. s.panes is always the tree's leaves.
+const LIVE_KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+const LIVE_SHARE_MIN = 0.15;  // a pane keeps at least this share of its split while a divider moves
+const liveTreeLeaves = t => !t ? [] : typeof t === 'string' ? [t] : t.k.flatMap(liveTreeLeaves);
+const liveTreeShares = z => { const sum = z.reduce((a, b) => a + b, 0) || 1; return z.map(x => Math.round(x / sum * 10000) / 10000); };
+// A tree read from the browser store, made safe: known keys only, no repeats, at most LIVE_MAX panes; null when empty.
+function liveTreeOk(t, seen = new Set(), depth = 0) {
+  if (typeof t === 'string') { if (!LIVE_KEY_RE.test(t) || seen.has(t) || seen.size >= LIVE_MAX) return null; seen.add(t); return t; }
+  if (!t || typeof t !== 'object' || depth > 4 || !['row', 'col'].includes(t.d) || !Array.isArray(t.k)) return null;
+  const kids = [], z = [];
+  t.k.forEach((c, i) => { const ok = liveTreeOk(c, seen, depth + 1); if (ok) { kids.push(ok); z.push(Number.isFinite(t.z?.[i]) && t.z[i] > 0 ? t.z[i] : 1); } });
+  if (!kids.length) return null;
+  if (kids.length === 1) return kids[0];
+  return {d:t.d, k:kids, z:liveTreeShares(z)};
+}
+// The tree for panes that have none yet (an older store, or panes added by an open): side by side, stacked on the right.
+function liveTreeFrom(panes, where = 'bottom') {
+  const list = (Array.isArray(panes) ? panes : []).slice(0, LIVE_MAX);
+  if (list.length < 2) return list[0] || null;
+  return {d:where === 'right' ? 'col' : 'row', k:list, z:liveTreeShares(list.map(() => 1))};
+}
+function liveTreeMap(t, f) { return typeof t === 'string' ? f(t) : t && {...t, k:t.k.map(c => liveTreeMap(c, f))}; }
+// The pane `at` shows another session in the same place.
+function liveTreeSwap(t, at, key) { return liveTreeMap(t, x => x === at ? key : x); }
+// Split the pane `at` right (side by side) or down (stacked) with `key`: in a node of that direction it goes in next to
+// `at` and the two share `at`'s room; else `at` becomes a node of the two.
+function liveTreeSplit(t, at, key, dir) {
+  const d = dir === 'down' ? 'col' : 'row';
+  if (!t) return key;
+  if (t === at) return {d, k:[at, key], z:[0.5, 0.5]};
+  if (typeof t === 'string') return t;
+  const i = t.k.indexOf(at);
+  if (i >= 0 && t.d === d) {
+    const k = [...t.k], z = [...t.z], half = z[i] / 2;
+    k.splice(i + 1, 0, key); z.splice(i, 1, half, half);
+    return {d, k, z:liveTreeShares(z)};
+  }
+  return {...t, k:t.k.map(c => liveTreeSplit(c, at, key, dir))};
+}
+// Close the pane `key`: its room goes to its neighbours in the same split; a split left with one pane is that pane.
+function liveTreeDrop(t, key) {
+  if (!t || t === key) return null;
+  if (typeof t === 'string') return t;
+  const kids = [], z = [];
+  t.k.forEach((c, i) => { const n = liveTreeDrop(c, key); if (n) { kids.push(n); z.push(t.z[i]); } });
+  if (!kids.length) return null;
+  if (kids.length === 1) return kids[0];
+  return {d:t.d, k:kids, z:liveTreeShares(z)};
+}
+// The node at a path of child indexes ('' = the root, '0.1' = second child of the first child).
+function liveTreeAt(t, path) {
+  let n = t;
+  for (const p of String(path || '').split('.').filter(Boolean)) n = n && typeof n === 'object' ? n.k[Number(p)] : null;
+  return n && typeof n === 'object' ? n : null;
+}
+function liveTreeEdit(t, path, f) {
+  const ps = String(path || '').split('.').filter(Boolean).map(Number);
+  const go = (n, i) => i === ps.length ? f(n) : {...n, k:n.k.map((c, j) => j === ps[i] ? go(c, i + 1) : c)};
+  return liveTreeAt(t, path) ? go(t, 0) : t;
+}
+// A divider moved: the panes on its two sides share their room anew (each keeps at least LIVE_SHARE_MIN of it).
+function liveTreeSize(t, path, i, share) {
+  return liveTreeEdit(t, path, n => {
+    if (!(i >= 0 && i < n.k.length - 1)) return n;
+    const z = [...n.z], both = z[i] + z[i + 1], f = Math.min(1 - LIVE_SHARE_MIN, Math.max(LIVE_SHARE_MIN, Number(share) || 0.5));
+    z[i] = both * f; z[i + 1] = both - z[i];
+    return {...n, z:liveTreeShares(z)};
+  });
+}
+// Double click on a divider: every pane of that split gets the same room.
+function liveTreeEqual(t, path) { return liveTreeEdit(t, path, n => ({...n, z:liveTreeShares(n.z.map(() => 1))})); }
+// Keeps the tree and the pane list the same: panes no longer listed leave the tree, new ones split off the last pane.
+function liveTreeSync(t, panes, where = 'bottom') {
+  let tree = liveTreeOk(t);
+  for (const k of liveTreeLeaves(tree)) if (!panes.includes(k)) tree = liveTreeDrop(tree, k);
+  for (const k of panes) if (!liveTreeLeaves(tree).includes(k)) { const l = liveTreeLeaves(tree); tree = l.length ? liveTreeSplit(tree, l[l.length - 1], k, where === 'right' ? 'down' : 'right') : k; }
+  return tree;
+}
+// Only the panes in `show` (a phone, quiet panes folded while the page behind has cards to answer, ORCH-261).
+function liveTreeKeep(t, show) {
+  let tree = t;
+  for (const k of liveTreeLeaves(t)) if (!show.includes(k)) tree = liveTreeDrop(tree, k);
+  return tree;
+}
 // ORCH-1643 (bottom split at 1280 sliced the page behind it): a layer that was never placed opens on the right on a
 // desktop window under LIVE_RIGHT_FIRST px wide, so the page keeps its full height beside it (the page beside keeps
 // LIVE_PAGE_MIN px); at 1920 the bottom keeps room for three panes. A place the person picked is always kept.
@@ -35,7 +122,7 @@ function liveLayerFirstPlace(win, phone) {
 }
 function liveLayerFresh(first = 'bottom') {
   const at = LIVE_PLACES.includes(first) ? first : 'bottom';
-  return {mode:'bar', last:at, back:at, height:null, width:null, panes:[], cur:'', menu:''};
+  return {mode:'bar', last:at, back:at, height:null, width:null, panes:[], tree:null, cur:'', menu:''};
 }
 // Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW
 // (one pane on the right at 1280 wide too: its header would push Full screen out of sight).
@@ -103,12 +190,14 @@ function liveLayerRead(store, ws = '', first = 'bottom') {
   s.back = s.mode === 'full' && LIVE_PLACES.includes(saved.back) ? saved.back : s.last;
   for (const k of ['height', 'width']) if (Number.isFinite(saved[k]) && saved[k] > 0) s[k] = Math.round(saved[k]);
   if (Array.isArray(saved.panes)) s.panes = saved.panes.filter((k, i, a) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k) && a.indexOf(k) === i).slice(0, LIVE_MAX);
+  s.tree = liveTreeSync(saved.tree || liveTreeFrom(s.panes, s.last), s.panes, s.last);  // ORCH-2200: the layout survives a reload
+  s.panes = liveTreeLeaves(s.tree);
   s.cur = s.panes.includes(saved.cur) ? saved.cur : s.panes[0] || '';
   if (!s.panes.length && s.mode !== 'bar' && s.mode !== 'side') s.mode = 'bar';
   return s;
 }
 function liveLayerWrite(store, s, ws = '') {
-  try { store?.setItem(liveLayerKey(ws), JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes, cur:s.cur})); } catch { /* private window: nothing kept */ }
+  try { store?.setItem(liveLayerKey(ws), JSON.stringify({mode:s.mode, last:s.last, back:s.back, height:s.height, width:s.width, panes:s.panes, tree:s.tree || null, cur:s.cur})); } catch { /* private window: nothing kept */ }
 }
 // Panes sit in the same order as the chips in the bar (draft D): order is the bar's list; a session not in it stays last.
 function liveLayerSort(s, order) {
@@ -125,13 +214,21 @@ function liveLayerOpenAt(s, phone) {
 }
 // One step of the layer: returns the next model, never changes the one it got.
 function liveLayerStep(s, act, phone = false) {
-  const n = {...s, panes:[...s.panes], menu:''};
+  const out = liveLayerStep1(s, act, phone);
+  if (out === s) return s;
+  // ORCH-2200: the tree and the panes stay one: the steps below keep the tree in place, anything else is synced
+  const tree = liveTreeSync(out.tree, out.panes, out.last);
+  return {...out, tree, panes:liveTreeLeaves(tree)};
+}
+function liveLayerStep1(s, act, phone = false) {
+  const n = {...s, panes:[...s.panes], tree:s.tree || liveTreeFrom(s.panes, s.last), menu:''};
   const opened = () => { if (n.mode === 'bar' || n.mode === 'side') n.mode = liveLayerOpenAt(n, phone); return n; };
   switch (act.type) {
     case 'open':  // a session from the bar, a tile or a ticket: shown already, it is selected; else it takes the selected pane
       if (act.key && !n.panes.includes(act.key)) {
         const at = n.panes.indexOf(n.cur);
-        if (at < 0) n.panes = [act.key, ...n.panes].slice(0, LIVE_MAX); else n.panes[at] = act.key;
+        if (at < 0) { n.panes = [act.key, ...n.panes].slice(0, LIVE_MAX); n.tree = liveTreeSync(n.tree, n.panes, n.last); }
+        else { n.panes[at] = act.key; n.tree = liveTreeSwap(n.tree, n.cur, act.key); }  // the pane keeps its place (ORCH-2200)
       }
       if (act.key) n.cur = act.key;
       if (!n.panes.length) return s;
@@ -140,16 +237,32 @@ function liveLayerStep(s, act, phone = false) {
     case 'beside': {  // Add beside: one more pane next to the others (the third is the most: it then takes the last pane)
       if (!act.key) return s;
       if (!n.panes.includes(act.key)) {
-        if (n.panes.length >= LIVE_MAX) n.panes[LIVE_MAX - 1] = act.key; else n.panes.push(act.key);
+        const at = n.panes.includes(n.cur) ? n.cur : n.panes[n.panes.length - 1];
+        if (n.panes.length >= LIVE_MAX) { n.tree = liveTreeSwap(n.tree, n.panes[LIVE_MAX - 1], act.key); n.panes[LIVE_MAX - 1] = act.key; }
+        else { n.tree = liveTreeSplit(n.tree, at, act.key, 'right'); n.panes.push(act.key); }
       }
       n.cur = act.key;
       return opened();
     }
+    case 'split': {  // ORCH-2200: split the pane `at` right or down with another session (a new plain terminal too)
+      if (!act.key || !n.panes.includes(act.at) || n.panes.includes(act.key) || n.panes.length >= LIVE_MAX) return s;
+      n.tree = liveTreeSplit(n.tree, act.at, act.key, act.dir === 'down' ? 'down' : 'right');
+      n.panes = liveTreeLeaves(n.tree);
+      n.cur = act.key;
+      return opened();
+    }
+    case 'resize':  // a divider dragged or moved with the arrow keys; the menu that is open stays
+      n.tree = liveTreeSize(n.tree, act.path, act.i, act.share);
+      n.menu = s.menu;
+      return JSON.stringify(n.tree) === JSON.stringify(s.tree) ? s : n;
+    case 'equal':  // double click on a divider
+      n.tree = liveTreeEqual(n.tree, act.path);
+      return JSON.stringify(n.tree) === JSON.stringify(s.tree) ? s : n;
     case 'swap': {  // the group switcher of a pane (ORCH-345): that pane shows another session of its group
       if (!act.key || !n.panes.includes(act.from)) return s;
       if (act.key === act.from) { if (n.cur === act.key) return s; n.cur = act.key; return n; }
-      if (n.panes.includes(act.key)) n.panes.splice(n.panes.indexOf(act.from), 1);  // shown already: the two become one
-      else n.panes[n.panes.indexOf(act.from)] = act.key;
+      if (n.panes.includes(act.key)) { n.panes.splice(n.panes.indexOf(act.from), 1); n.tree = liveTreeDrop(n.tree, act.from); }  // shown already: the two become one
+      else { n.panes[n.panes.indexOf(act.from)] = act.key; n.tree = liveTreeSwap(n.tree, act.from, act.key); }
       n.cur = act.key;
       return opened();
     }
@@ -185,6 +298,7 @@ function liveLayerStep(s, act, phone = false) {
       const at = n.panes.indexOf(act.key);
       if (at < 0) return s;
       n.panes.splice(at, 1);
+      n.tree = liveTreeDrop(n.tree, act.key);
       if (!n.panes.includes(n.cur)) n.cur = n.panes[Math.min(at, n.panes.length - 1)] || '';
       if (!n.panes.length) n.mode = n.mode === 'side' ? 'side' : 'bar';
       return n;
@@ -240,7 +354,7 @@ function liveLayerHelper(live, own) {
 // ORCH-1362 (UX checklist D5): Add beside is never greyed. When nothing can go beside, its menu says why and what to
 // do instead; '' when there are sessions to pick.
 function liveBesideNote(total, others) {
-  if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
+  if (total >= LIVE_MAX) return 'Four sessions show at once, the most. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
 }
 // ORCH-1659: a pane added beside that leaves another without room (two fit at 1280, three at 1920) says so once, with
@@ -349,9 +463,7 @@ function liveLayerPin(key) {
 window.addEventListener('orch:live-pins', () => {
   if (!document.getElementById('live-dock')) return;
   window.paintLiveBar?.();
-  liveLayer = liveLayerSort(liveLayerModel(), liveLayerLive());
-  liveLayerWrite(liveLayerStore(), liveLayer, liveLayerWs);
-  liveLayerPaint();
+  liveLayerPaint();  // ORCH-2200: a pin no longer moves the panes; they stay where the person put them
 });
 // Renaming a session in its pane header (draft D: click the name, type, Enter): which session and what is typed so
 // far, so a repaint while typing keeps the text.
@@ -401,7 +513,7 @@ function liveLayerDo(act, after) {
   const before = liveLayerModel(), stepped = liveLayerStep(before, act, liveLayerPhone());
   if (stepped === before) return;
   liveLayerActed = Date.now();
-  const next = liveLayerSort(stepped, liveLayerLive());
+  const next = stepped;  // ORCH-2200: panes stay in place (no sorting by the bar's order)
   liveLayer = next;
   liveLayerWrite(liveLayerStore(), next, liveLayerWs);
   liveLayerPaint();
@@ -452,6 +564,32 @@ function liveBesideMenu(key, label, others, note) {
         h('span', {className:'live-opt-t'}, h('span', {}, o ? (o.key ? h('span', {className:'key'}, o.key + ' ') : null) : null, o ? o.title : id), word ? h('span', {className:'meta'}, word) : null));
     }));
 }
+// ORCH-2200 (owner pick F a): Split right / Split down asks what goes there: Chat with… or Terminal (a live session not
+// shown yet, in that view) or a new Plain terminal. menu: 'split:<right|down>:<pane>' and ':chat' / ':term' for the list.
+function liveSplitMenu(menu, key, label, others, note) {
+  const m = /^split:(right|down):([A-Za-z0-9_.-]+)(?::(chat|term))?$/.exec(menu || '');
+  if (!m || m[2] !== key) return null;
+  const [, dir, , step] = m, base = 'split:' + dir + ':' + key;
+  const head = step === 'chat' ? 'Chat with' : step === 'term' ? 'Terminal of' : dir === 'right' ? 'Split right with' : 'Split down with';
+  const full = !!note && note.startsWith('Four');
+  return h('div', {className:'live-pop live-pop-scroll', role:'group', 'aria-label':head, 'data-key':'live-split-menu'},
+    h('p', {className:'live-pop-h'}, head),
+    full ? h('p', {className:'meta', role:'status', 'data-key':'live-split-none'}, note)
+    : !step ? fragment(
+      h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':base + ':chat', 'data-key':'live-split-chat', 'aria-haspopup':'true'}, liveIc('comment'), h('span', {}, 'Chat with\u2026')),
+      h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':base + ':term', 'data-key':'live-split-term', 'aria-haspopup':'true'}, liveIc('code'), h('span', {}, 'Terminal')),
+      h('button', {type:'button', className:'live-opt', 'data-live':'split-new', 'data-at':key, 'data-dir':dir, 'data-key':'live-split-plain'}, liveIc('terminal'), h('span', {}, 'Plain terminal')))
+    : note ? h('p', {className:'meta', role:'status', 'data-key':'live-split-none'}, note)
+    : others.map(id => {
+      const o = liveLayerSession(id), name = o ? (o.key ? o.key + ' ' : '') + o.title : id;
+      const word = o?.live?.status === 'needs-you' ? 'Needs you' : clean(o?.live?.word || '');
+      return h('button', {type:'button', className:'live-opt', 'data-live':'split-pick', 'data-session':id, 'data-at':key, 'data-dir':dir, 'data-view':step, 'data-key':'live-split-pick',
+        'aria-label':(step === 'term' ? 'Terminal of ' : 'Chat with ') + name + (dir === 'right' ? ', right of ' : ', below ') + label},
+        h('span', {className:'live-opt-t'}, h('span', {}, o?.key ? h('span', {className:'key'}, o.key + ' ') : null, o ? o.title : id), word ? h('span', {className:'meta'}, word) : null));
+    }));
+}
+// A new plain terminal from Split goes next to the pane it was split from (the bar's New starts it, then opens it).
+let liveSplitWant = null;
 // The More menu of every pane (ORCH-2199, owner pick G a): only Stop, End session, History and Where it sits (Bar only
 // is the old Minimise). Pin and Split sit in the header; a pane under LIVE_FOLD_W px folds them into here (CSS
 // container query on .live-pane: [data-fold] hides in the header, [data-fold-item] shows here). A phone pane keeps
@@ -461,7 +599,8 @@ function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
   return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
     h('p', {className:'live-pop-h'}, 'More for ' + label),
     phone ? null : item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold-item':''}),
-    phone || !besideMenu ? null : h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':besideMenu, 'data-key':'live-more-beside', 'aria-haspopup':'true', 'data-fold-item':''}, liveIc('split-right'), h('span', {}, 'Split')),
+    ...(phone ? [] : ['right', 'down'].map(dir => h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':'split:' + dir + ':' + key, 'data-key':'live-more-split-' + dir, 'aria-haspopup':'true', 'data-fold-item':''},
+      liveIc('split-' + dir), h('span', {}, dir === 'right' ? 'Split right' : 'Split down')))),
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
     sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
@@ -522,7 +661,7 @@ function livePane(key, where, s, o) {
   const leave = where !== 'full' ? null : signin
     ? h('button', {type:'button', className:'btn sm outline', 'data-live':'leave-full', 'data-key':'live-full', title:'Leave full screen'}, 'Back to the ticket')
     : livePaneBtn('leave-full', 'Leave full screen', 'full-exit', 'Leave full screen', {'data-key':'live-full'});
-  const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Split: ' + besideNone : 'Split: pick a session to show next to this one';
+  const besideNone = liveBesideNote(o.total, o.others.length);
   const statusMenu = 'status:' + key, plain = sess?.kind === 'terminal';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
@@ -546,12 +685,15 @@ function livePane(key, where, s, o) {
       h('span', {className:'live-ctl'},
         ...(sess ? liveEndHere(key, label) : []),
         leave || (o.phone ? null : livePaneBtn('full', 'Full screen', 'full-screen', 'Full screen', {'data-key':'live-full'})),
-        o.phone ? null : livePaneBtn('menu', besideWhy, 'split-right', 'Split', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside', 'data-fold':''}),
+        ...(o.phone ? [] : ['right', 'down'].map(dir => { const m = 'split:' + dir + ':' + key, on = s.menu === m || s.menu.startsWith(m + ':');
+          return livePaneBtn('menu', (dir === 'right' ? 'Split right' : 'Split down') + (besideNone ? ': ' + besideNone : ''), 'split-' + dir, dir === 'right' ? 'Split right' : 'Split down',
+            {'data-menu':m, 'aria-expanded':String(on), 'aria-haspopup':'true', 'data-key':'live-split-' + dir, 'data-fold':''}); })),
         o.phone ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold':''}),
         livePaneBtn('close', o.total > 1 ? 'Close this pane' : 'Close (the bar stays)', 'x', 'Close', {'data-session':key, 'data-key':'live-close'}),
         livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}),
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
+        liveSplitMenu(s.menu, key, label, o.others, besideNone),
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.phone, besideMenu) : null)), true),
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
       : liveShelfWrap(livePaneBody(key, sess, label), sess, label, n));
@@ -800,8 +942,29 @@ function liveLayerTree(s, where) {
     where === 'full' ? null : h('div', {className:'live-grip', role:'separator', tabindex:'0', 'data-live-grip':dim,
       'aria-orientation':dim === 'width' ? 'vertical' : 'horizontal', 'aria-label':dim === 'width' ? 'Width of the panel' : 'Height of the panel',
       ...liveGripValues(dim, px), title:'Drag or use the arrow keys to resize'}),
-    v.shown.map(k => livePane(k, where, s, {...v, fresh:!!liveLayerWasPanes.length && !liveLayerWasPanes.includes(k)})));
+    liveTreeDraw(v.tree, '', k => livePane(k, where, s, {...v, fresh:!!liveLayerWasPanes.length && !liveLayerWasPanes.includes(k)})));
   return fragment(panel, bar);
+}
+// ORCH-2200: the split tree drawn: a node is a row or column of its children with a 1 px divider between two (drag it,
+// arrow keys move it, double click makes the split equal); each child takes its share (--f).
+function liveTreeDraw(t, path, pane) {
+  if (!t) return null;
+  if (typeof t === 'string') return pane(t);
+  const box = h('div', {className:'live-split', 'data-dir':t.d, 'data-path':path, 'data-key':'live-split'});
+  t.k.forEach((c, i) => {
+    if (i) box.append(liveDivider(t, path, i - 1));
+    const el = liveTreeDraw(c, path === '' ? String(i) : path + '.' + i, pane);
+    el.style.setProperty('--f', String(t.z[i]));
+    box.append(el);
+  });
+  return box;
+}
+function liveDivider(t, path, i) {
+  const pct = Math.round(t.z[i] / (t.z[i] + t.z[i + 1]) * 100);
+  return h('div', {className:'live-div', role:'separator', tabindex:'0', 'data-live-div':'', 'data-path':path, 'data-i':String(i), 'data-key':'live-divider',
+    'aria-orientation':t.d === 'row' ? 'vertical' : 'horizontal', 'aria-label':t.d === 'row' ? 'Width of the panes beside it' : 'Height of the panes above and below it',
+    'aria-valuemin':String(LIVE_SHARE_MIN * 100), 'aria-valuemax':String(100 - LIVE_SHARE_MIN * 100), 'aria-valuenow':String(pct),
+    title:'Drag or use the arrow keys to resize; double click for equal sizes'});
 }
 // A focusable separator must say its size (ARIA): smallest, largest and now, in px. Without a kept size the CSS default
 // (45% of the height, 42% of the width up to 760 px) stands in until liveLayerPad writes the measured one.
@@ -834,9 +997,13 @@ function liveLayerView(s, where) {
   const phone = liveLayerPhone();
   const host = document.getElementById('live-dock');
   const room = where === 'right' ? Math.min(s.width || Math.min(window.innerWidth * 0.42, 760), liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) : (host?.offsetWidth || window.innerWidth);
-  const shown = liveLayerFit(s.panes, s.cur, where, room, phone, liveLayerAnswering() ? liveLayerQuiet(s.panes) : []);
+  // ORCH-2200: every pane of the tree shows (the person sized them); a phone shows the selected one, and quiet panes
+  // still fold to the bar while the page behind has cards to answer (ORCH-261)
+  const hush = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [];
+  const shown = phone ? liveLayerFit(s.panes, s.cur, where, room, phone, hush) : liveLayerFit(s.panes, s.cur, where, Infinity, false, hush).filter(k => s.panes.includes(k));
+  const tree = liveTreeKeep(s.tree || liveTreeFrom(s.panes, where), shown);
   const others = liveLayerOthers(s.panes);
-  return {shown, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),
+  return {shown, tree, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),
     compact:liveLayerCompact(where, shown.length, room, phone), tight:liveLayerTight(where, shown.length, room, phone), crowded:liveLayerCrowded(where, shown.length, room, phone), pins:liveLayerPins(), others, next:others[0] || ''};
 }
 // Paints the dock when something it shows changed; a state poll that changes nothing leaves it alone (no flicker, the
@@ -845,7 +1012,7 @@ function liveLayerPaint() {
   const host = liveDockHost(), s = liveLayerModel(), where = liveLayerWhere(s, liveLayerPhone());
   const shown = s.panes.map(liveLayerSession).map(x => x && [x.key, x.title, x.running, x.pill?.textContent || '', !!x.ended, x.live?.status || '', typeof liveEndModel === 'function' ? (m => [m.busy, m.hung])(liveEndModel(x.live)) : null, x.ended && typeof liveHistData === 'object' ? JSON.stringify(liveHistData.get(x.id)?.data || null) : '']);
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
-  const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.shown, v.narrow, v.compact, v.tight, v.crowded, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null, typeof window.liveVoiceKey === 'function' ? window.liveVoiceKey() : null, typeof window.liveEndKey === 'function' ? window.liveEndKey() : null]);
+  const key = JSON.stringify([where, s.menu, s.panes, s.tree, s.cur, shown, liveRen, v && [v.shown, v.narrow, v.compact, v.tight, v.crowded, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null, typeof window.liveVoiceKey === 'function' ? window.liveVoiceKey() : null, typeof window.liveEndKey === 'function' ? window.liveEndKey() : null]);
   host.dataset.mode = where;
   const cap = where === 'bottom' && !s.height && !liveLayerPhone() ? liveLayerBottomCap(window.innerHeight, liveLayerAnswering()) : null;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : cap ? cap + 'px' : '');
@@ -1022,7 +1189,10 @@ window.LiveLayer = {
   open(key, into = false) {  // the bar marks chips by ticket id; a ticket's session button moves the keyboard into the pane
     const id = liveLayerSession(key)?.id || key;
     liveLayerFromTile(id);
-    liveLayerDo({type:'open', key:id});
+    const want = liveSplitWant && Date.now() < liveSplitWant.until && liveLayerModel().panes.includes(liveSplitWant.at) ? liveSplitWant : null;
+    liveSplitWant = null;
+    if (want && !liveLayerModel().panes.includes(id)) liveLayerDo({type:'split', at:want.at, dir:want.dir, key:id}, liveSel(id, 'live-close'));  // a plain terminal from Split (ORCH-2200)
+    else liveLayerDo({type:'open', key:id});
     if (into) { liveLayerWant = {id, until:Date.now() + 5000}; liveLayerTake(); }
   },
   place(mode) { liveLayerDo({type:'place', mode}); },
@@ -1055,8 +1225,8 @@ document.addEventListener('click', e => {
     return;
   }
   const act = b.dataset.live;
-  if (act === 'menu') liveLayerDo({type:'menu', menu:b.dataset.menu}, b.dataset.key === 'live-more-beside'
-    ? '.live-pop :is([data-live="beside-pick"], .live-opt, a)' : `[data-menu="${b.dataset.menu}"]`);  // Add beside from More (ORCH-1600): its trigger is gone, the keyboard goes into the choice
+  if (act === 'menu') liveLayerDo({type:'menu', menu:b.dataset.menu},
+    /^live-(more-)?split/.test(b.dataset.key || '') ? '[data-key="live-split-menu"] .live-opt' : `[data-menu="${b.dataset.menu}"]`);  // a split menu's next step: the keyboard goes into the choice
   else if (act === 'place') liveLayerDo({type:'place', mode:b.dataset.mode}, b.dataset.mode === 'side' ? '[data-key="live-edge"]' : '[data-key="live-place"]');
   else if (act === 'reopen') {
     const s = liveLayerModel();
@@ -1071,6 +1241,17 @@ document.addEventListener('click', e => {
     liveLayerDo({type:'close', key:b.dataset.session}, s.panes.length > 1 ? liveSel(s.panes[at + 1] || s.panes[at - 1], 'live-close') : '[data-key="live-open"]');
   }
   else if (act === 'beside-pick') liveLayerDo({type:'beside', key:b.dataset.session}, liveSel(b.dataset.session, 'live-close'));
+  else if (act === 'split-pick') {  // ORCH-2200: the picked session goes right of or below the pane, in the view picked
+    const id = b.dataset.session;
+    if (typeof liveViewSet === 'function' && !liveLayerSession(id)?.kind) liveViewSet(id, b.dataset.view === 'term' ? 'term' : 'chat');
+    liveLayerDo({type:'split', at:b.dataset.at, dir:b.dataset.dir, key:id}, liveSel(id, 'live-close'));
+  }
+  else if (act === 'split-new') {
+    const menu = liveLayerModel().menu;
+    if (menu) liveLayerDo({type:'menu', menu});
+    liveSplitWant = {at:b.dataset.at, dir:b.dataset.dir, until:Date.now() + 60000};
+    if (window.LiveNew?.start) window.LiveNew.start('terminal'); else liveSplitWant = null;
+  }
   else if (act === 'select') liveLayerDo({type:'select', key:b.dataset.session}, liveSel(b.dataset.session, 'live-close'));
   else if (act === 'swap') {  // a row of the group switcher: History closes, the keyboard stays on the row
     const to = b.dataset.to;
@@ -1127,6 +1308,16 @@ document.addEventListener('keydown', e => {
     liveRenEnd(liveRen, false);
     return;
   }
+  const div = e.target.closest?.('#live-dock [data-live-div]');
+  if (div && /^Arrow(Up|Down|Left|Right)$/.test(e.key)) {  // ORCH-2200: a divider moves 5 % per press
+    const row = div.getAttribute('aria-orientation') === 'vertical', back = row ? e.key === 'ArrowLeft' : e.key === 'ArrowUp', fwd = row ? e.key === 'ArrowRight' : e.key === 'ArrowDown';
+    if (!back && !fwd) return;
+    e.preventDefault();
+    const n = liveTreeAt(liveLayerModel().tree, div.dataset.path), i = Number(div.dataset.i);
+    if (!n) return;
+    liveLayerDo({type:'resize', path:div.dataset.path, i, share:n.z[i] / (n.z[i] + n.z[i + 1]) + (fwd ? 0.05 : -0.05)}, `[data-live-div][data-path="${div.dataset.path}"][data-i="${i}"]`);
+    return;
+  }
   const grip = e.target.closest?.('[data-live-grip]');
   if (grip && /^Arrow(Up|Down|Left|Right)$/.test(e.key)) {
     const dim = grip.dataset.liveGrip, panel = grip.closest('.live-panel'), now = dim === 'width' ? panel.offsetWidth : panel.offsetHeight;
@@ -1144,7 +1335,8 @@ document.addEventListener('keydown', e => {
   const inside = !!e.target.closest?.('#live-dock'), s = liveLayerModel();
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
-  liveLayerDo({type:'escape', inside}, was ? (liveBesideFromMore(was) ? `.live-pane[data-session="${was.slice(7).replace(/["\\]/g, '')}"] [data-key="live-pane-more"]` : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
+  const splitAt = /^split:(right|down):([A-Za-z0-9_.-]+)/.exec(was || '');
+  liveLayerDo({type:'escape', inside}, was ? (splitAt ? (liveBesideFromMore(was) ? liveSel(splitAt[2], 'live-pane-more') : liveSel(splitAt[2], 'live-split-' + splitAt[1])) : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
 });
 // ORCH-1661: in full screen Tab and Shift+Tab go round inside the layer. The page behind is inert, but past the last
 // button the browser handed the keyboard to the page's body (2 in 40 presses), out of the layer.
@@ -1160,7 +1352,12 @@ function liveLayerTabWrap(e) {
   else if (!e.shiftKey && (out || at === last)) { e.preventDefault(); first.focus(); }
 }
 // Add beside opened from More (ORCH-1600, a crowded pane): the header has no Add beside button, so Esc goes back to More.
-const liveBesideFromMore = menu => menu.startsWith('beside:') && !document.querySelector(`#live-dock [data-key="live-beside"][data-menu="${menu.replace(/["\\]/g, '')}"]`);
+const liveBesideFromMore = menu => {
+  const m = /^split:(right|down):([A-Za-z0-9_.-]+)/.exec(menu);
+  if (!m) return false;
+  const btn = document.querySelector(`#live-dock [data-key="live-split-${m[1]}"][data-menu="split:${m[1]}:${m[2]}"]`);
+  return !btn || !btn.getClientRects().length;  // folded into More in a narrow pane (ORCH-2199)
+};
 // The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is
 // clear (ORCH-1360); something taller than the room above the box keeps its top in view.
 document.addEventListener('focusin', e => {
@@ -1168,6 +1365,38 @@ document.addEventListener('focusin', e => {
   if (!msg || msg.contains(e.target)) return;
   const r = e.target.getBoundingClientRect(), over = r.bottom - msg.getBoundingClientRect().top + 8, room = r.top - body.getBoundingClientRect().top;
   if (over > 8 && room > 0) body.scrollTop += Math.min(over, room);
+});
+// ORCH-2200: drag a divider between two panes; the two share their room anew (kept when the drag ends). Double click: equal.
+document.addEventListener('dblclick', e => {
+  const div = e.target.closest?.('#live-dock [data-live-div]');
+  if (div) liveLayerDo({type:'equal', path:div.dataset.path}, `[data-live-div][data-path="${div.dataset.path}"][data-i="${div.dataset.i}"]`);
+});
+document.addEventListener('pointerdown', e => {
+  const div = e.target.closest?.('#live-dock [data-live-div]');
+  if (!div || e.button !== 0) return;
+  e.preventDefault();
+  const row = div.getAttribute('aria-orientation') === 'vertical', a = div.previousElementSibling, b = div.nextElementSibling;
+  if (!a || !b) return;
+  const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), start = row ? ra.left : ra.top, both = row ? rb.right - ra.left : rb.bottom - ra.top;
+  const fa = parseFloat(a.style.getPropertyValue('--f')) || 0.5, fb = parseFloat(b.style.getPropertyValue('--f')) || 0.5;
+  let share = fa / (fa + fb);
+  div.dataset.drag = '';
+  div.setPointerCapture?.(e.pointerId);
+  const move = ev => {
+    const at = (row ? ev.clientX : ev.clientY) - start;
+    share = Math.min(1 - LIVE_SHARE_MIN, Math.max(LIVE_SHARE_MIN, both > 0 ? at / both : 0.5));
+    a.style.setProperty('--f', String((fa + fb) * share)); b.style.setProperty('--f', String((fa + fb) * (1 - share)));
+  };
+  let done = false;
+  const up = () => {
+    if (done) return;
+    done = true;
+    div.removeEventListener('pointermove', move);
+    delete div.dataset.drag;
+    liveLayerDo({type:'resize', path:div.dataset.path, i:Number(div.dataset.i), share}, `[data-live-div][data-path="${div.dataset.path}"][data-i="${div.dataset.i}"]`);
+  };
+  div.addEventListener('pointermove', move);
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) div.addEventListener(end, up, {once:true});
 });
 // Drag to resize: the top edge of the bottom panel, the left edge of the right one. Kept when the drag ends.
 document.addEventListener('pointerdown', e => {
