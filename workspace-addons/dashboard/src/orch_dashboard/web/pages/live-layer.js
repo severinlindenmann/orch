@@ -235,7 +235,9 @@ function liveLayerHelper(live, own) {
   if (own && (own.state === st || (st === 'working' && ['working', 'starting', 'waiting', 'stuck', 'limit'].includes(own.state)))) return own;
   // a working session keeps the API's finer word (Starting, On hold, Stuck, Stopped: usage limit)
   const fine = st === 'working' ? LIVE_LAYER_FINE[live.word] : null;
-  return {state:fine || st, word:fine ? live.word : {you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
+  // ORCH-2201: a helper at its prompt reads "Quiet 2 d", the time it has been quiet, instead of Idle or Stuck
+  const quiet = st === 'idle' || live.word === 'Stuck';
+  return {state:fine || st, word:quiet && typeof liveQuietWord === 'function' ? liveQuietWord(live.idle_seconds) : fine ? live.word : {you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
 }
 // ORCH-1362 (UX checklist D5): Add beside is never greyed. When nothing can go beside, its menu says why and what to
 // do instead; '' when there are sessions to pick.
@@ -309,7 +311,8 @@ function liveLayerSession(key) {
     const live = window.LiveSessions?.get(x.id) || null;
     const running = live ? ['working', 'needs-you', 'idle'].includes(live.status) && x.kind !== 'terminal' : !!state.runs?.[x.id]?.running;
     // ORCH-817: an ended helper without a ticket (Manager, empty or chat helper) keeps its pane: Start again and History
-    return {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind, running, ended:!running && x.kind !== 'terminal' && (x.open !== true || (!!window.LiveSessions?.ready && !live))};
+    const quiet = live?.status === 'idle' && x.kind !== 'terminal' && window.UI?.helperPill && typeof liveQuietWord === 'function' ? window.UI.helperPill('idle', liveQuietWord(live.idle_seconds)) : null;
+    return {pill:quiet, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind, running, ended:!running && x.kind !== 'terminal' && (x.open !== true || (!!window.LiveSessions?.ready && !live))};
   }
   const run = state.runs?.[t.id], live = window.LiveSessions?.get(t.id) || null;
   const own = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
@@ -717,8 +720,9 @@ function liveLayerFill() {
     const askBox = liveAskPlace(body);
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');
-    if (idle && typeof window.liveEndIdleFill === 'function') window.liveEndIdleFill(idle, body.dataset.liveBody, text);
-    now.hidden = (!!askBox && !askBox.hidden) || (!!idle && !idle.hidden);  // the question card or the idle note says it already (ORCH-687)
+    if (idle && typeof window.liveEndIdleFill === 'function') window.liveEndIdleFill(idle, body.dataset.liveBody);
+    // the question card or the stuck line says it already (ORCH-687); a quiet helper shows only its pill (ORCH-2201)
+    now.hidden = (!!askBox && !askBox.hidden) || (!!idle && !idle.hidden) || (live?.status === 'idle' && kind !== 'terminal');
     if (!text) now.hidden = true;  // a sign-in in front: no line about the terminal (ORCH-865)
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
