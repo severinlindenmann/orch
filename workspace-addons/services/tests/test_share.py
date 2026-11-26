@@ -6,6 +6,7 @@ talks to a real server. Report r-1118-2103-ws: a server listening on every addre
 
 import json
 import socket
+import sys
 import threading
 from contextlib import contextmanager
 
@@ -511,6 +512,24 @@ def test_a_share_that_cannot_be_stopped_keeps_its_record(cli, ws, fake, base, fo
     assert len(list((ws / ".orch/addons/services/services").glob("*.json"))) == 1
 
 
+def test_a_start_that_fails_and_cannot_be_undone_says_how_to_end_it(cli, ws, fake, base, folder, monkeypatch):
+    # #2301: the start raised, the clean-up failed too, and only the start's error was shown
+    from orch_services.store import Refused
+
+    def broken_start(spec):
+        raise Refused("The service tool refused to start it.")
+
+    def refuse(spec):
+        raise Refused("the service tool said no")
+
+    monkeypatch.setattr(fake, "start", broken_start)
+    monkeypatch.setattr(fake, "uninstall", refuse)
+    code, out = jrun(cli, "share", str(folder), "--ticket", "DM1-12")
+    assert code == 2 and out["error"].startswith("The service tool refused to start it.")
+    assert "could not be stopped" in out["error"] and "orch services remove share-" in out["error"]
+    assert len(list((ws / ".orch/addons/services/services").glob("*.json"))) == 1
+
+
 # ---- after the security review: every dot name and key files, in any case; the server checks the folder too
 
 
@@ -533,6 +552,25 @@ def test_dot_names_and_key_files_are_never_served_or_listed(base, folder):
         srv.server_close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="file links need admin rights on Windows")
+def test_a_link_with_a_private_name_to_an_allowed_file_is_not_served_or_listed(base, folder):
+    # #2301: only the resolved file was checked, so a link called .env (or id_rsa) to page.html was served
+    (folder / "page.html").write_text("ok", encoding="utf-8")
+    for name in (".env", "id_rsa", "secret.key"):
+        (folder / name).symlink_to(folder / "page.html")
+    (folder / "index.html").unlink(missing_ok=True)
+    srv = _serve(folder, base)
+    try:
+        for name in (".env", "id_rsa", "secret.key"):
+            assert _code(f"http://127.0.0.1:{base}/{name}") == 404, name
+        assert _code(f"http://127.0.0.1:{base}/page.html") == 200
+        _, _, listing = _get(f"http://127.0.0.1:{base}/")
+        assert "page.html" in listing and not any(n in listing for n in (".env", "id_rsa", "secret.key"))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_a_folder_in_a_dot_folder_is_refused_in_any_case(cli, fake, base, tmp_path):
     for parts in ((".Orch", "x"), (".SSH",), (".config", "site")):
         d = tmp_path.joinpath(*parts)
@@ -548,3 +586,57 @@ def test_the_server_itself_refuses_a_private_folder(base, tmp_path):
     d.mkdir()
     with pytest.raises(ValueError):
         share_server.make(d, base, "m")
+
+
+# ---- the server's own start-up errors and names with spaces and umlauts (coverage run)
+
+
+def test_the_server_start_says_why_it_cannot_run(base, folder, tmp_path, capsys):
+    from orch_services import share_server
+
+    assert share_server.main(["--dir", str(tmp_path / "gone ü"), "--port", str(base), "--mark", "m"]) == 2
+    assert "does not exist" in capsys.readouterr().err
+    private = tmp_path / ".config" / "site"
+    private.mkdir(parents=True)
+    assert share_server.main(["--dir", str(private), "--port", str(base), "--mark", "m"]) == 2
+    assert "never shared" in capsys.readouterr().err
+    with listener("127.0.0.1", base):
+        assert share_server.main(["--dir", str(folder), "--port", str(base), "--mark", "m"]) == 3
+    assert f"Port {base} is taken" in capsys.readouterr().err
+
+
+def test_names_with_spaces_and_umlauts_are_listed_and_served(base, folder):
+    import urllib.parse
+
+    sub = folder / "Bericht März"
+    sub.mkdir()
+    (sub / "Jörg & Söhne <1>.txt").write_text("grüezi", encoding="utf-8")
+    srv = _serve(folder, base)
+    try:
+        status, headers, listing = _get(f"http://127.0.0.1:{base}/{urllib.parse.quote('Bericht März')}/")
+        assert status == 200 and headers["X-Orch-Share"] == "m" and headers["Cache-Control"] == "no-store"
+        assert "Jörg &amp; Söhne &lt;1&gt;.txt" in listing  # escaped in the page
+        href = listing.split('href="', 1)[1].split('"', 1)[0]
+        assert "<" not in href and " " not in href
+        status, _, body = _get(f"http://127.0.0.1:{base}/{urllib.parse.quote('Bericht März')}/{href}")
+        assert status == 200 and body == "grüezi"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_folder_that_cannot_be_read_is_not_found(base, folder, monkeypatch):
+    from orch_services import share_server
+
+    (folder / "index.html").unlink()
+
+    def denied(path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(share_server.os, "listdir", denied)
+    srv = _serve(folder, base)
+    try:
+        assert _code(f"http://127.0.0.1:{base}/") == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()

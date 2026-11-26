@@ -62,7 +62,7 @@ test('add-on off: one switch row that turns it on through the add-on switch path
   const {c} = context();
   assert.equal(c.syncCard({addons:[]}), null);
   const row = c.syncCard({addons:[{name:'sync', active:false, consent:'sync 1.0'}]});
-  assert.equal(text(row), 'Keep a copy of my tickets');
+  assert.equal(text(row), 'Keep a copy of my tickets Off');  // the switch's state in words beside it
   const sw = byKey(row, 'settings-switch-sync-off');
   assert.deepEqual([sw.attrs.role, sw.attrs['aria-checked'], sw.attrs['data-action'], sw.attrs['data-name']], ['switch', false, 'settings-addon', 'sync']);
   assert.equal(all(row, n => n.tag === 'fieldset').length, 0);
@@ -398,7 +398,7 @@ test('Sync now is not offered while the saved sync mode is off', () => {
 });
 
 // Owner feedback 14 Nov (fb18): the Sync page says where, what and when, the last 5 syncs, and one plain error line + one button.
-const INFO = {folder:'Demo', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
+const INFO = {folder:'Demo', folder_path:'/Users/anna/Work/Demo/.orch', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
   history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'12 tickets, 3 files'}, {at:'2026-11-11T08:45:00Z', ok:false, text:'could not reach your storage'}]};
 function syncPage(card) {
   const {c, ui, calls} = context({settings:{...ON}});
@@ -408,14 +408,14 @@ function syncPage(card) {
 }
 test('fb18: the Sync page shows Where, What and When, then the last syncs', () => {
   const {page} = syncPage({...BASE, ...INFO});
-  assert.match(text(byKey(page, 'sync-where-info')), /This computer.*The Demo folder.*Your own storage.*files\.example\.org/);
-  assert.match(text(byKey(page, 'sync-what-info')), /24 tickets · 31 files · 18 MB.*Never included: passwords and keys, your private files\./);
-  assert.match(text(byKey(page, 'sync-when-info')), /Last: .*Next: .*every 15 minutes/);
-  assert.match(text(byKey(page, 'sync-service')), /Sync is running/);
+  assert.match(text(byKey(page, 'sync-where-info')), /Your storage repository.*https:\/\/files\.example\.org\/mia\/month-end.*Local history: \/Users\/anna\/Work\/Demo\/\.orch/);
+  assert.match(text(byKey(page, 'sync-what-info')), /Tickets and their attached files.*Saved locally: 24 tickets · 31 files · 18 MB.*Other workspace files, settings, passwords and keys are not included/);
+  assert.match(text(byKey(page, 'sync-when-info')), /Every 15 minutes while running.*Last successful sync: .*Next:/);
+  assert.match(text(byKey(page, 'sync-service')), /Next:/);
   const rows = all(byKey(page, 'sync-history'), n => n.attrs?.['data-key'] === 'sync-history-row');
   assert.equal(rows.length, 2);
   assert.match(text(rows[0]), /12 tickets, 3 files/);
-  assert.match(text(rows[1]), /could not reach your storage/);
+  assert.match(text(rows[1]), /Could not reach your storage/);
 });
 test('fb18: the storage choice says "Another computer or your own storage" and gives an example address', () => {
   const {page} = syncPage({...BASE, ...INFO});
@@ -460,7 +460,7 @@ test('before the sync status is read no choice is selected (not a false Off), th
 
 test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {
   const {page} = syncPage({...BASE, ...INFO});
-  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing leaves this computer\./], ['remote', /private place you own/]])
+  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing is sent to another device\./], ['remote', /private place you own/]])
     assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
   assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Backup').length, 0);
   const {c, ui} = context();
@@ -478,12 +478,63 @@ test('ORCH-413: the status is read with a GET, never a click: a page without a s
   assert.equal(byKey(card, 'sync-where-remote').checked, true);
 });
 
-test('ORCH-413: a status read that fails keeps the card on its reading line and sends no click', async () => {
+test('ORCH-413: a status read that fails says so with Try again, and sends no click', async () => {
   const {c, calls, ui} = context({settings:{...ON}});
   c.fetch = async () => ({ok:false, status:422, json:async () => { throw new Error('not json'); }});
   ui.card = null;
   await c.syncLoad();
   assert.deepEqual(calls, []);
   assert.equal(ui.card, null);
-  assert.match(text(byKey(c.syncCard(ON), 'sync-unread')), /Reading the sync setting/);
+  // not a "Reading…" line forever: what happened and one button that reads again (a GET, still no click)
+  const card = c.syncCard(ON);
+  assert.match(text(byKey(card, 'sync-unread')), /Can’t read the sync setting right now\. Nothing was changed\./);
+  assert.equal(byKey(card, 'sync-unread').attrs.role, 'alert');
+  c.fetch = async () => ({ok:true, status:200, json:async () => ({...BASE, mode:'local', remote:null})});
+  await click(byKey(card, 'sync-unread-retry'));
+  assert.equal(ui.failed, false);
+  assert.equal(ui.card.mode, 'local');
+  assert.deepEqual(calls, []);
+});
+
+test('Sync page polish: one card heading, no "Last error: none", plurals, history lines start with a capital', () => {
+  const {page} = syncPage({...BASE, ...INFO, counts:{tickets:1, files:1, bytes:900}, history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'nothing new'}]});
+  assert.equal(text(byKey(page, 'sync-where-head')), 'Where to keep a copy');
+  assert.equal(byKey(page, 'sync-status'), undefined, 'synced: the When card already says when');
+  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'fieldset')[0].attrs['aria-labelledby'], 'sync-where-title');
+  assert.equal(byKey(page, 'sync-details'), undefined, 'nothing went wrong: no error line at all');
+  assert.match(text(byKey(page, 'sync-what-info')), /^What is backed up.*Saved locally: 1 ticket · 1 file · 1 KB/);
+  assert.match(text(byKey(page, 'sync-history')), /Nothing new/);
+  const never = syncPage({...BASE, ...INFO, shown:'never'}).page;
+  assert.equal(text(byKey(never, 'sync-status')), 'Not synced yet');
+});
+
+// ORCH-2160: saved destinations remain explicit even when a draft or a stopped run exists.
+test('Backup distinguishes local history, a remote destination and an unconfirmed address', () => {
+  for (const folder_path of ['/Users/anna/Work/Demo/.orch', 'C:\\Users\\Anna Müller\\Work files\\.orch']) {
+    const {page} = syncPage({...BASE, ...INFO, mode:'local', remote:null, interval:5, folder_path});
+    const where = text(byKey(page, 'sync-where-info'));
+    assert.ok(where.includes(folder_path));
+    assert.match(where, /Workspace folder only.*No backup on another device/);
+    assert.match(text(byKey(page, 'sync-when-info')), /Every 5 minutes/);
+  }
+  const {page} = syncPage({...BASE, ...INFO, remote:null, unconfirmed:true});
+  assert.match(text(byKey(page, 'sync-where-info')), /Choose a storage address below.*No backup on another device/);
+  const remote = 'git@example.org:team/a-repository-with-a-long-name.git';
+  assert.ok(text(byKey(syncPage({...BASE, ...INFO, remote}).page, 'sync-where-info')).includes(remote));
+});
+test('Backup never promises a next run while paused, offline or stopped', () => {
+  for (const [change, expected] of [[{shown:'paused'}, /Paused/], [{shown:'offline'}, /Waiting for a connection/], [{running:false}, /Sync is stopped/]]) {
+    const {page} = syncPage({...BASE, ...INFO, ...change});
+    const when = text(byKey(page, 'sync-when-info'));
+    assert.match(when, expected);
+    assert.doesNotMatch(when, /Next:/);
+  }
+});
+
+test('Backup counts describe zero and one saved ticket without claiming a remote upload', () => {
+  for (const [n, expected] of [[0, /Saved locally: 0 tickets · 0 files/], [1, /Saved locally: 1 ticket · 1 file/]]) {
+    const {page} = syncPage({...BASE, ...INFO, counts:{tickets:n, files:n, bytes:0}, not_synced:[]});
+    assert.match(text(byKey(page, 'sync-what-info')), expected);
+    assert.doesNotMatch(text(byKey(page, 'sync-what-info')), /Skipped files are listed/);
+  }
 });
