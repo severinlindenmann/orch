@@ -33,7 +33,7 @@ struct NewTopicVoiceView: View {
     var body: some View {
         VStack(spacing: 20) {
             card
-            Toggle("Human review needed", isOn: $humanReview)
+            Toggle("I review the result", isOn: $humanReview)
                 .themeFont(17).tint(Theme.brand).frame(minHeight: 44)
                 .disabled(flow.phase == .sending)
                 .accessibilityIdentifier("nt-human-review")
