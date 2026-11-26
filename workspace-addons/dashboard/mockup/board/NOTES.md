@@ -180,3 +180,9 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Order: title, "One sentence is enough. Everything below the buttons is optional.", then the request and its buttons side by side (stacked, buttons right under the text, on a phone): What needs doing? beside `[Save ticket]` and, with a helper, `[Start now]` under it. One or two lines under them say what the buttons do. Then "Optional": files, Split into parts, Helper, Due date, Show me the plan first, Human review needed, Done when, and `[Cancel]` at the end. Nothing is hidden behind a toggle.
 - Save ticket is the filled button and the default for Enter with Cmd or Ctrl. With a helper: "Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts." (prepare on save off: "… as you wrote it. Nothing starts.") and "Start now has your helper begin the work at once. This uses its time and may cost money." Start now is outlined, never the default.
 - Preview pill "No helper" (`?helper=none`): no Start now, no Helper row, and "Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. Set up a helper".
+
+## Tickets page polish (ORCH-2091)
+
+- `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
+  the view chips (All … Done this week) on their own row under it; the table starts one gap below.
+- An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.
