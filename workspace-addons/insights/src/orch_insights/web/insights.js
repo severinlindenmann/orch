@@ -541,13 +541,19 @@ async function refresh() {
     delete failed.overview;
     renderLost(overview);
     if (overview.first_day) {
-      const mine = era;
-      const team = await loadModels(models);
-      if (mine !== era) return;
+      // The tiles come at once; the models read (`orch tokens`, every ticket of 30 days) can take seconds at 10,000
+      // tickets, so the team and the helper-time note follow when it answers (ORCH-2288).
+      const mine = era, first = overview;
+      const paint = team => {
+        const grid = node('div', undefined, 'metric-grid');
+        grid.append(...emptyTiles(first, team));
+        byId('empty').replaceChildren(grid);
+      };
       showView('empty');
-      const grid = node('div', undefined, 'metric-grid');
-      grid.append(...emptyTiles(overview, team));
-      byId('empty').replaceChildren(grid);
+      paint(null);
+      const team = await loadModels(models);
+      if (mine !== era || overview !== first) return;
+      if (team) paint(team);
       return;
     }
     const mine = era;
