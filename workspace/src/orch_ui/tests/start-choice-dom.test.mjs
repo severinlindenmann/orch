@@ -256,3 +256,32 @@ test('the Start choice is a group, not a menu: its buttons stay buttons however 
   m.q(n => n.tag === 'summary').click();
   assert.equal(m.q(n => n.dataset.start === 'fresh').getAttribute('role'), null, 'Fresh start keeps the button role');
 });
+
+// ORCH-2201 (owner, ORCH-2188 K a): the inline Start choice of a ticket that waits says why first, then Continue and a small Fresh start link.
+const SESS = {sessions: [{id: 's1', title: 'Draft', reopenable: true, turns: 4, last_used: '2026-11-17T10:00:00Z'}]};
+const ASK = {question: {id: 'q1', text: 'Run the gold steps on INT now?', options: []}, review: null, href: '#ticket/t_1'};
+test('Why it waits comes first with the question and an answer field; Continue is the main button, Fresh start is a small link', async () => {
+  const answers = [];
+  const m = mount({inline: true, sessions: SESS, why: {...ASK, answer: async a => { answers.push(a); return {ok: true}; }}});
+  assert.ok(m.q(n => n.dataset.key === 'start-why'), 'the why box is drawn');
+  assert.match(m.q(n => n.dataset.key === 'start-why').textContent, /Why it waits.*The helper asked: Run the gold steps on INT now\?/);
+  assert.equal(m.q(n => n.textContent === 'Start a helper'), null, 'no title above it');
+  assert.equal(m.q(n => n.dataset.start === 'continue').className, 'btn primary');
+  assert.equal(m.q(n => n.dataset.start === 'fresh'), null, 'Fresh start waits behind its link');
+  const input = m.q(n => n.dataset.key === 'start-why-text');
+  input.value = 'Tonight';
+  m.q(n => n.dataset.key === 'start-why-send').click();
+  await tick();
+  assert.deepEqual(answers, ['Tonight']);
+  m.q(n => n.dataset.key === 'start-fresh-link').click();
+  assert.ok(m.q(n => n.dataset.start === 'fresh'), 'the link opens the fresh start with tool and model');
+});
+test('a waiting review shows Open instead of an answer field; a ticket that waits on nothing keeps the plain choice', () => {
+  const m = mount({inline: true, sessions: SESS, why: {question: null, review: {text: 'Waits for your review'}, href: '#ticket/t_1'}});
+  const open = m.q(n => n.dataset.key === 'start-why-open');
+  assert.equal(open.getAttribute('href'), '#ticket/t_1');
+  assert.equal(m.q(n => n.dataset.key === 'start-why-text'), null);
+  const plain = mount({inline: true, sessions: SESS});
+  assert.equal(plain.q(n => n.dataset.key === 'start-why'), null);
+  assert.ok(plain.q(n => n.textContent === 'Start a helper'));
+});

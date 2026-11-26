@@ -39,7 +39,7 @@
       feed: ['  ⎿ ✔ week view adds up to the day view (17 ms)', '  ⎿ ✔ a failed call counts as failed (8 ms)', '  ⎿ ℹ tests 14 · pass 14 · fail 0', '⏺ Bash(uv run python -m pytest -q tests/test_insights.py)', '  ⎿ ......................  22 passed in 3.1s', '⏺ Tests are green. Drawing the usage chart next.', '⏺ Running the tests once more after the chart.'],
       chat: [['e', 'Step 1 done: counts are collected per day', '13:58'], ['h', 'The counts are in. I am running the tests before I draw the chart.', '15:04', 0, 0]],
       files: [['chart', 'Usage by day', 'Chart · 14 days'], ['html', 'insights-preview.html', 'Page · draft'], ['link', 'usage-raw.json', 'Link · data file']] },
-    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 't1', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
+    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Quiet 18 min', tool: 't1', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
       lines: ['⏺ Bash(orch ref wait ORCH-247 --merge)', '  ⎿ 12 of 12 checks green · merged', '⏺ Done. The Steer button is on the ticket page and', '  pull request 1309 is merged. Ready for your review.'],
       chat: [['e', 'Step 5 done: merged on all tests passed', '14:44'], ['h', 'Finished. You can try the Steer button on any working ticket.', '14:45', 0, 0]],
       files: [['pr', 'Pull request 1309', 'Merged · 12 of 12 checks green', [['State', 'Merged'], ['Checks', '12 of 12 green'], ['Changes', '9 files']]], ['img', 'steer-button.png', 'Picture · 14:30']] },
@@ -332,6 +332,13 @@
   function startHTML(s, withMk) {
     var on = live(s);
     var h = '<div class="mw-start"><h2>' + (on ? 'This session and earlier ones' : 'Start a helper on this ' + (s.kind === 'ticket' ? 'ticket' : 'session')) + (withMk ? mk(4) : '') + '</h2>';
+    if (!on && (s.q || s.ask)) {  /* ORCH-2201: why it waits first, then Continue and a small Fresh start link */
+      h = '<div class="mw-start">' + (withMk ? mk(4) : '') + '<section class="live-why" aria-label="Why it waits"><h4 class="live-why-h">Why it waits</h4>' + (s.q
+        ? '<p class="live-why-q">The helper asked: <b>' + esc(s.q.t) + '</b></p><div class="live-why-line"><input class="input" type="text" placeholder="Your answer" aria-label="Your answer"><button type="button" class="btn outline sm" data-act="sendwhy" data-k="' + esc(s.k) + '">Send</button></div>'
+        : '<div class="live-why-line"><p class="live-why-q">Waits for your review</p><button type="button" class="btn outline sm" data-act="ticket" data-k="' + esc(s.k) + '">Open</button></div>') + '</section>'
+        + '<div class="live-why-act">' + btn('btn primary', 'start', 'Continue', { 'data-how': 'continue', 'data-k': s.k }) + btn('btn ghost sm live-why-link', 'start', 'Fresh start…', { 'data-how': 'clean', 'data-k': s.k, 'aria-label': 'Fresh start on ' + s.k }) + '</div>';
+      return h + histHTML(s) + '</div>';
+    }
     h += '<p class="meta">A start uses 1 of ' + max() + ' helper places. If all are in use it waits in line. Now ' + used() + ' of ' + max() + ' are in use.</p>';
     if (on) h += '<p class="mw-warn"><span aria-hidden="true">!</span> Changing the session interrupts the work in progress.</p>';
     h += '<div class="mw-choices">';
@@ -419,12 +426,12 @@
       + it('endask', I.power, 'End session', s.kind === 'shell' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.');
   }
   function sessMenu(s, where) { return '<div class="mw-pmenu mw-smenu" role="group" aria-label="Stop or end ' + esc(s.k) + '">' + (where === 'end' ? '' : '<p class="mw-poph">' + esc(nm(s)) + '</p>') + sessItems(s, where) + '</div>'; }
-  /* an idle helper never shows an empty box: what it is doing, what to type, and a way out when it hangs */
+  /* ORCH-2201: a quiet session shows only its pill ("Quiet 2 d"); only a helper that looks stuck (prompt visible, no output for
+     20 min) or lost its login gets one slim line with Restart */
   function idleHTML(s) {
-    if (s.s !== 'idle' || s.kind === 'shell') return '';
-    var head = s.login ? 'The helper stopped: its login changed.' : (s.sl || 'Idle') + '. Nothing is running.';
-    var tail = s.login ? 'Start it again to use the new login. The conversation is kept.' : 'Type a message below to give it work. If it hangs, start it again.';
-    return '<div class="mw-idle" role="status"><p><strong>' + esc(head) + '</strong> ' + tail + '</p><div class="mw-endb">' + btn('btn outline sm', 'restart', 'Start again', { 'data-k': s.k, 'aria-label': 'Start ' + s.k + ' again' }) + btn('btn ghost sm', 'pm', 'End session', { 'data-k': s.k, 'data-kind': 'end' }) + '</div></div>';
+    if (s.s !== 'idle' || s.kind === 'shell' || !(s.login || s.stuck)) return '';
+    var head = s.login ? 'Its login changed · Restart to use the new login' : 'Looks stuck';
+    return '<div class="mw-idle" role="status"><span><strong>' + esc(head) + '</strong></span>' + btn('btn ghost sm', 'restart', 'Restart', { 'data-k': s.k, 'aria-label': 'Restart ' + s.k }) + '</div>';
   }
   function hhmm() { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
   function stopStep(k) {
@@ -803,7 +810,7 @@
       if (!EXTRA) EXTRA = MORE.map(function (m, i) {
         var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
-        if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
+        if (m[2] === 'idle') { s.sl = 'Quiet ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
         // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
         if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
         if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
@@ -870,6 +877,7 @@
     if (a === 'endask') { st.endask = k; render('.mw-endq .btn'); return; }
     if (a === 'endno') { st.endask = ''; st.pm = ''; render(); say('The session stays.'); return; }
     if (a === 'endok') { endSession(k); return; }
+    if (a === 'sendwhy') { say('Answered. The helper picks it up on its next start.'); return; }
     if (a === 'restart') { s = by(k); st.pm = ''; st.endask = ''; s.login = false; s.s = 'none'; begin(s, ['', '⏺ Started again. Picking up the same conversation.'], 'Started again'); return; }
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
     if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
@@ -1046,7 +1054,8 @@
     else if (MODELS.t1.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
     if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more|end|tile|bar)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
     if (q.get('att') === '1') by(st.cur).att = DEMO.slice();
-    if ((v = q.get('hung')) && has('Manager')) { var mg = by('Manager'); mg.s = 'idle'; mg.feed = null; mg.sl = 'Nothing running for 3 min'; mg.now = 'Nothing running for 3 min.'; if (v === 'login') { mg.login = true; mg.lines.push('  ⎿ API Error: 401 · Your login changed. Please run /login'); } }
+    if ((v = q.get('hung')) && has('Manager')) { var mg = by('Manager'); mg.s = 'idle'; mg.feed = null; mg.sl = v === 'stuck' ? 'Quiet 20 min' : 'Quiet 2 d'; mg.now = ''; mg.stuck = v === 'stuck'; if (v === 'login') { mg.login = true; mg.lines.push('  ⎿ API Error: 401 · Your login changed. Please run /login'); } }
+    if ((v = q.get('why')) && has('ORCH-189')) { var wk = by('ORCH-189'); if (v === 'ask') wk.q = { t: 'Run the gold steps on INT now, or wait for tonight\u2019s sync?', a: [] }; else wk.ask = true; }  /* ORCH-2201: a ticket without a helper that waits: ?cur=ORCH-189&why=ask|review */
     if ((v = q.get('ended')) && has(v)) endSession(v, true);
     if ((v = q.get('endask')) && has(v)) st.endask = v;
     if (/^(rec|done)$/.test(v = q.get('voice') || '')) { st.voice = v; st.vk = st.cur; if (v === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.'; }

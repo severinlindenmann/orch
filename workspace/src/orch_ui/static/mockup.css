@@ -1647,7 +1647,7 @@ body.mk-focus-v4d .mw-sopt-t .meta{font-size:var(--text-xs,12px)}
 body.mk-focus-v4d .mw-endq{display:grid;gap:var(--s2)}
 body.mk-focus-v4d .mw-endq p{margin:0}
 body.mk-focus-v4d .mw-endb{display:flex;flex-wrap:wrap;gap:var(--s2)}
-body.mk-focus-v4d .mw-idle{display:grid;gap:var(--s2);margin:0 0 var(--s3);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2,var(--surface))}
+body.mk-focus-v4d .mw-idle{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);margin:0 0 var(--s3);padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2,var(--surface))}
 body.mk-focus-v4d .mw-idle p{margin:0}
 body.mk-focus-v4d .mw-lrw{display:flex;gap:var(--s1);align-items:center}
 body.mk-focus-v4d .mw-lrw>.mw-opt{flex:1;min-width:0}
