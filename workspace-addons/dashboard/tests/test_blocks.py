@@ -511,6 +511,10 @@ def test_a_list_row_draws_the_edit_prompt_and_delete_for_an_item_id(tmp_path):
     assert prompt[0]["data"]["value"].startswith("Run the web tests") and prompt[0]["text"] == "Edit"
     rm = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonAct")]
     assert [(n["data"]["verb"], n["data"]["target"]) for n in rm] == [("rm", "l_k2m9q4"), ("rm", "l_a1b2c3")]
+    # nothing to open: the buttons show at the end of the row, no accordion to expand first (#863)
+    assert not any(n["tag"] == "details" for n in nodes)
+    acts = [n for n in nodes if n["cls"] == "row-acts"]
+    assert [[k["text"] for k in a["kids"]] for a in acts] == [["Edit", "Delete"], ["Edit", "Delete"]]
 
 
 @node

@@ -345,7 +345,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(oneTap(it)?'Answer ':lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
-   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.setAttribute('aria-hidden','true');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */
     if(c&&c===cur&&oneTap(it))return answerPick(it,op.id);/* Enter or Space on the answer */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});

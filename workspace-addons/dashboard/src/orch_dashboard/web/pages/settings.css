@@ -22,7 +22,7 @@
 .settings .ad-h>.grow{flex-basis:100%;display:grid;gap:12px}
 .settings .ad-h>.switch{margin-left:auto;width:auto;display:inline-flex;align-items:center;gap:8px}
 .settings .ad-h>.switch::before{flex:none}
-.settings button,.addon-native button,.settings-other button{min-height:44px}
+.settings button,.addon-native button:where(:not(.switch)),.settings-other button:where(:not(.switch)){min-height:44px}
 .addon-native .actions{display:flex;gap:8px;flex-wrap:wrap}
 .shared-link{padding:16px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
 .shared-link .chip{justify-self:start;align-self:flex-start;width:fit-content}

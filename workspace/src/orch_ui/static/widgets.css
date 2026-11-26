@@ -521,24 +521,24 @@ iframe.loading{opacity:0}
 .ic-wrap{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .ic-wrap>svg{display:block}
 .nav-item>.ic-wrap>svg{width:18px;height:18px}
-/* Link tile: a small square with a site or link-type monogram; the brand colours are data per link type. */
-.li{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font:700 12px/1 var(--font-ui);letter-spacing:-.02em;color:#fff;background:var(--surface-3)}
+/* Link tile: a small square with a site or link-type monogram; the brand colours are tokens (--link-*, brand/tokens.json). */
+.li{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font:700 12px/1 var(--font-ui);letter-spacing:-.02em;color:var(--link-ink);background:var(--surface-3)}
 .li.sm{width:16px;height:16px;border-radius:4px;font-size:8px}
 .li .ic-wrap{width:14px;height:14px;display:grid;place-items:center}.li.sm .ic-wrap{width:10px;height:10px}
 .li .ic-wrap svg{width:100%;height:100%}
-.h-github,.h-gitlab{background:#2b3137}.h-confluence{background:#1868db}.h-notion{background:#e8eaed;color:#111}.h-figma{background:#a259ff}
-.h-youtube{background:#e5302a}.h-gdocs,.h-gdrive{background:#2f7cf6}.h-jira{background:#2684ff}.h-linear{background:#5e6ad2}.h-gslides{background:#f4b400;color:#111}
-.h-slack{background:#4a154b}.h-miro{background:#ffd02f;color:#111}.h-gsheets{background:#1e8e3e}.h-loom{background:#625df5}.h-teams{background:#5b5fc7}
-.h-sharepoint{background:#038387}.h-trello{background:#0c66e4}.h-dropbox{background:#0061fe}
+.h-github,.h-gitlab{background:var(--link-github)}.h-confluence{background:var(--link-confluence)}.h-notion{background:var(--link-notion);color:var(--link-ink-dark)}.h-figma{background:var(--link-figma)}
+.h-youtube{background:var(--link-youtube)}.h-gdocs,.h-gdrive{background:var(--link-google)}.h-jira{background:var(--link-jira)}.h-linear{background:var(--link-linear)}.h-gslides{background:var(--link-gslides);color:var(--link-ink-dark)}
+.h-slack{background:var(--link-slack)}.h-miro{background:var(--link-miro);color:var(--link-ink-dark)}.h-gsheets{background:var(--link-gsheets)}.h-loom{background:var(--link-loom)}.h-teams{background:var(--link-teams)}
+.h-sharepoint{background:var(--link-sharepoint)}.h-trello{background:var(--link-trello)}.h-dropbox{background:var(--link-dropbox)}
 .h-link{background:var(--surface-3);color:var(--text-muted)}
-/* WCAG sRGB relative luminance, (Llighter + .05)/(Ldarker + .05):
+/* Phone-mode colours are tokens (--mm-dark-*, --mm-light-*); brand/tests/test_contrast.py checks:
    Dark banner #e8eaed on #164b43 = 8.21:1.
    Dark page #e8eaed / muted #9aa3ad on brightest stop #102925 = 12.76:1 / 6.02:1.
    Light banner #123b35 on #bce9dc = 9.30:1.
    Light page #123b35 / muted #365e56 on darkest stop #e3f5ef = 10.91:1 / 6.42:1.
    Opaque banner/button colours preserve these ratios on hover and in the awake warning. */
-body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:#164b43;--mm-ink:#e8eaed}
-:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:#e3f5ef;--mm-page-end:#f5fbf8;--mm-banner:#bce9dc;--mm-ink:#123b35}
+body.mobile-mode-on{--mm-page-start:var(--mm-dark-page-start);--mm-page-end:var(--bg);--mm-banner:var(--mm-dark-banner);--mm-ink:var(--mm-dark-ink)}
+:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:var(--mm-light-page-start);--mm-page-end:var(--mm-light-page-end);--mm-banner:var(--mm-light-banner);--mm-ink:var(--mm-light-ink)}
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
@@ -1609,6 +1609,33 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 /* a row's buttons as one group (.row-acts): on a phone they move under the words instead of squeezing them */
 .row-acts{display:flex;flex:none;align-items:center;gap:var(--s2)}
 @media(max-width:600px){.list-row:has(>.row-acts){flex-wrap:wrap}.list-row>.row-acts{width:100%;justify-content:flex-end}}
+/* List row with visible actions (issue 863): a block list item whose buttons (Edit, Delete) show without opening the row */
+.acc-li>.row-acts{align-self:center;padding:var(--s2) var(--s3)}
+@media(max-width:600px){.acc-li>.row-acts{width:100%;justify-content:flex-end;padding-top:0}}
+/* File card (issue 1025): one .file-tile per file in a .file-grid (thumbnail, name, kind · size · date); the whole card is
+   one .file-preview-link button. List mode: .files-collection[data-view-mode=list]. Loading: .file-tile.skeleton-tile. */
+.file-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s4);padding:var(--s1) 0 20px}
+.file-tile{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);overflow:hidden;transition:border-color var(--dur-fast) var(--ease-move)}
+.file-tile:hover{border-color:var(--border-strong)}
+.file-tile.skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
+.file-tile .file-preview-link{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.file-tile .file-preview-link:hover strong{text-decoration:underline}
+.file-tile .file-preview-link:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.file-thumb{position:relative;height:112px;overflow:hidden;background:var(--bg);display:grid;place-items:center}
+.file-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.file-thumb>pre{margin:0;padding:var(--s3) var(--s4);width:100%;height:100%;overflow:hidden;white-space:pre-wrap;font:12px/1.5 var(--font-mono);color:var(--text-muted)}
+.file-sym{display:grid;justify-items:center;gap:6px;color:var(--text-muted);font-size:12px}
+.tile-copy{display:flex;flex-direction:column;gap:2px;padding:var(--s3) var(--s3) var(--s2);min-width:0}
+.tile-copy strong{overflow-wrap:anywhere}
+.files-collection[data-view-mode=list] .file-grid{grid-template-columns:1fr;gap:0;padding:0 0 var(--s2)}
+.files-collection[data-view-mode=list] .file-tile{display:grid;grid-template-columns:minmax(200px,1fr) minmax(260px,1fr);align-items:center;gap:var(--s4);min-height:64px;border:0;border-bottom:1px solid var(--border);border-radius:0;background:none}
+.files-collection[data-view-mode=list] .file-preview-link{display:flex;align-items:center;gap:var(--s3)}
+.files-collection[data-view-mode=list] .file-thumb{flex:none;width:48px;height:36px;border-radius:6px}
+.files-collection[data-view-mode=list] .file-thumb>pre,.files-collection[data-view-mode=list] .file-thumb .ticket-preview,.files-collection[data-view-mode=list] .file-sym span{display:none}
+.files-collection[data-view-mode=list] .tile-copy{padding:var(--s2) 0}
+@media(min-width:1600px){.file-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.file-thumb{height:132px}}
+@media(max-width:760px){.file-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.files-collection[data-view-mode=list] .file-tile{grid-template-columns:1fr;gap:0}.files-collection[data-view-mode=list] .file-context{padding-left:60px}}
+@media(prefers-reduced-motion:reduce){.file-tile{transition:none}.file-tile.skeleton-tile{animation:none}}
 /* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
 .live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
 .live-opt.tall .live-opt-t{gap:var(--s1)}

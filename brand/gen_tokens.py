@@ -25,6 +25,10 @@ def render(t: dict) -> str:
     out += [f"  --{k}: {v};" for k, v in t.get("font", {}).items()]
     out += [f"  --{k}: {v}px;" for k, v in t.get("size", {}).items()]
     out += [f"  --{k}: {v};" for k, v in t.get("layout", {}).items()]
+    # link-tile brand colours (.h-github …) and the phone-mode page colours per theme (widgets.css picks the set)
+    out += [f"  --link-{k}: {v};" for k, v in t.get("link", {}).items()]
+    for theme, group in t.get("phone-mode", {}).items():
+        out += [f"  --mm-{theme}-{k}: {v};" for k, v in group.items()]
     for i, (k, v) in enumerate(t["type"].items(), 1):
         out.append(f"  --fs-{i}: {v}px; /* {k} */")
     out += [f"  --s{i}: {v}px;" for i, v in enumerate(t["space"], 1)]

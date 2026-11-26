@@ -6,6 +6,7 @@
 //   H5     a control smaller than 24x24 CSS px (inline links inside a sentence are exempt, WCAG 2.5.8);
 //   H4     a control that shows no focus mark (outline or ring) when reached with the Tab key;
 //   H10    an animation or transition still running when the person asked for reduced motion;
+//   H6     a control whose aria-label does not contain its visible text (label in name, WCAG 2.5.3);
 //   H1     text below 4.5:1 (3:1 at 24 px, or 18.66 px bold) against the colour behind it (logo tiles .li exempt);
 //   H6     a control with no name (an icon-only button needs aria-label);
 //   H3     the keyboard path: a modal dialog takes focus, keeps Tab and Shift+Tab inside, shows the focus mark there,
@@ -82,6 +83,18 @@ function layoutProblems() {
     if (inSentence(el) || (r.width >= 23.5 && r.height >= 23.5)) continue;
     const crowded = targets.some(o => o !== t && !o.el.contains(el) && !el.contains(o.el) && near(r, o.r));
     if (crowded) out.push(`target ${Math.round(r.width)}x${Math.round(r.height)} px under 24x24 with another target too close: ${label(el)}`);
+  }
+  // H6 label in name (WCAG 2.5.3): a control whose aria-label does not hold the words on it can't be said by voice control.
+  const words = v => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const seenText = el => { let txt = ''; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest('svg,[aria-hidden=true],.sr-only,.visually-hidden')) txt += ' ' + n.textContent;
+    return words(txt); };
+  // Older master parts still to fix (#2873); remove a selector when its fix lands. Every other control is checked.
+  const LABEL_IN_NAME_LATER = '.dl-conn-b,.wall-open,.wall-lopen,.bpeek-btn,.decision-shot,.lbar-cnt,.parts-bar,.live-pt,.live-edge,[aria-label="Open Focus where it was last"]';
+  for (const { el } of targets) {
+    if (!el.hasAttribute('aria-label') || el.matches('input,select,textarea') || el.matches(LABEL_IN_NAME_LATER)) continue;
+    const vis = seenText(el);
+    if (vis.length > 1 && !words(el.getAttribute('aria-label')).includes(vis)) out.push(`label in name: "${el.getAttribute('aria-label').slice(0, 40)}" does not hold the text on it "${vis.slice(0, 40)}": ${label(el)}`);
   }
   // Text contrast against the first opaque colour behind it; skipped where a picture, gradient or see-through layer is behind.
   const rgb = s => { const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
@@ -265,7 +278,7 @@ async function run(root, pages) {
 }
 
 // --selftest: a page with one known fault of each kind must trip every check (a check that finds nothing is broken).
-const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion', 'contrast', 'console error', 'no name',
+const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion', 'contrast', 'label in name', 'console error', 'no name',
   'focus trap', 'into the open menu', 'tabs'];
 
 module.exports = { layoutProblems, focusMark, keyboardPath };
@@ -282,5 +295,5 @@ if (require.main === module) (async () => {
     console.error(`UX CHECKS FAILED (${unique.length}):\n` + unique.map(x => '  - ' + x).join('\n'));
     process.exit(1);
   }
-  console.log(`ux checks ok: ${PAGES.join(', ')} at ${WIDTHS.join('/')} px, focus, names, keyboard path, reduced motion, contrast`);
+  console.log(`ux checks ok: ${PAGES.join(', ')} at ${WIDTHS.join('/')} px, focus, names, label in name, keyboard path, reduced motion, contrast`);
 })().catch(e => { console.error(e); process.exit(1); });

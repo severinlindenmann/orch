@@ -786,7 +786,7 @@ function sortedEntries(list) {
   return list.slice().sort(by[filesUI.sort] || by.newest);
 }
 function fileThumb(t, f) {
-  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
+  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind, 'aria-hidden':'true'});
   if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
@@ -801,8 +801,9 @@ function fileTile(t, f) {
   // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
-  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
+  // The name is the words on the card after a hidden "Preview"; the picture is decoration (label in name, #2243)
+  const link = h('button', {type:'button', className:'file-preview-link', 'data-key':'file-open-' + f.kind + '-' + f.name},
+    h('span', {className:'sr-only'}, 'Preview '), fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
@@ -2576,7 +2577,7 @@ function inlineField(t, field) {
   const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
   if (plain && !setDue) node.append(iconEl('pencil'));
   Object.assign(node, {type:'button', title:MULTILINE.includes(field) ? 'Click to change · Enter saves, Shift+Enter new line' : 'Click to change'});
-  node.setAttribute('aria-label', 'Change ' + FIELD_LABEL[field]);
+  node.append(el('span', 'sr-only', ', change ' + FIELD_LABEL[field]));  // spoken after the words on screen (label in name, #2243)
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
   return host;

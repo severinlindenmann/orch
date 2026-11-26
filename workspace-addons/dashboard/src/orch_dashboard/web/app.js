@@ -72,7 +72,7 @@ const parse = value => {
 // One date and time format everywhere: the master kit's UI.stamp ("today 10:32", "Mon 08:00", "14 Nov 2026, 10:32").
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
-let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+let state, renderedRoute = '', renderedKind = '', fetching = false, writing = 0, serial = 0, mutation = 0;
 // Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
 // (session.js) and stops asking; a sign-in link reloads the page.
 let signedOut = false;
@@ -221,7 +221,9 @@ function skeletonLines(label = 'Loading…', n = 2, key = 'loading-lines') {
 }
 // One menu entry; `here` is the address of the page shown, which gets aria-current.
 function navEntry(here, url, text, glyph, tail = null) {
-  return h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+  // The spoken name starts with the words on screen and then says the count ("Review, 1 needs you"; label in name, #2243)
+  const said = tail ? (tail.getAttribute?.('aria-label') || tail.textContent || '').trim() : '';
+  return h('a', {className:'nav-item', href:url, 'aria-label':said ? text + ', ' + said : text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
 }
 // The menu before the state is there (report r-1118-2330, ORCH-692): on a busy machine the first state can take
 // seconds after 'orch start', and the menu stayed empty until then. Home, Tickets and Review never depend on the
@@ -597,6 +599,11 @@ function render(arrived = new Set()) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  // Another kind of page, or the focused control went with the old page: the keyboard place and a screen reader
+  // follow to the new page (#1350). A pick inside the same kind of page (a chat thread, a doc) keeps the keyboard place.
+  const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+  if (soft && changed && !document.querySelector('dialog[open]') && (r.kind !== renderedKind || lost)) soft.arrive(main, title);
+  renderedKind = r.kind;
   window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
   if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();
