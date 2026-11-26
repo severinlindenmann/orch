@@ -87,6 +87,8 @@ card with the before and after pictures.
 | Master gallery at 1280, 390 and 320 px wide: no page sideways scroll | I1, H9 (width part) | `workspace/src/orch_ui/tests/ux_checks.cjs` (job `page-smoke`) |
 | Every control at least 24x24 CSS px, or 24 px clear of the next one (WCAG 2.5.8; links inside a sentence exempt) | H5 (pointer part) | same |
 | Every control reached with Tab shows a focus mark (outline or ring), first 60 Tab stops | H4 (mark part) | same |
+| Every control has a name (text, `aria-label`, a label, `title`); an icon-only button needs `aria-label` | H6 (name part) | same |
+| Keyboard path by real key presses: a modal dialog takes focus, keeps Tab and Shift+Tab inside with a focus mark, closes on Escape and gives focus back to its opener (or the menu button when the opener was a menu item); a menu opens with Enter, ArrowDown moves into it, Escape closes it with focus back on its button, Tab out closes it; arrow keys move between tabs and choose one | H3, H4 | same |
 | With reduced motion asked for, no animation or transition still runs | H10 | same |
 | Rendered text at least 4.5:1 (large 3:1) against the colour behind it | H1 | same |
 | No console error, uncaught exception or failed request on the gallery and on every Insights and dashboard screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
