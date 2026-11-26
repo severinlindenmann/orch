@@ -78,6 +78,18 @@ def mid(tag):
     return "m_" + hashlib.sha256(tag.encode()).hexdigest()[:16]
 
 
+@pytest.fixture(name="run")
+def group_run(run):
+    """Group clicks in these relay scenarios come from the signed-in dashboard."""
+
+    def invoke(*argv):
+        if argv[:2] == ("relay", "group") and "--by" not in argv:
+            argv = (*argv, "--by", "human:test")
+        return run(*argv)
+
+    return invoke
+
+
 @pytest.fixture
 def host(proj, run, rel):
     """Connected host with Home and Bank in the directory, a phone, and one open ticket."""

@@ -653,13 +653,9 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("changed", "This card changed or can't be checked. Look at it again.")
     if given is not None and given != current:
         raise ReviewError("changed", f"{key} changed after it was shown. Look at it again, then answer.")
-    if tickets.agent_tool() or (args.by or "").startswith(
-        "agent:"
-    ):  # an answer on a card is a person's, never an agent's (a label check)
+    who = tickets.acting_by(args)
+    if not who.startswith("human:"):
         raise ReviewError("needs_person", review_server.AGENT_REFUSED)
-    who = tickets.current_actor(
-        args.by
-    )  # the person chosen in orch (--by human:<name>), else the computer's user
     if q is not None and q.get("answer") is not None and given is not None:
         # ORCH-921: a card the page showed open, answered meanwhile in the terminal, on the phone or in
         # another tab. Its digest still matches (it is what was shown, not whether it was answered): say
@@ -824,13 +820,14 @@ def _accepted(args, root: Path) -> None:
 def _undo(args, root: Path) -> None:
     from orch import autoreview
 
-    if tickets.agent_tool() or (args.by or "").startswith("agent:"):
+    who = tickets.acting_by(args)
+    if not who.startswith("human:"):
         raise Refused("Only a person can undo what the Reviewer did.")
     tid = _ticket(root, args)["id"]
     q = args.question
     if q is not None and not re.fullmatch(r"q[0-9]{1,4}", q):
         raise Refused("Give the question like q3.")
-    res = autoreview.undo(root, tid, tickets.current_actor(args.by), q)
+    res = autoreview.undo(root, tid, who, q)
     said = {
         "accept": "back in Review for you, with Human review needed on",
         "back": "back in Review for you, with Human review needed on; the helper's new task is gone",

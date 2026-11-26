@@ -39,7 +39,8 @@ def test_owner_add_rename_rights_remove(proj, run):
     assert all(x["by"] == "human:" + owner["id"] and x["device"] == "machine" for x in log)
 
 
-def test_cli_round_trip(proj, run):
+def test_cli_round_trip(proj, run, monkeypatch):
+    monkeypatch.setattr(tickets.term, "is_terminal", lambda stream: True)
     assert run("people", "on", "--name", "Sev")[0] == 0
     code, out, _ = run("people", "add", "Max", "--rights", "write,decide", "--json")
     assert code == 0
@@ -325,8 +326,8 @@ def test_turn_on_is_refused_for_a_browser_a_phone_or_a_person_id(proj, monkeypat
 
 def test_cli_passes_who_acts(proj, run, monkeypatch):
     """`orch people ... --by` (what the dashboard runs): a non-owner is refused with exit 2."""
-    assert run("people", "on", "--name", "Sev")[0] == 0
-    code, out, _ = run("people", "add", "Lea", "--json")
+    assert run("people", "on", "--name", "Sev", "--by", "human:Sev")[0] == 0
+    code, out, _ = run("people", "add", "Lea", "--json", "--by", "human:Sev")
     lea = json.loads(out)["person"]["id"]
     code, out, err = run("people", "rights", "Lea", "write,decide,start", "--by", "human:" + lea)
     assert code == 2 and "owner at this computer" in (out + err)

@@ -1855,7 +1855,7 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
     assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
     assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
-    assert "--by" not in a and "--proof-stdin" not in a
+    assert a[a.index("--by") + 1].startswith("human:") and "--proof-stdin" not in a
 
 
 def test_review_answer_text_option_with_spaces(act_server, act_orch):
@@ -1888,10 +1888,11 @@ def test_review_answer_is_checked(act_server, act_orch, args):
     assert acts(act_orch) == []
 
 
-def test_review_answer_has_no_proof_and_no_by():
+def test_review_answer_names_the_current_person(monkeypatch):
     q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
+    monkeypatch.setattr(actions, "actor", lambda root: "human:Pat")
     argv = actions.build_argv("review.answer", q)
-    assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
+    assert argv[-3:] == ["--by", "human:Pat", "--json"] and "--proof-stdin" not in argv
     assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
     assert "review" in actions.RESERVED
 
@@ -1910,7 +1911,7 @@ def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
         actions.run_op(ws, SELF, "review.answer", args)
     assert seen == {}
     code, _, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
-    assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
+    assert code == 200 and seen["argv"][-3:] == ["--by", actions.actor(ws), "--json"]
 
 
 def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):

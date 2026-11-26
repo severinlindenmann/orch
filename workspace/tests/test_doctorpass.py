@@ -74,13 +74,13 @@ def test_setup_lives_in_the_guarded_home_not_the_project(ws):
 def test_a_bad_setup_is_refused(ws, run, tmp_path, bad):
     f = tmp_path / "bad.json"
     f.write_text(json.dumps(bad))
-    code, _, err = run("doctor", "setup", str(f))
+    code, _, err = run("doctor", "setup", str(f), "--by", "human:Pat")
     assert code == 2, err
     assert doctorpass.setup(ws)["urls"][0]["name"] == "dash"  # the old one stays
 
 
 def test_setup_off_stops_everything(ws, run):
-    assert run("doctor", "setup", "--off")[0] == 0
+    assert run("doctor", "setup", "--off", "--by", "human:Pat")[0] == 0
     assert doctorpass.setup(ws) is None and not doctorpass.due(ws)
     code, _, err = run("doctor", "pass")
     assert code == 2 and "not set up" in err
@@ -498,10 +498,11 @@ def test_a_last_pass_in_the_future_is_not_believed(ws, run):
     assert not next(r for r in d["checks"] if r["name"] == "scheduled checks")["ok"]
 
 
-def test_setup_is_a_person_s_step(ws, run, tmp_path, monkeypatch):
+@pytest.mark.parametrize("tool", [None, "claude"])
+def test_setup_is_a_person_s_step(ws, run, tmp_path, monkeypatch, tool):
     f = tmp_path / "s.json"
     f.write_text(json.dumps(SETUP))
-    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setattr(tickets, "agent_tool", lambda: tool)
     assert run("doctor", "setup", str(f))[0] == 2
     assert run("doctor", "setup", "--off")[0] == 2 and doctorpass.setup(ws)
     assert run("doctor", "setup")[0] == 0  # showing it is fine
