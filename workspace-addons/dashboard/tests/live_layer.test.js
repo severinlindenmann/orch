@@ -469,6 +469,8 @@ test('Add beside stays a button; its menu says why nothing can go beside and wha
   assert.match(pane, /liveSplitMenu\(s\.menu, key, label, o\.others, besideNone\)/);
   const sm = source.slice(source.indexOf('function liveSplitMenu('), source.indexOf('let liveSplitWant'));
   assert.match(sm, /'data-key':'live-split-none'\}, note\)/, 'its menu says why nothing can go there');
+  // four panes: the menu shows only why, before Chat with / Terminal / Plain terminal (the note's own words decide)
+  assert.match(sm, /const full = !!note && note === liveBesideNote\(LIVE_MAX, 0\)/, 'four panes are told by the note itself');
   for (const w of ['Chat with\\u2026', "'Terminal'", "'Plain terminal'"]) assert.ok(sm.includes(w), w);
   const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
   assert.match(menu, /note \? h\('p', \{className:'meta', role:'status', 'data-key':'live-beside-none'\}, note\)/);

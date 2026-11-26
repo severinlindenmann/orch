@@ -176,6 +176,8 @@ const LIVE_TALK_EVERY = 4000;
 function liveTalkLoad(id, box) {
   const hit = liveTalk.get(id);
   if (hit && (hit.busy || Date.now() - hit.at < LIVE_TALK_EVERY)) return;
+  // only a ticket id has a conversation to read (the server answers 404 to anything else): the chat is the summary
+  if (!/^t_[a-z0-9]{6,16}$/.test(String(id))) { liveTalk.set(id, {at:Date.now(), data:{available:false, turns:[]}, busy:false}); return; }
   liveTalk.set(id, {at:Date.now(), data:hit?.data || null, busy:true});
   fetch('/api/talk/' + encodeURIComponent(id)).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     // a failed read keeps what the chat shows; the first one shows the summary

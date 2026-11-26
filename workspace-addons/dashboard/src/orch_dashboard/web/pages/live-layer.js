@@ -583,7 +583,7 @@ function liveSplitMenu(menu, key, label, others, note) {
   if (!m || m[2] !== key) return null;
   const [, dir, , step] = m, base = 'split:' + dir + ':' + key;
   const head = step === 'chat' ? 'Chat with' : step === 'term' ? 'Terminal of' : dir === 'right' ? 'Split right with' : 'Split down with';
-  const full = !!note && note.startsWith('Four');
+  const full = !!note && note === liveBesideNote(LIVE_MAX, 0);  // four panes: no choice at all, only why
   return h('div', {className:'live-pop live-pop-scroll', role:'group', 'aria-label':head, 'data-key':'live-split-menu'},
     h('p', {className:'live-pop-h'}, head),
     full ? h('p', {className:'meta', role:'status', 'data-key':'live-split-none'}, note)

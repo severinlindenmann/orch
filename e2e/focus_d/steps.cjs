@@ -452,7 +452,8 @@ async function chatView(page, dash) {
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
   await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
   const rows = await page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim()));
-  const want = [/^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
+  // ORCH-2204: the stand-in has no conversation orch can read, so the chat is the ticket's summary and says so on top
+  const want = [/^e Summary from the ticket\s*Open terminal$/, /^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
     /^h Helper · .*above or below the files\?$/, /^y Demo · .*Below$|^y You · .*Below$/];
   if (rows.length !== want.length || want.some((re, i) => !re.test(rows[i]))) throw new Error('the chat reads:\n' + rows.join('\n'));
   if (await page.isVisible(`${pane} [data-live-lines]`)) throw new Error('Chat also shows the last lines');
@@ -1425,6 +1426,9 @@ async function startChoice(page, dash) {
         { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
     const first = (st.tickets || [])[0];
     if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; first.model = { name: 'sonnet', by: 'orch' }; }
+    // a ticket that waits for nobody: one that waits opens with "Why it waits" first (ORCH-2201, unit tests in
+    // workspace/src/orch_ui/tests/start-choice-dom.test.mjs); this step is the plain Start choice
+    if (first) { first.questions = (first.questions || []).filter(q => q && (q.answer != null || q.kind != null)); if (first.status === 'review') first.status = 'open'; }
     st.runs = { ...Object.fromEntries(Object.entries(st.runs || {}).filter(([k]) => k !== tid)), ...others(4) };
     st.start_line = full ? { waiting: ['t_other8', 't_other9'], why: '4 helpers are working at once, the most you allowed', limit: 4 } : null;
     st0 = st;
@@ -2774,7 +2778,11 @@ async function reviewReach(page, dash, width) {
   await motionQuiet(page);
   const panes = await page.$$eval('#live-dock .live-pane', els => els.map(e => e.dataset.session));
   if (panes.join() !== 't_bar238') throw new Error('with cards to answer behind, the split shows ' + panes.join(', ') + '; the empty pane should wait on the bar');
-  if (!await page.$('#live-bar [data-session="t_bar228"], #live-bar [data-id="t_bar228"], #live-bar [aria-current="true"]')) throw new Error('the folded pane has no chip on the bar');
+  // the folded pane waits in the bar's Helpers menu (ORCH-2198: one menu, no chips)
+  await page.click('#live-bar [data-lbar-list="helpers"]');
+  await page.waitForSelector('#live-bar [data-key="lbar-pop"]', { timeout: 5000 });
+  if (!await page.$('#live-bar [data-lbar-open="t_bar228"]')) throw new Error('the folded pane is not in the Helpers menu of the bar');
+  await page.keyboard.press('Escape');
   const toast = await page.$$eval('#ui-toasts .ui-toast', els => els.map(e => e.innerText).join(' | '));
   if (/Room for/.test(toast)) throw new Error('the folded empty pane says it found no room: ' + toast);
   const m = await page.evaluate(() => {

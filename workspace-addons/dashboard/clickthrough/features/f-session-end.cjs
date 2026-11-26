@@ -90,11 +90,12 @@ module.exports = {
     must(await pane.locator('[data-key="live-start-again"]').count(), 'the ended Manager has no Start again');
     await shot('pane-ended-history', pane);
 
-    // 2. The pane of the empty helper (idle): the idle note says what to type and offers Start again and End.
+    // 2. The pane of the empty helper (idle): ORCH-2201 shows only its pill (Quiet …), no notice and no Restart line
+    // (that line is for a helper that looks stuck).
     await page.evaluate(id => window.LiveLayer.open(id), IDS.empty);
     const ep = page.locator('#live-dock .live-pane').first();
-    await ep.locator('[data-key="live-restart"]').waitFor({ timeout: 10000 });
-    must(await ep.getByText(/Type a message below to give it work/).count(), 'the idle pane does not say what to type');
+    await ep.getByText(/^Quiet/).first().waitFor({ timeout: 10000 });
+    must(!(await ep.locator('[data-key="live-restart"]').isVisible()), 'a quiet helper shows the stuck line');
     // ORCH-1362: Stop is never greyed; pressed while nothing runs it says so in the page and sends nothing
     const stop2 = await more(ep, 'live-more-stop');
     must(!(await stop2.isDisabled()), 'Stop is greyed when nothing runs');
