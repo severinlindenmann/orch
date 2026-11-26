@@ -394,6 +394,34 @@ def test_a_signed_message_whose_save_failed_is_saved_on_the_next_pull(ws, run, r
     assert [i for i in inbox(run) if i["id"] == m["id"]] == []
 
 
+def test_a_message_saved_before_a_later_save_failed_still_reaches_the_arrival_journal(
+    ws, run, rel, person, monkeypatch
+):
+    """R3.1: A is saved, B's save fails, the pull stops before its journal. On the next pull A is a duplicate
+    already on disk: it is not saved twice, but it still gets its arrival entry (watchers wait on it)."""
+    from orch import relay
+
+    accept(ws, PEER)
+    a, b = signed_msg(SEED_PEER), signed_msg(SEED_PEER)
+    rel.inbox.extend([a, b])
+    real = net.write_json
+
+    def fail_b(path, data, *args, **k):
+        if path.name == f"{b['id']}.json":
+            raise OSError("No space left on device")
+        return real(path, data, *args, **k)
+
+    monkeypatch.setattr(net, "write_json", fail_b)
+    with pytest.raises(OSError):
+        run("relay", "inbox", "--json")
+    assert a["id"] not in {e["id"] for e in relay._read_arrivals(ws)}
+    monkeypatch.setattr(net, "write_json", real)
+    items = inbox(run)
+    journal = [e["id"] for e in relay._read_arrivals(ws)]
+    assert journal.count(a["id"]) == 1 and journal.count(b["id"]) == 1
+    assert sorted(i["id"] for i in items if i["id"] in (a["id"], b["id"])) == sorted([a["id"], b["id"]])
+
+
 def test_replay_list_lives_in_the_guarded_home(ws, run, rel, person, homes):
     accept(ws, PEER)
     m = signed_msg(SEED_PEER)

@@ -2477,11 +2477,19 @@ def _journal(root: Path, msgs: list[dict]) -> None:
                 f.write("".join(json.dumps(e) + "\n" for e in new))
 
 
-def _kept_here(root: Path, m: dict) -> bool:
-    """The message is saved in .orch/inbox or was handled already (inbox files are never pruned)."""
+def _saved_here(root: Path, m: dict) -> bool:
+    return (root / ".orch" / "inbox" / f"{m.get('id', '')}.json").exists()
+
+
+def _handled_here(root: Path, m: dict) -> bool:
     mid = str(m.get("id", ""))
     s = seen(root)
-    return (root / ".orch" / "inbox" / f"{mid}.json").exists() or mid in s or f"{m.get('from')}/{mid}" in s
+    return mid in s or f"{m.get('from')}/{mid}" in s
+
+
+def _kept_here(root: Path, m: dict) -> bool:
+    """The message is saved in .orch/inbox or was handled already (inbox files are never pruned)."""
+    return _saved_here(root, m) or _handled_here(root, m)
 
 
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
@@ -2494,6 +2502,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     ok = []
     acked = []
     arrival = {}
+    rejournal = []  # saved by an earlier pull that failed before its journal: watchers still hear of it
     for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
@@ -2518,6 +2527,9 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         # delivery of the same bytes is the only copy left, so it is saved now (R3.1, nothing is lost).
         lost_save = v.kind == "duplicate" and v.code != "dropped" and not _kept_here(root, v.message)
         if v.kind in ("refused", "duplicate") and not lost_save:
+            if v.kind == "duplicate" and v.code != "dropped" and _saved_here(root, v.message):
+                if not _handled_here(root, v.message):
+                    rejournal.append(v.message)
             continue
         m = v.message
         if not msgtrust.inbox_slot_free(d / f"{m['id']}.json", m):
@@ -2525,8 +2537,8 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         net.write_json(d / f"{m['id']}.json", m)
         arrival[m["id"]] = n
         ok.append(m)
-    if ok:
-        _journal(root, ok)
+    if ok or rejournal:
+        _journal(root, ok + rejournal)  # an id already journaled is skipped
     if acked:
         _api(root, "POST", "/v1/inbox/ack", {"ids": acked})
     from orch import chat
