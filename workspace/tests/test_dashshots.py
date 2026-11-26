@@ -228,6 +228,10 @@ def test_shot_waits_while_the_page_says_it_is_loading(monkeypatch):
             self.left = busy_for
 
         def call(self, method, params=None, session=None, timeout=30):
+            if method == "Page.getFrameTree":
+                return {"frameTree": {"frame": {"id": "F"}}}
+            if method == "Page.createIsolatedWorld":
+                return {"executionContextId": 1}
             if method == "Runtime.evaluate":
                 self.left -= 1
                 return {"result": {"value": self.left >= 0}}

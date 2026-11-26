@@ -222,7 +222,7 @@ def test_human_review_needed_in_review_is_left_alone(proj, run, new_ticket, fact
     rev = tickets.load(proj, tid)["revision"]
     assert _tend(run)["actions"] == []
     assert tickets.load(proj, tid)["revision"] == rev and tickets.load(proj, tid)["status"] == "review"
-    with pytest.raises(Refused, match="Human review needed"):
+    with pytest.raises(Refused, match="I review the result"):
         tickets.accept_for_owner(proj, tid, "x", auto="points")
 
 

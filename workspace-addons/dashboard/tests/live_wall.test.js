@@ -290,3 +290,23 @@ test('a session without a live helper that asks shows the needs-you mark, as the
     assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
   }
 });
+
+test('ORCH-2271: a band draws its first 24 entries and the Tickets list mark for the rest', () => {
+  const list = Array.from({length: 480}, (_, i) => ({id: 't_' + i}));
+  assert.equal(wall.liveWallCut('need', list).shown.length, 480, 'without the paging of the Tickets page every entry shows');
+  const marks = [];
+  const caps = new Map();
+  global.IntersectionObserver = function () {};
+  global.capOf = (key, step) => caps.get(key) || step;
+  global.moreMark = (key, hidden, fetchMore, step) => { marks.push([key, hidden, step]); caps.set(key, (caps.get(key) || step) + step); return {mark: key}; };
+  try {
+    const cut = wall.liveWallCut('need', list);
+    assert.equal(cut.shown.length, wall.LIVE_WALL_FIRST);
+    assert.deepEqual(marks, [['wall-need', 480 - 24, 24]]);
+    assert.equal(wall.liveWallCut('need', list).shown.length, 48, 'each step brings 24 more');
+    assert.deepEqual(cut.more, {mark: 'wall-need'});
+    assert.equal(wall.liveWallCut('pin', list.slice(0, 3)).more, null, 'a short band has no mark');
+  } finally { delete global.capOf; delete global.moreMark; delete global.IntersectionObserver; }
+  const src = fs.readFileSync(path.join(WEB, 'pages', 'livewall.js'), 'utf8');
+  assert.match(src, /armLoadMore\(document\.querySelector\('main'\)\)/, 'a repaint of the wall arms the mark');
+});

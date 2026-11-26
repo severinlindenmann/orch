@@ -1,0 +1,4 @@
+{"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "build",
+ "items": [{"title": "Booking page colour", "tag": "taste",
+            "looks": [{"title": "A", "picture": "a.png"}, {"title": "B", "picture": "b.png"},
+                      {"title": "C", "picture": "c.png"}, {"title": "D", "picture": "d.png"}]}]}

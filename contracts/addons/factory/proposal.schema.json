@@ -596,6 +596,25 @@
                 "type": "string",
                 "maxLength": 40,
                 "description": "Only for routine items; taste and cant-undo items never carry a preselected answer."
+              },
+              "looks": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
+                "description": "Only for taste items: 2-3 look options shown side by side as picture cards. The helper also asks one plain question on the order whose options are these titles; the person picks there.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["title", "picture"],
+                  "properties": {
+                    "title": {"type": "string", "minLength": 1, "maxLength": 60},
+                    "picture": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "description": "A picture filed with the stop, as before/after."
+                    }
+                  }
+                }
               }
             }
           }

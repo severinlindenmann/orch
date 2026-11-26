@@ -298,3 +298,143 @@ async fn a_signed_send_with_a_team_choice_must_sign_the_team_choice() {
         "{v}"
     );
 }
+
+// ---- outside review (ORCH-1206) --------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn signed_only_refuses_an_unsigned_phone_send() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = pair_with_key(&t, &a, Some(&key(7))).await;
+    let (s, _) = t
+        .admin_json(
+            "PUT",
+            "/admin/api/signing-keys/settings",
+            Some(json!({"require_signed": true})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let unsigned = json!({"to": a.id, "client_id": CID, "text": "Hi"});
+    let (s, v) = t
+        .phone(&p, "POST", "/v1/phone/send", Some(unsigned.clone()))
+        .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (422, Some("missing_signature")),
+        "{v}"
+    );
+    let (s, _) = t
+        .admin_json(
+            "PUT",
+            "/admin/api/signing-keys/settings",
+            Some(json!({"require_signed": false})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (s, v) = t.phone(&p, "POST", "/v1/phone/send", Some(unsigned)).await;
+    assert_eq!(s, 201, "switch off again: {v}");
+}
+
+#[tokio::test]
+async fn a_retry_that_says_something_else_is_a_mismatch_not_a_duplicate() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    let k = key(7);
+    let (_, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "P", "workspaces": [a.id, b.id]})),
+        )
+        .await;
+    let code = v["link"].as_str().unwrap().split("code=").nth(1).unwrap();
+    let r = t
+        .http
+        .post(format!("{}/v1/phone/pair", t.base))
+        .json(&json!({"code": code, "name": "P", "public_key": pk(&k)}))
+        .send()
+        .await
+        .unwrap();
+    let v: Value = r.json().await.unwrap();
+    let p: (String, String) = (
+        v["phone_id"].as_str().unwrap().into(),
+        v["token"].as_str().unwrap().into(),
+    );
+    let bytes = signed_bytes(&msg("m_aaaaaaaaaaaaaab1", &p.0, &a.id, "Hallo", CID));
+    let env = envelope(&k, &bytes);
+    let (s, v) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/send",
+            Some(request(&a.id, "Hallo", env.clone())),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    // the same client id is answered as a duplicate before any check (nothing new is stored); another client id
+    // with the stored envelope must still say what the signed bytes say
+    let other = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+    for req in [
+        json!({"to": a.id, "client_id": other, "text": "Hallo", "envelope": env.clone()}),
+        json!({"to": b.id, "client_id": other, "text": "Hallo", "envelope": env}),
+    ] {
+        let (s, v) = t.phone(&p, "POST", "/v1/phone/send", Some(req)).await;
+        assert_eq!(
+            (s, v["error"].as_str()),
+            (422, Some("signed_mismatch")),
+            "{v}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn one_file_named_twice_never_stands_for_two_signed_files() {
+    use sha2::{Digest, Sha256};
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let k = key(7);
+    let p = pair_with_key(&t, &a, Some(&k)).await;
+    let mut ids = vec![];
+    for fill in [1u8, 2u8] {
+        let bytes = vec![fill; 100];
+        let r = t
+            .http
+            .post(format!("{}/v1/phone/blobs", t.base))
+            .header("X-Orch-Phone", &p.0)
+            .header("Authorization", format!("Bearer {}", p.1))
+            .header("Content-Type", "image/jpeg")
+            .body(bytes.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 201);
+        let v: Value = r.json().await.unwrap();
+        ids.push((
+            v["blob_id"].as_str().unwrap().to_string(),
+            hex::encode(Sha256::digest(&bytes)),
+        ));
+    }
+    let att = |b: &str| json!({"blob_id": b, "kind": "image", "name": "a.jpg", "size": 100, "mime": "image/jpeg"});
+    let twice = json!([att(&ids[0].0), att(&ids[0].0)]);
+    let mut m = msg("m_aaaaaaaaaaaaaab2", &p.0, &a.id, "x", CID);
+    m["body"] = json!({"client_id": CID, "attachments": twice});
+    m["files"] = json!(ids
+        .iter()
+        .map(|(b, sha)| json!({"blob_id": b, "size": 100, "sha256": sha}))
+        .collect::<Vec<_>>());
+    let env = envelope(&k, &signed_bytes(&m));
+    let (s, v) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/send",
+            Some(json!({"to": a.id, "client_id": CID, "attachments": twice, "envelope": env})),
+        )
+        .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (422, Some("signed_mismatch")),
+        "{v}"
+    );
+}
