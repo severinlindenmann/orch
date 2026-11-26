@@ -196,11 +196,12 @@ def _denied(d: Path, e: OSError) -> RuntimeError:
 
 
 def read_json(p: Path) -> dict | None:
-    """The JSON object in p, or None (missing, a symlink, not a regular file, not JSON)."""
+    """The JSON object in p, or None (missing, a symlink, not a regular file, not JSON). Opened non-blocking:
+    a FIFO put there is refused at once instead of hanging the reader until something writes to it."""
     if p.is_symlink():
         return None
     try:
-        fd = os.open(p, os.O_RDONLY | NOFOLLOW)
+        fd = os.open(p, os.O_RDONLY | NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return None
     try:
@@ -219,9 +220,13 @@ def write_json(p: Path, data: dict) -> None:
         fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     except PermissionError as e:
         raise _denied(p.parent, e) from e
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    os.replace(tmp, p)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, p)
+    except BaseException:  # a failed write leaves the old file and no stray .tmp- file behind
+        remove(Path(tmp))
+        raise
 
 
 def open_append(p: Path):
