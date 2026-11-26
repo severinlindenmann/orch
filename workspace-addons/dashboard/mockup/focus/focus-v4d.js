@@ -7,7 +7,7 @@
     [2, 'Needs you is an orange tile', 'A session that waits for you is its normal tile, in orange, first after the pinned ones, with the question as its one sentence. You open it to answer; nothing is decided on the wall.', 'The "waiting on" value of orch run list plus the open question on the ticket; the answer is sent into the session.', 'Small', 'a colour and a sort order', { page: 'focus', view: 'wall', need: 'ORCH-238' }],
     [3, 'Focus button and Open ticket', 'Every ticket has one Focus button (Watch, Answer, Open or Start). Every session has Open ticket to go the other way.', 'The run signal of the ticket decides the word on the button; the session name is the ticket id.', 'Small', 'one button per ticket, one link per session', { page: 'ticket', tk: 'ORCH-189' }],
     [4, 'Continue, fresh start or an earlier session', 'Start asks one thing: continue the last conversation, make a fresh start, or reopen an earlier session from the history list.', 'The session id is kept on the ticket, so the next start resumes it. Built (ORCH-363): orch keeps the last 10 sessions per ticket and Reopen continues one (orch run start --session). Built (ORCH-362): the Start choice on orch run start (--fresh, --agent), with the helper places in use and the line.', 'Medium', 'the Start choice is new', { page: 'focus', view: 'zoom', cur: 'ORCH-189', need: 'ORCH-189' }],
-    [5, 'Chat or real terminal', 'Chat shows plain messages with results inside. Terminal is the real screen of the helper: click it and type, select, copy and paste like in the Terminal app.', 'Every helper runs in its own tmux session. Chat is helper messages plus ticket events; no transcript exists.', 'Large', 'a terminal in the browser (xterm.js and a bridge) is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: true }],
+    [5, 'Chat or real terminal', 'Chat shows plain messages with results inside. Terminal is the real screen of the helper: click it and type, select, copy and paste like in the Terminal app.', 'Every helper runs in its own tmux session. Chat is the helper\'s real conversation (where its tool keeps one) plus ticket events; otherwise the ticket\'s summary, labelled as such (ORCH-2204).', 'Large', 'a terminal in the browser (xterm.js and a bridge) is new', { page: 'focus', view: 'zoom', cur: 'ORCH-228', term: true }],
     [6, 'Sessions without a ticket', 'Empty helper, Chat helper, Plain terminal and Manager are buttons at the top of Focus and in the New menu of the bar. They are pinned by default.', 'The same per-workspace tmux socket, with a name that is not a ticket id. To build: orch starts helpers only on tickets today.', 'Medium', 'sessions outside the ticket limit need rules', { page: 'home', mode: 'bar', menu: 'new' }],
     [7, 'Focus on every page, split in up to 3', 'A calm bar under every page opens Focus at the bottom, on the right or full screen. Inside, 1, 2 or 3 sessions sit next to each other. Every pane has its own small controls: pin, add one beside, move, minimise and close.', 'Pages are separate full loads today. Cheapest honest path: soft page swaps that keep the layer; fallback: a pop-out window. Each pane attaches to its own tmux session.', 'Large', 'no layer survives a page change today', { page: 'home', mode: 'bottom', panes: ['ORCH-228', 'ORCH-232', 'Manager'], cur: 'ORCH-228', term: true }],
     [8, 'Zoom and full screen', 'Click a session and it grows into a large view. Full screen removes everything but a slim strip of the other sessions, and can be split too. Esc goes one step back.', 'Nothing new in orch: the same session, drawn bigger.', 'Small', 'layout only', { page: 'focus', view: 'zoom', cur: 'ORCH-232', term: true, full: true }],
@@ -24,17 +24,22 @@
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
       chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'To run the upload checks yourself:', '14:40', 0, 0, [], 'node --test tests/attach.test.js'], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
+    { k: 'ORCH-240', t: 'Run the sandbox heal job', kind: 'ticket', s: 'wait', tool: 't1', model: 'Opus', up: 51, step: [3, 4], now: 'Waits for your OK.', qn: 6,
+      q: { ok: true, t: 'Helper asks to run a command', why: 'Guard: `databricks jobs run-now` starts a job run. Confirm it is wanted.', cmd: 'databricks jobs run-now 588496183906654 --no-wait --profile sandbox -o json', a: ['Allow once', 'Don\u2019t allow'] },
+      lines: ['⏺ Case 3 passed with a repeat heal. Starting the sandbox run.', ' Bash command', '   databricks jobs run-now 588496183906654 --no-wait --profile sandbox -o json', ' Hook PreToolUse:Bash requires confirmation for this command:', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No'],
+      chat: [['e', 'Step 2 done: the heal works on a copy', '14:58'], ['h', 'Case 3 passed with a repeat heal. Starting the sandbox run.', '15:06', 1]],
+      files: [] },
     { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 't1', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
       feed: ['  ⎿ pull request 1318 opened as a draft', '⏺ Linking the pull request to the ticket.', '  ⎿ linked', '⏺ Waiting for the checks: 3 of 12 green.', '⏺ Waiting for the checks: 7 of 12 green.', '⏺ Waiting for the checks: 11 of 12 green.'],
       chat: [['e', 'Step 3 done: the page fits a phone at 390', '14:31'], ['h', 'The Home page no longer scrolls sideways on a phone. Here is the picture.', '14:40', 0, 0], ['h', 'Opening the pull request now. I will tell you when the checks are green.', '15:02', 0, 4]],
       files: [['img', 'home-390.png', 'Picture · 14:39'], ['html', 'phone-widths.html', 'Page · before and after'], ['chart', 'Width check', 'Chart · 3 widths'], ['table', 'widths.csv', 'Table · 3 rows', [['1280', 'fits'], ['1920', 'fits'], ['390', 'fits']]], ['pr', 'Pull request 1318', 'Draft · 3 of 12 checks green', [['State', 'Draft'], ['Checks', '3 of 12 green'], ['Changes', '6 files']]], ['link', 'Notes on phone widths', 'Link · team wiki']] },
-    { k: 'ORCH-232', t: 'Insights and usage counts', kind: 'ticket', s: 'run', tool: 't2', up: 22, step: [2, 6], now: 'Running the tests.',
+    { k: 'ORCH-232', t: 'Insights and usage counts', kind: 'ticket', s: 'run', tool: 't2', sum: true, up: 22, step: [2, 6], now: 'Running the tests.',
       lines: ['⏺ Bash(node --test tests/insights.test.js)', '  ⎿ ✔ counts skills per day (41 ms)', '  ⎿ ✔ counts keys that were never used (9 ms)', '  ⎿ ✔ empty workspace shows zero, not an error (6 ms)'],
       feed: ['  ⎿ ✔ week view adds up to the day view (17 ms)', '  ⎿ ✔ a failed call counts as failed (8 ms)', '  ⎿ ℹ tests 14 · pass 14 · fail 0', '⏺ Bash(uv run python -m pytest -q tests/test_insights.py)', '  ⎿ ......................  22 passed in 3.1s', '⏺ Tests are green. Drawing the usage chart next.', '⏺ Running the tests once more after the chart.'],
       chat: [['e', 'Step 1 done: counts are collected per day', '13:58'], ['h', 'The counts are in. I am running the tests before I draw the chart.', '15:04', 0, 0]],
       files: [['chart', 'Usage by day', 'Chart · 14 days'], ['html', 'insights-preview.html', 'Page · draft'], ['link', 'usage-raw.json', 'Link · data file']] },
-    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Idle 18 min', tool: 't1', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
+    { k: 'ORCH-247', t: 'Steer a helper from the dashboard', kind: 'ticket', s: 'idle', sl: 'Quiet 18 min', tool: 't1', model: 'Opus', up: 96, close: 42, step: [5, 5], now: 'Finished and merged. Ready for your review.',
       lines: ['⏺ Bash(orch ref wait ORCH-247 --merge)', '  ⎿ 12 of 12 checks green · merged', '⏺ Done. The Steer button is on the ticket page and', '  pull request 1309 is merged. Ready for your review.'],
       chat: [['e', 'Step 5 done: merged on all tests passed', '14:44'], ['h', 'Finished. You can try the Steer button on any working ticket.', '14:45', 0, 0]],
       files: [['pr', 'Pull request 1309', 'Merged · 12 of 12 checks green', [['State', 'Merged'], ['Checks', '12 of 12 green'], ['Changes', '9 files']]], ['img', 'steer-button.png', 'Picture · 14:30']] },
@@ -95,6 +100,9 @@
   function mk(n) { if (!st.marks) return ''; return btn('mw-mk', 'feat', n, { 'data-n': n, 'data-pick': picks[n] || '', 'data-on': st.sheet && st.feat === n ? 1 : false, 'aria-label': 'Feature ' + n + ': ' + F[n - 1][1] }); }
   function ic(d) { return '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>'; }
   var I = {
+    splitR: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
+    splitD: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>'),
+    copy: ic('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
     pin: ic('<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>'),
     full: ic('<path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/>'),
     exit: ic('<path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5"/>'),
@@ -276,6 +284,8 @@
   }
   function peekText(s) { return shown(s).filter(function (x) { return x.trim(); }).slice(-3).join('\n'); }
   function qHTML(s, quiet) {
+    /* ORCH-2197 (owner pick C a): a helper that waits for an OK on its screen: the OK card, the command shown, in Chat and Terminal view */
+    if (s.q.ok) return '<div class="mw-q" role="group" aria-label="Your OK for the helper"><p class="mw-qt live-ok-t">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><pre class="code-block live-ok-cmd" tabindex="0" aria-label="The command">' + esc(s.q.cmd) + '</pre><div class="mw-ans">' + btn('btn primary', 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + (st.term ? '' : btn('btn ghost', 'view', 'Open terminal', { 'data-v': 'term' })) + '</div></div>';
     return '<div class="mw-q" role="group" aria-label="Question from the helper"><p class="mw-qt">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><div class="mw-ans">' + btn('btn ' + (quiet ? 'outline' : 'primary'), 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + '</div></div>';
   }
   /* a command the helper suggests: Run in terminal types it (never Enter) into the helper or a plain terminal (ORCH-2203) */
@@ -300,7 +310,9 @@
   }
   function chatHTML(s, prim, withMk) {
     var id = 'mw-i' + (++uid), rec = st.voice === 'rec' && st.vk === s.k, done = st.voice === 'done' && st.vk === s.k;
-    var h = '<div class="mw-chat" data-chat="' + esc(s.k) + '" role="log" aria-label="Messages and ticket events">' + chatMsgs(s) + '</div><form class="mw-comp" data-k="' + esc(s.k) + '" data-f="chat">' + attHTML(s);
+    /* ORCH-2204: a tool whose conversation orch cannot read (sum) shows the ticket's summary and says so */
+    var src = s.sum ? '<p class="meta live-chat-src">Summary from the ticket ' + btn('btn ghost xs', 'view', 'Open terminal', { 'data-v': 'term' }) + '</p>' : '';
+    var h = '<div class="mw-chat" data-chat="' + esc(s.k) + '" role="log" aria-label="Messages and ticket events">' + src + chatMsgs(s) + '</div><form class="mw-comp" data-k="' + esc(s.k) + '" data-f="chat">' + attHTML(s);
     if (rec) h += '<div class="mw-voice" role="status"><span class="mw-level" aria-hidden="true">' + WAV + '</span><span>Listening <span data-vt="1">0:04</span></span><span class="grow"></span>' + btn('btn outline sm', 'voice', I.stop + '<span>Stop</span>', { 'data-k': s.k, 'data-v': 'done' }) + btn('btn sm ghost', 'voice', 'Cancel', { 'data-k': s.k, 'data-v': '' }) + '</div>';
     h += '<div class="mw-crow">' + btn('btn icon ghost', 'attach', I.clip, { 'data-k': s.k, 'aria-label': 'Attach files', title: 'Attach files. You can also paste a screenshot or drop files here, up to 25 MB each.' }) + '<label class="sr-only" for="' + id + '">Message to the helper on ' + esc(s.k) + '</label><input class="input" id="' + id + '" data-d="c:' + esc(s.k) + '" value="' + esc(drafts['c:' + s.k] || '') + '" placeholder="Message the helper" autocomplete="off">' + (rec ? '' : btn('btn icon ghost', 'voice', I.mic, { 'data-k': s.k, 'data-v': 'rec', 'aria-label': 'Speak', title: 'Speak instead of typing' })) + (withMk ? mk(13) : '') + '<button class="btn ' + (prim ? 'primary' : 'outline') + '" type="submit">Send</button></div>';
     if (done) h += '<p class="meta mw-vhint">From your voice. Check the words, change what is wrong, then send.</p>';
@@ -309,7 +321,8 @@
   function termHTML(s) {
     /* ORCH-1797: on Windows helpers run in one step (no live screen there yet): the Terminal view shows the helper's log under one plain line (win=1) */
     if (st.win && s.kind !== 'shell') return '<p class="meta" data-key="live-log-note">On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.</p><pre class="live-lines" tabindex="0" aria-label="Last lines of ' + esc(s.k) + '">' + esc(shown(s).join('\n')) + '</pre>';
-    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
+    /* ORCH-2199: no Watching bar and no Let me type switch: a click into the screen types (2 px brand edge), Esc twice or a click outside stops; Copy sits in the pane header */
+    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><pre class="mw-screen" data-act="typing" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" title="' + (st.typing ? 'Typing into the helper · Esc twice or a click outside stops' : 'Click the screen to type into it') + '" aria-label="Terminal of ' + esc(s.k) + '. Click to type, Esc twice stops.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
     return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + hist(s).map(function (x, i) {
@@ -319,6 +332,13 @@
   function startHTML(s, withMk) {
     var on = live(s);
     var h = '<div class="mw-start"><h2>' + (on ? 'This session and earlier ones' : 'Start a helper on this ' + (s.kind === 'ticket' ? 'ticket' : 'session')) + (withMk ? mk(4) : '') + '</h2>';
+    if (!on && (s.q || s.ask)) {  /* ORCH-2201: why it waits first, then Continue and a small Fresh start link */
+      h = '<div class="mw-start">' + (withMk ? mk(4) : '') + '<section class="live-why" aria-label="Why it waits"><h4 class="live-why-h">Why it waits</h4>' + (s.q
+        ? '<p class="live-why-q">The helper asked: <b>' + esc(s.q.t) + '</b></p><div class="live-why-line"><input class="input" type="text" placeholder="Your answer" aria-label="Your answer"><button type="button" class="btn outline sm" data-act="sendwhy" data-k="' + esc(s.k) + '">Send</button></div>'
+        : '<div class="live-why-line"><p class="live-why-q">Waits for your review</p><button type="button" class="btn outline sm" data-act="ticket" data-k="' + esc(s.k) + '">Open</button></div>') + '</section>'
+        + '<div class="live-why-act">' + btn('btn primary', 'start', 'Continue', { 'data-how': 'continue', 'data-k': s.k }) + btn('btn ghost sm live-why-link', 'start', 'Fresh start…', { 'data-how': 'clean', 'data-k': s.k, 'aria-label': 'Fresh start on ' + s.k }) + '</div>';
+      return h + histHTML(s) + '</div>';
+    }
     h += '<p class="meta">A start uses 1 of ' + max() + ' helper places. If all are in use it waits in line. Now ' + used() + ' of ' + max() + ' are in use.</p>';
     if (on) h += '<p class="mw-warn"><span aria-hidden="true">!</span> Changing the session interrupts the work in progress.</p>';
     h += '<div class="mw-choices">';
@@ -338,16 +358,15 @@
     var s = by(k), asking = s.s === 'none' || (o.main && st.ask), term = s.kind === 'shell' || st.term, id = 'mw-i' + (++uid);
     var segOk = s.kind !== 'shell' && !asking && s.s !== 'queue', qOut = size === 'md' && s.q && !asking;
     var qSide = !!s.q && !asking && term && size === 'lg' && !o.noshelf && window.innerWidth > 720 && !st.foldR;  // ORCH-1600: beside the terminal, not above it
-    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + stat(s, !!o.narrow) + '<span class="mw-key">' + esc(s.k) + '</span>';
+    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + (s.kind === 'shell' ? '<span class="mw-key" aria-hidden="true">&gt;_</span>' : btn('mw-stb', 'pm', stat(s, false), { 'data-k': s.k, 'data-kind': 'stat', 'aria-expanded': String(pmOpen(s.k, 'stat')), title: 'About ' + s.k })) + '<span class="mw-key">' + esc(s.k) + '</span>';
     if (o.main && st.ren === s.k) h += '<form class="mw-ren" data-f="ren" data-k="' + esc(s.k) + '"><label class="sr-only" for="' + id + '">Name of this session</label><input class="input" id="' + id + '" value="' + esc(nm(s)) + '" maxlength="60" autocomplete="off"><button class="btn outline sm" type="submit">Save name</button></form>';
     else if (o.main) h += btn('mw-pt truncate', 'ren', esc(nm(s)), { 'data-k': s.k, title: 'Click to rename', 'aria-label': 'Rename ' + nm(s) }) + (o.mk ? mk(9) : '');
     else if (o.sel) h += btn('mw-pt truncate', 'act', esc(nm(s)), { 'data-k': s.k, 'aria-label': 'Select the pane of ' + s.k });
     else h += '<span class="mw-pt truncate">' + esc(nm(s)) + '</span>';
     if (!o.compact && segOk && size === 'lg') h += seg(term, o.mk);
     h += o.ctl ? ctlHTML(s, o) : (o.tools || '');
-    ['place', 'model', 'more', 'end'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
-    var r2 = o.compact ? '' : (segOk && size !== 'lg' ? seg(term, false) : '') + (o.tools2 || '') + (size === 'sm' ? '' : mdlBtn(s, o.main) + meta(s, true) + (o.mk ? mk(12) : '') + tkLink(s));
-    if (r2) h += '<span class="mw-prow">' + r2 + '</span>';
+    ['place', 'model', 'more', 'end', 'stat', 'splitr', 'splitd'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
+    /* ORCH-2199 (owner picks A a, H a): no second row: model, step, open time and Open ticket sit in the status pill's popover */
     h += '</header><div class="mw-pb">' + (qOut ? '<div class="mw-qwrap">' + qHTML(s, o.quiet) + '</div>' : '') + '<div class="mw-pmain">';
     if (asking) h += startHTML(s, o.mk);
     else if (s.s === 'queue') h += '<div class="mw-start"><h2>In line</h2><p class="meta">All ' + max() + ' helper places are in use. This one starts by itself when a place is free. Idle helpers close after about an hour.</p></div>';
@@ -362,18 +381,20 @@
     var place = it('mode', I.bottom + '<span>At the bottom</span>', { 'data-m': 'bottom', 'aria-pressed': String(m === 'bottom') }) + '<span class="mw-nophone">' + it('mode', I.right + '<span>On the right</span>', { 'data-m': 'right', 'aria-pressed': String(m === 'right') }) + '</span>' + it('full', I.full + '<span>Full screen</span>', { 'aria-pressed': String(m === 'full') });
     if (kind === 'place') return '<div class="mw-pmenu" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p>' + place + '</div>';
     if (kind === 'end') return sessMenu(s, 'end');
+    if (kind === 'stat') return '<div class="mw-pmenu" role="group" aria-label="About ' + esc(s.k) + '"><p class="mw-poph">' + TOOL[s.tool || 't1'] + '</p>' + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) + '<p class="meta">Step: ' + esc(s.step || 'No step started yet') + '</p>' + (live(s) && s.up !== undefined ? '<p class="meta">Open ' + dur(s.up) + '</p>' : '') + '<p class="meta">' + warm(s).charAt(0).toUpperCase() + warm(s).slice(1) + '</p>' + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + '</div>';
+    if (kind === 'splitr' || kind === 'splitd') return '<div class="mw-pmenu" role="group" aria-label="Split"><p class="mw-poph">' + (kind === 'splitr' ? 'Split right with' : 'Split down with') + '</p>' + it('addpane', 'Chat with…') + it('addpane', 'Terminal') + it('addpane', 'Plain terminal') + '</div>';
     if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 't1'] + ': model</p>' + MODELS[s.tool || 't1'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A new model applies when the helper finishes its current step (or at its next start).</p></div>';
-    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + (o.compact && live(s) ? '<p class="mw-poph">This session</p>' + sessItems(s, 'more') : '') + '</div>';
+    /* ORCH-2199 (owner pick G a): More keeps only Stop, End session, History and Where Focus sits */
+    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (o.narrow && segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') : '') + (live(s) ? '<p class="mw-poph">This session</p>' + sessItems(s, 'more') : '') + (s.kind !== 'shell' ? it('ask', 'History') : '') + '<p class="mw-poph">Where Focus sits</p>' + place + it('min', I.down + '<span>Bar only</span>') + '</div>';
   }
   function ctlHTML(s, o) {
+    /* ORCH-2199 / ORCH-2200 (owner picks G a, F a): Copy (Terminal view) · full screen · split right · split down · pin · close · More; under 480 px pin and split fold into More */
     var h = '<span class="mw-ctl">';
-    if (!o.compact) h += stopBtn(s) + endBtn(s);
-    if (!o.narrow) h += pinBtn(s);
-    h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions show at once, the most' : 'Add a session beside this one' });
-    if (!o.narrow) h += pmBtn(s, 'place', I[eff() === 'right' ? 'right' : 'bottom'], 'Where Focus sits');
-    h += btn('btn icon sm ghost', 'min', I.down, { 'aria-label': 'Minimise to the bar', title: 'Minimise to the bar' });
+    if (s.kind === 'shell' || st.term) h += btn('btn icon sm ghost', 'copyterm', I.copy, { 'data-k': s.k, 'aria-label': 'Copy all', title: 'Copy all (Copy selection when text is selected)' });
+    h += btn('btn icon sm ghost mw-nophone', 'full', I.full, { 'aria-label': 'Full screen', title: 'Full screen' });
+    if (!o.narrow) h += pmBtn(s, 'splitr', I.splitR, 'Split right') + pmBtn(s, 'splitd', I.splitD, 'Split down') + pinBtn(s);
     h += btn('btn icon sm ghost', 'closepane', I.x, { 'data-k': s.k, 'aria-label': o.n > 1 ? 'Close this pane' : 'Close Focus', title: o.n > 1 ? 'Close this pane' : 'Close Focus (the bar stays)' });
-    if (o.compact) h += pmBtn(s, 'more', I.more, 'More for ' + s.k);
+    h += pmBtn(s, 'more', I.more, 'More for ' + s.k);
     return h + '</span>';
   }
   function mdlBtn(s, can) {
@@ -405,12 +426,12 @@
       + it('endask', I.power, 'End session', s.kind === 'shell' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.');
   }
   function sessMenu(s, where) { return '<div class="mw-pmenu mw-smenu" role="group" aria-label="Stop or end ' + esc(s.k) + '">' + (where === 'end' ? '' : '<p class="mw-poph">' + esc(nm(s)) + '</p>') + sessItems(s, where) + '</div>'; }
-  /* an idle helper never shows an empty box: what it is doing, what to type, and a way out when it hangs */
+  /* ORCH-2201: a quiet session shows only its pill ("Quiet 2 d"); only a helper that looks stuck (prompt visible, no output for
+     20 min) or lost its login gets one slim line with Restart */
   function idleHTML(s) {
-    if (s.s !== 'idle' || s.kind === 'shell') return '';
-    var head = s.login ? 'The helper stopped: its login changed.' : (s.sl || 'Idle') + '. Nothing is running.';
-    var tail = s.login ? 'Start it again to use the new login. The conversation is kept.' : 'Type a message below to give it work. If it hangs, start it again.';
-    return '<div class="mw-idle" role="status"><p><strong>' + esc(head) + '</strong> ' + tail + '</p><div class="mw-endb">' + btn('btn outline sm', 'restart', 'Start again', { 'data-k': s.k, 'aria-label': 'Start ' + s.k + ' again' }) + btn('btn ghost sm', 'pm', 'End session', { 'data-k': s.k, 'data-kind': 'end' }) + '</div></div>';
+    if (s.s !== 'idle' || s.kind === 'shell' || !(s.login || s.stuck)) return '';
+    var head = s.login ? 'Its login changed · Restart to use the new login' : 'Looks stuck';
+    return '<div class="mw-idle" role="status"><span><strong>' + esc(head) + '</strong></span>' + btn('btn ghost sm', 'restart', 'Restart', { 'data-k': s.k, 'aria-label': 'Restart ' + s.k }) + '</div>';
   }
   function hhmm() { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
   function stopStep(k) {
@@ -523,8 +544,11 @@
   };
 
   /* ---------- the layer: bar on every page, a panel (bottom, right, full) split in up to 3, or closed to the side ---------- */
-  function inList(o, l) { var w = o.s === 'wait'; return l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
-  var LIST = { wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
+  function inList(o, l) { var w = o.s === 'wait'; return l === 'helpers' ? true : l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
+  var LIST = { helpers: ['', 'helpers', 'Helpers'], wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
+  /* ORCH-2198 (owner pick J b, "calmer"): the Helpers menu groups every session as Needs you, Working, Quiet (in line, idle) */
+  var HGROUPS = [['wait', 'Needs you'], ['run', 'Working'], ['quiet', 'Quiet']];
+  function hgroup(o) { return o.s === 'wait' ? 'wait' : (grp(o) === 'run' ? 'run' : 'quiet'); }
   function chip(o) {
     var on = shownIn(o);
     return btn('mw-swb', 'switch', stat(o, true) + '<span class="mw-cn">' + esc(o.name || o.k) + '</span>', { 'data-k': o.k, 'data-s': o.s, 'aria-pressed': String(on), title: nm(o) });
@@ -535,17 +559,21 @@
     var text = compact ? sym + n : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
     return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': compact ? n + ' ' + LIST[l][1] : null });
   }
+  /* ORCH-2198: the bar holds one Helpers button (a ◆ when something needs you, no number) instead of chips and counts */
   function chipsHTML() {
-    var all = sorted(), need = all.filter(function (o) { return o.s === 'wait'; }), pin = all.filter(function (o) { return inList(o, 'pin'); }), open = all.filter(function (o) { return shownIn(o) && o.s !== 'wait' && !o.pin; });
-    var grpH = function (g, label, list) { return '<span class="mw-bg" role="group" data-g="' + g + '" aria-label="' + (g === 'pin' ? 'Pinned' : label) + '"><span class="mw-bl">' + label + '</span>' + list.map(chip).join('') + '</span>'; };
-    if (BL >= 3) return ['wait', 'pin', 'run', 'queue', 'idle'].map(function (l) { return cnt(l, true); }).join('') + mk(11);
-    var h = grpH('wait', need.length ? 'Needs you' : 'All calm', need);
-    if (pin.length) h += BL >= 1 ? cnt('pin') : grpH('pin', I.pin, pin);
-    if (open.length && BL < 2) h += grpH('open', 'Open', open);
-    return h + (BL >= 2 ? cnt('more') : cnt('run') + cnt('queue') + cnt('idle')) + mk(11);
+    var need = sorted().some(function (o) { return o.s === 'wait'; });
+    return btn('mw-swb mw-grp', 'list', (need ? '<span class="mw-st" data-s="wait"><span class="mw-sym" aria-hidden="true">◆</span></span>' : '') + '<span>Helpers</span>' + I.down,
+      { 'data-l': 'helpers', 'aria-expanded': String(st.list === 'helpers'), 'aria-haspopup': 'true', 'aria-label': need ? 'Helpers: something needs you' : 'Helpers' }) + mk(11);
   }
   function listRows() {
     var q = st.lq.trim().toLowerCase(), l = sorted().filter(function (o) { return inList(o, st.list) && (!q || (o.k + ' ' + nm(o)).toLowerCase().indexOf(q) >= 0); });
+    if (st.list === 'helpers') {
+      var out = HGROUPS.map(function (g) {
+        var rows = l.filter(function (o) { return hgroup(o) === g[0]; });
+        return rows.length ? '<div class="lbar-gh" data-g="' + g[0] + '"><span>' + g[1] + '</span><b>' + rows.length + '</b></div>' + rows.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow mw-hrow', 'switch', '<span class="mw-st" data-s="' + o.s + '"><span class="mw-sym" aria-hidden="true">' + ST[o.s][0] + '</span></span><span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + (g[0] === 'quiet' ? '<span class="meta"> · ' + esc(word(o)) + '</span>' : '') + '</span><span class="lbar-go">Open</span>', { 'data-k': o.k, 'aria-current': shownIn(o) ? 'true' : null }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '';
+      }).join('');
+      return out || '<p class="meta">' + (q ? 'No helper matches.' : 'No helper is open. New starts one.') + '</p>';
+    }
     return l.length ? l.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow', 'switch', stat(o) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + '</span><span class="meta">' + esc(tlabel(o)) + '</span>', { 'data-k': o.k }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '<p class="meta">No session matches.</p>';
   }
   function popHTML(mode) {
@@ -558,7 +586,7 @@
     }
     if (st.list) {
       var n = sorted().filter(function (o) { return inList(o, st.list); }).length;
-      return '<div class="mw-pop mw-pop-list" role="group" aria-label="' + LIST[st.list][2] + '"><p class="mw-poph">' + LIST[st.list][2] + ' (' + n + ')</p>' + (n >= 9 ? '<label class="sr-only" for="mw-lq">Search these sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search these sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
+      return '<div class="mw-pop mw-pop-list" role="group" aria-label="' + LIST[st.list][2] + '">' + (st.list === 'helpers' ? '' : '<p class="mw-poph">' + LIST[st.list][2] + ' (' + n + ')</p>') + (n >= 9 ? '<label class="sr-only" for="mw-lq">Search these sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search these sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
     }
     return '';
   }
@@ -579,7 +607,7 @@
     var panel = '', full = mode === 'full', n = st.panes.length;
     if (mode !== 'bar') panel = '<div class="mw-panel" data-mode="' + mode + '" data-n="' + n + '">' + st.panes.map(function (k, i) {
       var s = by(k), on = i === st.act, narrow = n > 1 && (mode === 'right' || phone() || (window.innerWidth - 240) / n < 480);
-      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, ctl: true, compact: n > 1, narrow: narrow, n: n, noshelf: n > 1 || (full && window.innerWidth < 1600), tools2: on && n === 1 ? histBtn(s) : '', prim: on, quiet: !on });
+      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, ctl: true, compact: n > 1, narrow: narrow, n: n, noshelf: n > 1 || (full && window.innerWidth < 1600), tools2: '', prim: on, quiet: !on });
     }).join('') + '</div>';
     return full ? barHTML(mode) + panel : panel + barHTML(mode);
   }
@@ -782,7 +810,7 @@
       if (!EXTRA) EXTRA = MORE.map(function (m, i) {
         var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
-        if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
+        if (m[2] === 'idle') { s.sl = 'Quiet ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
         // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
         if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
         if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
@@ -849,6 +877,7 @@
     if (a === 'endask') { st.endask = k; render('.mw-endq .btn'); return; }
     if (a === 'endno') { st.endask = ''; st.pm = ''; render(); say('The session stays.'); return; }
     if (a === 'endok') { endSession(k); return; }
+    if (a === 'sendwhy') { say('Answered. The helper picks it up on its next start.'); return; }
     if (a === 'restart') { s = by(k); st.pm = ''; st.endask = ''; s.login = false; s.s = 'none'; begin(s, ['', '⏺ Started again. Picking up the same conversation.'], 'Started again'); return; }
     if (st.pm) { st.pm = ''; if (k && has(k) && (a === 'ask' || a === 'view')) st.cur = k; }
     if (a === 'ntool') { st.nt = b.dataset.v; st.nm = AG[st.nt].usual; render('[data-act=ntool][data-v=' + st.nt + ']'); return; }
@@ -897,7 +926,7 @@
     else if (a === 'ovnav') ovStep(+b.dataset.d);
     else if (a === 'ovclose') closeOv();
     else if (a === 'typing') { st.typing = !st.typing; render('[data-act=typing]'); }  /* watching only by default (ORCH-744) */
-    else if (a === 'copyterm') clip(screenText(by(k)), function () { b.textContent = 'Copied'; say('Terminal text copied.'); });
+    else if (a === 'copyterm') clip(screenText(by(k)), function () { b.title = 'Copied'; say('Terminal text copied.'); });
     else if (a === 'feat') openSheet(+b.dataset.n);
     else if (a === 'sheet') { if (st.sheet) { st.sheet = false; render('#mw-fbtn'); } else openSheet(0); }
     else if (a === 'show') show(+b.dataset.n, b.dataset.more);
@@ -1019,13 +1048,14 @@
     st.foldR = q.get('fold') === 'r';
     st.ask = q.get('ask') === '1' && live(by(st.cur));
     if (q.get('ren') === '1') st.ren = st.cur;
-    if (/^(wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
+    if (/^(helpers|wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
     if (/^(new|pos)$/.test(v = q.get('menu') || '')) st.menu = v;
     if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : AG[v].usual; }
     else if (MODELS.t1.indexOf(q.get('model')) >= 0) st.nm = q.get('model');
     if ((v = q.get('pm'))) { var pc = v.lastIndexOf(':'); if (pc > 0 && has(v.slice(0, pc)) && /^(place|model|more|end|tile|bar)$/.test(v.slice(pc + 1))) st.pm = v.slice(0, pc) + '|' + v.slice(pc + 1); }
     if (q.get('att') === '1') by(st.cur).att = DEMO.slice();
-    if ((v = q.get('hung')) && has('Manager')) { var mg = by('Manager'); mg.s = 'idle'; mg.feed = null; mg.sl = 'Nothing running for 3 min'; mg.now = 'Nothing running for 3 min.'; if (v === 'login') { mg.login = true; mg.lines.push('  ⎿ API Error: 401 · Your login changed. Please run /login'); } }
+    if ((v = q.get('hung')) && has('Manager')) { var mg = by('Manager'); mg.s = 'idle'; mg.feed = null; mg.sl = v === 'stuck' ? 'Quiet 20 min' : 'Quiet 2 d'; mg.now = ''; mg.stuck = v === 'stuck'; if (v === 'login') { mg.login = true; mg.lines.push('  ⎿ API Error: 401 · Your login changed. Please run /login'); } }
+    if ((v = q.get('why')) && has('ORCH-189')) { var wk = by('ORCH-189'); if (v === 'ask') wk.q = { t: 'Run the gold steps on INT now, or wait for tonight\u2019s sync?', a: [] }; else wk.ask = true; }  /* ORCH-2201: a ticket without a helper that waits: ?cur=ORCH-189&why=ask|review */
     if ((v = q.get('ended')) && has(v)) endSession(v, true);
     if ((v = q.get('endask')) && has(v)) st.endask = v;
     if (/^(rec|done)$/.test(v = q.get('voice') || '')) { st.voice = v; st.vk = st.cur; if (v === 'done') drafts['c:' + st.cur] = 'Please keep the old file name, and add a note for the support team.'; }

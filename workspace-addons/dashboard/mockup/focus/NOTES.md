@@ -27,6 +27,15 @@ dock-side, full-screen, full-exit.
   numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
 - New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
 
+## One Helpers menu (ORCH-2198, 26 Nov, owner pick J b: "calmer")
+
+- The bar holds the name, one **Helpers ▾** button and New: no chips, no counts. A ◆ on the button when something needs
+  you (no number; the number is on the Review badge). `chipsHTML` draws that button; `?list=helpers` opens the menu.
+- The menu groups every session as Needs you, Working and Quiet (in line, idle) with their counts (`.lbar-gh`); each
+  row has Open and More and opens its pane. Built the same in `pages/livebar.js`.
+- The menu opens inside the window: above the bar at the bottom, below it in full screen where the bar sits at the
+  top (before, the list opened above the top edge and could not be seen).
+
 ## The split, built (ORCH-339, 17 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus the layer now holds
@@ -169,3 +178,29 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## Header-only panes, free splits, ticket beside Focus (ORCH-2199, ORCH-2200, ORCH-2202, 26 Nov)
+
+Owner picks of ORCH-2188 (A a, B a, F a, G a, H a, I a, M a; drawings in the ticket). focus-v4d.html now draws a pane
+as its header only above the screen: status pill (its popover: model, step, open time, how long it stays, Open ticket),
+key, title, Chat | Terminal, Copy, full screen, split right, split down, pin, close, More (Stop, End session, History,
+Where Focus sits with Bar only). No meta row, no Watching bar, no Let me type switch: a click into the screen types
+(brand edge), Esc twice or a click outside stops. Split right / down asks Chat with… / Terminal / Plain terminal. The
+mockup keeps its panes side by side; the built layer also nests them (helper left, terminal and Manager stacked right)
+with 1 px dividers to drag, and folds the side menu to its rail beside a ticket at 1280.
+
+## Chat shows the real talk or says it is a summary (ORCH-2204, 26 Nov)
+
+The Chat view shows the helper's real conversation (the newest turns of the session in use, read from the tool's own
+saved conversation) with the ticket's steps, questions and your messages around it. Where orch cannot read the
+conversation (a tool that keeps none, or the file is not on this computer), the chat is the ticket's summary and one
+small line at its top says so: "Summary from the ticket" with Open terminal (`.live-chat-src`). Here ORCH-232 shows it.
+The terminal opens without WebGL too: xterm's normal renderer draws it.
+
+## The OK card: a helper waits for your OK on its screen (ORCH-2197, 26 Nov)
+
+Owner pick C a on ORCH-2188, with the owner's comment "should show the command by default". ORCH-240 in the demo waits
+at a hook confirm: its pane shows the OK card (Helper asks to run a command, the reason, the command shown, Allow once /
+Don't allow / Open terminal) in Chat and in Terminal view (there beside the terminal, no Open terminal). The product
+draws the two answers only for a prompt it recognised on the screen and answers exactly that prompt; any other wait
+shows the card with Open terminal only. Master: `.live-ok-t`, `.live-ok-cmd` (with `.code-block`) in widgets.css.
