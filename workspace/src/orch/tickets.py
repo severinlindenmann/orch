@@ -1205,6 +1205,7 @@ def create(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}}, "ticket")
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -2226,6 +2227,14 @@ def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
     return f"Quiet since {_when_words(at, now or datetime.now())}"
 
 
+def no_secret(root: Path, body, what: str) -> None:
+    """R5.2: text a person or agent writes into a ticket runs the one scanner (secretscan) first; a hit
+    refuses with the kind and the field, never the value, and nothing is written."""
+    from orch import secretscan
+
+    secretscan.refuse_if_secret_in(root, body, what, verb="saved")
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
     if key in PROTECTED_FIELDS:
@@ -2287,6 +2296,11 @@ def edit(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(
+        root,
+        {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}},
+        "ticket",
+    )
 
     def op(ticket):
         if title is not None:
@@ -2981,6 +2995,7 @@ def tidy(
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, "description": description, **fields}, "ticket")
     more = _prepare_fields(root, tid, extra or {})
     kind_name = clean_kind(kind_name) if kind_name else None
 
@@ -3384,6 +3399,7 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
+    no_secret(root, {"summary": text}, "summary")
 
     def op(t):
         _set_field(t, "summary", text)
@@ -3413,6 +3429,7 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         clean[k] = v
     if not clean:
         raise Refused("Say what to record: --changed, --why or --not-included.")
+    no_secret(root, clean, "outcome")
 
     def op(ticket):
         out = dict(ticket.get("outcome") or {})
@@ -3480,6 +3497,7 @@ def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = Non
     if not text.strip():
         raise Refused("A checklist item needs text.")
     covers = _clean_covers(covers)
+    no_secret(root, {"text": text}, "task")
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
@@ -4018,6 +4036,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
+    no_secret(root, {"text": text}, "history entry")
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
 
@@ -4028,6 +4047,7 @@ def ref_add(
 
     t = load(root, tid)
     value = refs.detect(root, t["id"], target, kind, title, kinds)
+    no_secret(root, {k: v for k, v in value.items() if isinstance(v, str)}, "reference")
     identity = {k: v for k, v in value.items() if k != "title" and (k != "kind" or "url" not in value)}
     added = True
     result = None
@@ -4485,6 +4505,11 @@ def ask(
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
+    no_secret(
+        root,
+        {"text": text, "options": list(options), "recommended": recommended, "because": because},
+        "question",
+    )
     for part in (
         text,
         *options,
@@ -4722,6 +4747,7 @@ def answer(
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    no_secret(root, {"answer": text}, "answer")
 
     person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
 
