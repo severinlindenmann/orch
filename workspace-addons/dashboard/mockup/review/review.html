@@ -41,6 +41,7 @@
 const qs=new URLSearchParams(location.search),items=qs.has('empty')?[]:qs.has('one')?[window.SWIPE_ONE]:window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
 /* the All cards list is the kit's own (deck.drawList), as on the product page; one card leaves it empty and the rail hides */
 const drawSide=()=>{if(deck)deck.drawList(q)};
+if(items.length===1){document.querySelector('.page-heading p').textContent='1 thing waits on you, most urgent first.';document.querySelector('[data-show=deck] .meta').textContent='1'}
 deck=items.length&&UI.swipeDeck(document.getElementById('deck'),items,{mode:'desk',attach:{voice:true,accept:['png','jpg','jpeg','gif','webp','txt','md','csv','webm','ogg','m4a'],maxFiles:10,maxBytes:25*1024*1024,attachLabel:'Add file'},onNote:async()=>({ok:true}),onRun:it=>it.run&&it.run.class==='login'?Promise.resolve({ok:true,in_terminal:true,terminal:'t_term01'}):new Promise(r=>setTimeout(()=>r({ok:true,exit:0,output:'workflow.reviewer_look = on (was off)'}),1200)),onShowTerminal:()=>{},ticketLink:it=>it.ticketId?'?ticket='+encodeURIComponent(it.ticketId):'',onChange:()=>setTimeout(()=>{drawSide();drawTicket()})});
 /* Answered (ORCH-172): records from the master (UI.answerRecord): ticket key and title on every card, tiles about 344x216, a click or Enter opens one large */
 const ans=document.getElementById('answered'),fu=(e,r)=>'assets/'+String(r).split('/').pop(),tk=()=>'../ticket/ticket.html',ago=h=>Date.now()-h*36e5;
