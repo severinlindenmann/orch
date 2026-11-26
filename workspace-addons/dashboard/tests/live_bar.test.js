@@ -53,6 +53,16 @@ test('the Helpers menu opens inside the window: above the bar at the bottom, bel
   assert.match(src, /liveBarMenuAt\(r\.top, window\.innerHeight - r\.bottom\)/, 'measured from the bar where it really is');
 });
 
+test('ORCH-1684: a pane with no room in the panel is said to a screen reader; the bar marks only the sessions in sight', () => {
+  const layer = fs.readFileSync(path.join(WEB, 'pages/live-layer.js'), 'utf8');
+  const say = layer.slice(layer.indexOf('function liveBesideSay'), layer.indexOf('const liveIc'));
+  assert.doesNotMatch(say, /toast/, 'the panes with no room are said to a screen reader, no toast covers the cards');
+  assert.match(say, /role:'status'/);
+  assert.match(layer, /liveLayerTell\(s\);/, 'a paint that changes what fits tells the bar');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
+  assert.match(src, /bar\.shown = Array\.isArray\(v\)/, 'the layer says which panes are in sight');
+});
+
 test('loaded before app.js, served as a page module, painted on every render, names no add-on', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   assert.ok(index.indexOf('pages/livebar.js') > 0 && index.indexOf('pages/livebar.js') < index.indexOf('src="app.js"'));
@@ -81,7 +91,7 @@ test('plugs into the layer: a row opens its session there, open ones are marked,
   assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
   assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
   assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
-  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => bar\.panes\.includes\(id\)\)/, 'a row is current when its session (or one of its group, ORCH-345) is open');
+  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => \(bar\.shown \|\| bar\.panes\)\.includes\(id\)\)/, 'a row is current when its session (or one of its group, ORCH-345) is in sight');
   assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');

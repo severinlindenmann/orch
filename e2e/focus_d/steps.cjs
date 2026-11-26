@@ -333,7 +333,7 @@ async function paneData(page, dash) {
   await page.click(pn + ' [data-key="live-status"]');
   await page.waitForSelector('[data-key="live-status-menu"]', { timeout: 3000 });
   const stat = await page.$eval('[data-key="live-status-menu"]', el => el.textContent.replace(/\s+/g, ' '));
-  if (!/Sonnet/.test(stat) || !/\d+ min/.test(stat) || !/Stays warm while it waits for you/.test(stat)) throw new Error('the status popover reads: ' + stat);
+  if (!/Sonnet/.test(stat) || !/\d+ min/.test(stat) || !/Stays open while it waits for you/.test(stat)) throw new Error('the status popover reads: ' + stat);
   const link = '[data-key="live-status-menu"] [data-key="live-open-ticket"]';
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());

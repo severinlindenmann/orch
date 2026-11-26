@@ -132,7 +132,7 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {liveBarNeedCount, liveBarGroup, liveBarGroups, liveBarHelpersName, liveBarMenuAt, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarModel, liveFocusVerb, liveBarNewOpen, liveBarNewMade, LIVEBAR_GROUPS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], shown:null, list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
     // ORCH-818: the Permissions row of the New menu (pages/live-perm.js): the tool's modes for the next start
     const permRow = kind => typeof livePermRow === 'function' ? livePermRow(state?.session_modes, kind, bar.perm) : null;
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
@@ -154,7 +154,7 @@ if (typeof module === 'object' && module.exports) {
     }
     // One row of the menu: symbol, key, name (a Quiet row also says in line or idle), Open; More has Stop and End.
     function row(a, o, g) {
-      const open = (o.members || [o.id]).some(id => bar.panes.includes(id));
+      const open = (o.members || [o.id]).some(id => (bar.shown || bar.panes).includes(id));
       const name = label(o) === o.key ? o.title : label(o);
       return h('div', {className:'lbar-rw'}, h('a', {className:'lbar-row', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id,
         'aria-current':open ? 'true' : null, title:o.title + ' · ' + (o.group ? o.line : o.word)},
@@ -343,7 +343,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins(), groups());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.shown, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -432,7 +432,7 @@ if (typeof module === 'object' && module.exports) {
       if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
       else if (bar.list) { e.stopPropagation(); close(true); }
     }, true);
-    // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current
+    // the layer says which sessions are open ({mode, panes, shown: ticket ids}); the ones in sight are marked current
     window.addEventListener('orch:live-sessions', () => paint());
     // a Stop and End menu opened or closed (ORCH-817): the bar's own menu opens in place of a list
     window.addEventListener('orch:live-end', () => { if (window.liveEndOpenAt?.('bar')) { bar.list = ''; bar.q = ''; bar.menu = false; } paint(true); });
@@ -442,7 +442,12 @@ if (typeof module === 'object' && module.exports) {
       if (!c || !bar.el?.contains(c) || typeof window.liveEndShow !== 'function') return;
       if (window.liveEndShow('bar:' + c.dataset.lbarOpen)) e.preventDefault();
     });
-    window.addEventListener('orch:live-layer', e => { const p = e.detail?.panes; bar.panes = Array.isArray(p) ? p.map(String) : []; paint(); });
+    window.addEventListener('orch:live-layer', e => {
+      const p = e.detail?.panes, v = e.detail?.shown;
+      bar.panes = Array.isArray(p) ? p.map(String) : [];
+      bar.shown = Array.isArray(v) ? v.map(String) : null;
+      paint();
+    });
     let frame = 0;
     window.addEventListener('resize', () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => paint(true)); });
     window.paintLiveBar = paint;

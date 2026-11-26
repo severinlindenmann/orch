@@ -48,7 +48,8 @@ function liveTermFor(id, label, plain) {
   const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
     label, plain, toolsOut:true,
-    settingsHref: page ? '#settings/addons/' + encodeURIComponent(page) : null,  // ORCH-1600: the typing switch is there
+    // ORCH-1600: the typing switch is there; the plain terminal's is the owner's, in People (ORCH-1684)
+    settingsHref: page ? (plain ? '#settings/people' : '#settings/addons/' + encodeURIComponent(page)) : null,
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
     onTyping: async (on, byOther) => {

@@ -2021,6 +2021,26 @@ button.gtree-row:hover{background:var(--surface-2)}
 .thread-line-head .meta{font-size:12px;font-weight:400}
 .thread-line-text{font-size:14px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
 .thread-line>.thread-line-body{min-width:0;max-width:72ch;display:grid;gap:var(--s1)}
+/* Messenger parts (ORCH-2171, lane chat-messenger option A): the day line between days, a file card under a message,
+   the line under your own message that says what happened to it, and the status dot on a picture. */
+.day-line{display:flex;align-items:center;gap:var(--s3);color:var(--text-muted);font-size:12px;line-height:16px}
+.day-line::before,.day-line::after{content:"";flex:1;height:1px;background:var(--border)}
+.day-line>span{padding:2px var(--s3);border:1px solid var(--border-strong);border-radius:999px}
+.day-line-note{margin:0;text-align:center;color:var(--text-muted);font-size:12px;line-height:16px}
+.file-cards{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.file-card{display:inline-flex;align-items:center;gap:var(--s2);min-height:var(--touch);max-width:100%;padding:var(--s2) var(--s3);border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none;overflow-wrap:anywhere}
+.file-card:hover{border-color:var(--brand)}
+.file-card .meta{font-size:12px;white-space:nowrap}
+.msg-state{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);margin:0;font-size:12px;line-height:16px;color:var(--text-muted)}
+.msg-state::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:currentColor}
+.msg-state.failed{color:var(--danger)}
+.msg-state.saved::before{background:transparent;border:1px solid currentColor}
+.msg-state .btn{min-height:var(--touch)}
+.presence{position:relative;display:inline-grid;flex:none}
+.presence-dot{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg);background:var(--text-faint)}
+.presence-dot.ready{background:var(--success)}
+.presence-dot.working{background:var(--info)}
+.presence-dot.stopped{background:var(--danger)}
 /* Form page (ORCH-1037): one form as its own page (New ticket), a centred column the width of a dialog */
 .form-page{width:100%;max-width:640px;margin:0 auto;padding-top:var(--s5)}
 /* Launch (ORCH-1037, UI.launch): the starting moment after Start, a spinning ring around a breathing dot and the steps */
