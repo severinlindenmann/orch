@@ -179,9 +179,9 @@
   function warm(s) {
     if (s.kind === 'shell') return 'stays open until you close it';
     if (s.s === 'idle') return 'closes in ' + (s.close || 40) + ' min if left idle';
-    if (s.s === 'none') return 'closed, the conversation is kept';
+    if (s.s === 'none') return 'closed, you can continue it later';
     if (s.s === 'queue') return 'starts when a place is free';
-    return s.s === 'wait' ? 'stays warm while it waits for you' : 'stays warm while it works';
+    return s.s === 'wait' ? 'stays open while it waits for you' : 'stays open while it works';
   }
   function grp(o) { return o.s === 'run' || o.s === 'open' ? 'run' : (o.s === 'queue' ? 'queue' : 'idle'); }
   function isOpen() { var m = eff(); return (m !== 'bar' && m !== 'side') || zoomed(); }
@@ -785,7 +785,7 @@
         var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
-        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
+        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. You can continue it later.'; }
         if (m[2] === 'queue') { s.now = 'Waits in line for a free helper place.'; s.lines = []; s.chat = []; s.step = [0, 4 + i % 3]; }
         if (m[2] === 'run' && i % 3 === 0) s.feed = ['⏺ ' + NOWS[(i + 1) % NOWS.length], '⏺ ' + NOWS[(i + 2) % NOWS.length]];
         return s;

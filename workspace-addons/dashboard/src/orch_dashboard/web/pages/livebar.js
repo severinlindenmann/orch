@@ -90,6 +90,15 @@ function liveBarIn(o, l) {
   const w = o.s === 'wait';
   return l === 'wait' ? w : l === 'pin' ? o.pin && !w : l === 'more' ? !w : !w && !o.pin && o.s === l;
 }
+// ORCH-1684: the sessions open in the layer's panel that have no chip of their own yet (not needs you, not pinned) get
+// one in the Open group, as in the mockup. A pane that found no room (Add beside at 1280, or a quiet pane folded while
+// the page has cards to answer) is open but not shown: its chip is the place to bring it back, so the bar always
+// shows the session the layer names. panes: every open pane; shown: those in sight (null: all of them).
+function liveBarOpenRows(all, panes, shown) {
+  const open = new Set(Array.isArray(panes) ? panes.map(String) : []), seen = Array.isArray(shown) ? new Set(shown.map(String)) : open;
+  return (Array.isArray(all) ? all : []).filter(o => !liveBarIn(o, 'wait') && !liveBarIn(o, 'pin') && (o.members || [o.id]).some(id => open.has(id)))
+    .map(o => ({...o, held:!(o.members || [o.id]).some(id => seen.has(id))}));
+}
 // A helper without a ticket that was made and is not on now (ended, or closed after an hour idle): New starts it
 // again, and its History opens its pane (ORCH-817). A plain terminal keeps nothing, so it has none.
 function liveBarNewEnded(sessions, kind) {
@@ -106,9 +115,12 @@ function liveBarNewMade(sessions, live, kind) {
 }
 // "1 session", "2 sessions"
 function liveBarSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
-// The words of a count at a fold: "3 working", "Pinned (1)", "More (20)"; compact: the number alone.
-function liveBarCountText(l, n, compact) {
-  if (compact) return String(n);
+// The words of a count at a fold: "3 working", "Pinned (1)", "More (20)". Compact (a phone, a narrow bar) keeps a
+// short word beside each symbol ("1 needs you", "2 working", "3 more", ORCH-1684); only the last fold, when even
+// that does not fit, is the number alone (its tooltip and accessible name still say it).
+function liveBarCountText(l, n, compact, words) {
+  if (compact && !words) return String(n);
+  if (compact) return n + ' ' + (l === 'wait' && n === 1 ? 'needs you' : LIVEBAR_LISTS[l].word);
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
@@ -137,10 +149,10 @@ function liveBarNeedText(total, sessions) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarNeedCount, liveBarCountName, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, liveBarNewMade, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
+  module.exports = {liveBarOpenRows, liveBarNeedCount, liveBarCountName, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, liveBarNewMade, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], shown:null, list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
     // ORCH-818: the Permissions row of the New menu (pages/live-perm.js): the tool's modes for the next start
     const permRow = kind => typeof livePermRow === 'function' ? livePermRow(state?.session_modes, kind, bar.perm) : null;
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
@@ -154,23 +166,25 @@ if (typeof module === 'object' && module.exports) {
     const sym = (s, text) => h('span', {className:'lbar-sym', 'data-s':s, 'aria-hidden':'true'}, text);
 
     function chip(a, o) {
-      const open = (o.members || [o.id]).some(id => bar.panes.includes(id));
+      const open = (o.members || [o.id]).some(id => (bar.shown || bar.panes).includes(id));
+      const tip = o.held ? 'Not in sight in the panel: click to show it' : o.group ? o.line : o.word;
       return h('a', {className:'lbar-chip', href:link(a, o), 'data-s':o.s, 'data-key':'lbar-chip-' + (o.group || o.id), 'data-lbar-open':o.id,
-        'aria-current':open ? 'true' : null, title:o.title + ' · ' + (o.group ? o.line : o.word)},
+        'aria-current':open ? 'true' : null, title:o.title + ' · ' + tip},
         sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)), o.group ? h('span', {className:'lbar-n', 'aria-label':o.line}, String(o.n)) : null);
     }
-    function count(all, l, compact) {
+    function count(all, l, compact, words) {
       const own = all.filter(o => liveBarIn(o, l)).length;
       // ORCH-1643: the compact ◆ shows THE needs-you number (the Review badge's), never a second one of its own
       const n = l === 'wait' && compact ? liveBarNeedCount(needTotal(), own) : own;
       if (!n) return null;
       const head = l === 'pin' ? iconEl('pinned') : l === 'more' ? null : sym(l, LIVEBAR_LISTS[l].sym);
       const name = liveBarCountName(l, n, own, compact);
-      const body = [compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact)), compact ? null : iconEl('up')];
+      const body = [compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact, words)), compact ? null : iconEl('up')];
+      const tag = compact && !words;  // the number alone: the name says what it counts
       // nothing that waits is a session here: the number leads to the Review page, where it is
-      if (l === 'wait' && !own) return h('a', {className:'lbar-cnt', href:'#review', 'data-key':'lbar-cnt-' + l, 'aria-label':name, title:name}, ...body);
+      if (l === 'wait' && !own) return h('a', {className:'lbar-cnt', href:'#review', 'data-key':'lbar-cnt-' + l, 'aria-label':compact && words ? null : name, title:name}, ...body);
       return h('button', {type:'button', className:'lbar-cnt', 'data-lbar-list':l, 'data-key':'lbar-cnt-' + l, 'aria-expanded':String(bar.list === l),
-        'aria-haspopup':'true', 'aria-label':compact || l === 'pin' || l === 'more' ? name : null, title:compact ? name : null}, ...body);
+        'aria-haspopup':'true', 'aria-label':tag || (!compact && (l === 'pin' || l === 'more')) ? name : null, title:compact ? name : null}, ...body);
     }
     function group(a, g, text, list) {
       return h('span', {className:'lbar-g', 'data-g':g, role:'group', 'aria-label':g === 'pin' ? 'Pinned' : text},
@@ -180,14 +194,17 @@ if (typeof module === 'object' && module.exports) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
         // ORCH-1616: one count per kind of session, each with its own symbol (◆ needs you, pin, ● working, ◷ in line,
-        // ◐ idle), each with a tooltip and an accessible name; ◆ is the Review badge's number (ORCH-1643)
-        const counts = lists.map(l => count(all, l, true)).filter(Boolean);
+        // ◐ idle), each with a tooltip and an accessible name; ◆ is the Review badge's number (ORCH-1643). ORCH-1684:
+        // each symbol keeps its word; fold 5 (the narrowest) is the numbers alone.
+        const counts = lists.map(l => count(all, l, true, fold < 5)).filter(Boolean);
         return counts.length ? counts : [h('span', {className:'lbar-l'}, liveBarNeedText(needTotal(), 0))];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
+      const open = fold >= 2 ? [] : liveBarOpenRows(all, bar.panes, bar.shown);
       // the chips that need you carry the word, not a number (ORCH-1616: the number shows only on the Review badge)
       return [group(a, 'wait', need.length ? LIVEBAR_LISTS.wait.head : liveBarNeedText(needTotal(), 0), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
+        open.length ? group(a, 'open', 'Open', open) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }
     function rows(a, all) {
@@ -362,7 +379,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins(), groups());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.shown, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -371,7 +388,7 @@ if (typeof module === 'object' && module.exports) {
       if (bar.el) bar.el.replaceWith(el); else host.append(el);
       if (el.parentNode !== host) host.append(el);
       bar.el = el;
-      for (let sw = el.querySelector('.lbar-sw'); fold < 4 && sw.scrollWidth > sw.clientWidth + 1; sw = el.querySelector('.lbar-sw')) {
+      for (let sw = el.querySelector('.lbar-sw'); fold < 5 && sw.scrollWidth > sw.clientWidth + 1; sw = el.querySelector('.lbar-sw')) {
         const next = build(a, all, ++fold); el.replaceWith(next); el = bar.el = next;
       }
       bar.fold = fold;
@@ -451,7 +468,7 @@ if (typeof module === 'object' && module.exports) {
       if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
       else if (bar.list) { e.stopPropagation(); close(true); }
     }, true);
-    // the layer says which sessions are open ({mode, panes: ticket ids}); their chips are marked current
+    // the layer says which sessions are open ({mode, panes, shown: ticket ids}); the ones in sight are marked current
     window.addEventListener('orch:live-sessions', () => paint());
     // a Stop and End menu opened or closed (ORCH-817): the bar's own menu opens in place of a list
     window.addEventListener('orch:live-end', () => { if (window.liveEndOpenAt?.('bar')) { bar.list = ''; bar.q = ''; bar.menu = false; } paint(true); });
@@ -461,7 +478,12 @@ if (typeof module === 'object' && module.exports) {
       if (!c || !bar.el?.contains(c) || typeof window.liveEndShow !== 'function') return;
       if (window.liveEndShow('bar:' + c.dataset.lbarOpen)) e.preventDefault();
     });
-    window.addEventListener('orch:live-layer', e => { const p = e.detail?.panes; bar.panes = Array.isArray(p) ? p.map(String) : []; paint(); });
+    window.addEventListener('orch:live-layer', e => {
+      const p = e.detail?.panes, v = e.detail?.shown;
+      bar.panes = Array.isArray(p) ? p.map(String) : [];
+      bar.shown = Array.isArray(v) ? v.map(String) : null;
+      paint();
+    });
     let frame = 0;
     window.addEventListener('resize', () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => paint(true)); });
     window.paintLiveBar = paint;
