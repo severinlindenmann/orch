@@ -107,4 +107,30 @@ final class ChatDayTests: XCTestCase {
         XCTAssertEqual(ChatDay.label(forDay: "2026-11-07", today: "2026-11-08"), "Yesterday")
         XCTAssertEqual(ChatDay.label(forDay: "2025-11-03", today: "2026-11-08"), "Mon 3 Nov")
     }
+
+    func testFindSeparatesNoHistoryFromNoMatch() {
+        let past: [ChatDay.Day] = [("2026-11-06", [ConvItem(id: "a", at: "2026-11-06T12:00:00Z", side: .them, day: "2026-11-06", text: "Invoice filed")]),
+                                   ("2026-11-07", [ConvItem(id: "b", at: "2026-11-07T12:00:00Z", side: .them, day: "2026-11-07", text: "Parking permit")])]
+        func days(_ q: String) -> [String]? { if case .days(let d) = ChatDay.find(past, q) { return d.map(\.day) }; return nil }
+        func miss(_ q: String) -> String? { if case .noMatch(let t) = ChatDay.find(past, q) { return t }; return nil }
+        XCTAssertEqual(days("INVOICE"), ["2026-11-06"])
+        XCTAssertEqual(days(""), ["2026-11-06", "2026-11-07"])
+        XCTAssertEqual(days("  \n"), ["2026-11-06", "2026-11-07"], "whitespace is no query")
+        XCTAssertEqual(miss("  car tax "), "car tax", "a term only in a group title is no match, trimmed")
+        XCTAssertEqual(ChatDay.noMatchText("car tax"), "No earlier messages in this chat match “car tax”.")
+        for q in ["", "car tax"] {
+            guard case .noHistory = ChatDay.find([], q) else { return XCTFail("no history stays its own state for \"\(q)\"") }
+        }
+    }
+
+    func testFinishedGroupsAreSearchedByTitle() {
+        let titles = ["Pay car tax 2026", "Plan the summer trip"]
+        func hits(_ q: String) -> [String] { ChatDay.searchTitles(titles, q) { $0 } }
+        XCTAssertEqual(hits("CAR TAX"), ["Pay car tax 2026"], "case-insensitive")
+        XCTAssertEqual(hits("  trip \n"), ["Plan the summer trip"], "trimmed")
+        XCTAssertEqual(hits(""), titles, "no query keeps every group")
+        XCTAssertEqual(hits("   "), titles, "whitespace is no query")
+        XCTAssertEqual(hits("invoice"), [], "a term only in messages hides the groups")
+        XCTAssertEqual(ChatDay.noGroupMatchText("invoice"), "No finished groups match “invoice”.")
+    }
 }
