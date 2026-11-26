@@ -81,9 +81,9 @@
   function warm(s) {
     if (s.kind === 'shell') return 'stays open until you close it';
     if (s.s === 'idle') return 'closes in ' + (s.close || 40) + ' min if left idle';
-    if (s.s === 'none') return 'closed, the conversation is kept';
+    if (s.s === 'none') return 'closed, you can continue it later';
     if (s.s === 'queue') return 'starts when a place is free';
-    return s.s === 'wait' ? 'stays warm while it waits for you' : 'stays warm while it works';
+    return s.s === 'wait' ? 'stays open while it waits for you' : 'stays open while it works';
   }
   function grp(o) { return o.s === 'run' || o.s === 'open' ? 'run' : (o.s === 'queue' ? 'queue' : 'idle'); }
   function isOpen() { var m = eff(); return (m !== 'bar' && m !== 'side') || zoomed(); }
@@ -123,7 +123,7 @@
     html: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMin slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><rect class="mw-f5" width="120" height="22" rx="4"/><rect class="mw-f2" x="10" y="8" width="46" height="6" rx="2"/><rect class="mw-f1" x="10" y="30" width="100" height="5" rx="2"/><rect class="mw-f1" x="10" y="40" width="84" height="5" rx="2"/><rect class="mw-f1" x="10" y="50" width="92" height="5" rx="2"/><rect class="mw-f3" x="10" y="60" width="30" height="6" rx="2"/></svg>',
     chart: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><path class="mw-l1" d="M10 62h100"/><rect class="mw-f3" x="14" y="40" width="12" height="22" rx="2"/><rect class="mw-f3" x="32" y="30" width="12" height="32" rx="2"/><rect class="mw-f3" x="50" y="36" width="12" height="26" rx="2"/><rect class="mw-f3" x="68" y="18" width="12" height="44" rx="2"/><rect class="mw-f2" x="86" y="10" width="12" height="52" rx="2"/></svg>'
   };
-  var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols and counts only */
+  var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols with short words (ORCH-1684), 4 the numbers alone */
   var GRP = { run: ['●', 'working', 'Working'], queue: ['◷', 'in line', 'In line'], idle: ['◐', 'idle', 'Idle'] };
   var MODELS = { t1: AG.t1.models, t2: AG.t2.models };
   var KIND = { file: 'file', img: 'picture', html: 'page', table: 'table', chart: 'chart', pr: 'pull request', link: 'link' };
@@ -526,8 +526,9 @@
   function cnt(l, compact) {
     var n = sorted().filter(function (o) { return inList(o, l); }).length; if (!n) return '';
     var sym = l === 'pin' ? I.pin : (l === 'more' ? I.more : '<span class="mw-st" data-s="' + l + '"><span class="mw-sym" aria-hidden="true">' + LIST[l][0] + '</span></span>');
-    var text = compact ? sym + n : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
-    return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': compact ? n + ' ' + LIST[l][1] : null });
+    var word = n + ' ' + (l === 'wait' && n === 1 ? 'needs you' : LIST[l][1]), bare = compact && BL >= 4; /* only the narrowest fold drops the words */
+    var text = compact ? sym + (bare ? n : word) : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
+    return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': bare ? word : null, title: compact ? LIST[l][2] + ': ' + word : null });
   }
   function chipsHTML() {
     var all = sorted(), need = all.filter(function (o) { return o.s === 'wait'; }), pin = all.filter(function (o) { return inList(o, 'pin'); }), open = all.filter(function (o) { return shownIn(o) && o.s !== 'wait' && !o.pin; });
@@ -607,9 +608,9 @@
     b.dataset.mwSheet = st.sheet ? '1' : ''; b.dataset.mwLayer = mode; b.dataset.mwSplit = mode === 'bar' || mode === 'side' ? '' : st.panes.length;
     $('mw-page').innerHTML = st.page === 'focus' ? (st.view === 'zoom' ? zoomHTML() : wallHTML()) : PG[st.page]();
     var L = $('mw-layer'), nav; L.dataset.mode = mode;
-    /* the bar never wraps: beside the right dock and on phones it is symbols and counts; elsewhere it folds only as far as needed */
+    /* the bar never wraps: beside the right dock and on phones it is symbols with short words; elsewhere it folds only as far as needed */
     BL = phone() || (mode === 'right' && window.innerWidth < 1700) ? 3 : 0; L.innerHTML = layerHTML();
-    while (BL < 3 && (nav = q1('.mw-bar .mw-sw')) && nav.scrollWidth > nav.clientWidth + 1) { BL++; L.innerHTML = layerHTML(); }
+    while (BL < 4 && (nav = q1('.mw-bar .mw-sw')) && nav.scrollWidth > nav.clientWidth + 1) { BL++; L.innerHTML = layerHTML(); }
     var sh = $('mw-sheet'); sh.innerHTML = sheetHTML(); sh.inert = !st.sheet; sh.setAttribute('aria-hidden', String(!st.sheet));
     var ov = $('mw-ov'), oh = ovHTML(); ov.innerHTML = oh; ov.hidden = !oh; if (!oh) st.ov = null;
     Array.prototype.forEach.call(b.children, function (c) { if (c !== ov && c !== sh && c.tagName !== 'SCRIPT') c.inert = !!oh; }); if (oh) sh.inert = true; /* the page behind a preview cannot be reached */
@@ -779,7 +780,7 @@
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
         // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
         if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
-        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
+        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. You can continue it later.'; }
         if (m[2] === 'queue') { s.now = 'Waits in line for a free helper place.'; s.lines = []; s.chat = []; s.step = [0, 4 + i % 3]; }
         if (m[2] === 'run' && i % 3 === 0) s.feed = ['⏺ ' + NOWS[(i + 1) % NOWS.length], '⏺ ' + NOWS[(i + 2) % NOWS.length]];
         return s;
