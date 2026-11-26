@@ -347,9 +347,10 @@ final class ConversationModelTests: XCTestCase {
         _ = try await m.send(MessageDraft(text: "second"), to: .general(workspace: MockRelay.pilatus))
         m.message = nil   // the transient banner is gone
         let failed = m.conversationItems(gen).filter { if case .failed? = $0.receipt { true } else { false } }
-        XCTAssertEqual(failed.map(\.text), ["first", "second"])
+        // Both sends can share one second, so their order is not fixed: pick by text, not by position.
+        XCTAssertEqual(failed.map(\.text).sorted(), ["first", "second"])
         XCTAssertTrue(failed.allSatisfy { $0.receipt == .failed(NotSentNote.generic) })
-        let first = try XCTUnwrap(failed.first?.clientId)
+        let first = try XCTUnwrap(failed.first { $0.text == "first" }?.clientId)
         await m.retrySend(first)
         let after = m.conversationItems(gen)
         XCTAssertNotEqual(after.first { $0.text == "first" }?.receipt, .failed(NotSentNote.generic), "the retried one went")
