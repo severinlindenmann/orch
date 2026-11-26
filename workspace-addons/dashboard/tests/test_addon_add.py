@@ -50,7 +50,9 @@ def job_mod(tmp_path, monkeypatch):
 @pytest.fixture
 def listing(monkeypatch):
     monkeypatch.setattr(
-        actions, "run_orch", lambda b, args, root: ROWS if args == ["addon", "list", "--json"] else None
+        actions,
+        "run_orch",
+        lambda b, args, root: ROWS if args == ["addon", "list", "--catalog", "--json"] else None,
     )
     monkeypatch.setattr(actions, "human_env", lambda root, orch_bin: {"ORCH_VIA": "dashboard"})
 
@@ -120,7 +122,9 @@ def test_the_catalogue_passes_requires_through_when_the_listing_has_it(tmp_path,
         {"name": "relay", "installed": True, "active": False},
     ]
     monkeypatch.setattr(
-        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+        data,
+        "run_orch",
+        lambda b, args, root: rows if args == ["addon", "list", "--catalog", "--json"] else None,
     )
     ws = tmp_path / "ws"
     (ws / ".orch").mkdir(parents=True)
