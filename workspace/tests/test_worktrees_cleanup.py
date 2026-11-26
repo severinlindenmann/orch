@@ -1725,3 +1725,34 @@ def test_unwritable_parent_of_the_orch_folder_gives_a_plain_message(repo, monkey
     assert entry is None
     assert "cannot make its copies folder next to" in note and "Permission denied" in note
     assert "Errno" not in note and "Traceback" not in note
+
+
+def test_remove_orphaned_rechecks_under_the_lock_before_each_move(repo, monkeypatch):
+    main = repo.parent / "gone-and-back"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    real_git = worktrees._git
+
+    def comes_back(*a, **k):
+        (main / ".orch").mkdir(parents=True, exist_ok=True)
+        (main / ".orch" / ".local-id").write_text(d.name + "0" * 24)  # the workspace is here again
+        return real_git(*a, **k)
+
+    monkeypatch.setattr(worktrees, "_git", comes_back)
+    notes = worktrees.remove_orphaned(repo, d.name, discard=True)
+    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file() and "project is back" in notes[0]
+
+
+def test_remove_orphaned_moves_a_copy_while_holding_the_copies_state_lock(repo, monkeypatch):
+    main = repo.parent / "gone-locked"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    real, held = worktrees._to_trash, []
+
+    def spy(c, name):
+        held.append(bool(runs._held))
+        return real(c, name)
+
+    monkeypatch.setattr(worktrees, "_to_trash", spy)
+    assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+    assert held == [True]

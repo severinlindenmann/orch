@@ -166,3 +166,16 @@ test('a command a helper writes in backticks in its question is offered to copy;
   assert.match(home, /questionCommandRows\(needQuestion\(row\), key\)/);
   assert.equal(helpers.questionWords(q), 'The Azure login ran out. Sign in again with az login, then gcloud auth login --update-adc; see `c1`, `Wiki` and `rm`.');
 });
+
+test('a check file that waits for the person says so on Home and in Settings, with no terminal command (#1549)', () => {
+  const check = item({name: 'db-dev', label: 'Databricks dev', state: 'unreachable', approve: 'new', runs: 'databricks current-user me',
+    hash: '0123456789abcdef0123456789abcdef', how: 'Look at it, then approve it.', sign_in: 'orch checks approve db-dev --hash 0123'});
+  assert.deepEqual(helpers.needState(check), {word: 'Not approved yet', tone: 'needs'});
+  assert.equal(helpers.needSignIn(check), '');  // the Approve button takes its place
+  assert.equal(helpers.needKindWord({kind: 'tool'}), 'Tool');
+  assert.deepEqual(helpers.needState({...check, approve: 'broken', runs: undefined, hash: undefined}), {word: 'Cannot be read', tone: 'error'});
+  const {api} = page({items: [check]});
+  const b = api.loginBanner(api.loginWarnings().stopped);
+  assert.match(text(b), /^The Databricks dev login waits for you to approve it/);
+  assert.doesNotMatch(text(b), /orch checks approve/);
+});

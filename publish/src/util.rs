@@ -687,28 +687,56 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 }
 
 fn read_key(path: &std::path::Path) -> std::io::Result<Option<[u8; 32]>> {
-    let Ok(t) = std::fs::read_to_string(path) else {
-        return Ok(None);
+    use std::io::{Error, ErrorKind};
+    let t = match std::fs::read(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(Error::new(
+                e.kind(),
+                format!(
+                    "cannot read {}: {e}. Start the server as the publish user.",
+                    path.display()
+                ),
+            ))
+        }
     };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(path)?.permissions().mode();
         if mode & 0o077 != 0 {
-            return Err(std::io::Error::other(format!(
-                "{} must only be readable by the server (chmod 600)",
-                path.display()
-            )));
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                format!(
+                    "{} must only be readable by the server: run chmod 600 on it.",
+                    path.display()
+                ),
+            ));
         }
     }
-    let t = t.trim();
-    if t.len() != 64 || !t.is_ascii() {
-        return Err(std::io::Error::other("bad app-cap.key"));
+    let bad = |what: &str| {
+        Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "{} {what}; it must hold 64 hex characters. Restore it from a backup \
+                 (a new key changes every private-app address).",
+                path.display()
+            ),
+        )
+    };
+    let t = std::str::from_utf8(&t)
+        .map_err(|_| bad("is not text"))?
+        .trim();
+    if t.len() != 64 {
+        return Err(bad(&format!("has {} characters", t.len())));
+    }
+    if !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(bad("has a character that is not hex"));
     }
     let mut k = [0u8; 32];
     for (i, b) in k.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
-            .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
+        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16).map_err(|_| bad("is not hex"))?;
     }
     Ok(Some(k))
 }
@@ -724,25 +752,44 @@ pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let mut k = [0u8; 32];
     OsRng.fill_bytes(&mut k);
     let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
-    // write a 0600 temp file, flush it to disk, then link it into place (never overwrites an
-    // existing key, never a half-written file) and use whatever ended up on disk
-    let tmp = path.with_extension(format!("key.tmp{}", std::process::id()));
-    let _ = std::fs::remove_file(&tmp);
+    // write a 0600 temp file with a random name, flush it to disk, then link it into place (never
+    // overwrites an existing key, never a half-written file) and use whatever ended up on disk
+    let mut r = [0u8; 8];
+    OsRng.fill_bytes(&mut r);
+    let rnd: String = r.iter().map(|b| format!("{b:02x}")).collect();
+    let tmp = path.with_extension(format!("key.tmp-{rnd}"));
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
     let mut f = o.open(&tmp)?;
-    f.write_all(hex.as_bytes())?;
-    f.sync_all()?;
-    let linked = std::fs::hard_link(&tmp, path);
+    let written = f.write_all(hex.as_bytes()).and_then(|_| f.sync_all());
+    drop(f);
+    let linked = written.and_then(|_| std::fs::hard_link(&tmp, path));
     let _ = std::fs::remove_file(&tmp);
     match linked {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e),
     }
+    // the key's directory entry must reach the disk too: a lost key changes every private-app address
+    sync_dir(path)?;
     read_key(path)?.ok_or_else(|| std::io::Error::other("app-cap.key missing after write"))
+}
+
+/// fsync the folder that holds `path` (no-op where folders cannot be opened, e.g. Windows).
+fn sync_dir(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let dir = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => std::path::Path::new("."),
+        };
+        std::fs::File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -776,6 +823,74 @@ mod key_tests {
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
         assert_eq!(load_or_create_key(&p).unwrap(), k);
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(load_or_create_key(&p).is_err());
+        let e = load_or_create_key(&p).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("chmod 600"), "{e}");
+    }
+
+    #[test]
+    fn bad_key_files_say_what_is_wrong() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        for (body, says) in [
+            ("abc".to_string(), "has 3 characters"),
+            ("zz".repeat(32), "not hex"),
+            ("+1".repeat(32), "not hex"),
+        ] {
+            std::fs::write(&p, &body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let e = load_or_create_key(&p).unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidData, "{body}");
+            assert!(e.to_string().contains(says), "{e}");
+            // a bad key is never replaced by a new one
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+        }
+        std::fs::write(&p, [0xffu8; 64]).unwrap();
+        let e = load_or_create_key(&p).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn the_temp_file_name_is_not_the_pid() {
+        // a file planted at the old pid-based name is neither removed nor used
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        let planted = p.with_extension(format!("key.tmp{}", std::process::id()));
+        std::fs::write(&planted, "planted").unwrap();
+        load_or_create_key(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&planted).unwrap(), "planted");
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 2);
+    }
+}
+
+/// The `/health` answer: `ok`, then the release the binary was built from when the build set
+/// `ORCH_RELEASE` (CI: the commit), e.g. `ok b3b88f76` (#1208). A reader checks that it starts with `ok`.
+pub fn health_text() -> String {
+    health_line(option_env!("ORCH_RELEASE"))
+}
+
+pub fn health_line(release: Option<&str>) -> String {
+    let r: String = release
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .take(64)
+        .collect();
+    match r.trim() {
+        "" => "ok".into(),
+        r => format!("ok {r}"),
+    }
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::health_line;
+
+    #[test]
+    fn health_names_the_release_only_when_the_build_set_one() {
+        assert_eq!(health_line(None), "ok");
+        assert_eq!(health_line(Some("  ")), "ok");
+        assert_eq!(health_line(Some("b3b88f76")), "ok b3b88f76");
+        assert_eq!(health_line(Some("32 b3b88f76\n<x>")), "ok 32 b3b88f76x");
     }
 }
