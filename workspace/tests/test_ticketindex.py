@@ -7,9 +7,9 @@ import time
 
 from orch import history, needs, reads, ticketindex, tickets
 
-# File times move in kernel ticks: 4 ms on a Linux kernel with HZ=250 and no fine-grained times (before 6.13), as on
-# the CI edge runners. A test that changes a file and expects a new time waits one tick first; a person's hand edit
-# never comes within milliseconds of orch's own write.
+# File times move in kernel ticks: 4 ms on a Linux kernel with HZ=250 and no fine-grained times
+# (before 6.13), as on the CI edge runners. A test that changes a file and expects a new time
+# waits one tick first; a person's hand edit never comes within milliseconds of orch's own write.
 _TICK = 0.05
 
 
