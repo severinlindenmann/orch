@@ -338,6 +338,36 @@ def test_an_addon_that_is_off_on_purpose_is_not_a_problem(svc, proj, run):
     assert row["running"] is True and "idle" not in row
 
 
+def test_start_says_when_a_running_addon_runs_older_files(svc, proj, run, monkeypatch):
+    # #1391: a file of the add-on changed by hand while it ran; `orch start` left it on the old code, silently
+    import time
+
+    from orch import procs
+
+    started = time.time() - 600
+    monkeypatch.setattr(
+        procs, "pid_started", lambda pid: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
+    )
+    pkg = svc / "src" / "orch_hello"
+    for f in pkg.rglob("*"):
+        os.utime(f, (started - 60, started - 60))
+    assert run("start")[0] == 0
+    code, _out, err = run("start")
+    assert code == 0 and "older files" not in err
+    cache = pkg / "__pycache__"
+    cache.mkdir(exist_ok=True)
+    (cache / "x.pyc").write_bytes(b"")  # a compiled cache is not a changed file
+    assert "older files" not in run("start")[2]
+    (pkg / "__main__.py").write_text(SVC_MAIN + "\n# fixed by hand\n", encoding="utf-8")
+    # here the package is its own source folder; a real install is a copy
+    addons.record_consent(proj, "hello")
+    code, out, err = run("start", "--json")
+    assert code == 0, err
+    want = f"Warning: hello runs older files than are installed; run orch stop, then orch start, in {proj}"
+    assert want in err
+    assert "older files" in json.loads(out)["addons"][0]["warning"]
+
+
 def test_start_never_calls_a_stopped_addon_running():
     from orch import cli_status
 
