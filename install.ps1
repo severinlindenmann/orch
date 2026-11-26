@@ -5,6 +5,7 @@ if ($InstallKind -notin @("normal","dev","test")) { throw "InstallKind must be n
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
 # To leave: `orch uninstall` in a project (your tickets stay), then `uv tool uninstall orch-workspace`.
 # -InstallKind test|dev (given by the person running this installer) marks a test or dev install; default normal.
+# Plain Python via uv is the whole install. No installer .exe or app is downloaded or required by orch itself.
 # Works for a standard user: no admin rights, no git, no change to the execution policy.
 # Not "Stop": Windows PowerShell turns a native tool's stderr (uv's progress lines) into errors when the output is
 # redirected, which would abort the install. Every native call is checked by its exit code instead.
