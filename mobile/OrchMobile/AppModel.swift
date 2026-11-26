@@ -17,6 +17,12 @@ final class AppModel {
     private(set) var credentials: Credentials?
     private(set) var invite: PairingLink?
     private(set) var inviteState: InviteState = .none
+    /// An invitation opened while this phone is already paired: the Add workspace confirmation takes it (ORCH-2127).
+    private(set) var incomingInvite: PairingLink?
+    /// An Add workspace sheet is on screen (it takes `incomingInvite` itself; the Chats list then opens no second one).
+    @ObservationIgnored var addWorkspaceOpen = false
+    /// Invitation codes being redeemed right now: one code goes to the server once, even on a double tap.
+    @ObservationIgnored private var redeeming: Set<String> = []
     private(set) var pairedWorkspaces: [WorkspaceRef] = []
 
     // Data
@@ -363,7 +369,13 @@ final class AppModel {
     // MARK: Onboarding
 
     /// An `orch://pair?…` link (opened from the admin portal, pasted or scanned).
+    /// On a paired phone it only holds the link for the Add workspace confirmation: the pairing stays as it is.
     func openInvite(_ text: String) {
+        if credentials != nil {
+            guard let link = try? PairingLink(text) else { message = RelayError.badLink.localizedDescription; return }
+            incomingInvite = link; message = nil
+            return
+        }
         do {
             let link = try PairingLink(text)
             invite = link; inviteState = .found(host: link.host); message = nil; inviteNeedsReplacement = false
@@ -371,6 +383,15 @@ final class AppModel {
     }
 
     func openSampleInvite() { openInvite(PairingLink.sample.link) }
+
+    /// The Add workspace sheet takes the opened invitation; closing the sheet without Add drops it unused.
+    func takeIncomingInvite() -> PairingLink? { defer { incomingInvite = nil }; return incomingInvite }
+
+    /// The invitation is for the server this phone is paired with (only then may its code be sent).
+    func isForPairedServer(_ link: PairingLink) -> Bool {
+        guard let relay = credentials?.relay else { return false }
+        return IncomingInvite.sameOrigin(link.relay, relay)
+    }
 
     /// Drops the current invitation and goes back to scan / paste.
     func clearInvite() { invite = nil; inviteState = .none; inviteNeedsReplacement = false; message = nil }
@@ -959,8 +980,12 @@ final class AppModel {
     /// An `orch://pair?...` link opened while already paired: adds its workspaces to this phone. Returns the added workspaces.
     @discardableResult
     func redeemInvitation(_ text: String) async -> [WorkspaceRef] {
+        guard let link = try? PairingLink(text) else { message = RelayError.badLink.localizedDescription; return [] }
+        // Never forward a code to a server it was not made for.
+        guard isForPairedServer(link) else { message = IncomingInvite.otherServer; return [] }
+        guard redeeming.insert(link.code).inserted else { return [] }
+        defer { redeeming.remove(link.code) }
         do {
-            let link = try PairingLink(text)
             let r = try await client.redeem(code: link.code)
             await refresh()
             return r.workspaces
@@ -1078,7 +1103,7 @@ final class AppModel {
         readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
-        held = [:]; notValid = [:]; credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
+        held = [:]; notValid = [:]; credentials = nil; invite = nil; inviteState = .none; incomingInvite = nil; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
