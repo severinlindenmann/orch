@@ -448,6 +448,20 @@ def run(capsys):
 
 
 @pytest.fixture
+def plant_raw(proj):
+    """Put text straight into a ticket, past the scan: a ticket from before the scan (or one edited by hand)
+    may hold a secret, and the views that go out must still hide it."""
+    from orch import tickets
+
+    def _plant(tid, **fields):
+        t = tickets.load(proj, tid)
+        t.update(fields)
+        tickets._write(proj, t)
+
+    return _plant
+
+
+@pytest.fixture
 def validate():
     import jsonschema
 

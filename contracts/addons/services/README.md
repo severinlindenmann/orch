@@ -125,6 +125,8 @@ to 30 s, then is refused with "Another check runs right now"); the regular check
 log: `.orch/addons/services/checker.log` (service names and counts only).
 - Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
   the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
+  only the listener a `127.0.0.1` connect reaches counts (exact `127.0.0.1` first, then an IPv4 wildcard, then an
+  IPv6 one);
   otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
   `lsof`) the connect alone counts.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
@@ -137,7 +139,8 @@ log: `.orch/addons/services/checker.log` (service names and counts only).
   affects is not known.` without `depends`; never guessed from names), options Restart / Stop / Look into it,
   recommended Restart, or Look into it from 5 failures on (kept as `suggested`, the page's filled button). No second question while it is open (its id is in the state file).
   When another service has the same name, `<name>` in the question is `<name> (<id>)`, so each service gets its own
-  question (ORCH-1683).
+  question (ORCH-1683). Before asking, the pass looks on the ticket for an open, unanswered `services:health`
+  question that starts with `<name> keeps stopping: ` and takes it over (a pass that ended between asking and saving, #1401).
 - Answers (no new act verbs): the next pass reads the question with `orch ticket show` and acts once (the state is
   written before acting): Restart = `restart`, Stop = `stop`, Look into it (or any other text) = nothing, one
   `orch log` line on the ticket. A question taken back by someone ends it too.
