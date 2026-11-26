@@ -610,7 +610,9 @@ async fn answer(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let v = parse_body(&body)?;
+    let mut v = parse_body(&body)?;
+    // The phone's signature over the answer (ORCH-1204 c9), checked once the body is built.
+    let envelope = v.as_object_mut().and_then(|o| o.remove("envelope"));
     let (id, cid) = {
         let c = app.db.lock().unwrap();
         let (pid, name, ws) = auth::phone(&c, &h)?;
@@ -705,26 +707,78 @@ async fn answer(
                 }
             }
         }
-        let tx = c.unchecked_transaction()?;
-        let mut abody = json!({"question_id": qb["question_id"], "answer": text, "answered_by": format!("human:{name}")});
+        // A signed answer names the phone by its id: the one name it can sign without trusting a label it picked.
+        let by = if envelope.is_some() {
+            format!("human:{pid}")
+        } else {
+            format!("human:{name}")
+        };
+        let mut abody =
+            json!({"question_id": qb["question_id"], "answer": text, "answered_by": by});
         if !verdict.is_null() {
             abody["verdict"] = verdict.clone();
         }
         if let Some(cid) = &cid {
             abody["client_id"] = cid.clone().into();
         }
-        let m = store::system_message_with_key(
-            qextra.get("key").and_then(crate::rules::ticket_key),
+        let named_ids: Vec<String> = named.iter().map(|b| b.to_string()).collect();
+        let gate = crate::phonegate::check_answer(
             &c,
-            &app.key,
             &pid,
-            &q.from,
-            "answer",
-            q.ticket.as_deref(),
-            Some(qid),
-            abody,
+            envelope,
+            &q,
+            &qb["question_id"],
+            &abody,
+            &named_ids,
         )?;
-        let id = m["id"].as_str().unwrap().to_string();
+        if let crate::phonegate::Gate::Duplicate(old) = gate {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({"id": old, "client_id": cid, "duplicate": true})),
+            ));
+        }
+        let ticket_key = qextra.get("key").and_then(crate::rules::ticket_key);
+        let tx = c.unchecked_transaction()?;
+        let id = if let crate::phonegate::Gate::Signed {
+            id,
+            envelope,
+            digest,
+        } = gate
+        {
+            // The signed id and body as the phone wrote them; the envelope goes to the workspace unchanged.
+            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(()))
+                .optional()?
+                .is_some()
+            {
+                return Err(conflict(
+                    "This message id was already used for another message.",
+                ));
+            }
+            let mut m = json!({"schema": "orch.msg/1", "id": id, "from": pid, "to": q.from, "type": "answer",
+                "created_at": fmt_time(now()), "body": abody, "reply_to": qid, "envelope": envelope});
+            if let Some(t) = q.ticket.as_deref() {
+                m["ticket"] = t.into();
+                if let Some(k) = ticket_key {
+                    m["key"] = k.into();
+                }
+            }
+            store::insert_message(&c, &app.key, &m, "")?;
+            crate::phonegate::mark(&c, &id, &digest)?;
+            id
+        } else {
+            let m = store::system_message_with_key(
+                ticket_key,
+                &c,
+                &app.key,
+                &pid,
+                &q.from,
+                "answer",
+                q.ticket.as_deref(),
+                Some(qid),
+                abody,
+            )?;
+            m["id"].as_str().unwrap().to_string()
+        };
         if let Some(cid) = &cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }

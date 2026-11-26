@@ -8,17 +8,16 @@ $fails = @()
 function L($m) { Add-Content -Path $log -Value $m }
 function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; $script:fails += $what } }
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
-# stdout only: a note on stderr (e.g. the secret scan's) must not break the JSON a caller parses
-function OJ { cmd /c "orch $($args -join ' ') < NUL 2>NUL" }
-function NewScheduledTicket($title) {
-    $out = OJ ticket new ('"' + $title + '"') --json --by human:owner | Out-String
-    if ($LASTEXITCODE -ne 0) { L $out; throw "ticket creation failed: $title" }
-    try { $tid = ($out | ConvertFrom-Json -ErrorAction Stop).id }
-    catch { L $out; throw "ticket creation returned invalid JSON: $title" }
-    if (-not $tid) { L $out; throw "ticket creation returned no id: $title" }
-    $out = O check add $tid '"Say hello"' --by human:owner | Out-String
-    if ($LASTEXITCODE -ne 0) { L $out; throw "checklist creation failed: $title" }
-    return $tid
+function NewSmokeTicket($title) {
+    # JSON is stdout only. Join native output lines before parsing (Windows PowerShell 5.1).
+    # Keep stderr in the flow log, not in the JSON document.
+    $out = cmd /c "orch ticket new `"$title`" --json --by human:owner < NUL 2>> `"$log`"" | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "ticket new failed for $title (exit $LASTEXITCODE): $out" }
+    $ticket = ConvertFrom-Json -InputObject $out -ErrorAction Stop
+    if (-not $ticket.id) { throw "ticket new returned no id for $title : $out" }
+    $out = O check add $ticket.id '"Say hello"' --by human:owner | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "check add failed for $title : $out" }
+    return $ticket.id
 }
 function Results($out) {
     $m = [regex]::Match("$out", 'Log: (\S+)')
@@ -64,9 +63,12 @@ L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
 try {
-    $rep = NewScheduledTicket "Scheduled smoke"
-    $one = NewScheduledTicket "Wake-up smoke"
-} catch { L "RESULT fail: $_"; return }
+    $rep = NewSmokeTicket "Scheduled smoke"
+    $one = NewSmokeTicket "Wake-up smoke"
+} catch {
+    L "RESULT fail: scheduler setup: $($_.Exception.Message)"
+    return  # no background service or long waits with missing tickets
+}
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 

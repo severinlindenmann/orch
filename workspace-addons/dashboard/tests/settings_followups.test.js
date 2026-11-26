@@ -17,7 +17,7 @@ test('an add-on that is off: the switch drops its link at once and its address s
   assert.ok(off.includes('!row.active') && off.includes('!addons().some'), 'only an installed add-on that is not active');
 });
 
-test('an add-on is named by its menu label (Contacts), not its folder name (relay), in its dialogs and off page', () => {
+test('an add-on is named by its menu label (Relay), not its folder name (relay), in its dialogs and off page', () => {
   const app = read('app.js');
   assert.ok(/function addonRowLabel\(row\) \{\s*return String\(row\?\.label/.test(app), 'the label comes first');
   assert.ok(app.includes("settingsConfirm('Turn on ' + addonRowLabel(addon) + '?'"));
