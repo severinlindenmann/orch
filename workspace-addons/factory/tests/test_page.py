@@ -845,7 +845,9 @@ def test_empty_factory_is_the_idea_box_alone():
     assert "el.classList.add('f-idea', 'page-empty')" in js and "group('page-empty-step')" in js
     assert "const empty = !orders.length && !auto?.on;" in js
     assert "if (empty) { view.append(box); return; }" in js
-    assert js.index("if (empty) { view.append(box); return; }") < js.index("Budget health: shows here once an order runs.")
+    assert js.index("if (empty) { view.append(box); return; }") < js.index(
+        "Budget health: shows here once an order runs."
+    )
 
 
 def test_the_newest_draft_opens_without_a_click():
