@@ -26,6 +26,6 @@ module.exports = {
     const panel = page.locator(`[data-split-panel="${ws}"]`);
     await panel.getByText(words).first().waitFor({ timeout: 20000 })
       .catch(async () => { throw new Error('the message is not in the Kitchen thread after a reload:\n' + (await text()).slice(0, 800)); });
-    // the relay stays on (as in m-contacts-trust)
+    // the relay stays on (as in l-phone)
   },
 };
