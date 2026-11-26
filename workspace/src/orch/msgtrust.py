@@ -46,8 +46,8 @@ REFUSED_KEEP = 100
 # Made by the relay itself, never signed: a closed list (relay-api.md). None of them is an allow, a person's
 # answer, a start or a trust change (test_msgtrust.py checks each).
 RELAY_MADE_TYPES = ("refresh-hint", "webhook", "control")
-# a held one is never run by itself on Accept: the sender sends it again (start and delegate start work, so they
-# count too; outside review, ORCH-1206)
+# a held one is never run by itself on Accept: the sender sends it again (start and delegate start work, so
+# they count too; outside review, ORCH-1206)
 PERSON_ACTIONS = ("allow", "answer", "start", "delegate")
 # a refusal that means "forged or changed on the way": counted and shown as Not valid on the contact
 NOT_VALID_CODES = {
@@ -350,10 +350,21 @@ def _outer_matches(m: dict, s: dict) -> bool:
     return not isinstance(s["to"], str) or m.get("to") == s["to"]
 
 
-# Fields the signed bytes speak for: what is delivered is the signed value, never the relay's outer copy, and an
-# outer copy the signed bytes do not have is dropped (outside review, ORCH-1206).
-_SIGNED_SAYS = ("id", "from", "type", "ticket", "reply_to", "body", "question_id", "question_sha256",
-                "expires_ms", "files", "origin")
+# Fields the signed bytes speak for: what is delivered is the signed value, never the relay's outer copy, and
+# an outer copy the signed bytes do not have is dropped (outside review, ORCH-1206).
+_SIGNED_SAYS = (
+    "id",
+    "from",
+    "type",
+    "ticket",
+    "reply_to",
+    "body",
+    "question_id",
+    "question_sha256",
+    "expires_ms",
+    "files",
+    "origin",
+)
 
 
 def _from_signed(m: dict, s: dict) -> dict:
