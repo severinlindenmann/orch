@@ -1405,7 +1405,11 @@ async function startChoice(page, dash) {
       agents: [{ name: 'claude', label: 'Claude Code', found: true, chosen: true, models: true },
         { name: 'codex', label: 'Codex', found: true, chosen: false, models: false }] };
     const first = (st.tickets || [])[0];
-    if (first) { tid = first.id; if (!first.key) first.key = 'ORCH-189'; first.model = { name: 'sonnet', by: 'orch' }; }
+    if (first) {
+      tid = first.id; if (!first.key) first.key = 'ORCH-189'; first.model = { name: 'sonnet', by: 'orch' };
+      // this step checks the plain Start choice: a ticket that waits on the person starts with Why it waits (ORCH-2201)
+      first.questions = []; if (first.status === 'review') first.status = 'active';
+    }
     st.runs = { ...Object.fromEntries(Object.entries(st.runs || {}).filter(([k]) => k !== tid)), ...others(4) };
     st.start_line = full ? { waiting: ['t_other8', 't_other9'], why: '4 helpers are working at once, the most you allowed', limit: 4 } : null;
     st0 = st;
