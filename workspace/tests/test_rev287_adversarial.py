@@ -53,10 +53,12 @@ def test_F1b_agent_env_SHOULD_not_answer_a_phone_question_as_human(proj, run, mo
     assert code != 0, "an agent answered a phone question by claiming to be human"
 
 
-# ---------------------------------------------- F2: resume starts the default agent, not the asker
+# ---------------------------------------------- F2: resume starts the workspace agent, never the asker's tool
 
 
-def test_F2_resume_SHOULD_start_the_agent_that_asked(proj, run, gen, one_step):
+def test_F2_resume_starts_the_workspace_agent_not_the_tool_that_asked(proj, run, gen, one_step):
+    """ORCH-2270 (replaces the #287 finding): the tool that asked may be retired or gone (Copilot); the answer
+    restarts [workspace] agent, fresh, and never resumes the other tool's session."""
     gen()  # 'fake' is the workspace agent
     cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(test_run_wrap.AGENT))} {{prompt}}"
     config.add_agent(proj, "other", cmd, approve=True)
@@ -66,10 +68,11 @@ def test_F2_resume_SHOULD_start_the_agent_that_asked(proj, run, gen, one_step):
     qid = L._ask(run, tid, "Which colour?", by="agent:other")
     run("answer", tid, qid, "Blue", "--by", "human:t")
     rec = runs.read(proj, tid)
-    agent = rec and rec.get("agent")
-    if rec:
-        _wait(proj, tid)
-    assert agent == "other", f"the answer resumed {agent!r}, not the agent that asked (other)"
+    assert rec, "the answer started nothing"
+    agent, resumed = rec.get("agent"), rec.get("resumed")
+    _wait(proj, tid)
+    assert agent == "fake", f"the answer resumed {agent!r}, not the workspace agent (fake)"
+    assert not resumed, "a session of another tool was resumed"
 
 
 # ------------------------------------------------------------- F3: a peer workspace labels its answer human
