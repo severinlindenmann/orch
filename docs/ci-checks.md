@@ -100,6 +100,8 @@ Once Windows is green (KNOWN_RED empty), a pull request that changes file, proce
 
 ² A light pull request that changes file, process or path code while Windows is green runs the workspace job
 with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
+On `copilot/*` pull requests into `develop`, at most two workspace parts run at once per PR. This leaves
+hosted runners available for queue groups without dropping tests or slowing release and queue runs.
 
 ³ Queue groups never run the Windows parts (PR 1473): they run after the merge on every push to develop, also one
 a green group proved (then only they run, unless they are on our own Windows VM, see below), at night and in the
@@ -219,9 +221,9 @@ program reads but not the ones it sets).
 The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
-  into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
+  into develop stay on GitHub's machines for these jobs. The runner's job hook also refuses fork PRs.
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
-  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-long` (the setting in use)
+  unset = GitHub's machines (the default). `orch-edge-long`
   sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
   runs (stress tests, measurements); develop pushes and pull requests stay on GitHub's machines. The release
   keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting: they
@@ -232,6 +234,14 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
+- **Queue capacity (`EDGE_RUNNER=orch-edge-queue`)**: route only the scheduled Linux workspace shards, add-on
+  Python suites and lightweight rules and contract checks to edge (brand stays on GitHub: its tests run
+  the runner's own hooks) on develop pushes and same-repository
+  `orch-queue/` PRs into develop. This does not turn on the extra builds above. The hosted lookup checks the
+  runner list before scheduling; if none is online or the list is unavailable the jobs use `ubuntu-latest`.
+  Busy online runners accept queued work; GitHub cannot move a job already assigned labels if the pool then
+  disappears. Clear the variable and rerun in that case. Install the updated job-started hook before enabling
+  this mode. To check routing without a queue group, dispatch `rules.yml` on a `copilot/` branch.
 - **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at
   a time), so one run's 12 jobs share them. A develop push goes to orch edge only when EVERY runner there is idle;
   one busy runner means an earlier run is still there and the push goes to GitHub's machines, which run its jobs
