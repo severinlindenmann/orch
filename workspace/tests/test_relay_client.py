@@ -3074,8 +3074,8 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     assert "task" not in sent[1] and "about" not in sent[1]
 
 
+def test_allow_words_rp4(proj, run, rel):
     """RP4 A: three buttons that say what they do; the sender's words are on the card; old words count."""
-    """RP4 A: the three buttons say what they do; the sender's words are on the card; old words still count."""
     from orch import relay
 
     assert relay.allow_choice("Allow this task") == "once"
