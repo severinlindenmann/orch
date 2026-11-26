@@ -14,6 +14,10 @@ import threading
 import time
 from pathlib import Path
 
+from orch.ticketsearch import matches
+from orch.ticketsearch import needle as _needle
+from orch.ticketsearch import search_text as _search_text
+
 PAGE = 50
 MAX_PAGE = 200
 HISTORY_KEEP = 5
@@ -48,13 +52,6 @@ def _hidden(t: dict) -> bool:
 def _cut(text, n=TEXT_CAP) -> str:
     text = text if isinstance(text, str) else ""
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
-
-
-def _search_text(t: dict) -> str:
-    """Every word a search looks in: title, owner, note, description and the task texts (lower case)."""
-    parts = [t.get("title"), t.get("owner"), t.get("note"), t.get("description")]
-    parts += [c.get("text") for c in t.get("checklist") or [] if isinstance(c, dict)]
-    return "\n".join(str(p) for p in parts if isinstance(p, str)).lower()
 
 
 _DONE_TEXT = re.compile(r"(?:->|to) done\b|^Done\b", re.IGNORECASE)
@@ -160,28 +157,6 @@ def _add_children(listing: list[tuple[dict, str]]) -> None:
             parent["parts_done"] += int(r.get("status") == "done")
 
 
-def _key_match(t: dict, needle: str) -> bool:
-    """'58', '#58' or 'ORCH-58' finds that ticket by its number (exact); 'orch58' and 'orch 58' too (the page's rule)."""
-    key = str(t.get("key") or "").lower()
-    if not key:
-        return False
-    digits = needle.lstrip("#")
-    if digits.isdigit():
-        return key.split("-")[-1] == str(int(digits))
-    flat = lambda v: re.sub(r"[\s-]+", "", v)
-    return key == needle or flat(key) == flat(needle)
-
-
-def matches(row: dict, text: str, needle: str) -> bool:
-    if not needle:
-        return True
-    if _key_match(row, needle) or row.get("id") == needle:
-        return True
-    if not re.fullmatch(r"#?\d+", needle) and needle in str(row.get("key") or "").lower():
-        return True
-    return needle in text
-
-
 def _done_at(row: dict) -> str:
     return str(row.get("done_at") or row.get("closed_at") or row.get("updated_at") or "")
 
@@ -218,7 +193,7 @@ def page(rows: list[tuple[dict, str]], query: dict, me: str = "", login: str = "
         v = query.get(name)
         return str(v[0] if isinstance(v, list) and v else v or "").strip()
 
-    needle = one("q").lower()[:200]
+    needle = _needle(one("q"))
     wanted = {s for s in one("status").split(",") if s in STATUSES} or set(STATUSES) - {"dropped"}
     who, mine, group, since = one("who"), one("mine") == "1", one("group"), one("since")
     offset = _int(one("offset") or 0, 0, 10**7, 0)
