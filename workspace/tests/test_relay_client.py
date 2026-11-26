@@ -1037,6 +1037,48 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert run("relay", "outbox")[1].startswith("Nothing is waiting to be sent.")
 
 
+def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
+    proj, run, rel, monkeypatch, new_ticket
+):
+    """R1.1: relay turned on, server gone (DNS fails). A relay command waits for it once, not once per request
+    (send what waits, the key, the send itself); the queue shows in `relay status`; ticket commands never
+    touch the network."""
+    import socket
+    import urllib.error
+
+    from test_publish_client import own_sleeps
+
+    from orch import net
+
+    connect(run, rel)
+    tid = new_ticket()
+    tries = []
+
+    def no_dns(req, timeout, **kw):
+        tries.append(req.full_url)
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided"))
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", no_dns)
+    own_sleeps(monkeypatch)
+    assert "Not sent yet" in run("relay", "send", PEER, "first")[1]
+    tries.clear()
+    code, out, _ = run("relay", "send", PEER, "second")
+    assert code == 0 and "Not sent yet" in out
+    # one wait (sending "first" again); "second" is kept at once, with no second wait
+    assert len(tries) == 1 + len(net.RETRY_DELAYS)
+    assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2
+    tries.clear()
+    code, out, _ = run("relay", "status")
+    assert code == 0 and "2 messages not sent yet" in out and "next orch relay command" in out
+    # status checks the relay once (a relay command may wait once), never once per retry stacked on more waits
+    assert len(tries) <= 1 + len(net.RETRY_DELAYS)
+    assert json.loads(run("relay", "status", "--json")[1])["waiting"] == 2
+    tries.clear()
+    for cmd in (("ticket", "list"), ("ticket", "show", tid), ("check", "add", tid, "step"), ("status",)):
+        assert run(*cmd)[0] == 0, cmd
+    assert tries == []
+
+
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     proj, run, rel, monkeypatch, new_ticket
 ):
@@ -1095,6 +1137,58 @@ def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, mo
     monkeypatch.setattr(relay, "_post_message", real)
     code, out, _ = run("relay", "outbox", "--resend")
     assert "refused" in out and not list((proj / ".orch/outbox").glob("m_*.json"))
+
+
+def test_a_new_send_never_overtakes_a_waiting_message(proj, run, rel, monkeypatch):
+    """R3.1: a message sent while older ones wait in the outbox (Chat, a phone note: no CLI flush first) goes
+    out after them, in the order they were written; a waiting one the relay refuses is remembered as not
+    sent."""
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    real = relay._post_message
+
+    def down(r, raw):
+        raise _http(Refused("x"), 503)
+
+    monkeypatch.setattr(relay, "_post_message", down)
+    first = relay.send_text(proj, PEER, "first")
+    refused = relay.send_text(proj, "ws_denied0001", "to a workspace that refuses")
+    assert first["sent"] is False and refused["sent"] is False and not rel.sent
+    monkeypatch.setattr(relay, "_post_message", real)
+    second = relay.send_text(proj, PEER, "second")
+    assert second["sent"] is True
+    assert [s["body"]["text"] for s in rel.sent] == ["first", "second"]
+    assert relay.outbox_list(proj) == [] and set(relay.not_sent(proj)) == {refused["id"]}
+    monkeypatch.setattr(relay, "_post_message", down)
+    assert relay.send_text(proj, PEER, "third")["sent"] is False
+    monkeypatch.setattr(relay, "_post_message", real)
+    with pytest.raises(Refused):  # the relay refusing the new message itself still fails its send
+        relay.send_text(proj, "ws_denied0001", "fourth")
+    assert [s["body"]["text"] for s in rel.sent] == ["first", "second", "third"]
+
+
+def test_inbox_takes_unknown_fields_from_a_newer_peer(proj, run, rel):
+    """R3.1: a newer orch adds fields (top level, body, a nested part); this one reads, hands on and acks the
+    message without a crash, and a delivery of it again is dropped."""
+    connect(run, rel)
+    m = msg(
+        "m_newer00000000001",
+        "text",
+        {"text": "from the future", "mood": {"x": [1, 2]}, "update": {"kind": "working", "eta_ms": 5}},
+        priority=3,
+        trace={"hops": ["a"]},
+    )
+    rel.inbox.append(m)
+    code, out, err = run("relay", "inbox", "--json")
+    assert code == 0, err
+    got = [x for x in json.loads(out) if x["id"] == m["id"]]
+    assert len(got) == 1 and got[0]["body"]["text"] == "from the future" and m["id"] in rel.acked
+    rel.acked.clear()  # the ack was lost: the relay hands it over again
+    run("relay", "done", m["id"])
+    code, out, _ = run("relay", "inbox", "--json")
+    assert code == 0 and [x for x in json.loads(out) if x["id"] == m["id"]] == []
 
 
 def test_outbox_refuses_a_symlinked_file(proj, run, rel):
