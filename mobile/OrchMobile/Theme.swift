@@ -24,12 +24,18 @@ enum Theme {
 struct ThemeFont: ViewModifier {
     @ScaledMetric private var size: CGFloat
     let weight: Font.Weight
-    init(_ size: CGFloat, _ weight: Font.Weight) { _size = ScaledMetric(wrappedValue: size); self.weight = weight }
-    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight)) }
+    let design: Font.Design
+    init(_ size: CGFloat, _ weight: Font.Weight, _ design: Font.Design) {
+        _size = ScaledMetric(wrappedValue: size); self.weight = weight; self.design = design
+    }
+    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight, design: design)) }
 }
 
 extension View {
-    func themeFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> some View { modifier(ThemeFont(size, weight)) }
+    /// `design: .monospaced` for values a person compares character by character (fingerprints, ORCH-2128).
+    func themeFont(_ size: CGFloat, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
+        modifier(ThemeFont(size, weight, design))
+    }
 }
 
 extension Color {

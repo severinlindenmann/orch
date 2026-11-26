@@ -187,3 +187,15 @@ def test_late_phone_answer_is_a_history_line_only(proj, run, conn):  # noqa: F81
     q = tickets.load(proj, tid)["questions"][0]
     assert q["answer"] == "Taken back: plans changed"
     assert len(_taken(conn)) == 1
+
+
+def test_a_question_sent_twice_to_phones_is_taken_back_for_both(proj, run, conn):  # noqa: F811
+    tid = _new_ticket(run)
+    _ask(run, tid, "--phone")
+    path = relay._asked_path(proj)
+    asked = json.loads(path.read_text(encoding="utf-8"))
+    (first,) = asked
+    asked["m_second_send"] = dict(asked[first])
+    path.write_text(json.dumps(asked), encoding="utf-8")
+    assert _take(run, tid, "plans changed")[0] == 0
+    assert sorted(m["reply_to"] for m in _taken(conn)) == sorted([first, "m_second_send"])

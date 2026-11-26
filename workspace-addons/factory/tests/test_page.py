@@ -893,7 +893,7 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
         "orders.filter(o => o.open || draftWaiting(o) || reviews(o).length)" in js
     )  # not "nothing waits for you"
     assert (
-        "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))]"
+        "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))]"
         in js
     )  # in "Waits for you": one review per stage
 
@@ -1252,7 +1252,7 @@ def test_a_stopped_factory_says_where_and_who_starts_it_with_no_button():
         "this computer"
         not in (body + js[js.index("function waitWords(") : js.index("const waitNote")]).lower()
     )
-    assert "notices.append(stopped(homeData.workspace))" in js
+    assert "if (homeData.watcher === false) next.push(stopped(homeData.workspace))" in js
 
 
 def test_the_page_words_why_nothing_works():

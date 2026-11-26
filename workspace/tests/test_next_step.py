@@ -7,7 +7,8 @@ import re
 from orch import addons, cli, nextstep
 
 
-def _leaves():
+def _leaves(monkeypatch):
+    monkeypatch.setattr(cli, "_drop_hidden", lambda p: None)  # keep help=SUPPRESS to tell hidden apart
     top = cli.build_parser(show_all=True)
     out = []
 
@@ -31,8 +32,8 @@ def _leaves():
     return out
 
 
-def test_every_visible_command_has_a_next_step_or_a_reason():
-    leaves = _leaves()
+def test_every_visible_command_has_a_next_step_or_a_reason(monkeypatch):
+    leaves = _leaves(monkeypatch)
     assert "ticket new" in leaves and "relay send" in leaves
     missing = [p for p in leaves if p not in nextstep.EXEMPT and nextstep.entry(p) is None]
     assert not missing, f"add them to nextstep.HINTS (or EXEMPT with a reason): {missing}"
@@ -70,12 +71,44 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
         seen.append(line)
         m = re.search(r"orch ([a-z-]+)", line)
         if m:
-            assert m.group(1) in ("ticket", "check", "needs", "addon", "review", "init", "stop"), line
+            assert m.group(1) in ("ticket", "check", "needs", "answer", "addon", "review", "init", "stop"), (
+                line
+            )
     assert "orch check add" in seen[0]
     assert "orch check done" in seen[1] and "orch check done" in seen[2]  # after check add
     assert "orch check done" in seen[3]  # one task is still open
     assert "orch ticket summary" in seen[4]  # all tasks done, no summary yet
     assert re.search(r"orch ticket status \S+ done", seen[5])  # summary written
+
+
+def test_review_ticket_next_step_names_a_list_that_holds_it(proj, run):
+    """ORCH-2110: a ticket in Review is not an `orch needs` row: its Next lines and the one of `orch counts`
+    name `orch review list`, which lists it."""
+    run("init", "--yes")
+    key = json.loads(run("ticket", "new", "A", "--json")[1])["key"]
+    run("check", "add", key, "x")
+    run("check", "done", key, "c1", "--note", "ok")
+    _, out, _ = run("ticket", "status", key, "done", "--by", "agent:copilot")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("counts")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("review", "list")
+    assert key in out, out
+
+
+def test_lines_a_person_reads_name_the_key_not_the_id(proj, run):
+    """ORCH-1876: Next lines, `orch needs` rows and `orch run status` say MPU-2, never t_xxxxxx."""
+    run("init", "--yes")
+    made = json.loads(run("ticket", "new", "Do it", "--json")[1])
+    key, tid = made["key"], made["id"]
+    _, out, _ = run("check", "add", key, "step one")
+    assert f"orch check done {key} c1" in _last(out) and tid not in out
+    _, out, _ = run("run", "status", key)
+    assert f"orch run start {key}" in out and tid not in out
+    run("ask", key, "Which one?", "--option", "a", "--option", "b", "--recommend", "a")
+    _, out, _ = run("needs")
+    assert f"  {key}  " in out and tid not in out
+    assert _last(out) == f"Next: answer it: orch answer {key} q1 a"
 
 
 def test_json_shape_is_unchanged(proj, run):
@@ -105,6 +138,25 @@ def test_fresh_init_core_next_lines_name_no_part(proj, run):
             t1 = re.search(r"Created (\S+)", out).group(1)
         nxt = [x for x in out.splitlines() if x.startswith("Next:")]
         assert not any(bad.search(x) for x in nxt), (argv, nxt)
+
+
+def test_diag_says_what_looks_saves_and_deletes(proj, run, capsys):
+    run("init", "--yes")
+    code, out, _ = run("diag", "query")
+    nxt = _last(out)
+    # the report is offered as optional and local before the copyable line, which stays last
+    assert code == 0 and "optional" in nxt and "this workspace" in nxt and nxt.endswith(": orch diag report")
+    code, out, _ = run("diag", "query", "--json")
+    assert code == 0 and "Next:" not in out and set(json.loads(out)) >= {"total", "items", "window", "next"}
+    try:
+        cli.main(["diag", "--help"])
+    except SystemExit as e:
+        assert e.code == 0
+    out = capsys.readouterr().out
+    assert "read-only" not in out
+    for word in ("look:", "save:", "delete:", "inspect and query look", "for good"):
+        assert word in out, word
+    assert not re.search(r"relay|publish|share", out, re.I)  # off add-ons stay unnamed (R1.1)
 
 
 def _a(dry=False):
@@ -144,3 +196,31 @@ def test_keeper_off_cli_has_no_red_run_next_line(proj, run):
         assert code == 0, (argv, out, err)
         line = _last(out)
         assert line.startswith("Next: ") and "red run" not in line and "ticket list" not in line, (argv, out)
+
+
+def test_run_config_agents_are_in_help_all_and_run_help_names_no_internal_command(proj, capsys):
+    # ORCH-1877: README and docs/agents.md teach these commands; --help-all listed none of them
+    import pytest
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help-all"])
+    out = capsys.readouterr().out
+    for name in ("run", "config", "agents"):
+        assert re.search(rf"^\s+{name}\s+\S", out, re.M), name
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--help"])
+    out = capsys.readouterr().out
+    assert re.search(r"^\s+start\s+start your helper on a ticket", out, re.M)
+    assert "{" not in out and not {"_wrap", "claim", "argv", "event", "type"} & set(re.findall(r"\S+", out))
+
+
+def test_run_start_ends_with_a_next_line(proj, run, monkeypatch):
+    from orch import cli_run
+
+    run("init", "--yes")
+    t = json.loads(run("ticket", "new", "Do it", "--json")[1])["key"]
+    fake = {"notes": [], "resumed": False, "mode": "oneshot", "agent": "fake", "run": "r_abc1", "log": "l"}
+    monkeypatch.setattr(cli_run.runs, "start", lambda *a, **k: fake)
+    code, out, err = run("run", "start", t)
+    assert code == 0, err
+    assert _last(out) == f"Next: watch it: orch run status {t}"

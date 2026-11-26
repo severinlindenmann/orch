@@ -349,6 +349,7 @@ def build(data: dict, root: Path) -> dict:
         "one_account": len(subs) <= 1,
         "flapping": switch_flapping(root),
         # the page draws its own banner for "every account is at its limit": no second box with the same sentence
+        "near": data.get("near"),  # the same line `orch usage list` prints (near.warning)
         "warnings": [w for w in data["warnings"] if not (all_at_limit and w == switching.ALL_AT_LIMIT_ALERT)],
         # kinds of work whose starts wait now (routing): one line each, in the kinds' order
         "waiting": [

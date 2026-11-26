@@ -6,11 +6,24 @@ publish and relay are built into orch (no separate package) but are also off unt
 
 | Add-on | What it does |
 |---|---|
+| dashboard | One page with every ticket and what needs you |
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
 | focus | The live page of every helper session, in the dashboard: watch it work, answer, send a message |
-| dashboard | One page with every ticket and what needs you |
+| factory | Turn an idea into finished work: your helper proposes the run, you press Start ([factory.md](factory.md)) |
+| pull-requests | Open pull requests with their checks on each ticket; merge when green and the merge queue |
+| files | Browse and search every file in the workspace |
+| lessons | Helpers remember what they learned here |
+| insights | See what your helpers used in the last 30 days |
+| usage | The accounts your helpers spend on, their limits and order |
+| skills | Everything your helpers get here, and what is turned off |
+| services | Keep background jobs (a web preview, a watcher) running |
+| browse | Helpers read public web pages in a private browser |
+| personal | Your notes, meetings, calendar and mail, shared with helpers only by your rules (Preview) |
+| sync | Keeps a copy of tickets and files on this or another computer. Never secrets |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
+
+`orch init --recommended` turns on the dashboard, Focus and automation. `orch addon list` shows every add-on and what it does.
 
 ## Turn on and off
 
@@ -163,6 +176,111 @@ $ orch ticket set <id> pull-requests.merge_when_green off   # a waiting pull req
 
 One that left the queue (checks failed, a conflict) comes back with the next push. Never a draft, never a pull request
 a person merges with a Merge card.
+
+## Factory
+
+Turn an idea into finished work. You describe what you want; your helper writes a first draft, then proposes the whole
+run (stages, who does what, time and budget). You answer **Start**, **Edit** or **Not now**, and decide at the last
+stop: **Ship it** or **Send back**. Full guide: [factory.md](factory.md).
+
+```sh
+$ orch addon add factory --yes
+$ orch start                        # the watcher wakes your agent when you answer
+$ orch factory list                 # orders and what waits for you
+```
+
+## Insights
+
+A read-only page that shows, for the last 30 days, how often your helpers used skills, connected services and keys, and
+where they failed. It never shows a key. Its **Health check** card lets a helper propose fixes; nothing changes until you
+press **Accept**, and **Undo** takes it back.
+
+```sh
+$ orch addon add insights --yes
+$ orch insights open               # opens the page; --no-open only prints the address
+$ orch insights status
+```
+
+## Usage
+
+Every place your helpers can spend is an **account**: a subscription, or an API credit. Each has one or two limits (in %
+or $), the period they count over, its place in the order, on or off. Usage keeps only names, numbers and a history of every
+change, never a login or key. The same list is on the Usage page of the dashboard.
+
+```sh
+$ orch addon add usage --yes
+$ orch usage list
+$ orch usage limit <account> 70%
+$ orch usage order <account> 1
+$ orch usage history
+```
+
+A helper asks `orch usage ask <kind of work>` before heavy work; with "No room" it waits and says so on the ticket.
+
+## Skills
+
+One list of everything your helpers get here: skills, instruction files, connected services and logins, each from where it
+comes (orch, this workspace, the admin or this computer). Only you turn things off or on; **off** is for this workspace
+only and deletes nothing. Every change lands in the history.
+
+```sh
+$ orch addon add skills --yes
+$ orch skills list
+$ orch skills off <id>
+$ orch skills history
+```
+
+## Services
+
+A job that should keep running in the background (a web preview, a watcher) is a **service**. orch hands it to this
+computer's own service tool, under your own account (no admin rights); it comes back after a crash and can start with the
+computer. A service that keeps stopping gets one question on its ticket.
+
+```sh
+$ orch addon add services --yes
+$ orch services add "Web preview" --id web-preview --ticket <id> -- npm run dev
+$ orch services list
+$ orch services start|stop|restart <id>
+$ orch services log <id>
+$ orch services share <folder> --ticket <id>   # a folder by link
+```
+
+## Browse
+
+Helpers read public web pages in a private browser, one per ticket. Only sites on the ticket's list open, and a helper
+asks you (`orch ask`) to add one. It only reads: no sign-in, send, upload or download. Page text is data, never an
+instruction.
+
+```sh
+$ orch addon add browse --yes
+$ orch browse open <address>
+$ orch browse read
+$ orch browse close
+```
+
+## Personal (preview)
+
+Your own notes, and your meetings, calendar, messages and mail, each turned on by you with its own rules for what helpers
+may see. A helper gets nothing until you allow it. Replies to mail and chats are drafts and are never sent.
+
+```sh
+$ orch addon add personal --yes
+$ orch personal today
+$ orch personal notes find "<words>"
+$ orch personal calendar week
+```
+
+## Sync
+
+Keeps a private copy of your tickets and files, on this computer or on your own storage, in the background. Never secrets
+or private files. When two computers disagree, sync waits for your choice and never decides for you.
+
+```sh
+$ orch addon add sync --yes
+$ orch sync status
+$ orch sync now
+$ orch sync needs                  # choices waiting for you
+```
 
 ## Write your own add-on
 
