@@ -208,7 +208,7 @@ def test_orch_root_with_dotdot_is_normalised(proj, monkeypatch):
 def test_help_with_an_invalid_orch_root_is_refused_with_the_fix(proj, run, monkeypatch):
     monkeypatch.setenv("ORCH_ROOT", str(proj / "nope"))
     code, _, err = run("--help")
-    assert code == 2 and "Unset ORCH_ROOT" in err
+    assert code == 2 and "Clear ORCH_ROOT in this window only" in err
 
 
 def test_init_in_a_subfolder_of_orch_root_is_refused_with_a_plain_message(proj, run, monkeypatch):
@@ -218,7 +218,7 @@ def test_init_in_a_subfolder_of_orch_root_is_refused_with_a_plain_message(proj, 
     monkeypatch.chdir(sub)
     monkeypatch.setenv("ORCH_ROOT", str(outer))
     code, _, err = run("init", "--yes")
-    assert code == 2 and "ORCH_ROOT is set to" in err and "unset ORCH_ROOT" in err
+    assert code == 2 and "ORCH_ROOT is set to" in err and "clear ORCH_ROOT in this window only" in err
     assert not (sub / ".orch").exists()
 
 
@@ -286,3 +286,125 @@ def test_init_in_the_orch_root_folder_reached_through_a_symlink_is_not_refused(p
     code, _, err = run("init", "--yes")
     assert code == 0, err
     assert "Refused" not in err and "Note:" not in err
+
+
+# ORCH-2056 r5: the installer ends with "run: orch init"; a different workspace in ORCH_ROOT refuses that, and
+# the refusal names both ways out with lines that work in the shell the person is in. Folder names with spaces
+# and umlauts; the Windows wording is checked with a SIMULATED platform (cli._windows), real Windows in CI.
+_SHELLS = {
+    "windows (simulated)": (
+        True,
+        ["PowerShell:", "Remove-Item Env:ORCH_ROOT", "Command Prompt:", "set ORCH_ROOT="],
+    ),
+    "posix": (False, ["Terminal:", "unset ORCH_ROOT"]),
+}
+
+
+def _two_folders(proj):
+    """(the workspace ORCH_ROOT names, the new folder the person stands in)."""
+    there = _store(proj / "Kunden Müller")
+    (there / ".orch" / "keep.txt").write_text("x", encoding="utf-8")
+    here = proj / "Neues Büro"
+    here.mkdir()
+    return there, here
+
+
+def _every_file(p):
+    return {str(f.relative_to(p)): f.read_bytes() for f in sorted(p.rglob("*")) if f.is_file()}
+
+
+@pytest.mark.parametrize("shell", list(_SHELLS))
+def test_init_refused_by_another_orch_root_names_both_ways_for_this_shell(proj, run, monkeypatch, shell):
+    windows, want = _SHELLS[shell]
+    monkeypatch.setattr(cli, "_windows", lambda: windows)
+    there, here = _two_folders(proj)
+    monkeypatch.chdir(here)
+    monkeypatch.setenv("ORCH_ROOT", str(there))
+    before = (_files(there), _every_file(here))
+    code, out, err = run("init", "--yes")
+    assert code == 2 and out == ""
+    assert (_files(there), _every_file(here)) == before and not (here / ".orch").exists()
+    assert f"To use that workspace: go to {there.resolve()} and run orch init there." in err
+    assert f"To start a new workspace in this folder ({here.resolve()})" in err
+    assert "this window only" in err and err.rstrip().endswith("orch init")
+    for w in want:
+        assert w in err
+    other = _SHELLS["posix" if windows else "windows (simulated)"][1]
+    assert not any(w in err for w in other if w not in want)  # no PowerShell on Unix, no Unix line on Windows
+    said = err[err.index("Refused: ") :].rstrip("\n")  # after the one-time "Note: ORCH_ROOT sends this" line
+    assert said.startswith("Refused: ORCH_ROOT is set to") and "Nothing was written." in said.splitlines()[0]
+    assert all(line == line.rstrip() for line in said.splitlines())  # copyable: no trailing spaces
+    # machine-readable: stdout is only the JSON object, the same message in it
+    code, out, err2 = run("init", "--yes", "--json")
+    assert code == 2 and json.loads(out) == {"error": said.removeprefix("Refused: ")}
+    assert (_files(there), _every_file(here)) == before
+    # the person follows the "this folder" way: ORCH_ROOT cleared in this window, init works here only
+    monkeypatch.delenv("ORCH_ROOT")
+    code, _, err = run("init", "--yes")
+    assert code == 0, err
+    assert (here / ".orch").is_dir() and _files(there) == before[0]
+
+
+@pytest.mark.parametrize("shell", list(_SHELLS))
+def test_a_bad_orch_root_target_gives_the_same_labelled_lines(proj, run, monkeypatch, shell):
+    windows, want = _SHELLS[shell]
+    monkeypatch.setattr(cli, "_windows", lambda: windows)
+    _, here = _two_folders(proj)
+    monkeypatch.chdir(here)
+    monkeypatch.setenv("ORCH_ROOT", str(proj / "Gelöschter Ordner"))
+    before = _every_file(proj)
+    code, out, err = run("init", "--yes")
+    assert code == 2 and out == "" and "Nothing was changed." in err
+    assert "Clear ORCH_ROOT in this window only" in err and all(w in err for w in want)
+    if not windows:
+        assert "Remove-Item" not in err and "PowerShell" not in err
+    assert _every_file(proj) == before
+
+
+_CHILD = (
+    "import sys; from pathlib import Path; from orch import addons, cli; "
+    "addons.real_home = lambda: Path(sys.argv[1]); sys.exit(cli.main(sys.argv[2:]))"
+)
+
+
+def _child_env(proj, there):
+    home = proj.parent / f"{proj.name}_childhome"
+    home.mkdir(exist_ok=True)
+    keep = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "TEMP", "TMP") if k in os.environ}
+    env = {**keep, "HOME": str(home), "USERPROFILE": str(home), "ORCH_HOME": str(home / "orchhome")}
+    return home, {**env, "ORCH_HOME_STRICT": "1", "ORCH_ROOT": str(there), "PYTHONIOENCODING": "utf-8"}
+
+
+def test_init_refusal_reads_the_same_redirected_and_in_a_terminal(proj):
+    """A real process, as after the installer: output redirected to a file, and on a terminal (POSIX pty)."""
+    import subprocess
+
+    there, here = _two_folders(proj)
+    home, env = _child_env(proj, there)
+    before = (_files(there), _every_file(here))
+    cmd = [sys.executable, "-c", _CHILD, str(home), "init", "--yes"]
+    p = subprocess.run(cmd, cwd=here, env=env, capture_output=True, timeout=60)
+    assert p.returncode == 2 and p.stdout == b""
+    piped = p.stderr.decode("utf-8").replace("\r\n", "\n")
+    assert "\x1b" not in piped and "Then:" in piped and str(here.resolve()) in piped
+    assert (_files(there), _every_file(here)) == before
+    if os.name == "nt":
+        return  # no pty on Windows: the Windows CI run covers the redirected case there
+    import pty
+
+    main, child = pty.openpty()
+    q = subprocess.Popen(cmd, cwd=here, env=env, stdin=child, stdout=child, stderr=child)
+    os.close(child)
+    chunks = b""
+    while True:
+        try:
+            got = os.read(main, 4096)
+        except OSError:
+            break
+        if not got:
+            break
+        chunks += got
+    os.close(main)
+    assert q.wait(timeout=60) == 2
+    assert chunks.decode("utf-8").replace("\r\n", "\n") == piped  # same words, no colour codes
+    assert (_files(there), _every_file(here)) == before

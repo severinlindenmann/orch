@@ -686,6 +686,22 @@ def test_important_marks_the_record_only_and_the_act_verbs_take_it(cli, ws, fake
     assert out["services"][0]["important"] is False
 
 
+def test_important_works_without_a_working_service_tool(cli, ws, fake, monkeypatch):
+    # #2301: only the record changes, yet it saved the change and then reported the tool's refusal
+    from orch_services.store import Refused
+
+    assert jrun(cli, "add", "Forwarder", "--id", "fwd", "--", "python3", "-V")[0] == 0
+
+    def broken():
+        raise Refused("The service tool of this computer does not answer.")
+
+    monkeypatch.setattr(fake, "check", broken)
+    code, out = jrun(cli, "important", "fwd", "on")
+    assert code == 0, out
+    assert out["service"]["important"] is True and "asks once" in out["next"]
+    assert _record(ws, "fwd")["important"] is True
+
+
 # ---- edges found by the coverage run (ORCH: services test coverage)
 
 

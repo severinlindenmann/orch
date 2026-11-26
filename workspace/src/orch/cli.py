@@ -12,6 +12,7 @@ from pathlib import Path
 
 from orch import (
     addons,
+    cardkinds,
     cli_addons,
     cli_checks,
     cli_clients,
@@ -61,8 +62,24 @@ from orch.errors import Refused
 
 MAX_CHECK_FILES = 10  # files one `orch check done` may attach
 
-_HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
 _noted = False
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def _clear_root_lines() -> list[tuple[str, str]]:
+    """(label, line) that clear ORCH_ROOT in this window only. Windows has two shells and orch can not tell
+    which one started it, so both are named; other systems get the one POSIX line."""
+    if _windows():
+        return [("PowerShell", "Remove-Item Env:ORCH_ROOT"), ("Command Prompt", "set ORCH_ROOT=")]
+    return [("Terminal", "unset ORCH_ROOT")]
+
+
+def _hint() -> str:
+    ways = ", ".join(f"{label}: {line}" for label, line in _clear_root_lines())
+    return f"Clear ORCH_ROOT in this window only ({ways}), or point it at a folder with .orch in it."
 
 
 def _env_root() -> Path | None:
@@ -75,15 +92,17 @@ def _env_root() -> Path | None:
         return None
     p = Path(raw)
     if not p.is_absolute():
-        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_HINT} Nothing was changed.")
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_hint()} Nothing was changed.")
     try:
         p = p.resolve(strict=True)
     except (OSError, RuntimeError):
         raise Refused(
-            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_HINT} Nothing was changed."
+            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_hint()} Nothing was changed."
         ) from None
     if not p.is_dir() or not (p / ".orch").is_dir():
-        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. {_HINT} Nothing was changed.")
+        raise Refused(
+            f"ORCH_ROOT points to a folder without orch in it: {raw}. {_hint()} Nothing was changed."
+        )
     return p
 
 
@@ -1170,9 +1189,20 @@ def _init_guard(cwd: Path) -> None:
     here = cwd.resolve()
     env = _env_root()
     if env is not None and env != here:
+        ways = _clear_root_lines()
+        width = max(len(label) for label, _ in ways) + 2
         raise Refused(
-            f"ORCH_ROOT is set to {env}. Run orch init there, "
-            "or unset ORCH_ROOT to start a new workspace here."
+            "\n".join(
+                [
+                    f"ORCH_ROOT is set to {env}, a different workspace, so orch init stops here. "
+                    "Nothing was written.",
+                    f"  To use that workspace: go to {env} and run orch init there.",
+                    f"  To start a new workspace in this folder ({here}): clear ORCH_ROOT in this window "
+                    "only (other windows are not changed), then run orch init.",
+                    *(f"    {label + ':':<{width}}{line}" for label, line in ways),
+                    f"    {'Then:':<{width}}orch init",
+                ]
+            )
         )
     if any(c in (here, *here.parents) for c in _copies_folders()):
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
@@ -1820,6 +1850,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
+        if not args.kind and not args.action:  # an add-on's or orch's own question words itself
+            cardkinds.refuse_bad_question(args.text or "", list(args.option or []), bool(card))
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
@@ -1854,6 +1886,8 @@ def run(args: argparse.Namespace) -> None:
                 "\nHint: the question holds an orch command. A person copies or runs it in one click on "
                 'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
                 if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else "\n" + cardkinds.ASK_HINT
+                if not card and not args.kind and not (args.option and args.recommend)
                 else ""
             ),
         )
