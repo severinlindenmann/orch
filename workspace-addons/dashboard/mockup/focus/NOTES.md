@@ -188,6 +188,7 @@ Where Focus sits with Bar only). No meta row, no Watching bar, no Let me type sw
 (brand edge), Esc twice or a click outside stops. Split right / down asks Chat with… / Terminal / Plain terminal. The
 mockup keeps its panes side by side; the built layer also nests them (helper left, terminal and Manager stacked right)
 with 1 px dividers to drag, and folds the side menu to its rail beside a ticket at 1280.
+
 ## Chat shows the real talk or says it is a summary (ORCH-2204, 26 Nov)
 
 The Chat view shows the helper's real conversation (the newest turns of the session in use, read from the tool's own
@@ -195,3 +196,11 @@ saved conversation) with the ticket's steps, questions and your messages around 
 conversation (a tool that keeps none, or the file is not on this computer), the chat is the ticket's summary and one
 small line at its top says so: "Summary from the ticket" with Open terminal (`.live-chat-src`). Here ORCH-232 shows it.
 The terminal opens without WebGL too: xterm's normal renderer draws it.
+
+## The OK card: a helper waits for your OK on its screen (ORCH-2197, 26 Nov)
+
+Owner pick C a on ORCH-2188, with the owner's comment "should show the command by default". ORCH-240 in the demo waits
+at a hook confirm: its pane shows the OK card (Helper asks to run a command, the reason, the command shown, Allow once /
+Don't allow / Open terminal) in Chat and in Terminal view (there beside the terminal, no Open terminal). The product
+draws the two answers only for a prompt it recognised on the screen and answers exactly that prompt; any other wait
+shows the card with Open terminal only. Master: `.live-ok-t`, `.live-ok-cmd` (with `.code-block`) in widgets.css.
