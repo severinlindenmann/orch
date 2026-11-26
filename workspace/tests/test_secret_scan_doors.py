@@ -354,6 +354,61 @@ def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
     )
 
 
+# ---- ticket text doors: what a person or agent writes into a ticket (R5.2: secrets never go into tickets) --
+
+TEXT_DOORS = {
+    "edit-note": lambda t, v: ("ticket", "edit", t, "--note", f"saw {v}"),
+    "edit-title": lambda t, v: ("ticket", "edit", t, "--title", f"x {v}"),
+    "edit-done-when": lambda t, v: ("ticket", "edit", t, "--done-when", f"x {v}"),
+    "new": lambda t, v: ("ticket", "new", f"x {v}"),
+    "summary": lambda t, v: ("ticket", "summary", t, f"it was {v}"),
+    "outcome": lambda t, v: ("ticket", "outcome", t, "--why", f"x {v}"),
+    "tidy": lambda t, v: ("ticket", "tidy", t, "Clear title", "--description", f"x {v}"),
+    "log": lambda t, v: ("log", t, f"x {v}"),
+    "check-add": lambda t, v: ("check", "add", t, f"x {v}"),
+    "ask": lambda t, v: ("ask", t, f"is {v} ok?"),
+    "ask-option": lambda t, v: ("ask", t, "which?", "--option", f"x {v}", "--option", "b"),
+    "ask-because": lambda t, v: ("ask", t, "which?", "--option", "a", "--recommend", "a", "--because", v),
+    "answer": lambda t, v: ("answer", t, "q1", f"use {v}"),
+    "ref-add-url": lambda t, v: ("ref", "add", t, f"https://x.test/?a={v}"),
+    "ref-add-title": lambda t, v: ("ref", "add", t, "https://x.test/a", "--title", f"x {v}"),
+    "chat-say": lambda t, v: ("chat", "say", f"x {v}"),
+    "chat-say-ticket": lambda t, v: ("chat", "say", f"x {v}", "--ticket", t),
+    "report": lambda t, v: ("report", "problem", f"x {v}"),
+    "report-more": lambda t, v: ("report", "problem", "bad", "--more", f"x {v}"),
+    "report-expected": lambda t, v: ("report", "problem", "bad", "--expected", f"x {v}"),
+}
+
+
+@pytest.fixture(params=["github-token", "stored-key"])
+def planted_two(request, proj):
+    """The scanner's rules are tested per kind above; these doors only need a pattern and a stored key."""
+    if request.param == "stored-key":
+        keystore.add(proj, "planted-token", "token", STORED)
+        return request.param, STORED
+    return request.param, SAMPLES[request.param]
+
+
+@pytest.mark.parametrize("door", TEXT_DOORS)
+def test_ticket_text_is_scanned(proj, run, new_ticket, planted_two, door):
+    kind, value = planted_two
+    tid = new_ticket("Q3 invoice export")
+    assert run("ask", tid, "first?", "--option", "a", "--by", "human:tester")[0] == 0
+    before = _ticket_bytes(proj, tid)
+    reports = proj / ".orch" / "diag" / "reports"
+    code, out, err = run(*TEXT_DOORS[door](tid, value), "--by", "human:tester")
+    assert code != 0, "the write must be refused"
+    _clean(kind, value, out, err)
+    assert _ticket_bytes(proj, tid) == before, "nothing is written"
+    assert not reports.exists() or not any(p.is_file() for p in reports.rglob("*")), "no report is kept"
+
+
+def test_ticket_text_clean_still_goes_through(proj, run, new_ticket):
+    tid = new_ticket("Q3 invoice export")
+    assert run("ticket", "summary", tid, "Exported the CSV.", "--by", "human:tester")[0] == 0
+    assert run("log", tid, "all good", "--by", "human:tester")[0] == 0
+
+
 # ---- structural guard: a new door that skips the scanner fails here --------------------------------------
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch"
@@ -369,7 +424,9 @@ OUTBOUND = {
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
     ("net.py", "profile"): {"refuse_if_secret_in"},  # relay and publish profile description and tags
-    ("secretscan.py", "refuse_if_secret"): {"find"},
+    # refuse_if_secret runs it on the file and every unpacked member
+    ("secretscan.py", "_scan_bytes"): {"find"},
+    ("secretscan.py", "refuse_if_secret"): {"_scan_bytes"},
     ("secretscan.py", "refuse_if_secret_in"): {"find"},
 }
 # functions that put bytes on the wire without scanning themselves, because their caller did (the scanned
@@ -431,3 +488,55 @@ def test_ticket_fixture_test_is_collected():
     p = Path(__file__).with_name("test_ticket_fixtures.py")
     assert p.is_file()
     assert "def test_" in p.read_text(encoding="utf-8")
+
+
+# ---- #915: envelope fields and containers ----------------------------------------------------------------
+
+
+def test_relay_message_envelope_fields_are_scanned(proj, on, planted):
+    from orch import relay
+
+    kind, value = planted
+    for kw in ({"ticket": value}, {"reply_to": value}):
+        with pytest.raises(Refused) as e:
+            relay._message(proj, PEER, "text", {"text": "hi"}, **kw)
+        _clean(kind, value, e.value)
+    _nothing_left(proj, on)
+
+
+def _containers(value: str) -> dict[str, bytes]:
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+
+    raw = f"config\n{value}\n".encode()
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("word/document.xml", raw)
+    inner = zbuf.getvalue()
+    tbuf = io.BytesIO()
+    with tarfile.open(fileobj=tbuf, mode="w") as t:
+        info = tarfile.TarInfo("a.txt")
+        info.size = len(raw)
+        t.addfile(info, io.BytesIO(raw))
+    return {
+        "zip": inner,
+        "gzip": gzip.compress(raw),
+        "tar": tbuf.getvalue(),
+        "gzip-of-zip": gzip.compress(inner),
+    }
+
+
+@pytest.mark.parametrize("fmt", ["zip", "gzip", "tar", "gzip-of-zip"])
+def test_containers_are_scanned_inside(proj, planted, fmt):
+    kind, value = planted
+    with pytest.raises(Refused) as e:
+        secretscan.refuse_if_secret(_containers(value)[fmt], "file", proj)
+    _clean(kind, value, e.value)
+
+
+def test_a_clean_container_and_a_broken_one_pass(proj):
+    for blob in _containers("nothing here").values():
+        secretscan.refuse_if_secret(blob, "file", proj)
+    secretscan.refuse_if_secret(b"PK\x03\x04 not really a zip", "file", proj)

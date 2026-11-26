@@ -86,3 +86,48 @@ def test_refusals_are_plain_and_unknown_ops_fail(server, tmp_path):
     )
     assert call(server, "POST", "/api/act", {"op": "add", "args": {"part": "notes"}}, origin=False)[0] == 403
     assert call(server, "DELETE", "/api/act")[0] in (403, 405)
+
+
+def test_notes_paging_takes_only_plain_numbers(server, vault):
+    assert call(server, "POST", "/api/act", {"op": "add", "args": {"part": "notes"}})[0] == 200
+    assert call(server, "POST", "/api/act", {"op": "folder", "args": {"path": str(vault)}})[0] == 200
+    assert len(json.loads(call(server, "GET", "/api/notes?limit=1")[1])["notes"]) == 1
+    for bad in ("%C2%B2", "%EF%BC%92", "-1", "x"):  # ² and a full-width 2 look like digits to str.isdigit
+        code, body = call(server, "GET", f"/api/notes?limit={bad}&offset={bad}")
+        assert code == 200 and len(json.loads(body)["notes"]) == 3, bad
+
+
+def test_open_tickets_survive_hand_edited_files(server, ws):
+    """Ticket files are plain JSON a person may fix by hand (R1.3): odd values never break Use in a ticket."""
+    d = ws / ".orch" / "tickets"
+    (d / "t_num00001.json").write_text(json.dumps({"title": 5, "updated_at": 17, "status": "open"}))
+    (d / "t_lst00001.json").write_text(json.dumps({"id": ["x"], "key": None, "updated_at": None}))
+    (d / "t_bad00001.json").write_text("{not json")
+    (d / "t_arr00001.json").write_text("[1]")
+    (d / "t_don00001.json").write_text(json.dumps({"status": "done", "title": "finished"}))
+    code, body = call(server, "GET", "/api/tickets")
+    assert code == 200, body
+    rows = {r["id"]: r for r in json.loads(body)["tickets"]}
+    assert set(rows) == {"t_abc123", "t_num00001", "t_lst00001"}
+    assert rows["t_num00001"]["title"] == "5" and all(isinstance(r["updated"], str) for r in rows.values())
+
+
+def test_server_edges(server, ws):
+    assert call(server, "GET", "/nothing", vouched=False)[0] == 404
+    assert call(server, "GET", "/api/nothing")[0] == 404
+    assert json.loads(call(server, "GET", "/api/calendar")[1]) == {"on": False}
+    rules = json.loads(call(server, "GET", "/api/rules")[1])
+    assert rules["notes"] is None and rules["read"] and rules["write"]
+    assert call(server, "POST", "/elsewhere", {"op": "add"})[0] in (403, 405)
+    code, _ = call(server, "POST", "/api/act", {"op": "add", "args": {"part": "notes"}}, vouched=False)
+    assert code == 403
+    assert call(server, "POST", "/api/act", {"op": "add", "args": []})[0] == 400
+    code, body = call(server, "POST", "/api/act", {"op": "add", "args": {"part": ""}})
+    assert code == 409 and "Reload the page" in json.loads(body)["error"]
+    code, body = call(server, "POST", "/api/act", {"op": "use", "args": {"ticket": "t_gone0001", "id": "x"}})
+    assert code == 409 and "not there any more" in json.loads(body)["error"]
+    for args in ({"part": "notes", "way": "w"}, {"part": "mail", "way": "w", "accounts": "all"}):
+        code, body = call(server, "POST", "/api/act", {"op": "inbox_source", "args": args})
+        assert code == 409 and "Reload the page" in json.loads(body)["error"]
+    code, body = call(server, "POST", "/api/act", {"op": "meet_tickets", "args": {"id": "m", "steps": [0]}})
+    assert code == 409 and "Reload the page" in json.loads(body)["error"]

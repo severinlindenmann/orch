@@ -37,9 +37,6 @@
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/home.js": {
   "agent": 1
  },
- "workspace-addons/dashboard/src/orch_dashboard/web/pages/newticket.js": {
-  "agent": 1
- },
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/role.js": {
   "Schedule": 3
  },
@@ -48,13 +45,10 @@
  },
  "workspace-addons/factory/src/orch_factory/commands.py": {
   "Agents": 1,
-  "agent": 3
+  "agent": 1
  },
  "workspace-addons/factory/src/orch_factory/flow.py": {
   "agent": 2
- },
- "workspace-addons/factory/src/orch_factory/web/factory.js": {
-  "agent": 18
  },
  "workspace-addons/insights/src/orch_insights/lists.py": {
   "agent": 1
@@ -129,7 +123,8 @@
  },
  "workspace/src/orch/init.py": {
   "Agent": 4,
-  "agent": 6
+  "agent": 6,
+  "agents": 1
  },
  "workspace/src/orch/jobs.py": {
   "Job": 1
@@ -138,7 +133,8 @@
   "agent": 1
  },
  "workspace/src/orch/nextstep.py": {
-  "agent": 1
+  "agent": 4,
+  "agents": 1
  },
  "workspace/src/orch/profile_propose.py": {
   "agent": 1,

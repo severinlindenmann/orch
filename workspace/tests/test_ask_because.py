@@ -40,6 +40,16 @@ def test_a_question_without_because_has_no_field_and_keeps_its_digest(proj, run,
     assert "because" not in q
 
 
+def test_ask_stores_who_asked_outside_the_digest(proj, run, new_ticket):
+    """ORCH-2023: the question names its asker (Home said the workspace's chosen agent); old digests stay."""
+    tid = new_ticket("Files")
+    assert _ask(run, tid, "--recommend", "Keep")[0] == 0
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["asked_by"] == "agent:helper"
+    plain = {k: v for k, v in q.items() if k != "asked_by"}
+    assert tickets.question_digest(q) == tickets.question_digest(plain)
+
+
 def test_because_needs_a_suggestion_and_stays_one_short_line(proj, run, new_ticket):
     tid = new_ticket("Files")
     code, out, err = _ask(run, tid, "--because", "a reason")
