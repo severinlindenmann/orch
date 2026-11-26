@@ -1,5 +1,5 @@
 // Messages and group chats with the stand-in relay (server.py; the workspace "Kitchen" may receive text and files):
-// - Contacts: the person presses "Send a message" for Kitchen, writes in the chat with Kitchen and sends it; it is
+// - Relay: the person presses "Send a message" for Kitchen, writes in the chat with Kitchen and sends it; it is
 //   delivered and still there after a reload.
 // - A group chat on a ticket (made here as a helper would): the person writes to the group, finds it again as the
 //   ticket's chat, and shares a ticket file with the group from the ticket page.
@@ -20,10 +20,10 @@ module.exports = {
     await open('#home');
     await until(s => (s.addons || []).some(a => a.dashboard?.panel === 'phone'), 'the relay turned on');
 
-    // a message to Kitchen, started from Contacts
+    // a message to Kitchen, started from Relay
     await open('#addon/relay');
     const send = page.getByRole('button', { name: 'Send a message' }).first();
-    await send.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Send a message button on Contacts:\n' + (await text()).slice(0, 500)); });
+    await send.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Send a message button on Relay:\n' + (await text()).slice(0, 500)); });
     await send.click();
     const box = page.getByRole('textbox', { name: 'Message Kitchen' });
     await box.waitFor({ timeout: 20000 });

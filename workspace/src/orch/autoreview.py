@@ -467,6 +467,8 @@ def held(root: Path, ticket: dict) -> bool:
 def answer_away(root: Path, dry_run: bool = False) -> list[dict]:
     """Every open question on a working ticket: Away mode answers what it may at once. Returns
     [{ticket, key, question, routine, why, answer, done, away}]."""
+    from orch import reviewer  # reviewer imports autoreview: here, no cycle at load
+
     out = []
     for t in tickets.list_all(root):
         if t.get("status") in ("done", "dropped"):
@@ -475,6 +477,8 @@ def answer_away(root: Path, dry_run: bool = False) -> list[dict]:
             if q.get("answer") is not None or q.get("taken_back") is not None:
                 continue
             ok, why = away_answerable(t, q)
+            if ok and reviewer.quote_stale(root, t, q):
+                ok, why = False, reviewer.QUOTE_STALE
             row = {
                 "ticket": t["id"],
                 "key": t.get("key") or t["id"],

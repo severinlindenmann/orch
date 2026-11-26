@@ -81,6 +81,7 @@ SETTINGS_OPS = (
     "prepare.set",
     "auto_reviewer.set",
     "away.set",
+    "reviewer_mode.set",
     "diag.set",
     "typing.set",
     "terminal-typing.set",  # ORCH-1656: the plain terminal's switch showed its old state until the full build

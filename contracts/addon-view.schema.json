@@ -47,13 +47,13 @@
     "block": {
       "type": "object",
       "required": ["type"],
-      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "chart", "flow", "contacts"] } },
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "chart", "flow", "contacts", "conversations"] } },
       "oneOf": [
         { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
         { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" },
         { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" },
         { "$ref": "#/$defs/split" }, { "$ref": "#/$defs/chart" }, { "$ref": "#/$defs/flow" },
-        { "$ref": "#/$defs/contacts" }
+        { "$ref": "#/$defs/contacts" }, { "$ref": "#/$defs/conversations" }
       ]
     },
     "stat": {
@@ -299,6 +299,38 @@
             "refused": { "type": "integer", "minimum": 0, "description": "Messages refused as forged or changed (not_valid)." },
             "accepted_at": { "$ref": "#/$defs/time" },
             "withdrawn_at": { "$ref": "#/$defs/time" }
+          }
+        } }
+      }
+    },
+    "conversations": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "description": "One conversation per workspace (added 25 Nov, RP5): a list of workspaces (`items`) with the thread of the chosen one beside it (phone width: the list first, then the thread). Each message says who wrote it (`you` or `them`), when, and either `text`, a `file` or a handed-over `task` (a small card). Under your own messages `state` is what this workspace already records: Sent, Not sent yet, Waiting for <Name>. `offline` is one line naming the messages that wait. The dashboard sends a message with its own op `message.send` ({workspace, text}). Older dashboards skip the block.",
+      "properties": {
+        "type": { "const": "conversations" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "items": { "type": "array", "maxItems": 12, "items": {
+          "type": "object", "required": ["id", "name", "messages"], "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+            "name": { "$ref": "#/$defs/text", "maxLength": 60 },
+            "about": { "$ref": "#/$defs/text", "maxLength": 80, "description": "The workspace's own short description." },
+            "last": { "$ref": "#/$defs/text", "maxLength": 60, "description": "The newest message in one line, for the list." },
+            "badge": { "$ref": "#/$defs/chip" },
+            "offline": { "$ref": "#/$defs/text", "description": "Names the messages that wait because the relay can't be reached." },
+            "messages": { "type": "array", "maxItems": 30, "description": "Oldest first.", "items": {
+              "type": "object", "required": ["id", "who", "at"], "additionalProperties": false,
+              "properties": {
+                "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,40}$" },
+                "who": { "enum": ["you", "them"] },
+                "at": { "$ref": "#/$defs/text", "maxLength": 40, "description": "The time in words, e.g. 'today 18:05'." },
+                "text": { "$ref": "#/$defs/text" },
+                "file": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "$ref": "#/$defs/text", "maxLength": 120 }, "size": { "$ref": "#/$defs/text", "maxLength": 20 } } },
+                "task": { "type": "object", "required": ["title"], "additionalProperties": false, "properties": { "title": { "$ref": "#/$defs/text" }, "from": { "$ref": "#/$defs/text", "maxLength": 24, "description": "The ticket key the task was handed over from." }, "note": { "$ref": "#/$defs/text" } } },
+                "state": { "$ref": "#/$defs/chip" },
+                "note": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Where orch passed a message from them on." }
+              }
+            } }
           }
         } }
       }
