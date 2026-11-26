@@ -16,7 +16,7 @@ def test_settings_navigation_and_cards():
         "OrchMobileMode?.settingsSection(h)",
         "'1. Phone link'",
         "function addonDetailPage(addon)",
-        "'About this add-on'",
+        "'Remove ' + label",  # D6: one list ends with Remove and what stays (no 'About this add-on')
         "OrchLook?.settingsSection()",
         "agent-card",
         "role:'status', className:'meta test-note'",

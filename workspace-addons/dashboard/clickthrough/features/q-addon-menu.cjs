@@ -29,9 +29,14 @@ module.exports = {
     await open('#addon/factory');
     const t = await text();
     must(/turned off/i.test(t), 'an old Factory link does not say the add-on is turned off:\n' + t.slice(0, 300));
-    // the button names the add-on by its menu label (Projects since the owner's word list, ORCH-478)
-    await page.locator('[data-key="addon-off"] a[href="#settings/addons/factory"]').click();
-    await page.waitForFunction(() => location.hash.startsWith('#settings/addons'), null, { timeout: 10000 })
-      .catch(() => { throw new Error('"Open Factory settings" did not lead to Settings > Add-ons'); });
+    // D5: the page keeps its name, one notice says it is off with one green Turn on button (named by the menu label)
+    must(await page.locator('[data-key="addon-off"] [data-key="addon-off-on"]').count() === 1, 'the turned-off notice has no Turn on button');
+    // D6: the page's one Settings button opens its part of Settings, and Back returns here
+    await page.locator('[data-key="addon-settings"]').click();
+    await page.waitForFunction(() => location.hash === '#settings/addons/factory', null, { timeout: 10000 })
+      .catch(() => { throw new Error('the Settings button did not open the add-on settings'); });
+    await page.locator('[data-key="addon-detail-back"]').click();
+    await page.waitForFunction(() => location.hash === '#addon/factory', null, { timeout: 10000 })
+      .catch(() => { throw new Error('"Back to …" did not return to the page the settings were opened from'); });
   },
 };

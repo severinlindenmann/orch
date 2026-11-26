@@ -161,7 +161,9 @@ def test_github_trouble_is_the_notice(prws):
     add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
     poll.once(prws, fetch=FakeGitHub({}, fail={"acme/app": gh.NOT_SIGNED_IN}))
     v = valid(view.build(prws, running=True, queue_alive=True))
-    assert v["notice"] == gh.NOT_SIGNED_IN and v["notice_tone"] == "bad"
+    assert v["notice"] == view.NOT_CONNECTED and v["notice_tone"] == "warn"  # D5: no command, no "this computer"
+    assert "gh auth" not in v["notice"] and "this computer" not in v["notice"]
+    assert v["button"] == {"label": "Try again", "action": {"op": "addon.refresh"}}
     assert v["blocks"][0]["type"] == "list"  # nothing readable: the empty state, not an empty table
 
 

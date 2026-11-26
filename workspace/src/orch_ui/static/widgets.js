@@ -163,6 +163,29 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
  if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
  return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
+/* One look per page state (D4-D6, 26 Nov). Text only (textContent). Every page and add-on page uses these, no own copy.
+   UI.pageEmpty({title, text, step, dataKey}) -> <section class="card page-empty">: what is missing (title), one sentence what
+     will show up here (text), and the first step (step: a node such as the page's own input and button, or
+     {label, href|onClick} for one green button). No step where the helper fills the page: then only the sentence.
+   UI.pageNotice({what, still, action, tone, dataKey}) -> <div class="banner page-notice attn|error" role="status">: what
+     happened (bold), what still works, and one green button ({label, href|onClick|data:{...}}). Goes right under the
+     page name; one per page. tone 'error' for a failure the person must act on (default 'attn').
+   UI.settingsButton({href, label, dataKey}) -> <a class="btn outline sm settings-btn">: gear + "Settings", the one way
+     to an add-on's settings, first among the page top's buttons. */
+const stepButton=(a,cls)=>{const b=el(a.href?'a':'button','btn primary sm'+(cls?' '+cls:''),a.label);if(a.href)b.href=a.href;else{b.type='button';if(a.onClick)b.onclick=a.onClick}
+ if(a.data)Object.keys(a.data).forEach(k=>{b.dataset[k]=a.data[k]});return b};
+UI.pageEmpty=o=>{o=o||{};const b=el('section','card page-empty');if(o.dataKey)b.dataset.key=o.dataKey;
+ if(o.title)b.append(el('h2','',o.title));if(o.text)b.append(el('p','',o.text));
+ if(o.step){const s=el('div','page-empty-step');s.append(o.step instanceof Node?o.step:stepButton(o.step));b.append(s)}
+ return b};
+UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='error'?'error':'attn'));b.setAttribute('role',o.tone==='error'?'alert':'status');if(o.dataKey)b.dataset.key=o.dataKey;
+ const p=el('p','grow');if(o.what)p.append(el('strong','',o.what));if(o.what&&o.still)p.append(' ');if(o.still)p.append(o.still);b.append(p);
+ if(o.action)b.append(o.action instanceof Node?o.action:stepButton(o.action));
+ return b};
+UI.settingsButton=o=>{o=o||{};const a=el('a','btn outline sm settings-btn');a.href=o.href||'#settings/addons';if(o.dataKey)a.dataset.key=o.dataKey;
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),
+  document.createTextNode(o.label||'Settings'));
+ if(o.label&&o.label!=='Settings')a.setAttribute('aria-label',o.label);return a};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}

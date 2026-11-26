@@ -28,5 +28,6 @@ test('the click on a prompt button opens the dialog; the dashboard code never na
 
 test('place = settings keeps an add-on out of the nav, its page route stays', () => {
   assert.match(app, /addons\(\)\.filter\(a => a\.dashboard && a\.dashboard\.place !== 'settings' && a !== contactsAddon\)/);
-  assert.match(settings, /href:'#addon\/' \+ encodeURIComponent\(addon\.name\), 'data-key':'addon-detail-open'/);
+  // D6: the settings page's way back is "Back to <page>" (where it was opened from), else Settings › Add-ons
+  assert.match(settings, /const back = settingsBack \|\| \{hash:'#settings\/addons', label:'Add-ons'\}/);
 });
