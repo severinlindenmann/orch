@@ -84,9 +84,15 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         if not isinstance(value, str) or not value.strip() or len(value) > 200 or "\x00" in value:
             raise Bad("Say when in at most 200 characters.")
         from .cli import Refused, repeat
+        from .plain import repeat_zone
 
+        # Save in the repeat window (ORCH-1969): a ticket that already repeats keeps its own zone, the one the
+        # window names; only a new repeat takes the default zone
+        t = next((x for x in orchcli.tickets(root) if x["id"] == target), None)
+        sched = ((t or {}).get("ext") or {}).get("automation") or {}
+        tz = repeat_zone(root, sched) if sched.get("recurring") is True and sched.get("cron") else None
         try:
-            return {**repeat(root, target, value, False, by=by), "text": "Repeat saved."}
+            return {**repeat(root, target, value, False, by=by, tz=tz), "text": "Repeat saved."}
         except Refused as e:
             raise Bad(str(e)) from None
     t = next((x for x in orchcli.tickets(root) if x["id"] == target), None)
