@@ -3,7 +3,7 @@
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
 // `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
-// ORCH-524: a Check result's file as the ticket lists it (its time and size, when known here), so its link names
+// ORCH-524: a Test results card's file as the ticket lists it (its time and size, when known here), so its link names
 // its version and the browser keeps the picture; unknown: a plain link that asks again by content hash.
 function reviewFileStamp(tid, kind, name) {
   const t = array(state?.tickets).find(x => x?.id === tid);
@@ -275,7 +275,7 @@ function reviewApi() {
       if (typeof c?.ticket !== 'string') return '';
       const m = /^reviewed\/([0-9a-f]{12})\/([^/]+)$/.exec(String(ref || ''));
       if (m) return '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=reviewed&n=' + encodeURIComponent(m[1] + '/' + m[2]);
-      // a Check result's own files (ORCH-183): a picture or PDF through /api/file, a web page in its sandboxed /view frame
+      // a Test results card's own files (ORCH-183): a picture or PDF through /api/file, a web page in its sandboxed /view frame
       const f = /^(evidence|artifacts)\/((?:[^/\\]+\/){0,3}[^/\\]+)$/.exec(String(ref || ''));
       if (!f || f[2].split('/').some(p => p === '..' || p === '.' || p.startsWith('.'))) return '';
       return /\.html?$/i.test(f[2])
@@ -428,7 +428,7 @@ function reviewAcceptedCard() {
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with “I review the result” on wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
     meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
 };
@@ -437,6 +437,7 @@ function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
   return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
     h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
+    h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'),
     h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':where + '-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
 }
 // One set of rows for both places (R4.3): the Review card and Settings > General.
@@ -483,6 +484,7 @@ function reviewExtraRows() {
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
+    if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
     if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }

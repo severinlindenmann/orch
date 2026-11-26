@@ -440,6 +440,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .swipe-ov-state.later{background:var(--surface-3);color:var(--text)}
 .preview-wait{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--text-muted)}
 iframe.loading{opacity:0}
+.preview-fail{position:absolute;inset:0;align-content:center;max-height:none;background:var(--surface)}
 .swipe-compare[data-view=slide] .cmp-line{pointer-events:none}
 .swipe-compare[data-view=slide] .cmp-line::after{display:none}
 .cmp-handle{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:999px;background:var(--brand);box-shadow:var(--lift-shadow);pointer-events:auto;cursor:ew-resize;touch-action:none}
@@ -541,6 +542,12 @@ body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
+/* ORCH-2024, ORCH-2113: nothing else in the rail and an empty All cards list (nothing to review, or one card alone):
+   no empty left column, so the Waiting / Answered switch lines up with the page heading; the empty state or the card
+   sits in the card's reading column under it */
+.review-layout>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
+.review-layout:not(.with-ticket):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
+.review-main :is(#deck,#answered)>.empty-state{max-width:var(--review-card-w)}
 
 /* Report a problem (checks list in the dialog) */
 .report-checks{list-style:none;margin:0;padding:0}
@@ -981,7 +988,7 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
-.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
+.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center;flex:none;white-space:nowrap}
 /* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
 @media(max-width:720px){
 .blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}
@@ -1045,7 +1052,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 /* List and panel (ORCH-326, the Services page; OrchBlocks split block): a slim list on the left (state dot, name, state
    word, one button) and the chosen item in full on the right. Up to 720 px the list comes first; with an item chosen
    (data-picked) only its panel shows, with a way back (.phone-only). State look: .pill (done, failed, plain) with a
-   dot (.dot-ok, .dot-err, .dot-off). .log-lines = plain last lines of a log. */
+   dot (.dot-ok, .dot-err, .dot-off). .log-lines = plain last lines of a log. A pinned question (.banner) above the list
+   keeps a gap to it. */
+.blk-split>.banner+.banner,.blk-split>.banner+.split-view{margin-top:var(--s3)}
 .split-view{display:grid;grid-template-columns:272px minmax(0,1fr);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
 .split-view>*+*{border-left:1px solid var(--border)}
 .split-list{min-width:0}
@@ -1063,13 +1072,14 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-facts>div{display:grid;grid-template-columns:112px minmax(0,1fr);gap:var(--s3);align-items:center}
 .split-facts dt{color:var(--text-muted);font-size:var(--fs-meta)}
 .split-facts dd{margin:0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
-.split-facts dd>label{gap:var(--s2)}
+.split-facts dd>label{gap:var(--s2);flex-wrap:nowrap;min-width:0}
+.split-facts dd>label>.switch{flex:none}
 .log-lines{background:var(--sidebar);border:1px solid var(--border);border-radius:var(--r2);font-family:var(--font-mono);font-size:12.5px;line-height:20px;color:var(--text-muted);overflow:hidden}
 .log-lines:focus{outline:none}.log-lines:focus-visible{box-shadow:var(--focus-ring)}
 .log-lines-h{padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);font-family:var(--font-ui);font-size:var(--fs-meta)}
 .log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
 .log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
-.log-lines>p{padding:var(--s3);margin:0}
+.log-lines>p{padding:var(--s3);margin:0;font-family:var(--font-ui);font-size:var(--fs-meta)}
 .log-lines.log-short li:nth-last-child(n+7){display:none}
 .log-lines.log-full ol{max-height:60vh;overflow:auto}
 @media(max-width:720px){
@@ -1220,6 +1230,11 @@ button.live-pt:hover{color:var(--brand)}
 .live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
+.live-cmd{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.live-cmd code{font-family:var(--font-mono);overflow-wrap:anywhere;min-width:0}
+.live-cmd .live-run{flex:none}
+.live-cmd .live-run .menu-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:60;min-width:176px}
+.live-cmd .live-run .menu-pop .btn{width:100%;justify-content:flex-start}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
@@ -1289,7 +1304,7 @@ body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */
 body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
 body[data-live-narrow] .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
@@ -1399,10 +1414,10 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
    line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
-.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools{display:flex;gap:var(--s2);align-items:center}
 .wall-tools .input{max-width:360px}
 .wall-body{display:contents}
-.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum{display:grid;gap:var(--s1)}
 .wall-sum>.meta{margin:0}
 /* the start buttons right of the counts (draft D, ORCH-1568); under them on a phone */
 .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
@@ -1449,7 +1464,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-line+.wall-line{border-top:1px solid var(--border)}
 .wall-line:hover{background:var(--surface-2)}
 .wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.wall-line .wall-tt{white-space:nowrap}
+.wall-line .wall-tt{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}  /* a long title ends in … and never runs over the line (ORCH-2063) */
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
 /* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
@@ -1468,7 +1483,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 @media(max-width:720px){
   .wall-tools .input{max-width:none}
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
   .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
   .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
@@ -2435,7 +2450,14 @@ a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .door-card{display:grid;gap:16px;width:min(400px,100%);padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card)}
 .door-card .btn{width:100%}
 .door-error{margin:0;color:var(--danger);font-size:14px;line-height:20px}
-.door-hint{margin:0;color:var(--text-faint);font-size:12px;line-height:16px;text-align:center}
+.door-notice{width:min(400px,100%)}
+.door-help{display:grid;gap:8px;width:min(400px,100%)}
+.door-help-title{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.door-help p,.door-steps{margin:0;color:var(--text-muted);font-size:14px;line-height:20px}
+.door-help strong{color:var(--text);font-weight:600}
+.door-steps{display:grid;gap:4px;padding-left:20px}
+.door-hint{display:grid;gap:4px;margin:8px 0 0;padding-top:12px;border-top:1px solid var(--border)}
+.door-help .door-hint p{color:var(--text-faint);font-size:12px;line-height:16px}
 .door-hint code{font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
 .profiles{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;margin:0;padding:0;list-style:none}
 .profile{display:grid;justify-items:center;gap:12px;width:112px;padding:8px;border:0;border-radius:var(--radius-card);background:transparent;color:var(--text-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}
@@ -2842,3 +2864,21 @@ dialog .actions .actions-note{flex:1;min-width:0}
   dialog.dialog.sheet-phone .actions{position:sticky;bottom:0;margin:16px -16px 0;padding:12px 16px 16px;background:var(--surface);border-top:1px solid var(--border)}
   .banner.slim .banner-now{display:block;margin-left:0}
 }
+
+/* Pick several and change them at once (25 Nov, ORCH-2034; Tickets list). A checkbox per row (.pick-cell, .row-pick:
+   32 px target), a picked row tinted (tr.is-picked), and the bar that stays at the foot of the screen while rows are
+   picked (.bulk-bar, UI.bulkBar): "3 selected", the actions as menus that open upwards, Clear. aria-busy while saving. */
+.pick-cell{width:40px;padding-inline:4px 0}
+.row-pick{display:inline-grid;place-items:center;min-width:32px;min-height:32px;border-radius:8px;cursor:pointer}
+.row-pick:hover{background:var(--surface-3)}
+.row-pick input{margin:0;cursor:pointer}
+tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
+.bulk-bar{position:sticky;bottom:16px;z-index:30;display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:12px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface-2);box-shadow:var(--lift-shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
+.bulk-bar .bulk-count{display:inline-flex;align-items:center;gap:8px;font-weight:600;white-space:nowrap}
+.bulk-bar .bulk-count .spinner{width:14px;height:14px;flex:none}
+.bulk-bar .bulk-actions{display:flex;flex-wrap:wrap;gap:8px}
+.bulk-bar .bulk-actions .btn{min-height:32px}
+.bulk-bar .menu-pop{top:auto;bottom:calc(100% + 4px);left:0;right:auto;max-height:min(360px,60vh);overflow:auto}
+.bulk-bar .menu-pop .meta{padding:4px 8px}
+.bulk-bar[aria-busy=true] .bulk-actions{opacity:.5;pointer-events:none}
+.bulk-bar .bulk-clear{margin-left:auto}

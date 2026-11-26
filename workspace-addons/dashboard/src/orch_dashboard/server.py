@@ -319,7 +319,7 @@ def _link_msg(session, name: str) -> bytes:
         return REVOKED_MSG.encode()
     if getattr(session, "active", True) is False:  # a helper started this server: watch-only
         return WATCH_ONLY_MSG.encode()
-    return b"This link was already used. Sign in again: run orch dashboard open in your terminal."
+    return b"This sign-in link was already used or has ended. Sign in again: run orch dashboard open in your terminal."
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
@@ -2071,8 +2071,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
         elif state is None and body.get("op") in SETTINGS_OPS:
-            state = patch_settings(self.root, self.orch_bin, self.server.state_cache.get()[0], body.get("op"))
-            self.server.state_cache.quick(state)  # before the reply's own keys are added
+            op = body.get("op")  # the quick copy is stored before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_settings(self.root, self.orch_bin, held, op)
+            )
         elif (
             state is None
             and isinstance(tid, str)
@@ -2081,9 +2083,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
             # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
-            state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
-            if state is not None:
-                self.server.state_cache.quick(state)  # before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_ticket(self.root, self.orch_bin, held, tid)
+            )
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added

@@ -154,30 +154,48 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
 /// Every retry reuses the item's `client_id`, so the relay never stores a message twice. Survives restarts; one folder per item
 /// holds its files. `directory` can be an app group container (see `defaultDirectory`).
 /// Writes `outbox.json` off the main actor. `submit` keeps only the newest items while a write is running.
+/// Every result says which items it covered, so the Outbox knows which ones really reached the disk (ORCH-2125).
 private final class IndexWriter: @unchecked Sendable {
+    struct Result: Sendable {
+        let seq: Int
+        let ids: Set<String>
+        let error: String?
+        /// A newer state was already waiting when this write ended (its result follows).
+        let more: Bool
+    }
     static let queue = DispatchQueue(label: "io.severin.orch.outbox-index", qos: .utility)
     private static let log = Logger(subsystem: "io.severin.orch", category: "outbox")
     private let url: URL
     private let lock = NSLock()
     private var pending: [OutboxItem]?
     private var scheduled = false
+    private var seq = 0
+    private var fault = false
     init(url: URL) { self.url = url }
-    func submit(_ items: [OutboxItem], result: @escaping @Sendable (String?) -> Void) {
+    /// Tests only: every write fails as if the disk were full.
+    var failWrites: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return fault }
+        set { lock.lock(); fault = newValue; lock.unlock() }
+    }
+    func submit(_ items: [OutboxItem], result: @escaping @Sendable (Result) -> Void) {
         lock.lock(); pending = items; let start = !scheduled; scheduled = true; lock.unlock()
         guard start else { return }
         Self.queue.async { [self] in
             while true {
                 lock.lock()
                 guard let next = pending else { scheduled = false; lock.unlock(); return }
-                pending = nil; lock.unlock()
+                pending = nil; seq += 1; let n = seq, failing = fault; lock.unlock()
+                var problem: String?
                 do {
+                    if failing { throw CocoaError(.fileWriteOutOfSpace) }
                     let d = try JSONEncoder().encode(next)
                     try d.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    result(nil)
                 } catch {
                     Self.log.error("outbox save failed: \(error.localizedDescription, privacy: .public)")
-                    result(error.localizedDescription)
+                    problem = error.localizedDescription
                 }
+                lock.lock(); let more = pending != nil; lock.unlock()
+                result(Result(seq: n, ids: Set(next.map(\.clientId)), error: problem, more: more))
             }
         }
     }
@@ -212,8 +230,11 @@ final class Outbox {
         self.directory = directory; self.phone = phone
         IndexWriter.queue.sync {}      // a write from an earlier Outbox on this folder must have landed before we read it
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        // No owner (not paired, or the pairing could not be read): read nothing, so nothing is dropped as another phone's.
+        guard !phone.isEmpty else { return }
         if let d = try? Data(contentsOf: indexURL), let all = try? JSONDecoder().decode([OutboxItem].self, from: d) {
             items = all.filter { $0.phone == phone }
+            onDisk = Set(all.map(\.clientId))
             for foreign in all where foreign.phone != phone { removeFolder(foreign.clientId) }   // never send another phone's message
             if items.count != all.count { save() }
         }
@@ -237,9 +258,53 @@ final class Outbox {
     /// The queue in memory is the truth and updates at once; the index file is written afterwards on a background queue,
     /// coalesced (only the newest state is written when saves come in quick succession), atomic and file-protected as before.
     private func save() {
-        writer.submit(items) { [weak self] error in
-            Task { @MainActor in self?.lastSaveError = error }
+        writer.submit(items) { [weak self] result in
+            Task { @MainActor in self?.saved(result) }
         }
+    }
+    /// Items the last good index write holds: only these survive a relaunch. Starts with what was read from disk.
+    @ObservationIgnored private var onDisk: Set<String> = []
+    @ObservationIgnored private var lastResult = 0
+    @ObservationIgnored private var saveWaiters: [String: [CheckedContinuation<Bool, Never>]] = [:]
+    /// Items whose index write failed when they were queued: kept out of the queue, so they are neither shown nor sent, while
+    /// the composer still holds the text. Sending the same draft to the same place again brings the item back with its
+    /// `client_id` and copied files; a different draft drops it. One per place.
+    @ObservationIgnored private var unsaved: [SendTarget: OutboxItem] = [:]
+    private func saved(_ r: IndexWriter.Result) {
+        if r.seq > lastResult {
+            lastResult = r.seq
+            lastSaveError = r.error
+            if r.error == nil { onDisk = r.ids }
+        }
+        for (id, waiters) in saveWaiters {
+            let answer: Bool
+            if onDisk.contains(id) { answer = true }
+            else if item(clientId: id) == nil || (r.error != nil && r.ids.contains(id) && !r.more) { answer = false }
+            else { continue }                                   // an older write without it, or a newer one still runs
+            saveWaiters[id] = nil
+            for w in waiters { w.resume(returning: answer) }
+        }
+    }
+    /// True once an index write that holds the item has reached the disk; false when that write failed. Never blocks the UI.
+    func waitUntilSaved(_ clientId: String) async -> Bool {
+        if onDisk.contains(clientId) { return true }
+        guard item(clientId: clientId) != nil else { return false }
+        return await withCheckedContinuation { saveWaiters[clientId, default: []].append($0) }
+    }
+    /// The index write of a just-queued item failed: take it out of the queue (the composer keeps the text) until the same
+    /// draft is sent again. Returns false when it may stay: it reached the disk or the relay in the meantime.
+    @discardableResult
+    func holdUnsaved(_ clientId: String, target: SendTarget) -> Bool {
+        guard let i = items.firstIndex(where: { $0.clientId == clientId }), !onDisk.contains(clientId), items[i].sentMessageId == nil else { return false }
+        if let old = unsaved[target], old.clientId != clientId { removeFolder(old.clientId) }
+        unsaved[target] = items.remove(at: i)
+        save()
+        return true
+    }
+    /// Tests only: make every index write fail, as on a full disk.
+    var failIndexWrites: Bool {
+        get { writer.failWrites }
+        set { writer.failWrites = newValue }
     }
     @ObservationIgnored private lazy var writer = IndexWriter(url: indexURL)
     /// Waits until every queued index write has reached the disk (restore, wipe and tests that read the file).
@@ -253,6 +318,10 @@ final class Outbox {
     /// Queue a message. Files are copied into the item's folder. Throws `SendRequest.Problem` for an empty or invalid message.
     @discardableResult
     func enqueue(_ draft: MessageDraft, to target: SendTarget, joinAfter: String? = nil, now: Date = Date()) throws -> OutboxItem {
+        if let held = unsaved.removeValue(forKey: target) {
+            if joinAfter == held.joinAfter, Self.same(held, draft) { items.append(held); save(); return held }   // the same message again
+            removeFolder(held.clientId)
+        }
         let clientId = UUID().uuidString.lowercased()
         var item = OutboxItem(clientId: clientId, phone: phone, kind: .send, workspace: target.workspace,
                               createdAt: ISO8601DateFormatter().string(from: now), ticket: target.ticket, general: target.isGeneral, replyTo: draft.replyTo)
@@ -283,6 +352,21 @@ final class Outbox {
         } catch { removeFolder(clientId); throw error }
         items.append(item); save()
         return item
+    }
+
+    /// Whether a held item is the draft sent again (same words, reply, place, attachments by name and size, voice, feedback).
+    private static func same(_ item: OutboxItem, _ draft: MessageDraft) -> Bool {
+        let text = draft.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        func size(_ url: URL) -> Int? { (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil }
+        guard item.text == ((text?.isEmpty ?? true) ? nil : text), item.replyTo == draft.replyTo, item.location == draft.location,
+              item.humanReview == (item.isNewTopic ? draft.humanReview : nil),
+              item.files.map({ [$0.name, "\($0.size)"] }) == draft.files.map({ [$0.name, "\(size($0.url) ?? -1)"] }),
+              item.voice?.transcript == draft.voice?.transcript, item.voice?.file.duration == draft.voice?.duration,
+              item.voice?.file.size == draft.voice.flatMap({ size($0.url) }) else { return false }
+        guard let f = draft.feedback else { return item.feedback == nil }
+        guard let g = item.feedback else { return false }
+        return f.artifactId == g.artifactId && f.artifactRev == g.artifactRev && f.verdict == g.verdict
+            && f.pins.map { [String($0.n), $0.text ?? "", $0.transcript ?? ""] } == g.pins.map { [String($0.n), $0.text ?? "", $0.transcript ?? ""] }
     }
 
     /// Copies one picked or recorded file into the item's folder as file number `n` (`tag`: part of the name, so a
@@ -339,6 +423,12 @@ final class Outbox {
                               createdAt: ISO8601DateFormatter().string(from: now), questionMessageId: question.id, answer: answer)
         items.append(item); save()
         return item
+    }
+
+    /// The message could not be saved on this phone (disk full...). Nothing was queued; the composer keeps it.
+    enum SaveProblem: LocalizedError, Equatable {
+        case notSaved
+        var errorDescription: String? { "Couldn't save this message on your phone. Free up some space, then tap Send again." }
     }
 
     /// Why a swipe on a review card cannot be queued.
@@ -402,7 +492,7 @@ final class Outbox {
     }
     /// Sign-out: nothing may stay for the next person.
     func wipe() {
-        items = []
+        items = []; unsaved = [:]
         flushWrites()
         do { try fm.removeItem(at: directory) } catch { Self.log.error("outbox wipe failed: \(error.localizedDescription, privacy: .public)") }
         do { try fm.createDirectory(at: directory, withIntermediateDirectories: true) } catch { Self.log.error("outbox recreate failed: \(error.localizedDescription, privacy: .public)") }

@@ -292,7 +292,7 @@ def _review_answer(a):
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
     codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
-    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
+    "refused". decided (ORCH-548): the Test results card was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
@@ -370,7 +370,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
             raise BadRequest("That file could not be read.")
-        if len(f["name"]) > 240 or "\x00" in f["name"]:
+        if len(f["name"]) > 240 or any(c in f["name"] for c in "\x00\t\r\n"):
             raise BadRequest("That file name is not allowed.")
         if isinstance(f.get("text"), str) and f.get("data") is None:
             try:
@@ -982,12 +982,20 @@ def _log(a):
 def _chat_say(a):
     """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
     With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
-    _only(a, ("text", "new", "ticket"))
+    _only(a, ("text", "new", "ticket", "files"))
     if a.get("ticket") is not None:
-        if _flag(a.get("new")):
-            raise BadRequest("A ticket chat has no new conversation.")
+        if _flag(a.get("new")) or a.get("files"):
+            raise BadRequest("A ticket chat has no new conversation and no files here.")
         return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
-    return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+    # files: names already attached to the Chat ticket (ticket.attach first, as the ticket page does)
+    files = a.get("files") or []
+    if not isinstance(files, list) or len(files) > 10:
+        raise BadRequest("A Chat message takes up to 10 files.")
+    flags = ["--new"] if _flag(a.get("new")) else []
+    for name in files:
+        # one argv item, even for a name that starts with "-"
+        flags.append("--file=" + _text(name, "file name", limit=255))
+    return ["chat", "say"], flags, [_text(a.get("text"), empty=bool(files))]
 
 
 TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
@@ -1410,7 +1418,7 @@ MAX_ADD_NAMES = 32
 def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | None]:
     """Add several add-ons in one run (ORCH-1739): `addonjob.launch` starts `orch addon add <names> --yes --job`
     detached and returns the job at once (202); the page follows it with GET /api/addon-job. Every name must be in
-    the catalogue (`orch addon list`: shipped and not installed yet, or installed and off). A live job, or an orch
+    the catalogue (shipped and not installed yet, or installed and off). A live job, or an orch
     update, is refused by the core with one plain sentence (409). The caller checks the page session."""
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
@@ -1425,7 +1433,7 @@ def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | 
         raise BadRequest("Pick the add-ons to add.")
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     if not isinstance(rows, list):
         raise Unavailable("orch could not read the add-on list. Try again in a moment.")
     known = {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
@@ -1651,7 +1659,7 @@ def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
 
 
 def _addon_row(root: Path, orch_bin: str, name: str) -> dict | None:
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     for r in rows if isinstance(rows, list) else []:
         if isinstance(r, dict) and r.get("name") == name:
             return r
@@ -1718,10 +1726,16 @@ def _without_agent(environ) -> dict:
 
 
 def _attach_all(
-    root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]], feedback: bool = False
+    root: Path,
+    orch_bin: str,
+    tid: str,
+    files: list[tuple[str, bytes]],
+    feedback: bool = False,
+    request: bool = False,
 ) -> dict:
     """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
-    content and size). A file that is refused does not undo the ticket: it is listed as failed."""
+    content and size). A file that is refused does not undo the ticket: it is listed as failed. `request`: the
+    files of a new ticket, kept by name as what was asked (#1812)."""
     saved, failed = [], []
     for hint, raw in files:
         try:
@@ -1733,6 +1747,7 @@ def _attach_all(
                     tid,
                     f"--name={hint}",
                     *(["--feedback"] if feedback else []),
+                    *(["--request"] if request else []),
                     "--by",
                     actor(root),
                     "--json",
@@ -1862,6 +1877,8 @@ def _op_timeout(op, args) -> int:
     if op == "review.answer":  # a Merge click keeps trying while GitHub gives no answer (ORCH-1415)
         return 300
     if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
+        return 150
+    if op == "checks.approve":  # the approved check runs once at once (checkfiles.TIMEOUT_MAX: 2 minutes)
         return 150
     return 75 if op == "config.agent.test" else 60
 
@@ -2095,7 +2112,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             feedback = op == "ticket.attach" and args.get("feedback") is True
-            out["attached"] = _attach_all(root, orch_bin, out["id"], files, feedback=feedback)
+            out["attached"] = _attach_all(
+                root,
+                orch_bin,
+                out["id"],
+                files,
+                feedback=feedback,
+                request=op in ("ticket.new", "ticket.paste"),
+            )
         return 200, "", out if isinstance(out, dict) else None
     if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
         return 422, review_error(out, r.stderr, r.returncode), None
@@ -2159,6 +2183,17 @@ def _login_name(a) -> str:
     if not isinstance(v, str) or not LOGIN_NAME.fullmatch(v):
         raise BadRequest("That is not a login orch checks here.")
     return v
+
+
+def _checks_approve(a):
+    """Approve on a workspace check file that waits for the person (#1549): `orch checks approve <name> --hash <h>`,
+    the CLI's own path. The hash is the one the page showed next to what the check runs; the core refuses it when
+    the file changed since, and refuses an agent (the call runs with the person's environment and --by)."""
+    _only(a, ("name", "hash"))
+    h = a.get("hash")
+    if not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{32}", h):
+        raise BadRequest("That is not the check orch showed. Check again, then approve it.")
+    return ["checks", "approve", _login_name(a)], ["--hash", h], []
 
 
 def _logins_renew(a):
@@ -2322,6 +2357,7 @@ def _chat_sync_ws(a):
     return ["chat", "sync", ws], [], []
 
 
+OPS["checks.approve"] = _checks_approve
 OPS["logins.renew"] = _logins_renew
 OPS["logins.status"] = _logins_status
 OPS["logins.cancel"] = _logins_cancel

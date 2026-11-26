@@ -71,7 +71,7 @@ New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new tick
 
 - A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
-Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
+Save ticket (then "Save without starting") shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
 
 ## ORCH-14 (16 Nov): several tickets at once (epic)
 
@@ -165,7 +165,7 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
   Backlog, Done, Won't do. A row shows two lines of tiles, then "Show N more"; Done and Won't do start folded.
 - A tile is the title (2 lines, ticket key in front) and one line: tasks ("2/5 tasks"), ONE signal, "Part of: <title>",
   one add-on icon, the ⋯ menu.
-- The signal, most important first: Answer, Check result, late date, what the helper says (quiet, stuck), "Replaced by",
+- The signal, most important first: Answer, Test results, late date, what the helper says (quiet, stuck), "Replaced by",
   "Finished today", "Waits for", "Until 21:00", Paused, the parts bar.
 - An Epic or Release has a tag in front and a parts bar "1/3 done" instead of the tasks; the bar opens the list of its
   parts. A part says "Part of: <title>"; one click shows "Parts of ..." with a scope bar and "Back to all tickets".
@@ -177,5 +177,21 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Phone: one column of tiles, the ⋯ stays visible, a strip of row names at the top jumps to a row.
 
 ### new.html (ORCH-1852)
-- The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
-- Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
+- Order: title, "One sentence is enough. Everything below the buttons is optional.", then the request and its buttons side by side (stacked, buttons right under the text, on a phone): What needs doing? beside `[Save ticket]` and, with a helper, `[Start now]` under it. One or two lines under them say what the buttons do. Then "Optional": files, Split into parts, Helper, Due date, Show me the plan first, Human review needed, Done when, and `[Cancel]` at the end. Nothing is hidden behind a toggle.
+- Save ticket is the filled button and the default for Enter with Cmd or Ctrl. With a helper: "Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts." (prepare on save off: "… as you wrote it. Nothing starts.") and "Start now has your helper begin the work at once. This uses its time and may cost money." Start now is outlined, never the default.
+- Preview pill "No helper" (`?helper=none`): no Start now, no Helper row, and "Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. Set up a helper".
+
+## Pick several (25 Nov, ORCH-2034)
+
+### list.html
+
+- Each row has a checkbox in a first column; the box in the header picks every shown row (mixed when only some are).
+- While rows are picked, the bar from the master (`UI.bulkBar`) stays at the foot of the screen: "3 selected", Status, Priority, Epic (menus that open upwards), Clear. One click sets it for all of them; one notice with Undo.
+- Status offers Backlog, To do, Working, Check, Done and Won't do. Waiting and Superseded ask something per ticket and stay on each ticket's Move to.
+- Wide screens only: the phone list has no checkboxes. Open `list.html?pick=2` to see two rows picked.
+
+## Tickets page polish (ORCH-2091)
+
+- `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
+  the view chips (All … Done this week) on their own row under it; the table starts one gap below.
+- An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.

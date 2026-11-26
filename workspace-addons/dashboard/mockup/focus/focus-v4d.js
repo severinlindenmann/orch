@@ -22,7 +22,7 @@
     { k: 'ORCH-238', t: 'Add files and notes to a ticket', kind: 'ticket', s: 'wait', tool: 't1', up: 64, step: [3, 5], now: 'Waits for your answer.', qn: 4,
       q: { t: 'Keep the old file name when the same file is added twice?', why: 'The helper suggests keeping it: links people already shared keep working.', a: ['Keep the old name', 'Use the new name'] },
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
-      chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
+      chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'To run the upload checks yourself:', '14:40', 0, 0, [], 'node --test tests/attach.test.js'], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
     { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 't1', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
@@ -49,7 +49,7 @@
       files: [['table', 'helpers.csv', 'Table · 3 rows', [['ORCH-228', 'working'], ['ORCH-232', 'working'], ['ORCH-238', 'waits for you']]]] }
   ];
   var S0 = JSON.stringify(S), EXTRA = null;
-  var MORE = [['201', 'Newsletter for November', 'wait'], ['214', 'Price list as a table', 'wait'], ['203', 'Welcome mail for new customers', 'run'], ['205', 'Search in the help pages', 'queue'], ['207', 'Export tickets to a table', 'queue'], ['209', 'Faster first page', 'queue'], ['211', 'Monthly report for sales', 'queue'], ['216', 'Tidy the settings page', 'queue'], ['218', 'Spelling check in mails', 'queue'], ['219', 'New logo on every page', 'queue'], ['222', 'Reminder one day before', 'queue'], ['224', 'Sort the customer list', 'queue'], ['226', 'Holiday notice', 'none'], ['229', 'Bigger text on phones', 'none'], ['231', 'Old links that end nowhere', 'none'], ['234', 'Invoice as a file', 'none'], ['236', 'Colours of the charts', 'none'], ['240', 'Support answers as drafts', 'none']];
+  var MORE = [['201', 'Newsletter for November', 'wait'], ['214', 'Price list as a table', 'wait'], ['203', 'Welcome mail for new customers', 'run'], ['205', 'Search in the help pages', 'queue'], ['207', 'Export tickets to a table', 'queue'], ['209', 'Faster first page', 'queue'], ['211', 'Monthly report for sales', 'queue'], ['216', 'Tidy the settings page', 'queue'], ['218', 'Spelling check in mails', 'queue'], ['219', 'New logo on every page', 'queue'], ['222', 'Reminder one day before', 'queue'], ['224', 'Sort the customer list', 'queue'], ['226', 'Holiday notice', 'none'], ['229', 'Bigger text on phones', 'none'], ['231', 'Old links that end nowhere', 'none'], ['234', 'Invoice as a file', 'none'], ['236', 'Colours of the charts', 'none'], ['240', 'Support answers as drafts', 'none'], ['412', 'Price page for schools', 'check']];
   var QS = [{ t: 'Send the newsletter today or on Monday morning?', why: 'The helper suggests Monday: more people open it.', a: ['Send on Monday', 'Send today'] }, { t: 'Show prices with or without tax?', why: 'The helper suggests with tax: it is what customers pay.', a: ['With tax', 'Without tax'] }];
   var NOWS = ['Writing the first draft.', 'Running the tests.', 'Reading the files on the ticket.', 'Taking pictures at three widths.', 'Fixing two failed checks.', 'Waiting for the checks.'];
   var ST = { wait: ['◆', 'Needs you'], run: ['●', 'Working'], idle: ['◐', 'Idle'], none: ['○', 'No session'], queue: ['◷', 'In line'], open: ['▸', 'Open'] };
@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, sf: {}, panes: ['ORCH-238'], act: 0, pm: '', run: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -71,7 +71,8 @@
   function live(s) { return s.s === 'run' || s.s === 'wait' || s.s === 'idle' || s.s === 'open'; }
   function max() { return st.many ? 8 : 6; }
   function used() { return S.filter(function (s) { return s.kind !== 'shell' && live(s); }).length; }
-  function sorted() { return S.slice().sort(function (a, b) { var w = (b.s === 'wait' ? 1 : 0) - (a.s === 'wait' ? 1 : 0); return w || (b.pin ? 1 : 0) - (a.pin ? 1 : 0) || ORDER[a.s] - ORDER[b.s]; }); }
+  function asks(s) { return s.s === 'wait' || !!s.ask; }
+  function sorted() { return S.slice().sort(function (a, b) { var w = (asks(b) ? 1 : 0) - (asks(a) ? 1 : 0); return w || (b.pin ? 1 : 0) - (a.pin ? 1 : 0) || ORDER[a.s] - ORDER[b.s]; }); }
   function phone() { return window.innerWidth <= 720; }
   function nm(s) { return s.name || s.t; }
   function word(s) { return s.sl && (s.s === 'idle' || s.s === 'none') ? s.sl : ST[s.s][1]; }
@@ -277,12 +278,18 @@
   function qHTML(s, quiet) {
     return '<div class="mw-q" role="group" aria-label="Question from the helper"><p class="mw-qt">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><div class="mw-ans">' + btn('btn ' + (quiet ? 'outline' : 'primary'), 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + '</div></div>';
   }
+  /* a command the helper suggests: Run in terminal types it (never Enter) into the helper or a plain terminal (ORCH-2203) */
+  function cmdHTML(s, i, cmd) {
+    var id = s.k + '|' + i, open = st.run === id;
+    return '<div class="mw-cmd"><code>' + esc(cmd) + '</code><span class="mw-run">' + btn('btn primary sm', 'run', 'Run in terminal ▾', { 'data-id': id, 'aria-expanded': String(open), 'aria-haspopup': 'menu' }) +
+      (open ? '<div class="mw-runmenu" role="menu" aria-label="Where to type it">' + [['helper', 'This helper'], ['plain', 'Plain terminal'], ['new', 'New plain terminal']].map(function (o) { return btn('btn ghost sm', 'runto', o[1], { 'data-to': o[0], 'data-k': s.k, 'data-cmd': cmd, role: 'menuitem' }); }).join('') + '</div>' : '') + '</span></div>';
+  }
   function chatMsgs(s) {
     return s.chat.filter(function (m) { return !(s.q && m[3]); }).map(function (m, i) {
       if (m[0] === 'e') return '<p class="mw-ev meta"><span aria-hidden="true">✓</span> ' + esc(m[1]) + ' · ' + esc(m[2]) + '</p>';
       var f = m[4] !== undefined && s.files && s.files[m[4]] && m[1].indexOf('picture') + m[1].indexOf('pull request') > -2 ? s.files[m[4]] : null;
       var sent = (m[5] || []).map(function (x) { return '<div class="mw-inmsg">' + widget(s.sent[x], 'sent:' + s.k, x, true) + '</div>'; }).join('');
-      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span>' + (m[1] ? '<p>' + esc(m[1]) + '</p>' : '') + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + (sent ? '<div class="mw-sent">' + sent + '</div>' : '') + '</div>';
+      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span>' + (m[1] ? '<p>' + esc(m[1]) + '</p>' : '') + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + (sent ? '<div class="mw-sent">' + sent + '</div>' : '') + (m[6] ? cmdHTML(s, i, m[6]) : '') + '</div>';
     }).join('');
   }
   function attHTML(s) {
@@ -431,30 +438,42 @@
   }
 
   /* ---------- Focus page: the wall in bands, and zoom ---------- */
-  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : ''); }
+  function tileActs(s) { return '<span class="grow"></span>' + tkLink(s) + (s.s === 'none' && !s.ask ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + besideBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : ''); }
   function openB(s, cls, inner) { return btn(cls, 'zoom', inner, { 'data-k': s.k, 'aria-label': 'Open ' + s.k + ', ' + nm(s) + ', ' + word(s) }); }
   function tile(s) {
     return '<article class="mw-tile mw-work" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-topen', '<span class="mw-thead">' + stat(s) + '<span class="mw-key">' + esc(s.k) + '</span></span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-now" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>' + (live(s) ? '<span class="mw-peek" data-peek="' + esc(s.k) + '" aria-hidden="true">' + esc(peekText(s)) + '</span>' : '')) + meta(s) + '<footer class="mw-tfoot">' + steps(s) + tileActs(s) + '</footer></article>';
   }
   function line(s) {
-    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
+    return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' && !s.ask ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
+  }
+  /* ORCH-2063: during a search a folded band that holds a match opens by itself; a fold click then counts for this
+     search only (st.sf) and is dropped when the search is cleared. The saved choice (st.col) never changes. */
+  function folded(id, n) {
+    if (!st.f.trim()) return !!st.col[id];
+    return Object.prototype.hasOwnProperty.call(st.sf, id) ? st.sf[id] : !!st.col[id] && !n;
   }
   function band(id, title, list, draw, cls, empty, extra) {
-    var col = !!st.col[id];
+    var col = folded(id, list.length);
     return '<section class="mw-band" data-band="' + id + '"><div class="mw-bh"><h2>' + btn('mw-bt', 'col', '<span class="mw-chev" aria-hidden="true">' + (col ? '▸' : '▾') + '</span>' + title + ' (' + list.length + ')', { 'data-id': id, 'aria-expanded': String(!col) }) + '</h2>' + (extra || '') + '</div>' + (col ? '' : (list.length ? '<div class="' + cls + '">' + list.map(draw).join('') + '</div>' : '<p class="meta mw-none">' + empty + '</p>')) + '</section>';
   }
   function bandsHTML() {
-    var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s)).toLowerCase().indexOf(f) >= 0; });
+    // the filter finds one that asks by "Needs you" too (its band, the summary), and by its own reason such as "Check" (ORCH-2045)
+    var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s) + (asks(s) ? ' ' + ST.wait[1] : '')).toLowerCase().indexOf(f) >= 0; });
     var pin = all.filter(function (s) { return s.pin; }), rest = all.filter(function (s) { return !s.pin; });
-    var act = rest.filter(function (s) { return s.s === 'wait' || grp(s) === 'run'; }), inl = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'idle'; });
-    if (f && !all.length) return '<p class="meta mw-none">No session matches "' + esc(st.f) + '".</p>';
-    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.');
+    var act = rest.filter(function (s) { return asks(s) || grp(s) === 'run'; }), inl = rest.filter(function (s) { return !asks(s) && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return !asks(s) && grp(s) === 'idle'; });
+    // the wall's states are the master empty state (kit UI.state), as in the product (pages/livewall.js): ?wall=loading|error|empty
+    if (st.wall === 'loading') return '<div class="wall-tiles" aria-busy="true"><p class="sr-only" role="status">Loading the sessions…</p>' + '<div class="skeleton sk-card" aria-hidden="true"></div>'.repeat(3) + '</div>';
+    if (st.wall === 'error') return '<div class="empty-state err" role="alert"><span class="ico"><span class="dot-err"></span></span><strong>The sessions did not load</strong><p>orch did not answer just now. It tries again by itself.</p>' + btn('btn primary sm', 'wallretry', 'Try again') + '</div>';
+    if (st.wall === 'empty') return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No sessions yet</strong><p>A session shows here as soon as a helper starts work on a ticket.</p></div>';
+    if (f && !all.length) return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No session matches “' + esc(st.f.trim()) + '”</strong><p>Try another word, or show all sessions again.</p>' + btn('btn outline sm', 'wallclear', 'Clear filter') + '</div>';
+    // with a filter, a band without a match is left out (its "nothing here" line would not be true)
+    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + (act.length || !f ? band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) : '') + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + (idle.length || !f ? band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.') : '');
   }
   function wallHTML() {
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };
-    S.forEach(function (s) { c[s.s === 'wait' ? 'wait' : grp(s)]++; });
+    S.forEach(function (s) { c[asks(s) ? 'wait' : grp(s)]++; });
     var part = function (n, g, w) { return n ? '<span class="mw-st" data-s="' + g + '"><span class="mw-sym" aria-hidden="true">' + ST[g][0] + '</span>' + n + ' ' + w + '</span>' : ''; };
-    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.filter(function (s) { return !s.ask; }).length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
     h += '<div class="mw-new" role="group" aria-label="New session without a ticket">' + mk(6) + NEW.map(function (o) { return btn('btn outline sm', 'new', (has(o[0]) ? '' : '<span aria-hidden="true">+</span> ') + o[0], { 'data-k': o[0], title: has(o[0]) ? 'Already open: go to it' : o[1] }); }).join('') + '</div></header>';
     h += pickHTML();
     h += '<div class="mw-tools"><label class="sr-only" for="mw-filter">Filter sessions</label><input class="input" id="mw-filter" type="search" placeholder="Filter by name, ticket or status" value="' + esc(st.f) + '" autocomplete="off">' + mk(11) + '</div>';
@@ -764,6 +783,8 @@
         var s = { k: 'ORCH-' + m[0], t: m[1], kind: 'ticket', s: m[2], tool: i % 3 === 1 ? 't2' : 't1', up: 12 + i * 7, step: [1 + i % 4, 4 + i % 3], now: NOWS[i % NOWS.length], lines: ['⏺ Read(ticket notes)', '⏺ ' + NOWS[i % NOWS.length]], chat: [['h', NOWS[i % NOWS.length], '15:0' + (i % 10), 0, 0]], files: [] };
         if (m[2] === 'wait') { s.q = QS[i % 2]; s.now = 'Waits for your answer.'; }
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
+        // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
+        if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
         if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
         if (m[2] === 'queue') { s.now = 'Waits in line for a free helper place.'; s.lines = []; s.chat = []; s.step = [0, 4 + i % 3]; }
         if (m[2] === 'run' && i % 3 === 0) s.feed = ['⏺ ' + NOWS[(i + 1) % NOWS.length], '⏺ ' + NOWS[(i + 2) % NOWS.length]];
@@ -797,7 +818,7 @@
   function show(n, more) {
     var o = more ? F[n - 1][7][1] : F[n - 1][6];
     if (o.need) need(o.need);
-    st.full = false; st.ask = false; st.ren = ''; st.menu = ''; st.list = ''; st.ov = null; st.f = ''; st.mode = 'bar';
+    st.full = false; st.ask = false; st.ren = ''; st.menu = ''; st.list = ''; st.ov = null; st.f = ''; st.sf = {}; st.mode = 'bar';
     if (!!o.many !== st.many) many(!!o.many);
     Object.keys(o).forEach(function (k) { if (k !== 'need' && k !== 'many') st[k] = Array.isArray(o[k]) ? o[k].slice() : (o[k] && typeof o[k] === 'object' ? JSON.parse(JSON.stringify(o[k])) : o[k]); });
     if (!o.panes) { st.panes = [st.cur]; st.act = 0; }
@@ -821,7 +842,7 @@
     var nav = e.target.closest('.sidebar .nav-item[aria-label], .sidebar .brand');
     if (nav) { var p = nav.classList.contains('brand') ? 'home' : nav.getAttribute('aria-label').toLowerCase(); if (PAGES[p]) { e.preventDefault(); setPage(p); return; } }
     var b = e.target.closest('[data-act]');
-    if (!b) { if ((st.menu || st.list || st.pm) && !e.target.closest('.mw-pop, .mw-pmenu')) { st.menu = ''; st.list = ''; st.pm = ''; st.endask = ''; render(); } return; }
+    if (!b) { if ((st.menu || st.list || st.pm || st.run) && !e.target.closest('.mw-pop, .mw-pmenu, .mw-run')) { st.menu = ''; st.list = ''; st.pm = ''; st.run = ''; st.endask = ''; render(); } return; }
     var a = b.dataset.act, k = b.dataset.k, s;
     if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.endask = ''; st.menu = ''; if (b.dataset.kind !== 'bar') st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt:not([disabled]), .mw-pmenu .btn, .mw-pop-sess .mw-opt:not([disabled])' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
     if (a === 'stopstep') { stopStep(k); return; }
@@ -858,8 +879,12 @@
     else if (a === 'mode') setMode(b.dataset.m);
     else if (a === 'menu') { st.menu = st.menu === b.dataset.m ? '' : b.dataset.m; st.list = ''; render(st.menu ? '.mw-pop .mw-opt' : '[data-act=menu][data-m=' + b.dataset.m + ']'); }
     else if (a === 'list') { st.list = st.list === b.dataset.l ? '' : b.dataset.l; st.menu = ''; st.lq = ''; render(st.list ? '#mw-lq, .mw-pop .mw-opt' : '[data-act=list][data-l=' + b.dataset.l + ']'); }
-    else if (a === 'col') { st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
+    else if (a === 'wallretry') { st.wall = ''; $('mw-bands').innerHTML = bandsHTML(); }
+    else if (a === 'wallclear') { st.f = ''; st.sf = {}; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
+    else if (a === 'col') { if (st.f.trim()) st.sf[b.dataset.id] = b.getAttribute('aria-expanded') === 'true'; else st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
     else if (a === 'fold') { st.foldR = !st.foldR; render('[data-act=fold]'); }
+    else if (a === 'run') { st.run = st.run === b.dataset.id ? '' : b.dataset.id; render('[data-act=run]'); }
+    else if (a === 'runto') { var rs = by(k), plainT = b.dataset.to !== 'helper'; st.run = ''; rs.lines = rs.lines.concat([(plainT ? '$ ' : '❯ ') + b.dataset.cmd.replace(/^!\s*/, plainT ? '' : '!')]); render(); say('Typed into ' + (plainT ? 'the plain terminal' : 'the helper') + '. Press Enter to run it.'); }
     else if (a === 'pin') pin(k);
     else if (a === 'ren') { st.ren = k; render('.mw-ren input'); var ri = q1('.mw-ren input'); if (ri) ri.select(); }
     else if (a === 'answer') answer(k, +b.dataset.a);
@@ -891,7 +916,7 @@
   document.addEventListener('input', function (e) {
     var t = e.target, d = t.dataset && t.dataset.d;
     if (d) { drafts[d] = t.value; if (st.voice === 'done') st.voice = ''; }
-    else if (t.id === 'mw-filter') { st.f = t.value; $('mw-bands').innerHTML = bandsHTML(); url(); }
+    else if (t.id === 'mw-filter') { st.f = t.value; if (!st.f.trim()) st.sf = {}; $('mw-bands').innerHTML = bandsHTML(); url(); }
     else if (t.id === 'mw-lq') { st.lq = t.value; $('mw-plist').innerHTML = listRows(); }
   });
   document.addEventListener('submit', function (e) {
@@ -976,6 +1001,7 @@
     var q = new URLSearchParams(location.search), v, ov = document.createElement('div');
     ov.id = 'mw-ov'; ov.className = 'mw-ov'; ov.hidden = true; document.body.appendChild(ov);
     if (q.get('many') === '1') many(true);
+    if (/^(loading|error|empty)$/.test(v = q.get('wall') || '')) st.wall = v;
     if (PG[v = q.get('page')] || v === 'focus') st.page = v;
     if ((v = q.get('cur')) && has(v)) { st.cur = v; if (by(v).kind === 'ticket') st.tk = v; }
     if ((v = q.get('tk')) && has(v)) st.tk = v;

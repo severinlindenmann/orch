@@ -3,7 +3,7 @@
 // Review, Tickets, one ticket page), once, from the same fake workspace, and FAILS when two pages differ.
 // It is a test of agreement, not of one definition: when a page changes how it counts, every page must change with it.
 //   - the needs-you number: top bar line, menu button, side-menu Review badge, phone bottom-bar badge, Home title,
-//     Home "Needs you" card, Home line (questions + results), Review line, Tickets pill, Tickets lanes (Needs you + Check);
+//     Home "Needs you" card, Home line (questions + results + work that stopped, #2385), Review line, Tickets pill, Tickets lanes (Needs you + Check, plus work that stopped, which stays in its lane);
 //   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts;
 //   - for the same ticket: the status word and the due date on Home, Tickets and the ticket page.
 // ORCH-476 adds the number against the ROWS it stands for, with the counts made by the real core (orch/counts.py):
@@ -66,15 +66,22 @@ function makeState() {
   // number, Review and Tickets count it too
   const failed = s.tickets.find(t => t.key === 'PIL-81');
   Object.assign(failed, {status: 'waiting', waiting_on: {kind: 'external', ref: 'Not logged in', start: true}, questions: []});
-  s.counts = coreCounts(s.tickets, s.runs);
+  // #2385: a step whose check failed twice in a row (stuck.py helper:failing): a row of Home's Needs you, so the core's
+  // number counts it too (Focus, Insights and `orch counts` said less than Home while something was stuck)
+  const failing = s.tickets.find(t => t.key === 'PIL-55');
+  const run = at => ({type: 'command', ref: 'make check', exit: 1, at});
+  failing.checklist = [{id: 'c1', text: 'Check the backups', evidence: [run('2026-11-13T08:00:00Z'), run('2026-11-13T08:05:00Z')]}];
+  s.needs.push({id: `core:failing:${failing.id}`, source: 'core', kind: 'helper:failing', ticket: failing.id, title: failing.title,
+    text: 'The check failed 2 times in a row on the step "Check the backups".', tone: 'bad', since: '2026-11-13T08:05:00Z', cli: `orch ticket show ${failing.key}`});
+  s.counts = coreCounts(s.tickets, s.runs, s.needs);
   return s;
 }
 
 // The real core's count (orch/counts.py) over the same tickets and runs; the dashboard server adds the same block.
-function coreCounts(tickets, runs) {
-  const code = 'import json, sys\nfrom orch import counts\nd = json.load(sys.stdin)\nprint(json.dumps(counts.summary(d["tickets"], d["runs"])))';
+function coreCounts(tickets, runs, needs) {
+  const code = 'import json, sys\nfrom orch import counts\nd = json.load(sys.stdin)\nprint(json.dumps(counts.summary(d["tickets"], d["runs"], stopped=d["needs"])))';
   const out = execFileSync('uv', ['run', '--quiet', '--project', path.join(ROOT, 'workspace'), 'python', '-c', code],
-    {input: JSON.stringify({tickets, runs}), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 240_000});
+    {input: JSON.stringify({tickets, runs, needs}), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 240_000});
   return JSON.parse(out);
 }
 
@@ -205,7 +212,8 @@ test('same numbers: every page shows the same count, date and state for the same
       const rows = {};                                  // key -> {lane, due}: the lane a row sits in and its Due cell
       let lane = '';
       for (const r of main.querySelectorAll('tr')) {
-        const cells = [...r.children].map(c => (c.innerText || '').trim());
+        // the pick checkbox cell (ORCH-2034) holds no text: read the cells after it
+        const cells = [...r.children].filter(c => !c.classList.contains('pick-cell')).map(c => (c.innerText || '').trim());
         const key = /(?:^|\n)\s*([A-Z]+-\d+)\b/.exec(cells[0] || '');
         const head = /^[^\w]*\s*(Needs you|Check|Working|Waiting|Backlog|Done|Stuck)\b/.exec((r.innerText || '').trim());
         if (head && !key) { lane = head[1]; continue; }
@@ -220,7 +228,9 @@ test('same numbers: every page shows the same count, date and state for the same
     const ticketsChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'tickets.png')});
     noise('Tickets header', tickets.pill);
-    note('needs you', 'Tickets lanes (Needs you + Check)', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
+    // #2385: work that stopped stays in its own lane (Working): it is counted beside the lanes, like Review's extra rows
+    const stoppedRows = state.needs.filter(n => n.source === 'core' && /^(helper|reviewer):/.test(n.kind || '')).length;
+    note('needs you', 'Tickets lanes (Needs you + Check) + work that stopped', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0) + stoppedRows);
     noise('top bar (on Tickets)', ticketsChrome.topBar);
     note('tickets', 'Tickets list header', int(tickets.head));
     note('tickets', 'Tickets lanes (every lane added up)', Object.entries(tickets.lanes).filter(([k]) => k !== 'Needs you' && k !== 'Check').reduce((a, [, v]) => a + v, 0) + (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
@@ -297,8 +307,10 @@ test('same numbers: every page shows the same count, date and state for the same
     assert.ok(needs && needs.value > 0, 'the fake workspace must have something that needs the person, or the test proves nothing');
     // the shared state itself: the number every page shows is the one the data has (open questions + results to check
     // + helpers that could not start, ORCH-1687)
-    const open = state.review.cards.length + state.tickets.filter(t => t.status === 'waiting' && t.waiting_on?.start === true && !(t.questions || []).some(q => q.answer == null)).length;
-    if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions and results`);
+    const stopped = state.needs.filter(n => n.source === 'core' && /^(helper|reviewer):/.test(n.kind || '')).length;  // #2385
+    const open = state.review.cards.length + stopped + state.tickets.filter(t => t.status === 'waiting' && t.waiting_on?.start === true && !(t.questions || []).some(q => q.answer == null)).length;
+    if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions, results and stopped work`);
+    if (state.counts.needs_you.stopped !== stopped) problems.push(`needs you: the core counts ${state.counts.needs_you.stopped} stopped, Home lists ${stopped}`);
 
     // the same ticket: Tickets lane = ticket page state word; Tickets Due = ticket page Due
     // Working lane: the ticket page says 'Working' while a helper runs, 'In progress' when none does (ORCH-415, owner approved)

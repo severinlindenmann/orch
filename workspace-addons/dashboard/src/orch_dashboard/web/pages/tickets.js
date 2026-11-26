@@ -110,8 +110,9 @@ function searchKey() { const q = String(ticketSearch).trim(); return q ? JSON.st
 const searchServed = () => !!hits.key && hits.key === searchKey();
 function wantSearch() {
   const key = searchKey();
-  if (!key || !pagingOn() || hits.want === key) return;
+  if (!pagingOn() || hits.want === key) return;
   hits.want = key; clearTimeout(hits.timer);
+  if (!key) return;
   hits.timer = setTimeout(() => searchPage(key, 0), 250);
 }
 function searchPage(key, offset) {
@@ -122,7 +123,10 @@ function searchPage(key, offset) {
     if (hits.want !== key) return;
     hits.rows = offset ? [...hits.rows, ...array(out.items)] : array(out.items);
     hits.key = key; hits.next = out.next ?? null; hits.total = Number(out.total) || 0;
-  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => { hits.busy = false; render(); });
+  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => {
+    if (searchKey() !== key) return;
+    hits.busy = false; render();
+  });
 }
 // The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
 function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
@@ -285,14 +289,27 @@ function stuckLabel() {
   const n = ticketParents(tickets()).filter(isStuck).length;
   return n ? 'Stuck ' + n : 'Stuck';
 }
+// ORCH-2159: leave typing in the native input; coalesce costly page redraws after a short pause.
+// Keep the URL and server debounce current immediately, so a slow previous reply cannot win.
+let ticketSearchTimer = null;
+function changeTicketSearch(value) {
+  ticketSearch = value; searchFolds.clear(); writeTicketAddress(); wantSearch();
+  clearTimeout(ticketSearchTimer);
+  const address = typeof location === 'object' ? location.hash : '';
+  ticketSearchTimer = setTimeout(() => {
+    ticketSearchTimer = null;
+    if (typeof location === 'object' && location.hash !== address) return;
+    render();
+  }, 80);
+}
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
-  input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
+  input.addEventListener('input', event => changeTicketSearch(event.currentTarget.value));
   const people = ticketOwners(tickets()), picked = ticketPerson ? ownerKey(ticketPerson) : '';
   const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, boardShort(t.title, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
-  return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
+  return [group, person, h('span', {className:'grow'}), h('label', {className:'search-field'}, input)];
 }
 // The Person choices: one [key, name] per person (ownerKey), named as "You: ..." says when it is the person, else the
 // first spelling that starts with a capital letter.
@@ -335,7 +352,7 @@ function ticketNext(t) {
     }
     if (text) text = 'Question: ' + text;
   } else if (status === 'review') {
-    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
@@ -397,8 +414,8 @@ function treeBranch(rows, index, section) {
   const inRelease = String(section || '').startsWith('release:');
   const sub = changesLine(t) || waitsLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText.textContent) : null) || (helper?.line ? h('p', {className:'meta ticket-sub'}, helper.line) : null) || (row.parentMissing && !inRelease ? parentLine(t) : null);
   const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
-  const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
-    h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
+  const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : '') + (picked.has(t.id) ? ' is-picked' : ''), 'data-key':'tree-' + t.id},
+    pickCell(t), h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
       h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), prepareWord(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
     h('td', {className:'due-cell'}, dueCell(t)),
@@ -408,7 +425,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
-  node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,[role="menu"]')) location.hash = href(t.id); });
+  node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,label,[role="menu"]')) location.hash = href(t.id); });
   return fragment(node, open ? children.map(i => treeBranch(rows, i, section)) : null);
 }
 // ORCH-742 (look B): a saved ticket in Backlog says quietly where Prepare stands; Prepared means described, not checked
@@ -438,8 +455,9 @@ function whenLine(t) {
 let ticketView = 'list';
 try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
-const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+// Two steady rows at every width (as the mockup): layout, Part of, Person and search; then the view chips on their own row.
+const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'},
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters(), viewChips());
 /* ORCH-576 (owner picked draft C, 18 Nov): every status is a row of small tiles, the most urgent row first. A tile is
    the title (2 lines) and one line: tasks, ONE signal, the ticket it is part of, one add-on icon, ⋯. Kit: .status-row,
    .ticket-tile, .parts-bar, .kind-tag, .scope-bar (widgets.css). Drag, the ⋯ menu and the moves are the same as before. */
@@ -514,7 +532,7 @@ function boardSignal(t, lane, parts) {
       else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
     });
   }
-  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Check result');
+  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Test results');
   if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
   const helper = helperChip(t);
   if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
@@ -862,18 +880,18 @@ const searchMore = () => searchServed() && hits.next != null ? () => searchPage(
 function ticketTable(visible) {
   const rel = releaseGroups(visible), groups = ticketGroups(visible.filter(t => !rel.inRelease.has(t.id)));
   if (!foldSeen) { foldSeen = true; if (groupCount('done', groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
-  const body = [];
+  const body = [], cols = picking() ? 7 : 6;
   releaseFolds(rel.groups);
   for (const group of rel.groups) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, folded ? '› ' : '⌄ '), group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
     if (folded) continue;
     const roots = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0), cap = capOf('list-' + status);
     for (const {i} of roots.slice(0, cap)) body.push(treeBranch(rows, i, status));
-    if (roots.length > cap) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:6}, moreMark('list-' + status, roots.length - cap))));
+    if (roots.length > cap) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:cols}, moreMark('list-' + status, roots.length - cap))));
   }
   for (const status of GROUP_ORDER) {
     const group = groups.find(g => g.status === status), rows = window.DashHelpers.treeRows(group.tickets);
@@ -882,26 +900,137 @@ function ticketTable(visible) {
     // a search shows its hits: every group opens while a search is typed; folding then lasts for that search (ORCH-58)
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, (folded ? '› ' : '⌄ ') + icon + ' '), group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (folded) continue;
     const cap = capOf('list-' + status), fetchMore = status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null;
     for (const {i} of roots.slice(0, cap)) body.push(treeBranch(rows, i, status));
-    if (roots.length > cap || fetchMore) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:6}, moreMark('list-' + status, roots.length - cap, fetchMore))));
+    if (roots.length > cap || fetchMore) body.push(h('tr', {className:'group-row', 'data-key':'more-row-' + status}, h('td', {colSpan:cols}, moreMark('list-' + status, roots.length - cap, fetchMore))));
   }
   const more = searchMore();
-  if (more) body.push(h('tr', {className:'group-row', 'data-key':'more-row-search'}, h('td', {colSpan:6}, moreMark('search', 0, more))));
+  if (more) body.push(h('tr', {className:'group-row', 'data-key':'more-row-search'}, h('td', {colSpan:cols}, moreMark('search', 0, more))));
   // This week: one total line of helper time and money under the table
   if (savedView() === 'this-week') {
     const total = window.DashHelpers.spendTotal(visible);
-    body.push(h('tr', {className:'group-row', 'data-key':'week-total'}, h('th', {colSpan:3}, h('span', {className:'meta'}, 'This week')),
+    body.push(h('tr', {className:'group-row', 'data-key':'week-total'}, h('th', {colSpan:cols - 3}, h('span', {className:'meta'}, 'This week')),
       h('th', {className:'numeric'}, h('span', {className:'meta'}, window.DashHelpers.spendWords(total) || '–')), h('th', {colSpan:2})));
   }
   const heads = [[searchHead(visible.length), ''], ['Due', ''], ['Tasks', ''], ['Time · cost', 'numeric'], ['Last change', '']];
   return h('div', {className:'table-wrap wide-only', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
-    h('thead', {}, h('tr', {}, heads.map(([label, cls]) => h('th', {scope:'col', className:cls || null}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
+    h('thead', {}, h('tr', {}, pickAll(visible), heads.map(([label, cls]) => h('th', {scope:'col', className:cls || null}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
     h('tbody', {}, body)));
+}
+/* ORCH-2034: pick several rows and set Status, Priority or Epic for all of them in one click. The same paths as one
+   ticket (R4.3): moveTicket (ticket.patch) for the status, ticket.edit for priority and epic. One notice with Undo for
+   the batch. Wide screens only (the phone list has no checkboxes); never on a shared copy. */
+const picked = new Set();
+let bulkSaving = '';
+const picking = () => !snapshot && !!window.UI?.bulkBar;
+// Waiting and Superseded ask something per ticket (a date, the replacing ticket): those stay on each ticket's Move to.
+const BULK_STATUS = () => MOVE_CHOICES.filter(([lane]) => lane !== 'blocked' && lane !== 'superseded');
+const BULK_PRIORITY = [['high', 'High'], ['normal', 'Normal'], ['low', 'Low']];
+const shownIds = visible => new Set(visible.map(t => t.id));
+function pickBox(id, on, label, mixed = false) {
+  const box = h('input', {type:'checkbox', 'data-pick':id, 'data-mixed':mixed ? 'true' : null, 'aria-label':label, checked:on ? '' : null});
+  box.indeterminate = mixed;
+  return h('label', {className:'row-pick'}, box);
+}
+function pickCell(t) { return picking() ? h('td', {className:'pick-cell'}, pickBox(t.id, picked.has(t.id), 'Select ' + clean(t.title))) : null; }
+function pickAll(visible) {
+  if (!picking()) return null;
+  const ids = shownIds(visible), n = [...picked].filter(id => ids.has(id)).length;
+  return h('th', {scope:'col', className:'pick-cell'}, pickBox('*', n > 0 && n === ids.size, 'Select all shown tickets', n > 0 && n < ids.size));
+}
+// A tick in the list (app.js sends every change of a [data-pick] box here). '*' = every shown ticket.
+function pickTicket(id, on) {
+  if (id === '*') { const ids = shownIds(filteredTickets()); if (on) ids.forEach(x => picked.add(x)); else picked.clear(); }
+  else if (on) picked.add(id); else picked.delete(id);
+  render();
+}
+function bulkMenu(label, field, items, note) {
+  return h('details', {className:'menu', 'data-key':'bulk-' + field}, h('summary', {className:'btn outline sm'}, label, window.UI.chevron ? window.UI.chevron() : null),
+    h('div', {className:'menu-pop', role:'menu', 'aria-label':label},
+      items.length ? items.map(([value, word]) => h('button', {type:'button', className:'menu-item', role:'menuitem', 'data-action':'bulk-set', 'data-field':field, 'data-value':value, 'data-key':'bulk-' + field + '-' + value}, word))
+        : h('p', {className:'meta'}, note)));
+}
+// Open epics a picked ticket can go into: never a picked ticket itself or one inside a picked ticket.
+function bulkEpics() {
+  const all = ticketParents(tickets()), byId = new Map(all.map(t => [t.id, t]));
+  const inside = t => { for (let x = t, n = 0; x && n < 50; x = byId.get(x.parent), n++) if (picked.has(x.id)) return true; return false; };
+  return sorted(all.filter(t => t.epic && activeTicket(t) && !inside(t)));
+}
+function bulkBar(visible) {
+  if (!picking()) return null;
+  const ids = shownIds(visible);
+  for (const id of [...picked]) if (!ids.has(id)) picked.delete(id);  // only rows that are shown stay picked
+  if (!picked.size) return null;
+  const epics = bulkEpics().map(t => [t.id, [t.key, boardShort(t.title, 48)].filter(Boolean).join(' ')]);
+  const bar = window.UI.bulkBar({key:'ticket-bulk', label:'Selected tickets', count:picked.size, busy:bulkSaving || null,
+    actions:[bulkMenu('Status', 'status', BULK_STATUS()), bulkMenu('Priority', 'priority', BULK_PRIORITY),
+      bulkMenu('Epic', 'parent', epics.length ? [...epics, ['', 'Not in an epic']] : [['', 'Not in an epic']])],
+    clear:h('button', {type:'button', className:'btn ghost sm', 'data-action':'bulk-clear'}, 'Clear')});
+  bar.classList.add('wide-only');
+  return bar;
+}
+// Run `job` for every ticket, four at a time, with "Saving n of N…" in the bar. Resolves to the tickets that saved.
+async function bulkRun(list, job) {
+  let next = 0, done = 0;
+  const ok = [], step = () => { bulkSaving = 'Saving ' + Math.min(done + 1, list.length) + ' of ' + list.length + '…'; render(); };
+  step();
+  const worker = async () => { while (next < list.length) { const t = list[next++]; if (await job(t)) ok.push(t); done++; step(); } };
+  try { await Promise.all(Array.from({length:Math.min(4, list.length)}, worker)); }
+  finally { bulkSaving = ''; render(); }
+  return ok;
+}
+const ticketsWord = n => n === 1 ? '1 ticket' : n + ' tickets';
+function bulkNotice(text, ok, failed, undo) {
+  if (ok.length) {
+    const toast = window.orch.toast(text, 'ok');
+    if (undo && toast?.querySelector) {
+      const back = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
+      back.addEventListener('click', () => { toast.remove(); undo(); });
+      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(back);
+    }
+  }
+  if (failed) window.orch.toast((failed === 1 ? '1 ticket' : failed + ' tickets') + ' could not be saved. Try again, or change them on their tickets.', 'error');
+}
+async function bulkStatus(lane) {
+  const data = window.DashHelpers.laneMove(lane), word = (MOVE_CHOICES.find(([id]) => id === lane) || [])[1];
+  if (!data || !word) return;
+  const {status, ...more} = data;
+  const list = [...picked].map(ticketOf).filter(t => t && !(t.status === status && (lane !== 'dropped' || !t.superseded_by)));
+  if (!list.length) { window.orch.toast('Nothing to change: the selected tickets are in ' + word + ' already', 'ok'); return; }
+  if (status === 'done' && window.DashHelpers?.childrenOf) {
+    const open = list.flatMap(t => window.DashHelpers.childrenOf(tickets(), t)).filter(k => activeTicket(k) && !picked.has(k.id));
+    if (open.length && !await confirmOpenKids({title:ticketsWord(list.length) + ' selected'}, [...new Map(open.map(k => [k.id, k])).values()])) return;
+  }
+  const was = new Map(list.map(t => [t.id, {status:t.status, data:t.status === 'waiting' && t.waiting_on ? {waiting_on:t.waiting_on} : t.status === 'dropped' && t.superseded_by ? {superseded_by:t.superseded_by} : {}}]));
+  const ok = await bulkRun(list, async t => { await moveTicket(t.id, status, false, {quiet:true, data:lane === 'dropped' && !t.superseded_by ? {} : more}); return ticketOf(t.id)?.status === status; });
+  bulkNotice('Moved ' + ticketsWord(ok.length) + ' to ' + word, ok, list.length - ok.length,
+    () => bulkRun(ok, async t => { const b = was.get(t.id); await moveTicket(t.id, b.status, true, {quiet:true, data:b.data}); return true; }));
+}
+// priority and epic: ticket.edit, as the ticket page's Priority and Part of fields
+// A 409 (the ticket changed since this page read it, e.g. by the status just set) reads the state again and tries once
+// more, as long as the field still has the value it had before.
+const editTicket = (t, args, still) => actRetry('ticket.edit', () => ({ticket:t.id, ...args, if_revision:(ticketOf(t.id) || t).revision}),
+  () => { const now = ticketOf(t.id); return !!now && still(now); }).then(r => !!r.ok, () => false);
+async function bulkEdit(field, value) {
+  const now = t => field === 'priority' ? (['high', 'low'].includes(t.priority) ? t.priority : 'normal') : (boardParent(tickets(), t)?.id || '');
+  const list = [...picked].map(ticketOf).filter(t => t && now(t) !== value);
+  if (!list.length) { window.orch.toast('Nothing to change: the selected tickets have this already', 'ok'); return; }
+  const epic = value ? ticketOf(value) : null, name = epic ? epic.key || boardShort(epic.title, 48) : '';
+  const text = n => field === 'priority' ? 'Priority ' + (BULK_PRIORITY.find(([p]) => p === value) || [, value])[1] + ' on ' + ticketsWord(n)
+    : value ? 'Moved ' + ticketsWord(n) + ' into ' + name : 'Took ' + ticketsWord(n) + ' out of their epic';
+  const was = new Map(list.map(t => [t.id, now(t)]));
+  const arg = v => field === 'priority' ? {priority:v} : {parent:v || null};
+  const ok = await bulkRun(list, t => editTicket(t, arg(value), x => now(x) === was.get(t.id)));
+  bulkNotice(text(ok.length), ok, list.length - ok.length, () => bulkRun(ok, t => editTicket(t, arg(was.get(t.id)), x => now(x) === value)));
+}
+function bulkAction(control) {
+  if (bulkSaving || snapshot || changeUnavailable()) return Promise.resolve();
+  const {field, value} = control.dataset;
+  return field === 'status' ? bulkStatus(value) : bulkEdit(field, value);
 }
 // Phone (ORCH-73, owner 16 Nov): the same groups as short rows (master UI.shortGroup), never a squeezed table.
 // One row: number and title, one fact, one thing on the right (Answer where the person is needed, else steps n/m or an
@@ -923,9 +1052,9 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
-  // ORCH-1716: a result to check says Check result at every width (the computer row shows it first, the session button
+  // ORCH-1716: a result to check says Test results at every width (the computer row shows it first, the session button
   // only on hover); the phone has room for one thing, so it is that one
-  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
   if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
@@ -1105,14 +1234,21 @@ function list() {
   syncTicketAddress();
   const visible = filteredTickets();
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
-  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
+  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
-  return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
-    h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
-    h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+  return fragment(top, !tickets().length ? ticketsEmpty() : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+}
+// No tickets at all: the master empty state with one sentence and New ticket (the page's one filled button).
+function ticketsEmpty() {
+  const text = 'Describe a job in plain words; a helper works on it and asks you only when it needs a decision.';
+  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
+  const add = typeof newButton === 'function' ? newButton() : null;
+  if (add) box.append(add);
+  box.dataset.key = 'empty';
+  return box;
 }
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.

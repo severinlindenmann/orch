@@ -70,6 +70,14 @@
     },
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
+    "request": {
+      "type": "object",
+      "description": "Optional (#1812). What was first asked, kept as it was: note = the note at creation (the note itself stays editable), files = the names (in artifacts/) of the files sent with the new ticket. Written at creation and by `orch ticket attach --request`; an older ticket has none.",
+      "properties": {
+        "note": { "type": "string", "maxLength": 2000 },
+        "files": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+      }
+    },
     "estimate": {
       "type": "object",
       "description": "Optional (ORCH-189). The helper's estimate from its first run (orch ticket tidy --estimate-minutes / --estimate-cost): helper minutes and dollars at list price, who and when. Set once.",
@@ -471,6 +479,7 @@
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
         "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
         "asked_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was asked (set by the core in orch ask; absent on questions from older versions). The Reviewer's routine answers wait from this time." },
+        "asked_by": { "$ref": "#/$defs/who", "description": "Optional. Who asked the question (the --by of orch ask, e.g. agent:copilot; set by the core; absent on questions from older versions). Screens name the asker from it; without it, the agent of the run on the ticket, else Helper." },
         "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
         "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
         "kind": {

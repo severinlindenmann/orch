@@ -209,7 +209,7 @@ function skeletonFor(kind) {
       : stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
-    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-side'}, Array.from({length:4}, () => bar('sk-tab'))), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
@@ -344,6 +344,7 @@ function sync(target, source) {
   }
   reconcile(target, source);
   if (target.matches('[data-settings-agent],[data-settings-permissions],[data-sync-where]')) target.checked = source.checked;
+  if (target.matches('[data-pick]')) { target.checked = source.checked; target.indeterminate = source.dataset.mixed === 'true'; }
   if (target.matches('[data-settings-field]')) {
     if (target.type === 'checkbox') target.checked = source.checked;
     else if (target.value !== source.value) target.value = source.value;
@@ -477,7 +478,9 @@ function navAddons(pages, here, navLink) {
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
+  // ORCH-2159: changing Tickets filters is an in-page update. Keep the search input, caret and scroll.
+  const r = route(), sameTickets = r.kind === 'tickets' && renderedRoute.split('?')[0] === '#tickets' && ticketAddressKey === ticketAddressPart();
+  const changed = !!renderedRoute && renderedRoute !== r.hash && !sameTickets, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
@@ -568,7 +571,8 @@ function render(arrived = new Set()) {
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
-      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
+      // ORCH-2140 W3: on the ticket page the question already stands above its card, so the card is the plain one
+      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))}, {plain:!!host.closest('.ticket-page .next-question, .ticket-page .ticket-question')});
     }
   });
   const shown = shownAddon();
@@ -863,6 +867,7 @@ async function refresh() {
       signedOut = true;
       connection.hidden = true;
       if (!state) main.replaceChildren();
+      document.getElementById('side-menu')?.removeAttribute('aria-busy');  // settled: the login covers the page
       return;
     }
     if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
@@ -913,8 +918,8 @@ function dialog(title, cls = 'dialog', lock = '') {
     for (const [host, mounted] of mounts) if (d.contains(host)) { mounted.destroy(); mounts.delete(host); }
     d.remove();
     if (!resolving) render();
-    if (trigger?.isConnected) trigger.focus({preventScroll:true});
-    else if (triggerKey) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
+    // The trigger is already focused (kit/overlay.js, ORCH-2060); only a trigger the render above replaced is found again
+    if (!trigger?.isConnected && triggerKey && !document.querySelector('dialog[open]')) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
   });
   document.body.append(d);
   return {d, actions};
@@ -1082,6 +1087,8 @@ main.addEventListener('keydown', event => {
 });
 // A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
 main.addEventListener('change', event => {
+  const pick = event.target.closest?.('input[data-pick]');  // ORCH-2034: a tick in the Tickets list
+  if (pick) { pickTicket(pick.dataset.pick, pick.checked); return; }
   const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
   if (radio) addonRadio(radio);
 });
@@ -1197,6 +1204,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'relay-connect') { await relayConnect(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
@@ -1242,6 +1250,8 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'bulk-set') { await bulkAction(control); return; }  // ORCH-2034: pick several (pages/tickets.js)
+  if (action === 'bulk-clear') { picked.clear(); render(); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';

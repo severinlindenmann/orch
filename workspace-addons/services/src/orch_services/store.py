@@ -158,8 +158,11 @@ def clean_cwd(root: Path, cwd: str | None) -> str:
             raise Refused(
                 "The folder must be inside this workspace. Give a folder of the workspace."
             ) from None
-    rel = PurePosixPath(p.as_posix())
-    if ".." in rel.parts or "\\" in raw or _CONTROL.search(raw):
+    # Windows: C:\ws\web or web\app are normal folder names (as_posix turns \ into /); elsewhere a \ that is left
+    # is part of a name and is refused, so the record reads the same on every computer.
+    posix = p.as_posix()
+    rel = PurePosixPath(posix)
+    if ".." in rel.parts or "\\" in posix or _CONTROL.search(raw):
         raise Refused("The folder must be inside this workspace. Give a folder of the workspace.")
     text = rel.as_posix() or "."
     full = (root / text).resolve()

@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import left, page, picker, routing, store, switching, when
+from . import left, near, page, picker, routing, store, switching, when
 from . import share as share_mod
 from .readers import cswap
 from .store import PERIOD_WORDS, Refused
@@ -484,6 +484,8 @@ def gather(root: Path) -> dict:
         "together": together,
         "switcher": cswap.command() is not None,
         "warnings": warnings,
+        # one line when an account is past 80% of a limit, with the fix; the Usage page shows the same words
+        "near": near.warning(out, root),
         "prepare": prepare_use(root),
     }
 
@@ -629,6 +631,8 @@ def run(args) -> int:
                 f"{store.fmt_value(lim['value'], '$')} per {PERIOD_WORDS[lim['period']]}"
             )
         lines.append(prepare_text(data["prepare"]))
+        if data["near"]:
+            lines.append(f"Warning: {data['near']}")
         lines += [f"Warning: {w}" for w in data["warnings"]]
         lines.append(
             "Next: orch usage limit <account> <number>  (or for / period / order / on / off / end / left)"

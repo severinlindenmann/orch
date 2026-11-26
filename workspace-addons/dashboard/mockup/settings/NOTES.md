@@ -7,10 +7,11 @@
 - Phone, helper, shared links and sync are compact summaries with direct destinations (SN-08, SN-13, SN-16).
 - Advanced groups team sharing, finished-work policy and copies; edits save locally with visible feedback (SN-18; BP-48).
 - Product data: Needs rename, appearance and policy write endpoints, current helper label, share count and cache timestamps.
+- ORCH-2090 polish (product matched to this mockup): every switch has its On/Off word beside it (master `.switch-text`), section headings are 14 px semibold in the text colour, the People intro says "Only you can change this." (no "at this computer", R4.1a). The product keeps its tabs on top (owner decision); its loading skeleton now has the same top tab row.
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
-- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, instant dismissal and native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
+- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, 120 ms exit (`--dur-exit`), focus back on the opener once it is closed, native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
 - Every route renders its own content-shaped skeleton: an inert, hidden-from-accessibility clone retains the exact row/card geometry. Query `?state=loading` is applied before body paint; Loaded / Loading / Empty / Replay work locally. Loaded content is preserved during the Refresh demo; only its status changes (SN-03, SN-22–24; BP-61–64).
 - Targets, not measured results: route shell+skeleton ≤100 ms; warm full paint <300 ms; cold data <1 s; FCP ≤1.8 s; LCP ≤2.5 s; INP ≤200 ms (local target <100 ms); CLS ≤0.1. Reserve content geometry and cache by route/workspace. Replace serial CLI startup in `/api/state` with one in-process snapshot; read independent data in parallel. Publish view and links must not waterfall. Background refresh must not clear cached content. Prefetch after 65 ms hover/focus when data-saving allows (SN-03, SN-04; BP-59–67).
 
@@ -31,7 +32,7 @@
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
-- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, instant dismissal and native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
+- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, 120 ms exit (`--dur-exit`), focus back on the opener once it is closed, native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
 - Every route renders its own content-shaped skeleton: an inert, hidden-from-accessibility clone retains the exact row/card geometry. Query `?state=loading` is applied before body paint; Loaded / Loading / Empty / Replay work locally. Loaded content is preserved during the Refresh demo; only its status changes (SN-03, SN-22–24; BP-61–64).
 - Targets, not measured results: route shell+skeleton ≤100 ms; warm full paint <300 ms; cold data <1 s; FCP ≤1.8 s; LCP ≤2.5 s; INP ≤200 ms (local target <100 ms); CLS ≤0.1. Reserve content geometry and cache by route/workspace. Replace serial CLI startup in `/api/state` with one in-process snapshot; read independent data in parallel. Publish view and links must not waterfall. Background refresh must not clear cached content. Prefetch after 65 ms hover/focus when data-saving allows (SN-03, SN-04; BP-59–67).
 
@@ -51,7 +52,7 @@
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
-- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, instant dismissal and native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
+- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, 120 ms exit (`--dur-exit`), focus back on the opener once it is closed, native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
 - Every route renders its own content-shaped skeleton: an inert, hidden-from-accessibility clone retains the exact row/card geometry. Query `?state=loading` is applied before body paint; Loaded / Loading / Empty / Replay work locally. Loaded content is preserved during the Refresh demo; only its status changes (SN-03, SN-22–24; BP-61–64).
 - Targets, not measured results: route shell+skeleton ≤100 ms; warm full paint <300 ms; cold data <1 s; FCP ≤1.8 s; LCP ≤2.5 s; INP ≤200 ms (local target <100 ms); CLS ≤0.1. Reserve content geometry and cache by route/workspace. Replace serial CLI startup in `/api/state` with one in-process snapshot; read independent data in parallel. Publish view and links must not waterfall. Background refresh must not clear cached content. Prefetch after 65 ms hover/focus when data-saving allows (SN-03, SN-04; BP-59–67).
 
@@ -71,7 +72,7 @@
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
-- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, instant dismissal and native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
+- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, 120 ms exit (`--dur-exit`), focus back on the opener once it is closed, native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
 - Every route renders its own content-shaped skeleton: an inert, hidden-from-accessibility clone retains the exact row/card geometry. Query `?state=loading` is applied before body paint; Loaded / Loading / Empty / Replay work locally. Loaded content is preserved during the Refresh demo; only its status changes (SN-03, SN-22–24; BP-61–64).
 - Targets, not measured results: route shell+skeleton ≤100 ms; warm full paint <300 ms; cold data <1 s; FCP ≤1.8 s; LCP ≤2.5 s; INP ≤200 ms (local target <100 ms); CLS ≤0.1. Reserve content geometry and cache by route/workspace. Replace serial CLI startup in `/api/state` with one in-process snapshot; read independent data in parallel. Publish view and links must not waterfall. Background refresh must not clear cached content. Prefetch after 65 ms hover/focus when data-saving allows (SN-03, SN-04; BP-59–67).
 
@@ -91,7 +92,7 @@
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
-- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, instant dismissal and native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
+- Controls: hover 80–100 ms; switch thumb 100 ms with shared move easing. Details open: opacity and 2 px displacement, 150 ms enter; close instant. Dialog: shared 200 ms enter, 120 ms exit (`--dur-exit`), focus back on the opener once it is closed, native focus containment. Saved/refresh status: one 200 ms pulse. Reduced motion disables all animations/transitions and leaves static skeletons (BP-69–77).
 - Every route renders its own content-shaped skeleton: an inert, hidden-from-accessibility clone retains the exact row/card geometry. Query `?state=loading` is applied before body paint; Loaded / Loading / Empty / Replay work locally. Loaded content is preserved during the Refresh demo; only its status changes (SN-03, SN-22–24; BP-61–64).
 - Targets, not measured results: route shell+skeleton ≤100 ms; warm full paint <300 ms; cold data <1 s; FCP ≤1.8 s; LCP ≤2.5 s; INP ≤200 ms (local target <100 ms); CLS ≤0.1. Reserve content geometry and cache by route/workspace. Replace serial CLI startup in `/api/state` with one in-process snapshot; read independent data in parallel. Publish view and links must not waterfall. Background refresh must not clear cached content. Prefetch after 65 ms hover/focus when data-saving allows (SN-03, SN-04; BP-59–67).
 
@@ -270,9 +271,28 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - `Renew` / `Replace` come with the renew step (ORCH-46). Until then a row that needs renewing shows `Check again`, a
   connection that cannot be reached `Try again`, and a row that works no button.
 
-- Helper tab, last card: "Prepare tickets when I save" (ORCH-741), one switch, on by default; saves at once. Off: Save without starting keeps the ticket as written until Start. Only a person turns it on. The daily limit (30 by default) is named in the text and shown in Usage.
+- Helper tab, last card: "Prepare tickets when I save" (ORCH-741), one switch, on by default; saves at once. Off: Save ticket keeps the ticket as written until Start. Only a person turns it on. The daily limit (30 by default) is named in the text and shown in Usage.
 - 19 Nov (ORCH-971): "Accept small finished work for me" and "Merge releases without my click" show only where the workspace has pull requests (a github.com remote on its folder, or the Pull requests add-on is on). A switch that is already on still shows so it can be turned off. The mockup shows a workspace with pull requests.
 - 24 Nov (ORCH-1798, owner): General > Sharing and finished work has the Auto Reviewer's two switches ("Check finished
   work", "Away for the night"), off by default, with one line that each verdict shows in the ticket's history and can be
   undone under What the Reviewer did on Review. The Review page shows the Auto Reviewer card only while one is on. The
   product draws them as their own card (the Review card's rows, R4.3); the mockup draws them as setting rows.
+
+## Releases switch on the Pull requests add-on page (#1228)
+
+- `addon-detail-pull-requests.html`: "Put new versions live without my click" is a row of the Pull requests add-on's
+  own settings page (same words, same `release_merge.set`, i.e. `orch config set workflow.release_merge on|off`).
+  While that add-on is on, General no longer shows it; without the add-on (a GitHub remote only, or the add-on off)
+  General keeps it as before (ORCH-971), so the switch is always in exactly one place.
+- `settings-addons.html` lists Pull requests with its Settings link; the General panels of these pages show the
+  workspace with Pull requests on, so their Releases row is gone.
+
+## A check file that waits for the person (#1549)
+
+- `settings-helper.html` › What helpers need: "Databricks dev" says `Not approved yet` (warning tone) with one
+  `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
+  `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).
+
+## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
+
+- "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.

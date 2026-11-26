@@ -1,9 +1,9 @@
-// ORCH-420 follow-up: on Review, Send back on a Check result with a picture goes through. Before, the picture landed in
+// ORCH-420 follow-up: on Review, Send back on a Test results card with a picture goes through. Before, the picture landed in
 // the ticket's files first, the card's own file list changed, and the answer was refused as "This card changed". Now
 // feedback files go in the ticket's feedback folder, the card stays the same, and the ticket is back with its helper.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 module.exports = {
-  name: 'Send back a Check result on Review with a picture',
+  name: 'Send back a Test results card on Review with a picture',
   covers: ['review.answer', 'ticket.attach', 'page:review'],
   async run({ page, open, reload, act, must, text }) {
     const title = 'Check the poster colours';
@@ -11,7 +11,7 @@ module.exports = {
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
     await dlg.getByPlaceholder(/What should the helper do/).fill(title);
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });  // the saving moment, then the new ticket
     await open('#tickets');
     await page.getByText(title).first().click();

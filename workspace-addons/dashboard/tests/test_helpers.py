@@ -730,11 +730,7 @@ def test_review_ticket_without_run_offers_no_start():
     assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
     src = webjs.all_js()
     assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
-    # the helper bar only shows while the ticket is being worked on (never on review/done)
-    assert (
-        "!['done', 'review'].includes(t.status)" in src
-        and "working && !helperLive ? agentBar(t) : null" in src
-    )
+    # Helper-bar visibility is checked on rendered tickets in ticketstrip.test.js.
 
 
 def test_ui2_small_bugs_in_markup_and_css():
@@ -906,7 +902,7 @@ def test_failed_agent_start_is_plain_with_a_retry():
     assert call("startFailure", {**t, "status": "active"}, None, settings) is None
     t["waiting_on"] = {"kind": "question", "ref": "q1"}
     assert call("startFailure", t, None, settings) is None
-    assert call("plainStartReason", "The agent did not start") == "it did not start"
+    assert call("plainStartReason", "The agent did not start") == "it stopped right away"
     assert call("plainStartReason", "[Errno 13] Permission denied: '/x/claude'") == "it is not allowed to run"
 
 
@@ -916,13 +912,24 @@ def test_start_reason_never_shows_paths_commands_or_secrets():
     assert r(
         "The agent could not be started: [Errno 2] No such file or directory: '/usr/local/bin/claude'"
     ) == ("the claude program was not found")
-    assert r("[Errno 2] No such file or directory: '/x/a b; rm -rf /'") == "it did not start"
+    assert r("[Errno 2] No such file or directory: '/x/a b; rm -rf /'") == "it stopped right away"
     for raw in (
         "boom: ghp_abcdefghijklmnopqrstuvwxyz0123 at /Users/me/secret/dir",
         "claude --token sk-live-abcdefabcdefabcdef exited 1",
         "",
     ):
-        assert r(raw) == "it did not start"
+        assert r(raw) == "it stopped right away"
+
+
+@node
+def test_start_reason_and_wait_line_name_a_login_in_plain_words():
+    """ORCH-1688: "Waits: The agent stopped before it got going: Not logged in - Please run /login" on Tickets."""
+    ref = "The agent stopped before it got going: Not logged in · Please run /login"
+    assert call("plainStartReason", ref) == "its login needs renewing"
+    assert call("plainStartReason", "API Error: 401 Unauthorized") == "its login needs renewing"
+    line = call("waitWords", {"waiting_on": {"kind": "external", "ref": ref, "start": True}}, [], None)
+    assert line == "Waits: the helper could not start, its login needs renewing"
+    assert not any(w in line for w in ("agent", "/login", "Please run"))
 
 
 def test_agent_line_shows_the_core_hold_reason_and_drops_it_when_absent():

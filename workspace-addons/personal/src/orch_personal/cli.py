@@ -213,24 +213,24 @@ def _manage(args, root: Path) -> int:
 
     from . import service
 
-    if args.cmd in ("start", "open"):
-        try:
+    try:  # a run folder that is a link or a file, a stop that failed: one plain sentence, never a traceback
+        if args.cmd in ("start", "open"):
             cur = service.start(root)
-        except RuntimeError as e:
-            raise Refused(str(e)) from None
-        url = service.url(cur["port"])
-        data, msg = {"running": True, "pid": cur["pid"], "url": url}, url
-        if args.cmd == "open" and not args.no_browser:
-            webbrowser.open(url)
-    elif args.cmd == "stop":
-        result = service.stop(root)
-        data, msg = {"stopped": result == "stopped", "note": result}, f"Personal: {result}."
-    else:
-        cur = service.running(root)
-        data = {"running": bool(cur)}
-        if cur:
-            data.update(pid=cur["pid"], url=service.url(cur["port"]))
-        msg = f"Personal: {data['url']}" if cur else "Personal is not running."
+            url = service.url(cur["port"])
+            data, msg = {"running": True, "pid": cur["pid"], "url": url}, url
+            if args.cmd == "open" and not args.no_browser:
+                webbrowser.open(url)
+        elif args.cmd == "stop":
+            result = service.stop(root)
+            data, msg = {"stopped": result == "stopped", "note": result}, f"Personal: {result}."
+        else:
+            cur = service.running(root)
+            data = {"running": bool(cur)}
+            if cur:
+                data.update(pid=cur["pid"], url=service.url(cur["port"]))
+            msg = f"Personal: {data['url']}" if cur else "Personal is not running."
+    except RuntimeError as e:
+        raise Refused(str(e)) from None
     print(json.dumps(data) if args.json else msg)
     return 1 if args.cmd == "status" and not data["running"] else 0
 
