@@ -46,6 +46,7 @@ KEYS = (
     "workflow.away",
     "workflow.reviewer_answers",
     "workflow.reviewer_kinds",
+    "workflow.reviewer_mode",
     "workflow.reviewer_look",
     "workflow.release_merge",
     "workflow.prepare_on_save",
@@ -314,6 +315,7 @@ def _config(args, root: Path) -> None:
             "workflow.away": lambda: config.away_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_kinds": lambda: ",".join(config.reviewer_kinds(root)) or "none",
+            "workflow.reviewer_mode": lambda: config.reviewer_mode(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
             "workflow.prepare_on_save": lambda: config.prepare_on_save_on(root),
@@ -443,6 +445,21 @@ def _config(args, root: Path) -> None:
             if kinds
             else "Saved: the Reviewer accepts no kind of work by itself.",
         )
+    elif args.sub == "set" and args.key == "workflow.reviewer_mode":
+        who = _actor(args)
+        if args.value == "accept" and not who.startswith("human:"):  # closes work in the owner's place
+            raise Refused(
+                "Only a person lets the Reviewer accept for them: orch config set in their own terminal."
+            )
+        mode = config.set_reviewer_mode(root, args.value)
+        _out(
+            args,
+            {"workflow.reviewer_mode": mode},
+            "Saved: the Reviewer accepts complete work for you and sends open work back; each has an Undo."
+            if mode == "accept"
+            else "Saved: nothing closes by itself. The Reviewer only proposes; "
+            "you accept or send back on Review.",
+        )
     elif args.sub == "set" and args.key == "workflow.reviewer_look":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -496,7 +513,7 @@ def _config(args, root: Path) -> None:
         _out(
             args,
             {"workflow.auto_reviewer": value},
-            "Saved: new tickets start with Human review needed "
+            "Saved: new tickets start with “I review the result” "
             + ("off (the Auto Reviewer checks them)." if value else "on."),
         )
     elif args.sub == "set" and args.key == "workflow.dispatcher":
@@ -546,7 +563,7 @@ def _config(args, root: Path) -> None:
             "Saved: Away mode is "
             + (
                 "on: the Auto Reviewer accepts finished work and answers cards with the helper's "
-                "recommendation at once, on tickets without Human review needed."
+                "recommendation at once, on tickets with “I review the result” off."
                 if value
                 else "off."
             ),

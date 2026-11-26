@@ -34,6 +34,7 @@ class StateCache:
         self.busy = False
         self.closed = False
         self.rebuild = threading.Lock()  # single flight for a synchronous rebuild after a change
+        self.patching = threading.Lock()  # one click's quick copy at a time (see patch())
         self.gen = 0  # bumped by every put(): a rebuild started earlier never overwrites a newer copy
         self.dirty = False  # a change arrived: the background builder builds (once more)
         self.ended = 0.0  # when the last background build ended (MIN_GAP)
@@ -194,6 +195,16 @@ class StateCache:
                 pass
             finally:
                 self.ended = time.monotonic()
+
+    def patch(self, change):
+        """A click's quick copy: `change(copy)` gives the last copy with the clicked part read again (or None). One at a
+        time, so two clicks at once (several tickets changed together) each build on the other's copy instead of the
+        later one serving the earlier ticket's old version until the full build."""
+        with self.patching:
+            state = change(self.get()[0])
+            if state is not None:
+                self.quick(state)
+            return state
 
     def quick(self, state: dict):
         """A click's answer (the last copy with the clicked ticket read again) is served at once, and a full build
