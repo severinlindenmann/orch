@@ -19,3 +19,5 @@
   (read-only rows: "Manage in Claude" / "Manage in Copilot CLI", no switch), and the services in the Claude account
   that Check sign-in found ("In your Claude account", kept from the last check). The tab says "Connected services
   (MCP servers) your helpers can use" and "Last checked …". Demo: linear (plugin), github (Copilot CLI), Gmail (account).
+
+- Empty states (ORCH-2017): every tab, filter and search that shows nothing has one next step (New skill, Look again, Show all, Clear search, Show skills). The mockup runs the real `skills.js`, so they show here as in the product.

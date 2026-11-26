@@ -18,7 +18,7 @@
            {"label": "Delete", "tone": "bad", "action": {"op": "addon.act", "args": {"verb": "rm", "target": "l_a1b2c3"}}}
          ]}
       ],
-      "empty": {"title": "No lessons yet", "text": "Your helper adds a lesson when it learns something the next helper should know."}
+      "empty": {"title": "No lessons yet", "text": "Your helper adds a lesson when it learns something the next helper should know.", "link": {"label": "Open tickets", "to": "app:tickets"}}
     }
   ]
 }
