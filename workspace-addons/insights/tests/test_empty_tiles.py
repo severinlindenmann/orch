@@ -53,6 +53,9 @@ def test_first_day_shows_two_tiles():
     assert "No work by helpers is recorded here yet" in runs
     assert "Connected services" in services and "|0|" in services + "|"
     assert "Fills after a helper’s first work" in services
+    # services already set up are ready on day one: never "fills after the first work" beside their number
+    ready = run({"count": 3, "known": True})["tiles"][1]
+    assert ready == "Connected services|3|Ready for your helpers"
 
 
 def test_orch_is_lower_case_mid_sentence():

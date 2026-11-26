@@ -218,6 +218,7 @@ def stage(root, head, index, state, now):
         names.update((Path(parent) / f).relative_to(work).as_posix() for f in files)
     names.add("ticket-counter.json")
     generals, preserved = set(), set()
+    odd = 0
     left = cli.read(root, "left-out")  # Leave it out (pause.leave_out): checked per path against its bytes
     for path in sorted(names):
         if any(path.startswith(f"tickets/{tid}/") for tid in preserved):
@@ -225,6 +226,14 @@ def stage(root, head, index, state, now):
         if not paths.allowed(path) or any(path.startswith(f"tickets/{tid}/") for tid in generals):
             if path in old:
                 repo.git(root, "update-index", "--force-remove", "--", path, index=index)
+            elif (
+                paths.odd_name(path)
+                and odd < 50
+                and not any(path.startswith(f"tickets/{tid}/") for tid in generals)
+            ):
+                # never silent: a file named "Grüße.pdf" would else be missing on the other computer unseen
+                odd += 1
+                state["skipped"].append(f"{path}: {paths.ODD_NAME}")
             continue
         tid = path.split("/")[1].removesuffix(".json") if path.startswith("tickets/") else "key"
         with tickets.sync_apply(root, tid):

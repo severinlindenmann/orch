@@ -184,12 +184,13 @@ BAD_CHECK = (
 )
 
 
-def add_recipe(root: Path, name: str, doc: dict) -> dict:
+def add_recipe(root: Path, name: str, doc: dict, by: str | None = None) -> dict:
     """Keep one workspace recipe (the person's own check, `orch logins add`) in the guarded orch home and
     return it. Refused when it is not a recipe or names a built-in check."""
-    from orch import keystore
+    from orch import keystore, renew
     from orch.errors import Refused
 
+    renew.not_helper(by)  # the command runs later by itself: a helper must not save one
     doc = {k: v for k, v in doc.items() if v not in (None, "")}
     r = _recipe(name, doc)
     if not r:
@@ -206,9 +207,11 @@ def add_recipe(root: Path, name: str, doc: dict) -> dict:
     return r
 
 
-def remove_recipe(root: Path, name: str) -> bool:
+def remove_recipe(root: Path, name: str, by: str | None = None) -> bool:
     """Forget one workspace recipe; False when there was none by that name."""
-    from orch import keystore
+    from orch import keystore, renew
+
+    renew.not_helper(by)
 
     have = keystore.record_read(Path(root), "checks") or {}
     items = have.get("checks") if isinstance(have.get("checks"), dict) else {}
@@ -603,7 +606,7 @@ def conn_list(root: Path, binary: str, argv: list[str]) -> dict[str, str]:
     try:
         r = subprocess.run(
             [binary, *argv],
-            cwd=str(root),
+            cwd=os.path.realpath(tempfile.gettempdir()),  # not the workspace: its files are not trusted
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,

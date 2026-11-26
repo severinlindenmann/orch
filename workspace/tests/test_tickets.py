@@ -192,6 +192,24 @@ def test_ask_recommend_must_be_option(proj, run, new_ticket):
     assert run("ask", tid, "q?", "--option", "A", "--recommend", "B")[0] == 2
 
 
+def test_wait_until_without_a_zone_is_local_time_and_the_reply_says_so(proj, run, new_ticket, monkeypatch):
+    import time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("needs a POSIX TZ")
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        tid = new_ticket()
+        code, out, _ = run("wait", tid, "--until", "2030-11-20 08:00")
+        assert code == 0
+        assert read(proj, tid)["waiting_on"]["until"] == "2030-11-20T07:00:00Z"
+        assert "until Wed 20 Nov 08:00 (local time)" in out
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_wait_until_and_on(proj, run, new_ticket, validate):
     tid = new_ticket()
     assert run("wait", tid, "--until", "2026-11-05T08:00:00+01:00")[0] == 0
@@ -283,12 +301,14 @@ def test_concurrent_write_is_refused_not_lost(proj, new_ticket):
 
 
 def test_stale_lock_does_not_block(proj, run, new_ticket):
-    import os
+    import time
 
     tid = new_ticket()
     lock = proj / ".orch" / "tickets" / f".lock-{tid}"
     lock.write_text("", encoding="utf-8")
-    old = lock.stat().st_mtime - 120
+    # days old, not "stat - 120 s": at the fake clock (scripts/at-clock.sh) a stat can come back real or moved
+    # back by up to a day, and 120 s before a real stamp then reads as the future
+    old = time.time() - 3 * 86400
     os.utime(lock, (old, old))
     assert run("log", tid, "x")[0] == 0 and not lock.exists()
 
@@ -582,13 +602,13 @@ def _c(cid, done=True, types=("command",), **kw):
 def test_proof_state_counts_line():
     ps = tickets.proof_state(_t([_c("c1"), _c("c2"), _c("c3", types=("note",))]))
     assert ps["per_item"] == {"c1": "passed", "c2": "passed", "c3": "note"}
-    assert ps["line"] == "2 checks passed · 1 note" and ps["uncovered"] == []
+    assert ps["line"] == "2 tasks with evidence · 1 note" and ps["uncovered"] == []
 
 
 def test_proof_state_missing_and_empty():
     ps = tickets.proof_state(_t([_c("c1", done=False, types=())]))
-    assert ps["per_item"] == {"c1": "missing"} and ps["line"] == "No checks recorded"
-    assert tickets.proof_state(_t([]))["line"] == "No checks recorded"
+    assert ps["per_item"] == {"c1": "missing"} and ps["line"] == "No evidence yet"
+    assert tickets.proof_state(_t([]))["line"] == "No evidence yet"
 
 
 def test_proof_state_failed_only_when_exit_recorded():
@@ -597,7 +617,7 @@ def test_proof_state_failed_only_when_exit_recorded():
     bad = _c("c1")
     bad["evidence"][0]["exit"] = 1
     ps = tickets.proof_state(_t([bad, _c("c2")]))
-    assert ps["per_item"]["c1"] == "failed" and ps["line"] == "1 check failed"
+    assert ps["per_item"]["c1"] == "failed" and ps["line"] == "1 task failed"
     zero = _c("c1")
     zero["evidence"][0]["exit"] = 0
     assert tickets.proof_state(_t([zero]))["per_item"]["c1"] == "passed"
@@ -620,7 +640,7 @@ def test_proof_state_real_coverage_count_and_level():
             done_when="One.\nTwo; Three",
         )
     )
-    assert ps["uncovered"] == [] and ps["line"] == "3 checks passed" and ps["level"] == "ok"
+    assert ps["uncovered"] == [] and ps["line"] == "3 tasks with evidence" and ps["level"] == "ok"
     assert tickets.proof_state(_t([_c("c1")]))["uncovered"] == []  # no done_when, nothing to cover
 
 
@@ -1152,6 +1172,15 @@ def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_evidence_at_and_by_are_set_by_the_core(proj, run, new_ticket):
+    tid = new_ticket()
+    run("check", "add", tid, "Implement")
+    ev = '{"type":"note","ref":"x","at":"2099-01-01T00:00:00Z","by":"human:owner"}'
+    code, _, _ = run("check", "done", tid, "c1", "--evidence", ev)
+    got = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert code == 0 and got["at"] < "2099" and got["by"] != "human:owner"
 
 
 def test_the_unattributed_run_ticket_id_cannot_be_created(proj):
