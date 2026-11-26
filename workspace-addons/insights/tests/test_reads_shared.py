@@ -90,3 +90,16 @@ def test_a_failed_counts_read_is_not_kept_and_a_click_forgets_them(ws, monkeypat
     assert server.read_counts(ws) == {"n": 1}
     server.forget_counts()
     assert server.read_counts(ws) == {"n": 2}
+
+
+def test_a_read_on_its_way_during_a_click_is_not_kept(ws, monkeypatch):
+    answers = iter([{"n": 1}, {"n": 2}])
+
+    def read_json(*a):
+        server.forget_counts()  # the click ends while this read is on its way
+        return next(answers)
+
+    monkeypatch.setattr(server, "read_json", read_json)
+    assert server.read_counts(ws) == {"n": 1}
+    monkeypatch.setattr(server, "read_json", lambda *a: next(answers))
+    assert server.read_counts(ws) == {"n": 2}  # read again, not the answer from before the click

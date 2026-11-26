@@ -71,6 +71,7 @@ COUNTS_FRESH = 5.0  # seconds one counts answer serves every read of it (the pag
 _COUNTS: dict[tuple, tuple[float, object]] = {}
 _COUNTS_LOCK = threading.Lock()
 _COUNTS_ASKING: dict[tuple, threading.Lock] = {}
+_FORGOTTEN = [0]  # how many times a click forgot the counts
 
 
 def read_counts(root, orch_bin=None):
@@ -84,17 +85,23 @@ def read_counts(root, orch_bin=None):
         hit = _COUNTS.get(key)
         if hit and time.monotonic() - hit[0] < COUNTS_FRESH:
             return hit[1]
+        generation = _FORGOTTEN[0]
         got = read_json(root, orch_bin, ["record", "counts", "--days", "30", "--json"])
-        if got is None:
-            _COUNTS.pop(key, None)  # a failed read is never kept: the next ask tries again
-        else:
-            _COUNTS[key] = (time.monotonic(), got)
+        with _COUNTS_LOCK:
+            if got is None or generation != _FORGOTTEN[0]:
+                # a failed read is never kept, nor one that began before a click forgot the counts
+                _COUNTS.pop(key, None)
+            else:
+                _COUNTS[key] = (time.monotonic(), got)
         return got
 
 
 def forget_counts():
-    """A click may change what the counts say (a setting, a proposal): the next read asks again."""
-    _COUNTS.clear()
+    """A click may change what the counts say (a setting, a proposal): the next read asks again, and a read
+    already on its way when the click ended is not kept."""
+    with _COUNTS_LOCK:
+        _FORGOTTEN[0] += 1
+        _COUNTS.clear()
 
 
 def read_ticket_titles(root, orch_bin=None):
