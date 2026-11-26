@@ -12,7 +12,7 @@ module.exports = {
     await open('#home');
     await until(s => (s.review?.cards || []).some(c => c.id === 'core:review:' + tid), 'menu ready for review');
     await open('#review?card=' + encodeURIComponent('core:review:' + tid));
-    const card = page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Plan the spring menu'}).first();
+    const card = page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Six dishes with spring vegetables'}).first();
     await card.waitFor();
     const host = await page.locator('[data-review-host]').elementHandle();
     await card.getByRole('link', {name:/^Open ticket/}).click();
@@ -30,6 +30,6 @@ module.exports = {
     await page.locator('.review-ticket').getByRole('link', {name:'Close ticket'}).click();
     await page.locator('.review-ticket').waitFor({state:'detached'});
     must(await page.locator('.review-side').isVisible(), 'All cards is back');
-    must(await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Plan the spring menu'}).first().isVisible(), 'the same card');
+    must(await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Six dishes with spring vegetables'}).first().isVisible(), 'the same card');
   },
 };

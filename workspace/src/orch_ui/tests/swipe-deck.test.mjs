@@ -464,3 +464,227 @@ test('a question not marked one tap keeps tap an option, then Use it; one card w
   assert.equal(pics.host.children[0].hidden, false, 'options with pictures can be compared: the row and its All stay');
   assert.equal(pics.okBtn.hidden, false, 'not plain options: no one tap');
 });
+
+// Review overhaul (owner's picks 25 Nov 2026)
+test('R2 A: the list groups by lane (Holds up work now first), not by ticket', () => {
+  const {d} = deck([{...check('a'), laneName: 'Holds up work now', ticketTitle: 'One'}, {...check('b'), laneName: 'Look at the result', ticketTitle: 'Two'}, {...check('c'), laneName: 'Look at the result', ticketTitle: 'Three'}]);
+  const box = new N('div'); d.drawList(box);
+  const heads = box.querySelectorAll('.review-group-name').map(n => n.textContent);
+  assert.deepEqual(heads, ['Holds up work now', 'Look at the result']);
+});
+
+test('R4 A: words never open large; a picture does', () => {
+  const words = deck([draft('w'), draft('x')]);
+  assert.equal(words.host.querySelector('.swipe-expand'), null, 'no Make bigger on a text card');
+  const pic = deck([{id: 'p', kind: 'draft', kindLabel: 'Pictures', title: 'Banner', preview: {type: 'img', src: '/b.png'}}, draft('y')]);
+  assert.ok(pic.host.querySelector('.swipe-expand'), 'a picture opens large');
+});
+
+test('R6 A: a part still open sits on top of a result, and Send back is the filled button', () => {
+  const {host, noBtn, okBtn} = deck([check('a', {blocked: '1 step is not finished. Send it back to get it done.'}), check('b')]);
+  const open = host.querySelector('.swipe-open');
+  assert.ok(open && open.textContent.includes('Still open'));
+  assert.equal(noBtn.classList.contains('suggested'), true);
+  assert.equal(okBtn.classList.contains('suggested'), false);
+});
+
+test('R4 A: a written comment makes Send back the filled button, so Looks good never sends it along', async () => {
+  const {host, noBtn} = deck([check('a'), check('b')]);
+  assert.equal(noBtn.classList.contains('suggested'), false);
+  noBtn.click();
+  const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
+  ta.value = 'Make it 15%'; ta.listeners.input.forEach(f => f());
+  const close = sheet.querySelectorAll('button').find(b => /close|cancel/i.test(b.attrs['aria-label'] || b.textContent));
+  close.click(); await wait(300);
+  assert.equal(noBtn.classList.contains('suggested'), true);
+  assert.match(noBtn.textContent, /Send back with your comment/);
+});
+
+test('Reviewer mode propose: the card says what the Reviewer proposes', () => {
+  const {host} = deck([check('a', {proposal: {verdict: 'back', why: 'a part is open'}, suggest: 'no'}), check('b')]);
+  assert.ok(host.querySelectorAll('.swipe-why').some(n => n.textContent === 'The Reviewer proposes to send it back: a part is open'));
+});
+
+// ORCH-2182 (Focused review A): behind decisionFirst the card leads with "You decide:" and "If you wait:", one
+// "What matters" box holds the facts, and the links fold into one More menu. Without the switch: as before.
+const asked = extra => ({id: 'q1', kind: 'plan', kindLabel: 'Question', ticket: 'REL-4', title: 'Release 0.42', text: 'Put release 0.42 live for everyone?',
+  ifWait: '41 changes wait in develop.', facts: ['All checks are green', 'Nobody outside has it yet'], open: 'https://example.com/pr/1', links: [{label: 'Mockup', url: 'https://example.com/m'}], ...extra});
+const words = n => n.textContent;
+test('decision first: You decide, If you wait and What matters lead the card; links sit in More', () => {
+  const {host} = deck([asked()], {decisionFirst: true});
+  const card = host.querySelector('.swipe-card'), head = card.querySelector('.swipe-head');
+  assert.equal(words(head.querySelector('.swipe-decide')), 'You decide: Put release 0.42 live for everyone?');
+  assert.equal(words(head.querySelector('.swipe-wait')), 'If you wait: 41 changes wait in develop.');
+  const box = card.querySelector('.swipe-fact');
+  assert.equal(box.getAttribute('aria-label'), 'What matters');
+  assert.deepEqual(box.querySelectorAll('li').map(words), ['All checks are green', 'Nobody outside has it yet']);
+  assert.equal(card.children.indexOf(box), card.children.indexOf(head) + 1, 'the facts come right under the decision');
+  const more = card.querySelector('.swipe-more');
+  assert.ok(more, 'one More menu');
+  assert.deepEqual(more.querySelectorAll('.menu-item').map(words).map(s => s.trim()), ['Mockup', 'Open']);
+  assert.equal(card.querySelector('.swipe-foot-row').children.filter(x => x.tag === 'a').length, 0, 'no loose link buttons');
+  assert.ok(host.querySelector('.swipe-act.ok'), 'the answers stay in the bar');
+});
+test('decision first: empty fields are left out, never guessed', () => {
+  const {host} = deck([asked({ifWait: '', facts: [], open: undefined, links: []})], {decisionFirst: () => true});
+  const card = host.querySelector('.swipe-card');
+  assert.equal(card.querySelector('.swipe-wait'), null);
+  assert.equal(card.querySelector('.swipe-fact'), null);
+  assert.equal(card.querySelector('.swipe-more'), null);
+  assert.equal(words(card.querySelector('.swipe-decide')), 'You decide: Put release 0.42 live for everyone?');
+});
+test('switch off: the card as before, even when the fields are there', () => {
+  const {host} = deck([asked()]);
+  const card = host.querySelector('.swipe-card');
+  for (const c of ['.swipe-decide', '.swipe-wait', '.swipe-fact', '.swipe-more']) assert.equal(card.querySelector(c), null, c);
+  assert.equal(card.querySelector('.swipe-head').children.find(x => x.tag === 'h3').textContent, 'Release 0.42');
+});
+
+// ORCH-2183 (Focused review B): the person's quoted words under What matters, only behind decisionFirst.
+test('decision first: the quote says who and when, with open; out of date adds one line', () => {
+  const {host} = deck([asked({said: {who: 'person', name: 'Lea', src: 'chat', day: 'on 21 Nov', words: 'Keep Windows 10 until March.', stale: ''}})], {decisionFirst: true, ticketLink: () => '#ticket/t_1'});
+  const card = host.querySelector('.swipe-card'), said = card.querySelector('.swipe-said');
+  assert.equal(card.children.indexOf(said), card.children.indexOf(card.querySelector('.swipe-fact')) + 1, 'right under What matters');
+  assert.equal(words(said.querySelector('.swipe-said-q')), 'Lea wrote on 21 Nov: \u201cKeep Windows 10 until March.\u201d \u00b7 open');
+  assert.equal(said.querySelector('.swipe-said-open').href, '#ticket/t_1');
+  assert.equal(said.querySelector('.swipe-said-stale'), null);
+});
+test('decision first: You said / You wrote / Team rule, and stale words are not shown', () => {
+  const one = s => deck([asked({said: s})], {decisionFirst: true}).host.querySelector('.swipe-said');
+  assert.equal(words(one({who: 'you', src: 'chat', day: 'today', words: 'Ship it.', stale: ''}).querySelector('.swipe-said-q')), 'You said today: \u201cShip it.\u201d');
+  assert.equal(words(one({who: 'you', src: 'history', day: 'on 2 Nov', words: 'Ship it.', stale: ''}).querySelector('.swipe-said-q')), 'You wrote on 2 Nov: \u201cShip it.\u201d');
+  assert.equal(words(one({who: 'rule', name: 'Team rules', src: 'rules', day: 'on 2 Nov', words: 'Ask before money.', stale: ''}).querySelector('.swipe-said-q')), 'Team rule, 2 Nov: \u201cAsk before money.\u201d');
+  const newer = one({who: 'you', src: 'chat', day: 'today', words: 'Ship it.', stale: 'newer'});
+  assert.equal(words(newer.querySelector('.swipe-said-stale')), 'This may be out of date: things changed after you said this.');
+  const gone = one({who: 'person', name: 'Lea', src: 'chat', day: 'today', words: '', stale: 'gone'});
+  assert.equal(gone.querySelector('.swipe-said-q'), null);
+  assert.equal(words(gone.querySelector('.swipe-said-stale')), 'This may be out of date.');
+});
+test('switch off: no quote line', () => {
+  const {host} = deck([asked({said: {who: 'you', src: 'chat', day: 'today', words: 'x', stale: ''}})]);
+  assert.equal(host.querySelector('.swipe-said'), null);
+});
+
+// ORCH-2184 (Focused review C): behind decisionFirst the keys are 1 2 3 (the answers left to right, digits on the
+// buttons), J / K next and card before, M More, U undo, Esc o.onEscape; o.endView replaces the summary.
+const key = (host, k) => host.listeners.keydown.forEach(f => f({key: k, target: host, repeat: false, preventDefault() {}}));
+test('decision first: 1 2 3 answer, digits show on the buttons, J and K move, U takes back', async () => {
+  const {d, host, decided, talkBtn, noBtn, okBtn} = deck([draft('a'), draft('b'), draft('c')], {decisionFirst: true, canUndo: () => true, onUndo() {}});
+  assert.deepEqual([talkBtn, noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['1', '2', '3']);
+  key(host, 'j'); assert.equal(d.index, 1);
+  key(host, 'K'); assert.equal(d.index, 0);
+  key(host, '3'); await wait(160);
+  assert.deepEqual(decided.map(x => [x.id, x.v]), [['a', 'ok']]);
+  key(host, 'u');
+  assert.equal(d.index, 0, 'U brings the card back');
+  key(host, '2'); await wait(160);
+  assert.deepEqual(decided.map(x => x.v), ['ok', 'no']);
+});
+test('decision first: a Check card has two answers, so 1 and 2; M opens More; Esc goes to o.onEscape', () => {
+  let esc = 0;
+  const {host, noBtn, okBtn} = deck([check('a', {open: 'https://example.com/pr/1'}), check('b')], {decisionFirst: true, onEscape: () => { esc++; }});
+  assert.deepEqual([noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['1', '2']);
+  const sm = host.querySelector('.swipe-more summary');
+  let opened = 0; sm.onclick = () => { opened++; };
+  key(host, 'm'); assert.equal(opened, 1);
+  key(host, 'Escape'); assert.equal(esc, 1);
+});
+test('switch off: the keys stay the arrows; digits and J do nothing', async () => {
+  const {d, host, decided, okBtn} = deck([draft('a'), draft('b')]);
+  assert.equal(okBtn.querySelector('kbd').textContent, '→');
+  key(host, '3'); key(host, 'j'); await wait(160);
+  assert.equal(decided.length, 0); assert.equal(d.index, 0);
+});
+test('o.endView shows in place of the summary when every card is answered', async () => {
+  const end = new N('div'); end.className = 'attn-end';
+  const {host, okBtn} = deck([draft('a')], {decisionFirst: true, endView: () => end});
+  okBtn.click(); await wait(160);
+  assert.ok(host.querySelector('.attn-end'));
+  assert.equal(host.querySelector('.tally'), null);
+});
+
+// UI.attentionTiles (ORCH-2184): three tile buttons, an empty one says so and does nothing; no minutes
+test('attention tiles: counts, holds up work, the next deadline, and an empty tile', () => {
+  const UI = {}; const window = {UI};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const picked = [];
+  const row = UI.attentionTiles([
+    {group: 'quick', name: 'Quick look', count: 3, hold: 0},
+    {group: 'short', name: 'Short decision', count: 4, hold: 1, deadline: 'Next deadline: Release 0.42 · tomorrow 09:00'},
+    {group: 'time', name: 'Take your time', count: 0, hold: 0},
+  ], {onPick: g => picked.push(g)});
+  const tiles = row.querySelectorAll('.attn-tile');
+  assert.deepEqual(tiles.map(t => t.tag), ['button', 'button', 'button']);
+  assert.deepEqual(tiles.map(t => t.querySelector('.stat-label').textContent), ['Quick look', 'Short decision', 'Take your time']);
+  assert.equal(tiles[1].querySelector('.attn-tile-line').textContent, '1 holds up work');
+  assert.match(tiles[1].querySelector('.attn-due').textContent, /^Next deadline: Release 0\.42/);
+  assert.equal(tiles[2].querySelector('.stat-delta').textContent, 'Nothing waits here');
+  assert.equal(tiles[2].getAttribute('aria-disabled'), 'true');
+  assert.ok(!/min/.test(row.textContent), 'no minutes');
+  tiles[2].click(); tiles[0].click();
+  assert.deepEqual(picked, ['quick']);
+});
+test('a deck built again on the same host: only the newest one answers a key (ORCH-2184)', async () => {
+  const {host, decided} = deck([draft('a'), draft('b')]);
+  const UI2 = {toast() {}, statusIcon: () => new N('span'), reviewViewer() {}};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: {UI: UI2}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const again = [];
+  UI2.swipeDeck(host, [draft('c')], {mode: 'desk', voice: false, onDecide: (it, v) => again.push([it.id, v])});
+  key(host, 'ArrowRight'); await wait(160);
+  assert.deepEqual(decided, [], 'the old deck stays quiet');
+  assert.deepEqual(again, [['c', 'ok']]);
+});
+
+// ORCH-2186 (Focused review E): an ideas card, behind decisionFirst: one row per idea with Keep / Later / No, Save in
+// the bar; saving part is fine (the rest stays for later). Without the switch the ideas are the plain list as before.
+const ideasCard = extra => ({id: 'q7', kind: 'draft', kindLabel: 'Document', ticket: 'NOR-76', title: 'Which content ideas?', text: 'Which content ideas should the helper work out?',
+  ideas: ['Customer story', 'Advent calendar', 'Video with an installer'], preview: {type: 'doc', steps: ['Customer story', 'Advent calendar', 'Video with an installer']}, ...extra});
+const sortBtn = (host, row, word) => host.querySelectorAll('.swipe-idea')[row].querySelectorAll('button').find(b => b.textContent === word);
+test('ideas: one row per idea with Keep, Later and No in place of the list', () => {
+  const {host, okBtn} = deck([ideasCard()], {decisionFirst: true});
+  const card = host.querySelector('.swipe-card');
+  assert.equal(card.querySelector('.swipe-preview'), null, 'the plain list is not drawn twice');
+  const rows = card.querySelectorAll('.swipe-idea');
+  assert.deepEqual(rows.map(r => r.querySelector('.swipe-idea-t').textContent), ['Customer story', 'Advent calendar', 'Video with an installer']);
+  assert.deepEqual(rows[0].querySelectorAll('button').map(words), ['Keep', 'Later', 'No']);
+  assert.equal(rows[0].querySelector('.segmented').getAttribute('role'), 'group');
+  assert.ok(card.querySelector('.swipe-idea-left').textContent.includes('Ideas you do not sort stay here for later.'));
+  assert.match(words(okBtn), /^Save/);
+  assert.ok(okBtn.classList.contains('wait'), 'nothing sorted yet');
+});
+test('ideas: Save with nothing sorted asks to sort one, saves nothing', async () => {
+  const {host, okBtn, decided} = deck([ideasCard()], {decisionFirst: true});
+  okBtn.click(); await wait(200);
+  assert.equal(decided.length, 0);
+  assert.ok(words(host).includes('Sort at least one idea, then save.'));
+});
+test('ideas: saving part says how many stay and answers ok with the sorting', async () => {
+  const {host, okBtn, decided} = deck([ideasCard(), ideasCard({id: 'q8'})], {decisionFirst: true});
+  sortBtn(host, 0, 'Keep').click();
+  assert.equal(sortBtn(host, 0, 'Keep').getAttribute('aria-pressed'), 'true');
+  sortBtn(host, 2, 'No').click();
+  assert.match(words(okBtn), /Save, 1 left for later/);
+  assert.equal(okBtn.classList.contains('wait'), false);
+  sortBtn(host, 2, 'No').click();  // a second tap takes it back
+  assert.equal(sortBtn(host, 2, 'No').getAttribute('aria-pressed'), 'false');
+  assert.match(words(okBtn), /Save, 2 left for later/);
+  sortBtn(host, 1, 'Later').click();
+  okBtn.click(); await wait(200);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id: 'q7', v: 'ok', note: {ideas: {keep: [1], no: [], later: [2]}}}]);
+});
+test('ideas: everything sorted is a plain Save; the answer reads as counts', async () => {
+  const {host, okBtn, decided, note} = deck([ideasCard(), ideasCard({id: 'q8'})], {decisionFirst: true});
+  ['Keep', 'No', 'Keep'].forEach((w, i) => sortBtn(host, i, w).click());
+  assert.match(words(okBtn), /^Save(?!,)/);
+  okBtn.click(); await wait(200);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided[0].note)), {ideas: {keep: [1, 3], no: [2], later: []}});
+  const vm2 = {}; vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: vm2.window = {UI: {}}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  assert.equal(vm2.window.UI.ideasWord({keep: [1, 3], no: [2]}, 3), '2 kept, 1 no');
+  assert.equal(vm2.window.UI.ideasWord({keep: [1], no: [], later: [2]}, 5), '1 kept, 0 no, 4 for later');
+});
+test('ideas: switch off draws the plain list and Looks good, as before', () => {
+  const {host, okBtn} = deck([ideasCard()]);
+  assert.equal(host.querySelector('.swipe-idea'), null);
+  assert.ok(host.querySelector('.swipe-preview'));
+  assert.match(words(okBtn), /Looks good/);
+});

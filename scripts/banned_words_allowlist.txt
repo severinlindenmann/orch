@@ -41,6 +41,14 @@ relay/src/phonekeys.rs
 relay/src/phonegate.rs
 relay/tests/phone_signed_send.rs
 relay/tests/phone_signing_key.rs
+relay/tests/phone_signed_answer.rs   # the phone's signed answer (ORCH-1204 c9)
+mobile/OrchMobileUITests/SignedTwoWorkspacesE2ETests.swift  # its end-to-end UI test (ORCH-1204)
+relay/src/phone.rs                   # /v1/phone/answer takes the answer's envelope (ORCH-1204 c9)
+mobile/OrchMobile/Outbox.swift       # the outbox keeps the signed answer for a retry (ORCH-1204 c9)
+mobile/OrchMobile/Models.swift       # the question carries the hash of its signed bytes (ORCH-1204 c9)
+workspace/src/orch/relay.py          # keeps the hash of each signed question for its answer (ORCH-1204 c9)
+contracts/relay-api.md               # documents the answer's envelope (ORCH-1204 c9)
+contracts/phone-api.schema.json      # the answer's envelope field (ORCH-1204 c9)
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
 # ORCH-1202 (same owner request): the workspace side that checks every received message and the test of it
 workspace/src/orch/msgtrust.py

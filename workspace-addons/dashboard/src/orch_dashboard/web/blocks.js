@@ -458,130 +458,82 @@ const OrchBlocks = (() => {
     return s;
   }
 
-  // ---- Contacts with fingerprint and state (message keys, ORCH-1203, owner picked look B "Split"): the contacts
-  // that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this
-  // workspace's own fingerprint beside them; every other contact in a table below. The words are orch's (TRUST),
-  // never the add-on's; only checked ids and fingerprints go into the DOM (data attributes, textContent).
-  const PEER_ID = /^(ws|ph)_[a-z0-9]{10}$/;
-  const FPRINT = /^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$/;
-  const TRUST = {
-    new_key: {word: 'New key without the old one', tone: 'bad', icon: '!', ask: true,
-      text: 'The old key did not vouch for this new one. That happens with a lost or new computer, or with an attack. Treat it as a new contact.'},
-    changed: {word: 'Changed', tone: 'warn', icon: '↻', ask: true,
-      text: 'New key, vouched for by the old one. This happens when it is installed again. Messages wait until you accept again.'},
-    not_accepted: {word: 'Not accepted yet', tone: 'neutral', icon: '○', ask: true,
-      text: 'New contact. Its messages wait and nothing runs until you accept it.'},
-    not_valid: {word: 'Not valid', tone: 'bad', icon: '×', ask: false},
-    withdrawn: {word: 'Withdrawn', tone: 'bad', icon: '⊘', ask: false},
-    accepted: {word: 'Accepted', tone: 'good', icon: '✓', ask: false},
-  };
-  const KIND = {workspace: 'Workspace', phone: 'Phone'};
-  function fingerprint(fp, cls) {
-    const box = el('span', 'fingerprint' + (cls ? ' ' + cls : '')); box.setAttribute('translate', 'no');
-    String(fp).split(' ').forEach(g => box.append(el('span', '', g)));
-    box.setAttribute('aria-label', 'Fingerprint ' + String(fp));
-    return box;
-  }
-  function trustPill(state) {
-    const t = TRUST[state], p = el('span', 'badge trust-pill' + ({good: ' done', warn: ' needs', bad: ' failed'}[t.tone] || '')), i = el('span', 'trust-icon', t.icon);
-    i.setAttribute('aria-hidden', 'true'); p.append(i, t.word);
-    return p;
-  }
-  const dayOf = v => { const d = typeof v === 'string' ? parseDate(v) : null; return d ? dayLabel(d) : ''; };
-  const waitLine = n => n > 0 ? el('p', 'trust-held', n === 1 ? '1 message waits for your Accept' : n + ' messages wait for your Accept') : null;
-  function acceptForm(c, again) {
-    const risky = c.state === 'new_key' || !!c.old_fingerprint;   // any key that is not the one accepted
-    const f = el('form', 'trust-accept'); f.dataset.contactForm = c.id;
-    const field = el('label', 'field'); field.append(el('span', '', 'Your own name for it (optional)'));
-    const input = el('input', 'input'); input.name = 'name'; input.maxLength = 60; input.autocomplete = 'off';
-    input.value = !risky && c.relay_name ? String(c.name) : ''; input.placeholder = risky ? 'A new name' : String(c.relay_name || c.name);
-    field.append(input);
-    const label = risky ? 'Accept as new contact' : again ? 'Accept again' : 'Accept';
-    const b = el('button', 'btn sm ' + (risky ? 'outline' : 'primary'), label); b.type = 'submit';
-    b.dataset.contactAccept = c.id; b.dataset.fingerprint = c.fingerprint; b.dataset.who = String(c.name);
-    b.setAttribute('aria-label', label + ' ' + String(c.name));
-    f.append(field, b);
-    return f;
-  }
-  function oldKey(c) {
-    if (!c.old_fingerprint) return [];
-    const old = el('p', 'meta trust-old'); old.append(c.state === 'changed' ? 'Before: ' : 'Old key, no longer used: ', fingerprint(c.old_fingerprint, 'sm'));
-    return [old];
-  }
-  const warnLine = c => c.state === 'new_key' || (c.old_fingerprint && c.state !== 'changed') ? [el('p', 'trust-warn', 'Only accept if they set up a new computer.')] : [];
-  function checkLine(c) {
-    return el('p', 'trust-check', 'Check that it matches the fingerprint ' + String(c.relay_name || c.name) + ' shows on its own Settings page.');
-  }
-  function askCard(c) {
-    const t = TRUST[c.state], card = el('article', 'card trust-ask'); card.dataset.contact = c.id; card.dataset.tone = t.tone;
-    const head = el('header', 'trust-head'), who = el('div', 'trust-who');
-    who.append(el('h3', '', c.name));
-    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
-    who.append(el('span', 'meta', sub.join(' · ')));
-    head.append(who, trustPill(c.state)); card.append(head, el('p', '', t.text));
-    card.append(...oldKey(c), checkLine(c), fingerprint(c.fingerprint, 'lg'), ...warnLine(c));
-    card.append(acceptForm(c, false));
-    const w = waitLine(c.held); if (w) card.append(w);
-    return card;
-  }
-  function stateNote(c) {
-    if (c.state === 'accepted') return c.accepted_at ? 'Accepted ' + dayOf(c.accepted_at) : '';
-    if (c.state === 'withdrawn') return c.withdrawn_at ? 'Withdrawn ' + dayOf(c.withdrawn_at) + '. Nothing from it is handled.' : 'Nothing from it is handled.';
-    if (c.state === 'not_valid') return (c.refused === 1 ? '1 message refused' : (c.refused || 0) + ' messages refused') + ' as forged or changed.';
-    return '';
-  }
-  function otherRow(c) {
-    const tr = el('tr'); tr.dataset.contact = c.id;
-    const who = el('td', 'trust-cell'); who.dataset.label = 'Contact'; who.append(el('strong', '', c.name));
-    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
-    who.append(el('span', 'meta', sub.join(' · ')));
-    const fp = el('td'); fp.dataset.label = 'Fingerprint'; fp.append(fingerprint(c.fingerprint, 'sm'), ...oldKey(c));
-    const st = el('td', 'trust-cell'); st.dataset.label = 'State'; st.append(trustPill(c.state));
-    const note = stateNote(c); if (note) st.append(el('span', 'meta', note));
-    const act = el('td', 'trust-act');
-    if (c.state === 'accepted') {
-      const b = el('button', 'btn ghost sm', 'Stop trusting'); b.type = 'button';
-      b.dataset.contactWithdraw = c.id; b.dataset.who = String(c.name); b.setAttribute('aria-label', 'Stop trusting ' + String(c.name));
-      act.append(b);
-    } else {   // Not valid or Withdrawn: the same check and Accept, one click to open it here
-      const d = el('details', 'trust-again'), s = el('summary', 'btn outline sm', 'Check and accept again');
-      d.append(s, checkLine(c), ...warnLine(c), acceptForm(c, true)); act.append(d);
+  // ---- Conversations (RP5): one thread per workspace. The workspaces are the master's list-and-panel (.split-view, the
+  // same choosing and phone-width back as the split block); a message is the master's .thread-line, a handed-over task a
+  // small .banner card, a file a .file-chip. What a message says about itself (Sent, Not sent yet, Waiting for <Name>)
+  // is the add-on's answer, drawn as it is. Only the checked workspace id goes into a data attribute.
+  const WS_ID = /^ws_[a-z0-9]{10}$/;
+  const convDrafts = new Map();   // what was typed in a thread's box, kept over repaints (workspace id -> text)
+  const initial = name => (String(name || '?').trim()[0] || '?').toUpperCase();
+  function convMessage(m, who, prev) {
+    const mine = m.who === 'you', same = prev && prev.who === m.who;
+    const line = el('article', 'thread-line' + (same ? ' cont' : '')); line.dataset.message = String(m.id);
+    const av = el('span', 'avatar', initial(mine ? 'You' : who)); av.setAttribute('aria-hidden', 'true');
+    const body = el('div', 'thread-line-body');
+    if (!same) { const head = el('div', 'thread-line-head', mine ? 'You' : who); head.append(el('span', 'meta', m.at)); body.append(head); }
+    if (m.text) body.append(el('div', 'thread-line-text', m.text));
+    if (m.file) body.append(el('span', 'file-chip', m.file.name + (m.file.size ? ' · ' + m.file.size : '')));
+    if (m.task) {
+      const card = el('div', 'banner'), grow = el('div', 'grow'), stack = el('div', 'stack-sm');
+      stack.append(el('span', 'eyebrow', mine ? 'Task you handed over' + (m.task.from ? ' · from ticket ' + m.task.from : '') : 'Task from ' + who),
+        el('strong', '', m.task.title));
+      if (m.task.note) stack.append(el('p', '', m.task.note));
+      grow.append(stack); card.append(grow);
+      if (m.state && m.state.tone !== 'good') card.append(el('span', 'badge needs', m.state.label));
+      body.append(card);
     }
-    tr.append(who, fp, st, act);
-    return tr;
+    if (m.note) body.append(el('span', 'handoff', m.note));
+    if (m.state && !(m.task && m.state.tone !== 'good')) {
+      const ok = m.state.tone === 'good';
+      body.append(el('span', 'handoff' + (ok ? ' answered' : ''), (ok ? '✓ ' : '') + m.state.label + (m.state.label === 'Not sent yet' ? '. Goes out by itself when the connection is back.' : '')));
+    }
+    line.append(av, body);
+    return line;
   }
-  function drawContacts(b) {
-    const items = arr(b.items).filter(c => c && PEER_ID.test(String(c.id)) && Object.prototype.hasOwnProperty.call(TRUST, c.state) && FPRINT.test(String(c.fingerprint)) && typeof c.name === 'string' && c.name)
-      .map(c => ({...c, old_fingerprint: FPRINT.test(String(c.old_fingerprint || '')) && c.old_fingerprint !== c.fingerprint ? c.old_fingerprint : '', held: Number.isInteger(c.held) && c.held > 0 ? c.held : 0, relay_name: typeof c.relay_name === 'string' && c.relay_name !== c.name ? c.relay_name : ''}));
-    const asks = items.filter(c => TRUST[c.state].ask), others = items.filter(c => !TRUST[c.state].ask);
-    const s = el('section', 'blk blk-above blk-contacts trust-layout');   // blk-above: no outer card around the cards
-    const main = el('div', 'trust-asks');
-    if (asks.length) {
-      const h = el('div', 'blk-head'); h.append(el('h2', 'blk-title', 'Needs your Accept'), el('span', 'count', String(asks.length)));
-      main.append(h, ...asks.map(askCard));
-      s.append(main);
-    }
-    const own = b.own && FPRINT.test(String(b.own.fingerprint)) ? b.own : null;
-    if (own) {
-      const card = el('aside', 'card trust-own'); card.setAttribute('aria-label', 'This workspace');
-      card.append(el('span', 'eyebrow', 'This workspace'), el('h3', '', own.name || 'This workspace'), fingerprint(own.fingerprint, 'lg'));
-      card.append(el('p', 'meta', 'Read it out to the other side so they can check it.'));
-      const c = el('button', 'btn outline sm', 'Copy'); c.type = 'button'; c.dataset.copy = String(own.fingerprint); c.setAttribute('aria-label', 'Copy this workspace’s fingerprint');
-      card.append(c); s.append(card);
-    }
-    const box = el('section', 'card trust-others');
-    const h = el('header', 'card-h row between'); h.append(el('h3', '', asks.length ? 'Other contacts' : 'Contacts'), el('span', 'meta', others.length === 1 ? '1 contact' : others.length + ' contacts'));
-    box.append(h);
-    if (others.length) {
-      const wrap = el('div', 'table-wrap'), t = el('table', 'data-table trust-table'), hr = el('tr');
-      ['Contact', 'Fingerprint', 'State'].forEach(x => { const th = el('th', '', x); th.scope = 'col'; hr.append(th); });
-      const th = el('th'); th.scope = 'col'; th.append(el('span', 'sr-only', 'Actions')); hr.append(th);
-      const thead = el('thead'); thead.append(hr); const tb = el('tbody'); others.forEach(c => tb.append(otherRow(c)));
-      t.append(thead, tb); wrap.append(t); box.append(wrap);
-    } else box.append(el('p', 'blk-none', asks.length ? 'None yet. Accepted contacts show here.' : 'No other workspace or phone yet.'));
-    s.append(box);
+  function convPanel(c, shown, label) {
+    const s = el('section', 'split-panel stack-lg'); s.dataset.splitPanel = c.id; s.tabIndex = -1;
+    s.setAttribute('aria-label', c.name); if (!shown) s.hidden = true;
+    const back = el('div', 'phone-only'), bb = el('button', 'btn ghost sm', '← All ' + label.toLowerCase()); bb.type = 'button'; bb.dataset.splitPick = '';
+    back.append(bb); s.append(back);
+    const head = el('div', 'row between'), t = el('h2', 't-sect', c.name); head.append(t);
+    if (c.about) head.append(el('span', 'meta', c.about));
+    s.append(head);
+    const thread = el('div', 'stack'); thread.setAttribute('role', 'log'); thread.setAttribute('aria-label', 'Messages with ' + c.name);
+    if (!arr(c.messages).length) thread.append(el('p', 'muted', 'No messages yet. Write the first one below.'));
+    arr(c.messages).forEach((m, i) => thread.append(convMessage(m, c.name, arr(c.messages)[i - 1])));
+    s.append(thread);
+    if (c.offline) s.append(el('p', 'handoff', c.offline));
+    const form = el('div', 'row conv-send'), input = el('input', 'input grow');
+    input.type = 'text'; input.maxLength = 2000; input.autocomplete = 'off'; input.placeholder = 'Write to ' + c.name + '…';
+    input.setAttribute('aria-label', 'Message to ' + c.name); input.dataset.convInput = c.id; input.value = convDrafts.get(c.id) || ''; input.addEventListener('input', () => convDraft(c.id, input.value));
+    const send = el('button', 'btn primary', 'Send'); send.type = 'button'; send.dataset.convSend = c.id; send.dataset.who = c.name;
+    form.append(input, send); s.append(form);
     return s;
   }
+  function drawConversations(b) {
+    const items = arr(b.items).filter(c => c && WS_ID.test(String(c.id)) && typeof c.name === 'string' && c.name);
+    const s = el('section', 'blk blk-above blk-split'), param = 'chat';
+    s.dataset.splitParam = param;
+    if (!items.length) return s;
+    const label = String(b.title || 'Workspaces'), want = splitChosen(param);
+    const picked = items.some(c => c.id === want) ? want : null, shown = picked || items[0].id;
+    const grid = el('div', 'split-view'); if (picked) grid.dataset.picked = 'true';
+    const nav = el('nav', 'split-list focus-list'); nav.setAttribute('aria-label', label);
+    const h = el('div', 'card-h'); h.append(el('h2', '', label)); nav.append(h);
+    for (const c of items) {
+      const row = el('div', 'list-row' + (c.id === shown ? ' cur' : '')); row.dataset.splitRow = c.id;
+      const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(c.id);
+      a.dataset.splitPick = c.id; if (c.id === shown) a.setAttribute('aria-current', 'true');
+      a.append(el('span', '', c.name)); if (c.last) a.append(el('span', 'subline', c.last));
+      row.append(a); if (c.badge) row.append(chip(c.badge));
+      nav.append(row);
+    }
+    grid.append(nav, ...items.map(c => convPanel(c, c.id === shown, label)));
+    s.append(grid);
+    return s;
+  }
+  function convDraft(id, text) { if (WS_ID.test(String(id))) convDrafts.set(String(id), String(text).slice(0, 2000)); }
+  function convSent(id) { convDrafts.delete(String(id)); }
 
   const draw = {
     stat(b) {
@@ -613,7 +565,7 @@ const OrchBlocks = (() => {
       return s;
     },
     split: drawSplit,
-    contacts: drawContacts,
+    conversations: drawConversations,
     // Bars per label (e.g. per day), side by side or stacked; each column says its numbers on hover or focus.
     chart(b) {
       const s = el('section', 'blk card blk-chart'), head = blkHead(b); if (head) s.append(head);
@@ -931,6 +883,6 @@ const OrchBlocks = (() => {
     return root;
   }
   const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
-  return {render, duration, appHash, splitPick, splitLogShow};
+  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;

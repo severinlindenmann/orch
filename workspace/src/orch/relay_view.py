@@ -333,17 +333,123 @@ def _question_state(root: Path, entry: dict) -> str:
     return ""
 
 
+CONV_MAX = 12  # workspaces shown with a thread
+CONV_MESSAGES = 30  # newest messages kept per thread
+
+
+def _conversations(root: Path, received: list[dict], sent: list[dict], picked: dict, handled) -> list[dict]:
+    """RP5: one conversation per workspace (the people in the relay's list), oldest first. What a message says
+    about itself comes from what this workspace already records: still in the outbox is "Not sent yet"; sent
+    is "Sent"; a task they must allow first is "Waiting for <Name>"."""
+    d = relay._read_dir(root)
+    waiting: dict[str, list[dict]] = {}
+    for m in relay.outbox_list(root):
+        waiting.setdefault(str(m.get("to")), []).append(m)
+    allowed = relay.allows(root)["received"]
+    by_peer: dict[str, list[tuple[str, dict]]] = {}
+
+    def add(peer: str, at: str, item: dict) -> None:
+        by_peer.setdefault(peer, []).append((at, item))
+
+    for m in received:
+        line, extra = preview(m["type"], m.get("body"))
+        upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
+        if is_update(m["type"], line, upd):
+            continue
+        at = str(m.get("created_at") or "")
+        item: dict = {"id": str(m["id"]), "who": "them", "at": _stamp(at) or "-"}
+        if m["type"] == "file":
+            item["file"] = {"name": line, **({"size": extra} if extra else {})}
+        elif m["type"] in ("delegate", "start"):
+            item["task"] = {
+                "title": line,
+                "note": "Asks your helper to work on it. You decide here whether it may.",
+            }
+        else:
+            item["text"] = line
+        if m["type"] in ("text", "file"):  # where orch passed it on (#2051)
+            tmp: dict = {}
+            _pickup_state(root, tmp, m, picked.get(m["id"]), m["id"] in handled)
+            if tmp.get("chips"):
+                item["note"] = tmp["chips"][-1]["label"]
+        add(m["from"], at, item)
+    for e in sent:
+        line = plain(e.get("preview") or "-")
+        if is_update(e["type"], line, e.get("update")):
+            continue
+        at = str(e.get("at") or "")
+        item = {"id": str(e["id"]), "who": "you", "at": _stamp(at) or "-"}
+        pid = e["to"]
+        name = relay.name_of(root, pid)
+        if e["type"] == "file":
+            item["file"] = {"name": line, **({"size": str(e["extra"])} if e.get("extra") else {})}
+        elif e["type"] in ("delegate", "start"):
+            task = {"title": line}
+            key = _about(root, e.get("ticket"), None)
+            if key:
+                task["from"] = key
+            item["task"] = task
+        else:
+            item["text"] = line
+        unsent = any(w.get("id") == e["id"] for w in waiting.get(pid, []))
+        if unsent:
+            item["state"] = {"label": "Not sent yet", "tone": "warn"}
+        elif e["type"] in ("delegate", "start") and not _yes(allowed, pid, e["type"]):
+            item["state"] = {"label": plain(f"Waiting for {name}", 40), "tone": "warn"}
+        else:
+            item["state"] = {"label": "Sent", "tone": "good"}
+        add(pid, at, item)
+    rows = []
+    for w in d.get("workspaces", []):
+        if not isinstance(w, dict) or not isinstance(w.get("id"), str):
+            continue
+        pid, name = w["id"], plain(w.get("name") or w["id"], 60)
+        msgs = sorted(by_peer.get(pid, []), key=lambda x: x[0])[-CONV_MESSAGES:]
+        row: dict = {
+            "id": pid,
+            "name": name,
+            "messages": [it for _, it in msgs],
+            "_at": msgs[-1][0] if msgs else "",
+        }
+        if w.get("description"):
+            row["about"] = plain(w["description"], 80)
+        last = next(
+            (
+                it.get("text") or (it.get("file") or {}).get("name") or (it.get("task") or {}).get("title")
+                for _, it in reversed(msgs)
+                if it
+            ),
+            "",
+        )
+        if last:
+            row["last"] = plain(last, 60)
+        wait = waiting.get(pid, [])
+        if wait:
+            n = len(wait)
+            row["badge"] = {"label": f"{n} not sent", "tone": "warn"}
+            row["offline"] = (
+                f"Not sent yet: {n} message{'s' if n != 1 else ''} to {name}. "
+                "They go out by themselves when the relay can be reached."
+            )
+        rows.append(row)
+    rows.sort(key=lambda r: (r["_at"] == "", r["_at"]), reverse=True)
+    rows = rows[:CONV_MAX]
+    for r in rows:
+        del r["_at"]
+    return rows
+
+
 def view(root: Path) -> dict:
     now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: dict = {"schema": "orch.addon-view/1", "generated_at": now, "blocks": []}
     try:
         net.load_service(root, "relay")
     except Refused:
-        # D5 (26 Nov): what happened, what still works, and one button to the place that connects it (the
-        # dashboard draws the header link as the notice's button when the notice has none of its own).
-        out["notice"] = "Contacts is not connected yet. Your tickets and everything else still work."
+        # D5 (26 Nov): what happened and what to do, one button to the place that connects it (the dashboard draws the
+        # header link as the notice's button); RP8: the page says Relay.
+        out["notice"] = "Relay is not connected yet. Paste the text from your admin to connect it."
         out["notice_tone"] = "warn"
-        out["header"] = {"link": {"label": "Connect Contacts", "to": "app:settings/phone"}}
+        out["header"] = {"link": {"label": "Connect Relay", "to": "app:settings/phone"}}
         out["blocks"] += [
             {
                 "type": "list",
@@ -352,18 +458,18 @@ def view(root: Path) -> dict:
                 "items": [],
                 "empty": {
                     "title": "No messages yet",
-                    "text": "Messages to and from other workspaces show here once Contacts is connected.",
+                    "text": "Messages to and from other workspaces show here once Relay is connected.",
                 },
             },
             {
                 "type": "list",
-                "title": "Workspaces you can talk to",
+                "title": "Workspaces",
                 "span": "half",
                 "count": 0,
                 "items": [],
                 "empty": {
                     "title": "No workspaces yet",
-                    "text": "The workspaces you allow show here once Contacts is connected.",
+                    "text": "The workspaces your admin connects to you show here once Relay is connected.",
                 },
             },
         ]
@@ -378,12 +484,19 @@ def view(root: Path) -> dict:
         out["notice"] = (
             f"{waiting} message{s} wait to be sent: {problem}"
             if problem
-            else f"{waiting} message{s} wait to be sent. They go out as soon as the relay can be reached."
+            else f"The relay can't be reached. You can keep writing. {waiting} message{s} "
+            + (
+                "waits here and goes out by itself."
+                if waiting == 1
+                else "wait here and go out by themselves."
+            )
+            + " Nothing is lost."
         )
         out["notice_tone"] = "warn"
         out["header"] = {"status": {"label": "Waiting to send", "tone": "warn"}}
+        out["button"] = {"label": "Try now", "action": {"op": "addon.refresh"}}
     else:
-        out["notice"] = "Connected. Send messages and files to other workspaces."
+        out["notice"] = "Connected. Write to the workspaces your admin connected."
         out["notice_tone"] = "good"  # the page shows the pill instead of a banner for this one
         out["header"] = {"status": {"label": "Connected", "tone": "good"}}
     rows: list[tuple[str, dict, tuple]] = []
@@ -429,10 +542,15 @@ def view(root: Path) -> dict:
 
     picked = {r["id"]: r for r in relay.pickups(root)}
     handled = relay.seen(root)
-    for m in _received(root):
+    got, gave = _received(root), _sent(root)
+    convs = _conversations(root, got, gave, picked, handled)
+    conv_ids = {c["id"] for c in convs}  # what is said with these workspaces is read in their thread
+    for m in got:
         line, extra = preview(m["type"], m.get("body"))
         upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
         auto = is_update(m["type"], line, upd)
+        if not auto and m["from"] in conv_ids:
+            continue
         r = row(
             str(m.get("created_at") or ""),
             relay.name_of(root, m["from"]),
@@ -445,9 +563,11 @@ def view(root: Path) -> dict:
         if not auto:
             _pickup_state(root, r[1], m, picked.get(m["id"]), m["id"] in handled)
         (updates if auto else rows).append(r)
-    for e in _sent(root):
+    for e in gave:
         line = plain(e.get("preview") or "-")
         auto = is_update(e["type"], line, e.get("update"))
+        if not auto and e["to"] in conv_ids:
+            continue
         (updates if auto else rows).append(
             row(
                 str(e.get("at") or ""),
@@ -486,34 +606,82 @@ def view(root: Path) -> dict:
     trust = _trust_block(root)
     if trust:
         out["blocks"].append(trust)
-    out["blocks"] += [
+    if convs:
+        out["blocks"].append({"type": "conversations", "title": "Conversations", "items": convs})
+    if rows or updates or not convs:
+        out["blocks"].append(
+            {
+                "type": "list",
+                "title": "Recent messages",
+                "items": shown,
+                "more": max(0, len(rows) - 20),
+                "empty": {
+                    "title": "No messages yet",
+                    "text": (
+                        "Send one from the phone or from another workspace."
+                        if peers
+                        else "Your admin chooses who you can write to. Nothing to do until then."
+                    ),
+                    "button": {"label": "Open Relay settings", "to": "app:settings/phone"},
+                },
+            }
+        )
+        if not convs:
+            out["blocks"][-1]["span"] = "half"
+    out["blocks"].append(
         {
             "type": "list",
-            "title": "Recent messages",
-            "span": "half",
-            "items": shown,
-            "more": max(0, len(rows) - 20),
-            "empty": {
-                "title": "No messages yet",
-                "text": (
-                    "Send one from the phone or from another workspace."
-                    if peers
-                    else "Pair a phone or allow a workspace in Settings to start a conversation."
-                ),
-                "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
-            },
-        },
-        {
-            "type": "list",
-            "title": "Workspaces you can talk to",
-            "span": "half",
+            "title": "Workspaces",
             "count": len(peers),
             "items": peers[:50],
             "empty": {
-                "title": "No workspaces allowed",
-                "text": "Allow a workspace to send it messages and files.",
-                "link": {"label": "Allow a workspace", "to": "app:settings/phone"},
+                "title": "No workspaces yet",
+                "text": "Your admin chooses who you can write to.",
+                "link": {"label": "Open Relay settings", "to": "app:settings/phone"},
             },
-        },
-    ]
+        }
+    )
+    if not convs:
+        out["blocks"][-1]["span"] = "half"
     return out
+
+
+NEW_CONTACT_DAYS = 3
+
+
+def needs(root: Path, now: dt.datetime | None = None) -> list[dict]:
+    """Home rows (contracts/needs.schema.json) for a workspace the admin paired and this one took in on its
+    first message (RP3 A): one quiet line each, for three days; OK puts it off for the day. No network."""
+    from orch import msgtrust
+
+    now = now or dt.datetime.now(dt.UTC)
+    rows = []
+    for c in msgtrust.contacts(root):
+        if (
+            c.get("kind") != "workspace"
+            or c.get("accepted_by") != "relay-pairing"
+            or c.get("state") != "accepted"
+        ):
+            continue
+        try:
+            since = dt.datetime.fromisoformat(str(c.get("accepted_at")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if since.tzinfo is None or not dt.timedelta(0) <= now - since <= dt.timedelta(days=NEW_CONTACT_DAYS):
+            continue
+        name = plain(c.get("name") or "Another workspace", 60)
+        rows.append(
+            {
+                "id": f"relay:new-contact:{c['id']}",
+                "source": "relay",
+                "kind": "relay:new-contact",
+                "ticket": None,
+                "title": f"New contact: {name}",
+                "text": f"New contact: {name}, connected by your admin. "
+                "Their messages are on the Relay page.",
+                "tone": "warn",
+                "since": since.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "actions": [{"label": "OK", "later": True}],
+            }
+        )
+    return rows

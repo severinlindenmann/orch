@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Phone link'",
+        "'Connection'",
         "function addonDetailPage(addon)",
         "'Remove ' + label",  # D6: one list ends with Remove and what stays (no 'About this add-on')
         "OrchLook?.settingsSection()",
