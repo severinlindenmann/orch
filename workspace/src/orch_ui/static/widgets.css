@@ -1366,7 +1366,6 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-end:empty{display:none}
 .lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:flex;flex-direction:column;gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
 .lbar-pop[data-at=below]{top:calc(100% + var(--s2));bottom:auto}
-.lbar-pop-h{margin:0;font-weight:600}
 .lbar-helpers{border:1px solid var(--border);color:var(--text)}
 .lbar-gh{display:flex;justify-content:space-between;gap:var(--s2);margin:var(--s2) 0 0;padding:0 var(--s3);color:var(--text-muted);font-size:var(--fs-meta);font-weight:600;line-height:16px;letter-spacing:.04em;text-transform:uppercase}
 .lbar-gh:first-child{margin-top:0}
