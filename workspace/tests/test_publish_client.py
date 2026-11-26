@@ -498,6 +498,51 @@ def test_net_retries_connection_failures_only(monkeypatch):
     assert len(tries) == 1 and sleeps == []
 
 
+def test_net_tries_a_stalled_request_once_more_at_most(monkeypatch):
+    """A server that takes the connection and never answers: each try waits the whole time limit, so four
+    tries held `orch relay send` for minutes. One more try after a stall, then the message stays queued."""
+    from orch import net
+    from orch.errors import Refused
+
+    tries = []
+    sleeps = own_sleeps(monkeypatch)
+
+    def stalls(req, timeout, **kw):
+        tries.append(1)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", stalls)
+    with pytest.raises(Refused, match="reach"):
+        net.call("POST", "http://x.test/v1/messages", body={"a": 1}, timeout=1)
+    assert len(tries) == 2 and sleeps == [1]
+
+
+def test_net_one_wait_per_host_skips_a_silent_host_only(monkeypatch):
+    import urllib.error
+
+    from orch import net
+    from orch.errors import Refused
+
+    tries = []
+    own_sleeps(monkeypatch)
+
+    def refused(req, timeout, **kw):
+        tries.append(req.host)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", refused)
+    with net.one_wait_per_host():
+        for url in ("http://a.test/x", "http://a.test/y", "http://b.test/x"):
+            with pytest.raises(Refused, match="reach") as e:
+                net.call("GET", url)
+            assert e.value.status is None
+    assert tries == ["a.test"] * 4 + ["b.test"] * 4
+    tries.clear()
+    with pytest.raises(Refused):
+        net.call("GET", "http://a.test/x")  # outside a command every call tries again
+    assert len(tries) == 4
+
+
 def test_net_does_not_replay_posts_after_send(monkeypatch):
     from orch import net
     from orch.errors import Refused
@@ -702,7 +747,7 @@ def test_publish_has_a_shared_tab():
     import tomllib
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
-    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Publish"
 
 
 def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):

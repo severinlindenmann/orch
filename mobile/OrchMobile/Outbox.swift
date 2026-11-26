@@ -116,6 +116,11 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     /// Review stack swipe: sent as `verdict` with the plain `answer` summary. Such an item stays after the relay stored it
     /// (`sentMessageId`) until the workspace's review_result arrives (`reconcile`), so the phone can show Received / Changed / Refused.
     var verdict: PendingVerdict? = nil
+    /// The question this answer is for, as the workspace signed it (ORCH-1204): the signed answer names its
+    /// `question_id` and the SHA-256 of its signed bytes. Nil for an unsigned question (the answer goes unsigned).
+    var questionEnvelope: SignedEnvelope? = nil
+    var questionId: String? = nil
+    var questionTicket: String? = nil
     // progress
     /// The relay stored it (first tick). The item stays until `/messages` lists it, so a restart in between never sends twice.
     var sentMessageId: String? = nil
@@ -415,12 +420,20 @@ final class Outbox {
         return v
     }
 
+    /// What a signed answer needs of its question (ORCH-1204): kept with the item, so a retry after a restart signs the same.
+    nonisolated static func remember(_ question: Question, in item: inout OutboxItem) {
+        item.questionEnvelope = question.message.envelope
+        item.questionId = question.message.body.questionId
+        item.questionTicket = question.message.ticket
+    }
+
     /// Queue an answer to a question. The same `client_id` is used on every retry; one answer per question is queued.
     @discardableResult
     func enqueueAnswer(question: Question, answer: String, now: Date = Date()) -> OutboxItem {
         if let existing = items.first(where: { $0.kind == .answer && $0.questionMessageId == question.id }) { return existing }
-        let item = OutboxItem(clientId: UUID().uuidString.lowercased(), phone: phone, kind: .answer, workspace: question.message.from,
+        var item = OutboxItem(clientId: UUID().uuidString.lowercased(), phone: phone, kind: .answer, workspace: question.message.from,
                               createdAt: ISO8601DateFormatter().string(from: now), questionMessageId: question.id, answer: answer)
+        Self.remember(question, in: &item)
         items.append(item); save()
         return item
     }
@@ -450,6 +463,7 @@ final class Outbox {
         do { try Self.checkVerdict(Self.wireVerdict(verdict, files: pending, dummy: true), for: question) } catch { removeFolder(clientId); throw error }
         var item = OutboxItem(clientId: clientId, phone: phone, kind: .answer, workspace: question.message.from,
                               createdAt: ISO8601DateFormatter().string(from: now), questionMessageId: question.id, answer: answer, verdict: verdict)
+        Self.remember(question, in: &item)
         item.files = pending
         items.append(item); save()
         return item
@@ -632,7 +646,9 @@ final class Outbox {
                 try await uploadMissing(item.clientId, client)  // the answer changed during the upload: its new files
             }
             guard let item = self.item(clientId: item.clientId), !item.files.contains(where: { $0.blobId == nil }) else { throw RelayError.network("gone") }
-            let r = try await client.answer(Self.answerRequest(for: item))
+            var req = Self.answerRequest(for: item)
+            req.envelope = answerSignature(for: req, item: item)
+            let r = try await client.answer(req)
             if item.verdict != nil { mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil } }   // stays until the result
             else { discard(item.clientId) }
             return .answered(clientId: item.clientId, questionMessageId: item.questionMessageId ?? r.id, answer: item.answer ?? "")
@@ -656,6 +672,20 @@ final class Outbox {
         for p in item.feedback?.pins ?? [] { if let f = p.voice, let b = f.blobId { local[b] = fileURL(item, f) } }
         let e = MessageSigner.sign(r, phoneId: phone, key: key) { local[$0].flatMap(MessageSigner.facts(of:)) }
         if e == nil { Self.log.info("sent unsigned: this message cannot be signed in v1") }
+        return e
+    }
+
+    /// The phone signs an answer to a signed question (ORCH-1204 c9): it names the question's id and the hash of its
+    /// signed bytes, so a broken relay cannot move the answer to another question. Unsigned question: unsigned answer.
+    private func answerSignature(for r: AnswerRequest, item: OutboxItem) -> SignedEnvelope? {
+        guard let qe = item.questionEnvelope, let qid = item.questionId, let key = PhoneKey.current() else { return nil }
+        var local: [String: URL] = [:]
+        for f in item.files { if let b = f.blobId { local[b] = fileURL(item, f) } }
+        let e = MessageSigner.signAnswer(r, to: item.workspace, ticket: item.questionTicket, questionId: qid,
+                                         questionEnvelope: qe.wire, phoneId: phone, key: key) {
+            local[$0].flatMap(MessageSigner.facts(of:))
+        }
+        if e == nil { Self.log.info("answer sent unsigned: it cannot be signed in v1") }
         return e
     }
 
