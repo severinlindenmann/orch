@@ -12,6 +12,7 @@ from pathlib import Path
 
 from orch import (
     addons,
+    cardkinds,
     cli_addons,
     cli_checks,
     cli_clients,
@@ -1859,6 +1860,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
+        if not args.kind and not args.action:  # an add-on's or orch's own question words itself
+            cardkinds.refuse_bad_question(args.text or "", list(args.option or []), bool(card))
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
@@ -1893,6 +1896,8 @@ def run(args: argparse.Namespace) -> None:
                 "\nHint: the question holds an orch command. A person copies or runs it in one click on "
                 'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
                 if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else "\n" + cardkinds.ASK_HINT
+                if not card and not args.kind and not (args.option and args.recommend)
                 else ""
             ),
         )
