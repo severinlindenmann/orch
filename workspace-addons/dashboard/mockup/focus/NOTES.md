@@ -169,3 +169,13 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## Header-only panes, free splits, ticket beside Focus (ORCH-2199, ORCH-2200, ORCH-2202, 26 Nov)
+
+Owner picks of ORCH-2188 (A a, B a, F a, G a, H a, I a, M a; drawings in the ticket). focus-v4d.html now draws a pane
+as its header only above the screen: status pill (its popover: model, step, open time, how long it stays, Open ticket),
+key, title, Chat | Terminal, Copy, full screen, split right, split down, pin, close, More (Stop, End session, History,
+Where Focus sits with Bar only). No meta row, no Watching bar, no Let me type switch: a click into the screen types
+(brand edge), Esc twice or a click outside stops. Split right / down asks Chat with… / Terminal / Plain terminal. The
+mockup keeps its panes side by side; the built layer also nests them (helper left, terminal and Manager stacked right)
+with 1 px dividers to drag, and folds the side menu to its rail beside a ticket at 1280.

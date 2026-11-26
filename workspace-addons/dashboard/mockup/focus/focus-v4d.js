@@ -95,6 +95,9 @@
   function mk(n) { if (!st.marks) return ''; return btn('mw-mk', 'feat', n, { 'data-n': n, 'data-pick': picks[n] || '', 'data-on': st.sheet && st.feat === n ? 1 : false, 'aria-label': 'Feature ' + n + ': ' + F[n - 1][1] }); }
   function ic(d) { return '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>'; }
   var I = {
+    splitR: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
+    splitD: ic('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>'),
+    copy: ic('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
     pin: ic('<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>'),
     full: ic('<path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/>'),
     exit: ic('<path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5"/>'),
@@ -303,7 +306,8 @@
   function termHTML(s) {
     /* ORCH-1797: on Windows helpers run in one step (no live screen there yet): the Terminal view shows the helper's log under one plain line (win=1) */
     if (st.win && s.kind !== 'shell') return '<p class="meta" data-key="live-log-note">On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.</p><pre class="live-lines" tabindex="0" aria-label="Last lines of ' + esc(s.k) + '">' + esc(shown(s).join('\n')) + '</pre>';
-    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
+    /* ORCH-2199: no Watching bar and no Let me type switch: a click into the screen types (2 px brand edge), Esc twice or a click outside stops; Copy sits in the pane header */
+    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><pre class="mw-screen" data-act="typing" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" title="' + (st.typing ? 'Typing into the helper · Esc twice or a click outside stops' : 'Click the screen to type into it') + '" aria-label="Terminal of ' + esc(s.k) + '. Click to type, Esc twice stops.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
     return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + hist(s).map(function (x, i) {
@@ -332,16 +336,15 @@
     var s = by(k), asking = s.s === 'none' || (o.main && st.ask), term = s.kind === 'shell' || st.term, id = 'mw-i' + (++uid);
     var segOk = s.kind !== 'shell' && !asking && s.s !== 'queue', qOut = size === 'md' && s.q && !asking;
     var qSide = !!s.q && !asking && term && size === 'lg' && !o.noshelf && window.innerWidth > 720 && !st.foldR;  // ORCH-1600: beside the terminal, not above it
-    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + stat(s, !!o.narrow) + '<span class="mw-key">' + esc(s.k) + '</span>';
+    var h = '<section class="mw-pane" data-size="' + size + '" data-s="' + s.s + '" data-k="' + esc(s.k) + '"' + (o.main ? ' data-on="1"' : '') + ' aria-label="' + esc(s.k + ', ' + nm(s)) + '"><header class="mw-ph">' + (o.pre || '') + (s.kind === 'shell' ? '<span class="mw-key" aria-hidden="true">&gt;_</span>' : btn('mw-stb', 'pm', stat(s, false), { 'data-k': s.k, 'data-kind': 'stat', 'aria-expanded': String(pmOpen(s.k, 'stat')), title: 'About ' + s.k })) + '<span class="mw-key">' + esc(s.k) + '</span>';
     if (o.main && st.ren === s.k) h += '<form class="mw-ren" data-f="ren" data-k="' + esc(s.k) + '"><label class="sr-only" for="' + id + '">Name of this session</label><input class="input" id="' + id + '" value="' + esc(nm(s)) + '" maxlength="60" autocomplete="off"><button class="btn outline sm" type="submit">Save name</button></form>';
     else if (o.main) h += btn('mw-pt truncate', 'ren', esc(nm(s)), { 'data-k': s.k, title: 'Click to rename', 'aria-label': 'Rename ' + nm(s) }) + (o.mk ? mk(9) : '');
     else if (o.sel) h += btn('mw-pt truncate', 'act', esc(nm(s)), { 'data-k': s.k, 'aria-label': 'Select the pane of ' + s.k });
     else h += '<span class="mw-pt truncate">' + esc(nm(s)) + '</span>';
     if (!o.compact && segOk && size === 'lg') h += seg(term, o.mk);
     h += o.ctl ? ctlHTML(s, o) : (o.tools || '');
-    ['place', 'model', 'more', 'end'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
-    var r2 = o.compact ? '' : (segOk && size !== 'lg' ? seg(term, false) : '') + (o.tools2 || '') + (size === 'sm' ? '' : mdlBtn(s, o.main) + meta(s, true) + (o.mk ? mk(12) : '') + tkLink(s));
-    if (r2) h += '<span class="mw-prow">' + r2 + '</span>';
+    ['place', 'model', 'more', 'end', 'stat', 'splitr', 'splitd'].forEach(function (kd) { if (pmOpen(s.k, kd)) h += paneMenu(s, kd, o); });
+    /* ORCH-2199 (owner picks A a, H a): no second row: model, step, open time and Open ticket sit in the status pill's popover */
     h += '</header><div class="mw-pb">' + (qOut ? '<div class="mw-qwrap">' + qHTML(s, o.quiet) + '</div>' : '') + '<div class="mw-pmain">';
     if (asking) h += startHTML(s, o.mk);
     else if (s.s === 'queue') h += '<div class="mw-start"><h2>In line</h2><p class="meta">All ' + max() + ' helper places are in use. This one starts by itself when a place is free. Idle helpers close after about an hour.</p></div>';
@@ -356,18 +359,20 @@
     var place = it('mode', I.bottom + '<span>At the bottom</span>', { 'data-m': 'bottom', 'aria-pressed': String(m === 'bottom') }) + '<span class="mw-nophone">' + it('mode', I.right + '<span>On the right</span>', { 'data-m': 'right', 'aria-pressed': String(m === 'right') }) + '</span>' + it('full', I.full + '<span>Full screen</span>', { 'aria-pressed': String(m === 'full') });
     if (kind === 'place') return '<div class="mw-pmenu" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p>' + place + '</div>';
     if (kind === 'end') return sessMenu(s, 'end');
+    if (kind === 'stat') return '<div class="mw-pmenu" role="group" aria-label="About ' + esc(s.k) + '"><p class="mw-poph">' + TOOL[s.tool || 't1'] + '</p>' + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) + '<p class="meta">Step: ' + esc(s.step || 'No step started yet') + '</p>' + (live(s) && s.up !== undefined ? '<p class="meta">Open ' + dur(s.up) + '</p>' : '') + '<p class="meta">' + warm(s).charAt(0).toUpperCase() + warm(s).slice(1) + '</p>' + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + '</div>';
+    if (kind === 'splitr' || kind === 'splitd') return '<div class="mw-pmenu" role="group" aria-label="Split"><p class="mw-poph">' + (kind === 'splitr' ? 'Split right with' : 'Split down with') + '</p>' + it('addpane', 'Chat with…') + it('addpane', 'Terminal') + it('addpane', 'Plain terminal') + '</div>';
     if (kind === 'model') return '<div class="mw-pmenu" role="group" aria-label="Model"><p class="mw-poph">' + TOOL[s.tool || 't1'] + ': model</p>' + MODELS[s.tool || 't1'].map(function (x) { return it('smodel', x + (x === mdl(s) ? ' (now)' : ''), { 'data-v': x, 'aria-pressed': String((s.next || mdl(s)) === x) }); }).join('') + '<p class="meta">A new model applies when the helper finishes its current step (or at its next start).</p></div>';
-    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (s.kind !== 'shell' ? it('ask', 'History') + it('pm', 'Model: ' + mdl(s), { 'data-kind': 'model' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') + place : '') + (s.kind === 'ticket' ? it('ticket', 'Open ticket') : '') + (o.compact && live(s) ? '<p class="mw-poph">This session</p>' + sessItems(s, 'more') : '') + '</div>';
+    /* ORCH-2199 (owner pick G a): More keeps only Stop, End session, History and Where Focus sits */
+    return '<div class="mw-pmenu" role="group" aria-label="More for ' + esc(s.k) + '">' + (o.narrow && segOk ? it('view', st.term ? 'Show chat' : 'Show terminal', { 'data-v': st.term ? 'chat' : 'term' }) : '') + (o.narrow ? it('pin', s.pin ? 'Unpin' : 'Pin') : '') + (live(s) ? '<p class="mw-poph">This session</p>' + sessItems(s, 'more') : '') + (s.kind !== 'shell' ? it('ask', 'History') : '') + '<p class="mw-poph">Where Focus sits</p>' + place + it('min', I.down + '<span>Bar only</span>') + '</div>';
   }
   function ctlHTML(s, o) {
+    /* ORCH-2199 / ORCH-2200 (owner picks G a, F a): Copy (Terminal view) · full screen · split right · split down · pin · close · More; under 480 px pin and split fold into More */
     var h = '<span class="mw-ctl">';
-    if (!o.compact) h += stopBtn(s) + endBtn(s);
-    if (!o.narrow) h += pinBtn(s);
-    h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions show at once, the most' : 'Add a session beside this one' });
-    if (!o.narrow) h += pmBtn(s, 'place', I[eff() === 'right' ? 'right' : 'bottom'], 'Where Focus sits');
-    h += btn('btn icon sm ghost', 'min', I.down, { 'aria-label': 'Minimise to the bar', title: 'Minimise to the bar' });
+    if (s.kind === 'shell' || st.term) h += btn('btn icon sm ghost', 'copyterm', I.copy, { 'data-k': s.k, 'aria-label': 'Copy all', title: 'Copy all (Copy selection when text is selected)' });
+    h += btn('btn icon sm ghost mw-nophone', 'full', I.full, { 'aria-label': 'Full screen', title: 'Full screen' });
+    if (!o.narrow) h += pmBtn(s, 'splitr', I.splitR, 'Split right') + pmBtn(s, 'splitd', I.splitD, 'Split down') + pinBtn(s);
     h += btn('btn icon sm ghost', 'closepane', I.x, { 'data-k': s.k, 'aria-label': o.n > 1 ? 'Close this pane' : 'Close Focus', title: o.n > 1 ? 'Close this pane' : 'Close Focus (the bar stays)' });
-    if (o.compact) h += pmBtn(s, 'more', I.more, 'More for ' + s.k);
+    h += pmBtn(s, 'more', I.more, 'More for ' + s.k);
     return h + '</span>';
   }
   function mdlBtn(s, can) {
@@ -573,7 +578,7 @@
     var panel = '', full = mode === 'full', n = st.panes.length;
     if (mode !== 'bar') panel = '<div class="mw-panel" data-mode="' + mode + '" data-n="' + n + '">' + st.panes.map(function (k, i) {
       var s = by(k), on = i === st.act, narrow = n > 1 && (mode === 'right' || phone() || (window.innerWidth - 240) / n < 480);
-      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, ctl: true, compact: n > 1, narrow: narrow, n: n, noshelf: n > 1 || (full && window.innerWidth < 1600), tools2: on && n === 1 ? histBtn(s) : '', prim: on, quiet: !on });
+      return pane(k, full ? 'lg' : 'md', { main: on, sel: !on, ctl: true, compact: n > 1, narrow: narrow, n: n, noshelf: n > 1 || (full && window.innerWidth < 1600), tools2: '', prim: on, quiet: !on });
     }).join('') + '</div>';
     return full ? barHTML(mode) + panel : panel + barHTML(mode);
   }
@@ -889,7 +894,7 @@
     else if (a === 'ovnav') ovStep(+b.dataset.d);
     else if (a === 'ovclose') closeOv();
     else if (a === 'typing') { st.typing = !st.typing; render('[data-act=typing]'); }  /* watching only by default (ORCH-744) */
-    else if (a === 'copyterm') clip(screenText(by(k)), function () { b.textContent = 'Copied'; say('Terminal text copied.'); });
+    else if (a === 'copyterm') clip(screenText(by(k)), function () { b.title = 'Copied'; say('Terminal text copied.'); });
     else if (a === 'feat') openSheet(+b.dataset.n);
     else if (a === 'sheet') { if (st.sheet) { st.sheet = false; render('#mw-fbtn'); } else openSheet(0); }
     else if (a === 'show') show(+b.dataset.n, b.dataset.more);

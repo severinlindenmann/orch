@@ -29,6 +29,9 @@ module.exports = {
     await act('session.new', () => page.locator('#live-bar [data-lbar-kind="terminal"]').click());
     const pane = page.locator('#live-dock .live-pane .live-pt', { hasText: 'Plain terminal' });
     await pane.first().waitFor({ timeout: 20000 });
+    // a plain terminal's header is the >_ icon, its title and the workspace folder: no status pill, no Open ticket
+    must(await page.locator('#live-dock .live-pane .live-pfolder').count(), 'the plain terminal does not show its workspace folder');
+    must(!(await page.locator('#live-dock .live-pane [data-key="live-status"]').count()), 'a plain terminal has a status pill');
     must(!(await page.locator('#live-dock [data-key="live-open-ticket"]').count()), 'a session without a ticket offers Open ticket');
 
     const listed = JSON.parse(orch('session', 'list', '--json'));

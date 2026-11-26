@@ -150,8 +150,8 @@ async function tapAbove(page, sel) {
   await page.$eval(sel, el => el.scrollIntoView({ block: 'center' }));
   const covered = await page.$eval(sel, el => { const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && !el.contains(top) && !!top.closest('#live-dock'); });
   if (covered) {
-    await page.click('#live-dock [data-key="live-min"], #live-dock [data-key="live-pane-more"]');
-    if (await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+    await page.click('#live-dock [data-key="live-pane-more"]');
+    await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]');  // Where Focus sits: Bar only
     await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   }
   await page.click(sel);
@@ -314,7 +314,7 @@ function barSessions() {
       pinned: barPrefs.pins['t_bar' + key.slice(5)] === true, name: barPrefs.names['t_bar' + key.slice(5)] || null };
   });
 }
-// Step 16: every pane says what its session does, its last lines, tool and model, how long it is open and how long it
+// Step 16: every pane says what its session does, its last lines; the status popover has model, how long it is open and how long it
 // stays, from the live sessions API, and keeps it current without a repaint (the keyboard place stays).
 async function paneData(page, dash) {
   await liveBarState(page);
@@ -325,11 +325,16 @@ async function paneData(page, dash) {
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const body = '#live-dock .live-pane[data-session="t_bar238"] [data-live-body]';
   await page.waitForFunction(b => /Keep the old file name/.test(document.querySelector(b)?.textContent || ''), body, { timeout: 10000 });
-  const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
-    lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
-  if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
-  if (!/^Claude Code · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
-  const link = `${body} [data-key="live-open-ticket"]`;
+  const lines = await page.$eval(body, el => el.querySelector('[data-live-lines]').textContent);
+  if (!/step \d of 5/.test(lines)) throw new Error('the pane does not show the last lines: ' + lines);
+  // the model, open time and how long it stays are in the status popover now (the pane body has no meta line)
+  const pn = '#live-dock .live-pane[data-session="t_bar238"]';
+  if (await page.$(body + ' [data-live-meta]')) throw new Error('the pane body still has a meta line');
+  await page.click(pn + ' [data-key="live-status"]');
+  await page.waitForSelector('[data-key="live-status-menu"]', { timeout: 3000 });
+  const stat = await page.$eval('[data-key="live-status-menu"]', el => el.textContent.replace(/\s+/g, ' '));
+  if (!/Sonnet/.test(stat) || !/\d+ min/.test(stat) || !/Stays warm while it waits for you/.test(stat)) throw new Error('the status popover reads: ' + stat);
+  const link = '[data-key="live-status-menu"] [data-key="live-open-ticket"]';
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());
   await page.waitForTimeout(300);
@@ -575,10 +580,7 @@ async function widgetsInPane(page, dash) {
   await page.evaluate(id => window.LiveLayer.open(id), WIDGET_ID);
   const pane = `#live-dock .live-pane[data-session="${WIDGET_ID}"]`;
   await page.waitForSelector(`${pane} [data-key="live-pane-more"]`, { timeout: 15000 });
-  if (!(await page.$('#live-dock[data-mode="full"]'))) {
-    await page.click(`${pane} [data-key="live-pane-more"]`);
-    await page.click('[data-key="live-more-full"]');
-  }
+  if (!(await page.$('#live-dock[data-mode="full"]'))) await fullScreen(page, pane);
   await page.waitForFunction(p => document.querySelectorAll(p + ' .live-shelf .result[data-type]').length >= 6, pane, { timeout: 15000 })
     .catch(async () => { throw new Error('the pane shows no results: ' + await page.textContent(pane)); });
 }
@@ -637,8 +639,7 @@ async function shelfView(page, dash, width) {
   await mode('right');
   if (await where() !== 'above') throw new Error('on the right the shelf is not a strip above the chat');
   await extraShot(page, 'fd-34-shelf-right', width);
-  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
-  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${inPane} .live-shelf .result`, { timeout: 5000 });
   if (await where() !== 'beside') throw new Error('in full screen the shelf is not a column beside the chat');
   const wf = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
@@ -649,16 +650,37 @@ async function shelfView(page, dash, width) {
   if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
   await page.waitForSelector(`${shelf} .result`, { timeout: 5000 });
 }
-// Minimise the layer to the bar when a pane is open (Minimise is in a pane's More, ORCH-1616); nothing open: nothing to do
+// Minimise the layer to the bar when a pane is open (Bar only is in a pane's More under Where Focus sits, ORCH-2199); nothing open: nothing to do
 async function minLayer(page) {
   const more = page.locator('#live-dock [data-key="live-pane-more"]:visible').first();
   if (!(await more.count())) return;
   await more.click().catch(() => {});
-  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]', { timeout: 3000 }).catch(() => page.keyboard.press('Escape'));
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]', { timeout: 3000 }).catch(() => page.keyboard.press('Escape'));
+}
+// Split right of a pane (ORCH-2200): Split right, then Chat with..., then the first live session not shown yet.
+// Split right / down opens its menu: from the header, or from More when the pane is under 600 px (ORCH-2199 fold)
+async function openSplit(page, btn) {
+  if (await page.isVisible(btn)) { await page.click(btn); return; }
+  await page.click(btn.replace(/\[data-key="live-split-(right|down)"\]$/, '[data-key="live-pane-more"]'));
+  await page.click(btn.replace(/^.*\[data-key="live-split-(right|down)"\]$/, '[data-key="live-more-menu"] [data-key="live-more-split-$1"]'));
+}
+// Full screen of a pane (ORCH-2199, owner pick G a): the header's Full screen; a phone pane has none, so there it is
+// "Where Focus sits", Full screen, in More (More has no Full screen item of its own any more).
+async function fullScreen(page, pane) {
+  const btn = `${pane} [data-key="live-full"]`;
+  if (await page.isVisible(btn)) { await page.click(btn); return; }
+  await page.click(`${pane} [data-key="live-pane-more"]`);
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="full"]');
+}
+async function splitBeside(page, btn) {
+  await openSplit(page, btn);
+  await page.click('[data-key="live-split-menu"] [data-key="live-split-chat"]');
+  await page.waitForSelector('[data-key="live-split-menu"] [data-key="live-split-pick"]', { timeout: 5000 });
+  await page.click('[data-key="live-split-menu"] [data-key="live-split-pick"]');
 }
 async function paneMin(page, pane) {
   await page.click(`${pane} [data-key="live-pane-more"]`);
-  await page.click('[data-key="live-more-min"]').catch(() => page.keyboard.press('Escape'));
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]').catch(() => page.keyboard.press('Escape'));
 }
 async function extraShot(page, name, width) {
   const dir = process.env.FD_EXTRA;
@@ -1005,9 +1027,7 @@ async function staysOpen(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('#live-dock .live-pane').length === 1, null, { timeout: 5000 });
   want = 1;
   if (!phone) {
-    await page.click('#live-dock [data-key="live-beside"]');
-    await page.waitForSelector('[data-key="live-beside-menu"] [data-key="live-beside-pick"]', { timeout: 5000 });
-    await page.click('[data-key="live-beside-menu"] [data-key="live-beside-pick"]');
+    await splitBeside(page, '#live-dock [data-key="live-split-right"]');
     await page.waitForFunction(() => document.querySelectorAll('#live-dock .live-pane').length === 2, null, { timeout: 5000 });
     want = 2;
   }
@@ -1083,7 +1103,7 @@ async function fakeTermStream(page, allowed = true) {
       return es;
     };
   }, screen);
-  // one page types at a time (ORCH-883): Let me type claims it; the stand-in always says yes
+  // one page types at a time (ORCH-883): a click into the screen claims it; the stand-in always says yes
   await page.route('**/api/term/typing', route => route.fulfill({ json: {} }));
   // a watching page sizes the helper's screen to its box while typing is allowed (ORCH-1758): the stand-in takes it
   // (step 22 routes it again to count the sizes; the later route wins)
@@ -1119,8 +1139,8 @@ async function liveFocus(page) {
 }
 
 // Step 22: the terminal view (ORCH-744) on the terminal bridge (ORCH-743). The stream (GET /api/term/stream) is fake
-// data here; what is typed and the sizes are only recorded. Watching only first: keys and a paste send nothing; Let me
-// type turns typing on; a paste with a line end asks first; Ctrl+C with a selection copies instead of stopping.
+// data here; what is typed and the sizes are only recorded. Watching only first: keys send nothing; a click into the
+// screen turns typing on; a paste goes in at once without a question; Ctrl+C with a selection copies instead of stopping.
 const TERM_SCREEN = ['\x1b[1m⏺ \x1b[0mRunning the tests for the export.', '  \x1b[32m✔\x1b[0m counts skills per day \x1b[2m(41 ms)\x1b[0m',
   '  \x1b[32m✔\x1b[0m empty workspace shows zero', '  \x1b[31m✖\x1b[0m week view adds up to the day view', '',
   '\x1b[7m> \x1b[0m'].join('\r\n');
@@ -1175,29 +1195,31 @@ async function terminalView(page, dash, width) {
   if (!(await page.evaluate(() => window.termStreams || [])).some(u => /\/api\/term\/stream\?ticket=t_/.test(u))) throw new Error('the pane did not open the bridge stream');
   const term = pane + ' .term', box = pane + ' .term .xterm-screen';
   if (await page.$eval(term, el => el.dataset.typing) !== 'off') throw new Error('the terminal did not start watching only');
-  // the screen text, read back through Copy (the screen is drawn on a canvas)
-  await page.click(term + ' [data-key="term-copy"]');
+  // the screen text, read back through Copy (the screen is drawn on a canvas). The tools sit in the pane header
+  // (.live-term-tools), and Copy is hidden in a pane under 480 px: press it through the DOM there.
+  await page.$eval(pane + ' [data-key="term-copy"]', el => el.click());
   if (!/week view adds up/.test(await page.evaluate(() => navigator.clipboard.readText()))) throw new Error('Copy did not copy the helper\'s screen');
-  // watching only: a key and a paste send nothing
-  await page.click(box);
+  // watching only: a key with the keyboard elsewhere sends nothing
   await page.keyboard.type('x');
-  await page.$eval(term + ' .xterm-helper-textarea', el => { const d = new DataTransfer(); d.setData('text/plain', 'ls'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
   await page.waitForTimeout(150);
   if (typed.length) throw new Error('keys went out while watching only');
-  // Let me type, then a command
-  await page.click(term + ' [data-key="term-type"]');
-  if (await page.$eval(term, el => el.dataset.typing) !== 'on') throw new Error('Let me type did not turn typing on');
+  // a click into the screen starts typing (no switch), then a command
+  await page.click(pane + ' .term-screen');
+  await page.waitForFunction(t => document.querySelector(t)?.dataset.typing === 'on', term, { timeout: 3000 }).catch(() => { throw new Error('a click into the screen did not turn typing on'); });
+  if (await page.$(pane + ' [data-key="term-type"][hidden]')) throw new Error('the keyboard icon is hidden while typing');
   // the keys go where the screen has the keyboard: wait for it, then for what went out (a busy first width is slow)
   await page.waitForFunction(t => document.activeElement?.matches(t + ' .xterm-helper-textarea'), term, { timeout: 3000 });
   await page.keyboard.type('ls');
   await page.keyboard.press('Enter');
   for (let i = 0; i < 20 && typed.join('') !== 'ls\r'; i++) await page.waitForTimeout(100);
   if (typed.join('') !== 'ls\r') throw new Error(`typing sent ${JSON.stringify(typed)}`);
-  // a paste with a line end asks first; Cancel sends nothing
+  // a paste goes in at once as one block, with no question and no Enter at its end
   await page.$eval(term + ' .xterm-helper-textarea', el => { const d = new DataTransfer(); d.setData('text/plain', 'echo one\necho two\n'); el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: d, bubbles: true, cancelable: true })); });
-  await page.waitForSelector(term + ' .term-ask:not([hidden])', { timeout: 2000 });
-  if (!/2 lines/.test(await page.textContent(term + ' .term-ask'))) throw new Error('the paste question does not say how many lines');
-  await page.click(term + ' [data-key="term-paste-no"]');
+  for (let i = 0; i < 20 && !/echo two/.test(typed.join('')); i++) await page.waitForTimeout(100);
+  if (await page.$(term + ' .term-ask, ' + pane + ' [data-key="term-paste-go"]')) throw new Error('a paste still asks a question');
+  const pasted = typed.join('').slice(3);
+  if (!/^echo one\r?echo two$/.test(pasted)) throw new Error(`the paste did not go in as one block without its last Enter: ${JSON.stringify(typed)}`);
+  const sentBefore = typed.join('');
   // select text with the mouse and press Ctrl+C: it copies, nothing goes to the helper
   const r = await page.$eval(box, el => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y }; });
   await page.mouse.move(r.x + 4, r.y + 4);
@@ -1206,12 +1228,12 @@ async function terminalView(page, dash, width) {
   await page.mouse.up();
   await page.keyboard.press('Control+c');
   await page.waitForTimeout(150);
-  if (typed.join('') !== 'ls\r') throw new Error(`a cancelled paste or Ctrl+C with a selection went out: ${JSON.stringify(typed)}`);
+  if (typed.join('') !== sentBefore) throw new Error(`Ctrl+C with a selection went out: ${JSON.stringify(typed)}`);
   // the screen follows its box while typing (desktop: the pane is a different size than 80 x 24)
   await page.waitForTimeout(400);
   if (width > 720 && !sizes.length) throw new Error('no new size went to the helper while typing');
   if (sizes.some(z => !(z.cols >= 10 && z.cols <= 500 && z.rows >= 3 && z.rows <= 300))) throw new Error(`a size out of range: ${JSON.stringify(sizes)}`);
-  await page.click(box);
+  await page.click(pane + ' .term-screen');
   await noSideways(page);
 }
 
@@ -1242,7 +1264,9 @@ async function layer(page, dash, width) {
   // open from the bar: where it opens first (ORCH-1643: on the right under 1600 px wide), the page stays usable
   await page.click('[data-key="live-open"]');
   await page.waitForSelector(panel(firstPlace(width)), { timeout: 5000 });
-  await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
+  await page.click('[data-key="live-pane"] [data-key="live-status"]');  // Open ticket is in the status popover now
+  await page.waitForSelector('[data-key="live-status-menu"] [data-key="live-open-ticket"]');
+  await page.keyboard.press('Escape');
   if (await page.$eval('[data-key="live-pane"] .live-ph', el => /\bt_[A-Za-z0-9]+/.test(el.textContent))) throw new Error('the pane shows the raw ticket id');
   if (!await page.$eval('[data-key="live-pane"] .key', el => el.textContent.trim() === 'ORCH-238')) throw new Error('the pane does not show the ticket key');
   // the page changes, the layer stays (the same element, never painted again)
@@ -1268,11 +1292,7 @@ async function layer(page, dash, width) {
   const docked = phone ? 'bottom' : 'right';
   // full screen; Esc goes back one step at a time: full screen, the panel, the bar
   // a compact pane (on the right, on a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$('#live-dock .live-pane [data-key="live-full"]')) await page.click('[data-key="live-full"]');
-  else {
-    await page.click('#live-dock .live-pane [data-key="live-pane-more"]');
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
-  }
+  await fullScreen(page, '#live-dock .live-pane');
   await page.waitForSelector(panel('full'), { timeout: 5000 });
   // the page behind full screen takes no keyboard (ORCH-340)
   if (!(await page.evaluate(() => document.getElementById('content').inert))) throw new Error('the page behind full screen still takes Tab');
@@ -1285,8 +1305,8 @@ async function layer(page, dash, width) {
   // Open brings it back where it was; minimise leaves only the bar
   await page.click('[data-key="live-open"]');
   await page.waitForSelector(panel(docked), { timeout: 5000 });
-  await page.click('#live-dock .live-pane [data-key="live-pane-more"]');  // Minimise is in More (ORCH-1616)
-  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+  await page.click('#live-dock .live-pane [data-key="live-pane-more"]');  // Bar only is in More (ORCH-2199)
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   // closed to the side: a slim edge; it opens where it was last
   await page.click('[data-key="live-place"]');
@@ -1313,7 +1333,7 @@ async function layer(page, dash, width) {
 }
 
 // Step 12: the split. The test workspace has one ticket, so the step uses the bar's 24 sessions of draft D (step 9).
-// Every pane has pin, add beside, place, minimise and close; narrow panes keep pin and place in More (draft D).
+// Every pane has Full screen, Split right, Split down, Pin, Close and More; narrow panes keep Split and Pin in More (ORCH-2199).
 // Step 26 (ORCH-363): the History tab of a pane lists the ticket's earlier sessions (the last 10, newest first) and
 // Reopen starts the helper on one. The list comes from GET /api/sessions/<ticket>; here it is fake data, and the
 // Reopen action is caught before orch so nothing starts. The ticket has no working helper, so Reopen can be pressed.
@@ -1354,18 +1374,17 @@ async function history(page, dash) {
   await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
   await page.evaluate(id => window.LiveLayer.open(id), tid);
   const pane = '#live-dock .live-pane';
-  // History is a button in the pane header; a narrow pane (the phone) has it in its More menu
+  // History is only in the pane's More menu (no History button in the header any more)
   const toggle = async (dom = false) => {
-    await page.waitForSelector(pane + ' :is([data-key="live-history"], [data-key="live-pane-more"])', { timeout: 5000 });
     const press = sel => dom ? page.$eval(sel, el => el.click()) : page.click(sel);
-    if (await page.$(pane + ' [data-key="live-history"]')) return press(pane + ' [data-key="live-history"]');
+    await page.waitForSelector(pane + ' [data-key="live-pane-more"]', { timeout: 5000 });
+    if (await page.$(pane + ' [data-key="live-history"]')) throw new Error('the pane header still has a History button');
     await press(pane + ' [data-key="live-pane-more"]');
     await page.waitForSelector(pane + ' [data-key="live-history-item"]', { timeout: 5000 });
     await press(pane + ' [data-key="live-history-item"]');
   };
   await toggle();
   await page.waitForSelector(pane + ' .live-hist-row', { timeout: 5000 });
-  if (await page.$(pane + ' [data-key="live-history"][aria-pressed="false"]')) throw new Error('History is not marked as open');
   if (await page.$(pane + ' [data-key="live-more-menu"]')) throw new Error('the More menu stayed open after History');
   const seen = await page.$$eval(pane + ' .live-hist-row', els => els.map(el => ({
     t: el.querySelector('.live-hist-t').textContent, f: el.querySelector('.live-hist-f').textContent,
@@ -1470,8 +1489,8 @@ async function startChoice(page, dash) {
   await noSideways(page);
 }
 
-// Step 16, second part (ORCH-362): the model button at the top of a working session's pane opens the model choice;
-// the pane's line (ORCH-359) says tool, model, open time and when it closes. The running helper and its live data are
+// Step 16, second part (ORCH-362): the status pill of a working session's pane opens a popover with the model choice;
+// the same popover says the model, open time and when it closes (ORCH-2199). The running helper and its live data are
 // fake and ticket.model is caught before orch.
 async function toolModel(page, dash) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
@@ -1516,26 +1535,24 @@ async function toolModel(page, dash) {
   await mainHasText(page);
   await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
   await page.evaluate(id => window.LiveLayer.open(id), tid);
-  const row = '#live-dock .live-pane [data-key="live-model-row"]';
-  await page.waitForSelector(row, { timeout: 8000 });
-  const text = await page.$eval(row, el => el.textContent);
-  if (text !== 'Model: Opus') throw new Error('the model button reads: ' + text);
-  const meta = '#live-dock .live-pane [data-live-meta]';
-  await page.waitForFunction(m => /open/.test(document.querySelector(m)?.textContent || ''), meta, { timeout: 8000 });
-  const line = await page.$eval(meta, el => el.textContent);
-  if (line !== 'Claude Code · Opus · open 1 h 36 min · closes in 42 min if left idle') throw new Error('the pane line reads: ' + line);
+  // ORCH-2199: the model, open time and how long it stays sit in the popover of the status pill; no meta line, no model row
+  const pick = '[data-key="live-status-menu"] [data-key="live-model-pick"]';
+  const status = '#live-dock .live-pane [data-key="live-status"]';
+  await page.waitForSelector(status, { timeout: 8000 });
+  if (await page.$('#live-dock .live-pane [data-live-meta], #live-dock .live-pane [data-key="live-model-row"]')) throw new Error('the pane still has a meta line or a model row');
+  await page.click(status);
+  await page.waitForSelector(pick, { timeout: 3000 });
+  const stat = await page.$eval('[data-key="live-status-menu"]', el => el.textContent.replace(/\s+/g, ' '));
+  if (!/Open ?1 h 36 min/.test(stat) || !/Closes in 42 min if left idle/.test(stat)) throw new Error('the status popover reads: ' + stat);
+  if ((await page.$eval(pick + ' [aria-pressed="true"]', el => el.textContent)) !== 'Opus') throw new Error('the model choice does not mark Opus');
   if (await page.$('#live-dock [data-key="live-start"]')) throw new Error('a working session offers the Start choice');
   await noSideways(page);
-  await page.click(row + ' [data-key="live-model"]');
-  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
-  const menu = await page.$eval('#live-dock [data-key="live-model-menu"]', el => el.textContent);
-  if (!/Opus \(now\)/.test(menu) || !/applies when the helper finishes its current step/.test(menu)) throw new Error('model menu: ' + menu);
   await page.click('#live-dock [data-live-model="haiku"]');
-  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-model-menu"]'), null, { timeout: 3000 });
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-status-menu"]'), null, { timeout: 3000 });
   if (asked.length !== 1 || asked[0].args.model !== 'haiku' || asked[0].args.ticket !== tid) throw new Error('the new model did not go to orch: ' + JSON.stringify(asked));
-  // open the menu again for the picture
-  await page.click(row + ' [data-key="live-model"]');
-  await page.waitForSelector('#live-dock [data-key="live-model-menu"]', { timeout: 3000 });
+  // open the popover again for the picture
+  await page.click(status);
+  await page.waitForSelector(pick, { timeout: 3000 });
 }
 
 async function split(page, dash, width) {
@@ -1550,33 +1567,27 @@ async function split(page, dash, width) {
     return panes();
   };
   const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
-  // ORCH-1616 (owner's look stop): every pane header has about three buttons, as in draft D: pin, add beside and close,
-  // plus More with the place, minimise and the rest (pin goes into More when the pane is tight)
+  // ORCH-2199: every pane header has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and
+  // Pin fold into More (a phone has no split and no pin); More has the place (Where Focus sits) and the rest
   const controls = async () => {
     for (const p of await panes()) {
       const has = async what => !!await page.$(inPane(p.key, what));
       if (!await has('live-pane-more') || !await has('live-close')) throw new Error(`the pane of ${p.key} has no More or close`);
-      if (!phone && !p.tight && !await has('live-pin')) throw new Error(`the pane of ${p.key} has room but its header has no pin`);
-      if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
-      const icons = await page.$$eval(`#live-dock .live-pane[data-session="${p.key}"] .live-ctl > .btn`, els => els.filter(b => b.getBoundingClientRect().width > 0 && b.dataset.liveHist === undefined).length);
-      if (icons > 4) throw new Error(`the header of ${p.key} has ${icons} buttons; draft D has pin, add beside, close and More`);
+      for (const k of ['live-pin', 'live-split-right', 'live-split-down']) if (phone === await has(k)) throw new Error(`the pane of ${p.key} ${phone ? 'offers' : 'has no'} ${k} on a ${phone ? 'phone' : 'desktop'}`);
+      if (await has('live-beside') || await has('live-history')) throw new Error(`the header of ${p.key} still has Add beside or History`);
+      const icons = await page.$$eval(`#live-dock .live-pane[data-session="${p.key}"] .live-ctl > .btn`, els => els.filter(b => b.getBoundingClientRect().width > 0).length);
+      if (icons > 6) throw new Error(`the header of ${p.key} has ${icons} buttons; it has Full screen, Split right, Split down, Pin, Close and More`);
       await page.click(inPane(p.key, 'live-pane-more'));
       await page.waitForSelector('[data-key="live-more-menu"]', { timeout: 5000 });
       if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
-      if (!await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) throw new Error(`More of ${p.key} has no minimise`);
-      if (p.tight && !await page.$('[data-key="live-more-menu"] [data-key="live-pin"]')) throw new Error(`the tight pane of ${p.key} has no pin in More`);
+      if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]')) throw new Error(`More of ${p.key} has no Bar only`);
+      if (!phone) for (const k of ['live-pin', 'live-more-split-right', 'live-more-split-down']) if (!await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`)) throw new Error(`More of ${p.key} has no ${k} (it shows when the pane is under 480 px)`);
       await page.keyboard.press('Escape');
       await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
     }
   };
-  // ORCH-1616: as many panes show side by side as get 480 px each (2 at 1280, 3 at 1920); the rest stay on the bar
-  const fits = () => page.evaluate(() => Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480))));
-  // Add beside asks which session (ORCH-463): open its menu, pick the first one offered
-  const addBeside = async sel => {
-    await page.click(sel);
-    await page.waitForSelector('[data-key="live-beside-menu"] [data-key="live-beside-pick"]', { timeout: 5000 });
-    await page.click('[data-key="live-beside-menu"] [data-key="live-beside-pick"]');
-  };
+  // ORCH-2200: up to four panes show at once, whatever the room; Split right asks which session (Chat with...): the first one offered
+  const addBeside = sel => splitBeside(page, sel);
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
   barAsk = true;  // the waiting tickets carry their open question, as orch's state does
@@ -1591,34 +1602,34 @@ async function split(page, dash, width) {
   let list = await count(1);
   await controls();
   if (phone) {
-    // a phone shows one session at a time: no add beside; a second session from the bar takes the pane
-    if (await page.$('[data-key="live-beside"]')) throw new Error('a phone offers add beside');
+    // a phone shows one session at a time: no split; a second session from the bar takes the pane
+    if (await page.$('[data-key="live-split-right"], [data-key="live-split-down"]')) throw new Error('a phone offers a split');
     await page.evaluate(() => window.LiveLayer.beside('t_bar232'));
     list = await count(1);
     if (list[0].key !== 't_bar232') throw new Error('on a phone the second session does not take the pane');
   } else {
-    // Add beside twice: two, then three panes next to each other; the third is the most
-    await addBeside('[data-key="live-beside"]');
+    // Split right three times: two, three, then four panes next to each other; the fourth is the most
+    const last = () => panes().then(l => l[l.length - 1].key);
+    await addBeside(inPane(await last(), 'live-split-right'));
     list = await count(2);
     if (!sideBySide(list)) throw new Error('two panes do not sit next to each other');
-    await addBeside(inPane(list[0].key, 'live-beside'));
-    const most = await fits();
-    list = await count(Math.min(3, most));
-    if (!sideBySide(list)) throw new Error('the panes do not sit next to each other');
-    if (!list[list.length - 1].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
     // every pane title has room: the title of each pane is at least 120 px wide (fd-12-split-1280 cut them to a word)
     const titles = await page.$$eval('#live-dock .live-pane .live-pt', els => els.map(e => Math.round(e.getBoundingClientRect().width)));
     if (titles.some(w => w < 120)) throw new Error('a pane title is cut short: ' + titles.join(', ') + ' px');
-    // the pane that does not fit is still open: its chip on the bar is marked open
-    if (most < 3 && !(await page.$$('#live-bar [aria-current="true"]')).length) throw new Error('the pane that does not fit is not marked open on the bar');
-    // ORCH-1362: with three panes Add beside is not greyed; its menu says why and offers no session
-    if (await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside is greyed with three panes');
-    await page.click(inPane(list[0].key, 'live-beside'));
-    const none = (await page.textContent('[data-key="live-beside-menu"] [data-key="live-beside-none"]', { timeout: 5000 }).catch(() => '')).trim();
-    if (!/^Three sessions show at once/.test(none)) throw new Error(`add beside with three panes does not say why (it says "${none}")`);
-    if (await page.$('[data-key="live-beside-menu"] [data-key="live-beside-pick"]')) throw new Error('add beside offers a fourth session');
+    await addBeside(inPane(await last(), 'live-split-right'));
+    await addBeside(inPane(await last(), 'live-split-right'));
+    list = await count(4);
+    if (!sideBySide(list)) throw new Error('the panes do not sit next to each other');
+    if (!list[list.length - 1].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
+    if (!(await page.$('[data-key="live-divider"]'))) throw new Error('the panes have no divider between them');
+    // with four panes Split is not greyed; its menu says four is the most and offers no session
+    if (await page.$eval(inPane(list[0].key, 'live-split-right'), b => b.disabled)) throw new Error('split is greyed with four panes');
+    await openSplit(page, inPane(list[0].key, 'live-split-right'));
+    const none = (await page.textContent('[data-key="live-split-menu"] [data-key="live-split-none"]', { timeout: 5000 }).catch(() => '')).trim();
+    if (!/^Up to four sessions show at once/.test(none)) throw new Error(`split with four panes does not say why (it says "${none}")`);
+    if (await page.$('[data-key="live-split-menu"] [data-key="live-split-pick"]')) throw new Error('split offers a fifth session');
     await page.keyboard.press('Escape');
-    await page.waitForSelector('[data-key="live-beside-menu"]', { state: 'detached', timeout: 5000 });
+    await page.waitForSelector('[data-key="live-split-menu"]', { state: 'detached', timeout: 5000 });
     await controls();
     await askCardsInPanes(page);
   }
@@ -1632,7 +1643,8 @@ async function split(page, dash, width) {
   if ((await panes()).length !== list.length) throw new Error('the split lost a pane when the page changed');
   // pin one pane
   const one = list[0].key;
-  if (await page.$(inPane(one, 'live-pin'))) await page.click(inPane(one, 'live-pin'));
+  if (phone) await page.evaluate(k => window.LiveSessions.pin(k, true), one);  // a phone pane has no Pin button (ORCH-2199)
+  else if (await page.isVisible(inPane(one, 'live-pin'))) await page.click(inPane(one, 'live-pin'));
   else {
     await page.click(inPane(one, 'live-pane-more'));
     await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
@@ -1651,7 +1663,6 @@ async function split(page, dash, width) {
   };
   if (await place('right') === phone) throw new Error(phone ? 'a phone offers the right edge' : 'the pane has no right place');
   if (!phone) {
-    if (!sideBySide(await panes(), true)) throw new Error('on the right the panes are not stacked');
     // ORCH-1616: the layer to the side beside a page: the page keeps at least 600 px, so it stays usable
     for (const hash of ['#review', '#tickets']) {
       await page.evaluate(h => { location.hash = h; }, hash);
@@ -1671,9 +1682,9 @@ async function split(page, dash, width) {
     await mainHasText(page);
     await place('bottom');
   } else await page.keyboard.press('Escape');
-  // minimise to the bar (in More, ORCH-1616); Open brings the split back
+  // minimise to the bar (More, Bar only); Open brings the split back
   await page.click(inPane(one, 'live-pane-more'));
-  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   await page.click('[data-key="live-open"]');
   list = await count(list.length);
@@ -1681,13 +1692,15 @@ async function split(page, dash, width) {
   if (!phone) {
     const room = list.reduce((a, p) => a + p.w, 0), gone = list[1].key;
     await page.click(inPane(gone, 'live-close'));
-    const left = await count(Math.min(2, await fits()));
+    const left = await count(list.length - 1);
     if (left.some(p => p.key === gone)) throw new Error('the closed pane is still there');
     const now = left.reduce((a, p) => a + p.w, 0);
-    if (Math.abs(now - room) > 2) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
-    // the picture: three panes again, as in draft D (as many as fit side by side)
-    await addBeside(inPane(left[0].key, 'live-beside'));
-    await count(Math.min(3, await fits()));
+    if (Math.abs(now - room) > 3) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
+    // the picture: four panes again
+    await addBeside(inPane(left[0].key, 'live-split-right'));
+    // four sessions are in the layout; a quiet one may sit in the bar while the page has cards to answer (ORCH-261)
+    await page.waitForFunction(n => window.LiveLayer.panes.length === n, list.length, { timeout: 5000 });
+    await page.waitForFunction(n => document.querySelectorAll('#live-dock .live-pane').length >= n, list.length - 1, { timeout: 5000 });
   } else {
     await page.click(inPane(list[0].key, 'live-close'));
     await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
@@ -1769,19 +1782,25 @@ async function permModes(page, dash, width) {
   await extra('warning');
   if (!/Bypass permissions/.test(await mgr())) throw new Error(`the Manager does not say Bypass permissions: ${await mgr()}`);
   await page.click('#live-bar [data-lbar-kind="manager"]');
-  await page.waitForSelector(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`, { timeout: 10000 });
+  const stat = `#live-dock .live-pane[data-session="${id}"] [data-key="live-status"]`;
+  await page.waitForSelector(stat, { timeout: 10000 });
   if (JSON.stringify(calls[0]) !== '["manager","full"]') throw new Error(`the start sent ${JSON.stringify(calls[0])}`);
-  const line = () => page.textContent(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
-  if ((await line()).trim() !== 'Permissions: Bypass permissions') throw new Error(`the pane says "${(await line()).trim()}"`);
+  // the pane's permissions sit in the status popover (ORCH-2199): the mode in use is marked, a change restarts the helper
+  const pick = '#live-dock [data-key="live-status-menu"] [data-key="live-perm-pick"]';
+  await page.click(stat);
+  await page.waitForSelector(pick, { timeout: 3000 });
+  const line = async () => (await page.$eval(pick + ' [aria-pressed="true"]', el => el.textContent)).trim();
+  if (await line() !== 'Bypass permissions') throw new Error(`the pane says "${await line()}"`);
+  if (!/A change restarts the helper; its conversation stays\./.test(await page.textContent(pick))) throw new Error('the popover does not say a change restarts the helper');
+  if (await page.$('#live-dock [data-key="live-perm"], #live-dock [data-key="live-perm-row"]')) throw new Error('the pane still has a permissions row');
   await extra('pane');
   // the pane goes on in another mode (the same conversation): Auto
-  await page.click(`#live-dock .live-pane[data-session="${id}"] [data-key="live-perm"]`);
-  await page.waitForSelector('#live-dock [data-key="live-perm-menu"]', { timeout: 3000 });
-  const now = await page.textContent('#live-dock [data-live-perm="full"]');
-  if (!/\(now\)/.test(now)) throw new Error(`the menu does not mark the mode in use: ${now}`);
   await extra('pane-menu');
   await page.click('#live-dock [data-live-perm="auto"]');
-  await page.waitForFunction(() => /Permissions: Auto$/.test(document.querySelector('#live-dock [data-key="live-perm"]')?.textContent.trim() || ''), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('#live-dock [data-key="live-status-menu"]'), null, { timeout: 5000 });
+  await page.click(stat);
+  await page.waitForSelector(pick, { timeout: 3000 });
+  await page.waitForFunction(p => document.querySelector(p + ' [aria-pressed="true"]')?.textContent.trim() === 'Auto', pick, { timeout: 5000 });
   if (JSON.stringify(calls[1]) !== '["manager","auto"]') throw new Error(`the restart sent ${JSON.stringify(calls[1])}`);
   // a workspace that does not allow Bypass permissions: the segment is off and says why
   ws.top = 'auto'; ws.warned = false;
@@ -1866,7 +1885,10 @@ async function noTicket(page, dash, width) {
     if (head.trim() !== title) throw new Error(`the pane of the ${title} says "${head.trim()}"`);
     const pins = await page.evaluate(() => window.LiveSessions?.pins || []);  // kept by orch for the workspace (ORCH-361)
     if (!pins.includes(id)) throw new Error(`the ${title} is not pinned`);
+    const stat = await page.$(`#live-dock .live-pane[data-session="${id}"] [data-key="live-status"]`);  // a plain terminal has no status pill
+    if (stat) { await stat.click(); await page.waitForSelector('[data-key="live-status-menu"]', { timeout: 3000 }); }
     if (await page.$(`#live-dock .live-pane[data-session="${id}"] [data-key="live-open-ticket"]`)) throw new Error(`the ${title} offers Open ticket`);
+    if (stat) await page.keyboard.press('Escape');
   }
   if (calls.join() !== 'empty,chat,terminal,manager') throw new Error(`the start calls were ${calls.join()}`);
   // the bar shows them as pinned sessions: chips by name on a wide screen, the pinned count on a phone
@@ -1988,15 +2010,12 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(pane, { timeout: 5000 });
   if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
   // from full screen too: Open ticket steps out of it so the ticket page shows
-  // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
-  else {
-    await page.click(`${pane} [data-key="live-pane-more"]`);
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
-  }
+  // Full screen is a button in every pane header (ORCH-2199); a phone pane has it under More, Where Focus sits
+  await fullScreen(page, pane);
   await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
   await page.evaluate(() => { location.hash = '#home'; });
   await mainHasText(page);
+  await page.click(`${pane} [data-key="live-status"]`);  // Open ticket is in the status popover
   await page.click(`${pane} [data-key="live-open-ticket"]`);
   await page.waitForFunction(h => location.hash === h, '#ticket/' + id('ORCH-189'), { timeout: 10000 });
   await page.waitForSelector(`[data-key="ticket-strip-${id('ORCH-189')}"]`, { timeout: 10000 });
@@ -2006,10 +2025,11 @@ async function focusButton(page, dash, width) {
   if (!await page.evaluate(k => window.LiveLayer.panes.includes(k), id('ORCH-189'))) throw new Error('the session closed when Open ticket was pressed');
   await page.click('[data-key="live-open"]');
   await page.waitForSelector(pane, { timeout: 5000 });
-  // a narrow pane keeps Open ticket in More as well (draft D)
+  // More no longer has Open ticket: it is only in the status popover
   if (await page.$(`${pane} [data-key="live-pane-more"]`)) {
     await page.click(`${pane} [data-key="live-pane-more"]`);
-    await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
+    await page.waitForSelector('[data-key="live-more-menu"]', { timeout: 5000 });
+    if (await page.$('[data-key="live-more-menu"] [data-key="live-more-ticket"]')) throw new Error('More still has Open ticket');
     await page.keyboard.press('Escape');
   }
   // a ticket with no helper: one start button in the header (ORCH-1466); "Open in Focus" in the ⋯ menu opens its pane,
@@ -2256,8 +2276,7 @@ async function zoom(page, dash, width) {
   const docked = await page.$eval('#live-dock', el => el.dataset.mode);
   if (phone && docked !== 'bottom') throw new Error('a phone opened the session on the right');
   // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
-  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   if (!(await page.isVisible('#live-dock[data-mode="full"] #live-bar'))) throw new Error('full screen keeps no strip of the other sessions');
   await page.keyboard.press('Escape');
@@ -2270,8 +2289,7 @@ async function zoom(page, dash, width) {
   await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
   await page.waitForSelector('#live-dock ' + pane, { timeout: 5000 });
   // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
-  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   await page.waitForTimeout(300);
   await noSideways(page);
@@ -2402,8 +2420,7 @@ async function foldView(page, dash, width) {
     await noSideways(page);
     return;
   }
-  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
-  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] .live-pane[data-session="${gid('ORCH-302')}"] .live-shelf`, { timeout: 5000 });
   await page.waitForTimeout(600);  // the pane grows into full screen first (motion); a click during it hits the leaving picture
   await page.click(`${pane} [data-key="live-view-term"]`);
@@ -2411,21 +2428,21 @@ async function foldView(page, dash, width) {
   await page.waitForSelector(`${pane} .live-shelf > [data-live-ask]:not([hidden])`, { timeout: 5000 });
   await page.waitForSelector(`${pane} [data-key="term-settings"]:not([hidden])`, { timeout: 5000 });
   if (await page.getAttribute(`${pane} [data-key="term-settings"]`, 'href') !== '#settings/addons/focus') throw new Error('Turn typing on does not lead to the Focus settings');
-  if ((await page.textContent(`${pane} .term-say`)).trim() !== 'Watching only') throw new Error('the typing line says it twice: ' + await page.textContent(`${pane} .term-say`));
+  if ((await page.textContent(`${pane} .term-say`)).trim() !== 'Watch only') throw new Error('the typing line says it twice: ' + await page.textContent(`${pane} .term-say`));
   if (await page.isVisible(`${pane} .live-shelf-list > .meta`)) throw new Error('"Nothing yet" shows under the question in the Results column');
   const title = await page.$eval(`${pane} .live-pt`, el => el.scrollWidth <= el.clientWidth + 1);
   if (!title) throw new Error('the title of the pane is cut in full screen');
   await extraShot(page, 'fd-35-fold-open', width);
   const inHead = async k => !!(await page.$(`${pane} .live-ctl > [data-key="${k}"]`));
-  if (width < 1500) {  // Pin, Add beside and Minimise are in More, so the title fits
-    for (const k of ['live-pin', 'live-beside', 'live-min']) if (await inHead(k)) throw new Error(`${k} is still in the header at ${width}`);
-    await page.click(`${pane} [data-key="live-pane-more"]`);
-    for (const k of ['live-pin', 'live-more-beside', 'live-more-min']) if (!(await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`))) throw new Error(`More misses ${k}`);
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-beside"]');
-    if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Add beside from More leaves the keyboard outside its choice');
+  if (width <= 720) {  // a phone: no split and no pin in the header, so the title fits
+    for (const k of ['live-pin', 'live-split-right', 'live-split-down']) if (await inHead(k)) throw new Error(`${k} is in the header at ${width}`);
+  } else {
+    for (const k of ['live-pin', 'live-split-right', 'live-split-down']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
+    await page.click(`${pane} [data-key="live-split-right"]`);
+    if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Split right leaves the keyboard outside its choice');
     await page.keyboard.press('Escape');
-    if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-pane-more'))) throw new Error('Esc in Add beside does not go back to More');
-  } else for (const k of ['live-pin', 'live-beside']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);  // Minimise is in More (ORCH-1616)
+    if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-split-right'))) throw new Error('Esc in Split right does not go back to its button');
+  }
   const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
   const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
   await page.click(`${pane} [data-key="live-fold-left"]`);
@@ -2465,7 +2482,7 @@ function watchTab(p) {
   return () => { if (bad.length) throw new Error([...new Set(bad)].join(' | ')); };
 }
 
-// Step 25: at phone width one session shows at a time, right falls back to bottom, Add beside opens instead of splitting.
+// Step 25: at phone width one session shows at a time, right falls back to bottom, the wall's Add beside opens instead of splitting.
 async function phone(page, dash, width) {
   await wallPage(page, dash, 'fd25', null, { ask: true });
   await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
@@ -2583,7 +2600,7 @@ async function ended(page, dash) {
 // Steps 23 and 24 (ORCH-1329): the motion of draft D. A recorder in the page notes every animation that starts in the
 // layer, on the wall and in the big overlay (CSS keyframes and script moves; colour changes on hover and a working
 // spinner are no change and left out) and the layout shift that no click caused. The same tour runs both steps: the
-// big overlay in the style guide opens and closes, a tile zooms into the layer, full screen and back, Add beside twice
+// big overlay in the style guide opens and closes, a tile zooms into the layer, full screen and back, Add beside twice (the wall tile's own)
 // and a pane closes (one session at a time on a phone), the layer goes back to the bar, a tile is pinned, and a tile
 // opens again for the picture. Step 23: each change moves, only transform and opacity, at most 240 ms, layout shift at
 // most 0.1. Step 24 (reduced motion): nothing moves, every change is still there at once, the last lines still update.
@@ -2641,9 +2658,7 @@ async function motionTour(page, dash, width, reduce) {
   const inPane = (id, what) => `#live-dock ${pane(id)} [data-key="${what}"]`;
   const count = n => page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
   const full = async id => {
-    if (await page.$(inPane(id, 'live-full'))) return page.click(inPane(id, 'live-full'));
-    await page.click(inPane(id, 'live-pane-more'));
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+    await fullScreen(page, `#live-dock ${pane(id)}`);
   };
   // 1. the big overlay (style guide): opens and closes
   await page.goto(dash + '/styleguide/#result-widgets');
@@ -2700,9 +2715,8 @@ async function motionTour(page, dash, width, reduce) {
     }, 'live-pane');
     await step('add a third pane', async () => {
       await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
-      // as many as get 480 px each show side by side (ORCH-1616): 2 at 1280, 3 at 1920; the new one always
-      // on the right (where it opens under 1600 px, ORCH-1643) two stack, the most there
-      await count(await page.evaluate(() => document.getElementById('live-dock').dataset.mode === 'right' ? 2 : Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
+      // up to four panes show at once, whatever the room (ORCH-2200), at the bottom and on the right alike
+      await count(3);
       await page.waitForSelector('#live-dock ' + pane('t_bar240'), { timeout: quick });
     }, 'live-pane');
     await step('close a pane', async () => {
@@ -2911,10 +2925,10 @@ const STEPS = [
     n: 10, pic: 'fd-10-layer', area: 'layer', title: 'The layer at the bottom, on the right, full screen, to the bar, to the side',
     feature: [7],
     do: ['Open a session from the bar.', 'Change to Tickets, Review and Home.', 'Use Place: bottom, right, full screen; press Esc twice.',
-      'Open it again, minimise it to the bar, then put it to the side and open it from the edge.', 'Make it larger, then reload the page.'],
+      'Open it again, put it on the bar only (More), then put it to the side and open it from the edge.', 'Make it larger, then reload the page.'],
     see: ['Each place works and the page stays usable behind it; on a phone there is no right.', 'The layer stays open while the page changes.',
       'Esc goes back one step: full screen, then the panel, then the bar.', 'In full screen Tab stays in the layer.',
-      'Minimise leaves only the bar; to the side leaves a slim edge.', 'After the reload the layer opens where it was last, at the same size.'],
+      'Bar only (in More, Where Focus sits) leaves only the bar; to the side leaves a slim edge.', 'After the reload the layer opens where it was last, at the same size.'],
     async run({ page, dash, width }) {
       await layer(page, dash, width);
     },
@@ -2931,12 +2945,12 @@ const STEPS = [
     draft: { q: '?page=focus&cur=ORCH-232&view=zoom&term=1&mode=full' },
   },
   {
-    n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into two and three sessions with the pane controls', feature: [7],
-    do: ['In the layer press Add beside twice.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Place, minimise and close.'],
-    see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
-      'With three panes Add beside is not greyed: its menu says three is the most and to close one first.',
+    n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into up to four sessions with the pane controls', feature: [7],
+    do: ['In the layer press Split right, pick Chat with... and a session; do it three times.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Where Focus sits (More), Bar only and close.'],
+    see: ['Two, three, then four panes sit next to each other with a thin divider between them; panes keep the order they were opened in.', 'Every pane has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and Pin are in More.',
+      'With four panes Split is not greyed: its menu says four is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
-      'On a phone one session shows at a time and there is no add beside.',
+      'On a phone one session shows at a time and there is no split and no pin in the header.',
       'A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.'],
     async run({ page, dash, width }) {
       await split(page, dash, width);
@@ -2980,11 +2994,11 @@ const STEPS = [
   },
   {
     n: 16, pic: 'fd-16-tool-model', area: 'sessions', title: 'Tool, model and open time on every session', feature: [12],
-    do: ['Open a session that needs you from the bar.', 'Look at the pane: what it does now, its last lines and the line under them.',
+    do: ['Open a session that needs you from the bar.', 'Look at the pane: its last lines; open the status pill for model, step and open time.',
       'Press Stop in the pane; open an idle session and read its Stop button.',
-      'Open the model choice of a working session and pick another model.'],
-    see: ['The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").',
-      'How long it is open and how long it stays (warm while it works, or when it closes for being idle).',
+      'Press the status pill of a working session and pick another model there.'],
+    see: ['The open question and the last lines of its screen; no line of tool and model under them.',
+      'Press the status pill in the header: the model (for example "Opus"), the step, how long it is open and how long it stays (warm while it works, or when it closes for being idle), and Open ticket.',
       'All of it stays current while you look; the keyboard place does not jump.',
       'Stop in the pane stops its helper; an idle helper\'s button says Stop idle helper.',
       'A new model applies when the helper finishes its current step (or at its next start) and says so.'],
@@ -3051,10 +3065,10 @@ const STEPS = [
   },
   {
     n: 22, pic: 'fd-22-terminal', area: 'terminal', title: 'A real terminal: type, select, copy and paste', feature: [5],
-    do: ['Switch a session to Terminal.', 'Press a key: nothing is sent (watching only).', 'Turn on Let me type, type a command and press Enter.',
-      'Paste two lines, then Cancel.', 'Select text and copy it.'],
-    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after Let me type.',
-      'A paste with a line end asks first.', 'Selecting and copying works like on any page; Copy copies the selection or the screen.',
+    do: ['Switch a session to Terminal.', 'Press a key: nothing is sent (watching only).', 'Click into the screen, type a command and press Enter.',
+      'Paste two lines.', 'Select text and copy it.'],
+    see: ['The helper\'s real screen with its colours; it starts watching only.', 'Keys go to the helper only after a click into the screen (a small keyboard icon shows while typing).',
+      'A paste goes in at once as one block, without its last line end and without a question.', 'Selecting and copying works like on any page; Copy copies the selection or the screen.',
       'While typing the screen follows the size of its pane.', 'It can only be reached from this computer (the bridge, ORCH-743).'],
     async run({ page, dash, width }) {
       await terminalView(page, dash, width);
@@ -3095,7 +3109,7 @@ const STEPS = [
   },
   {
     n: 26, pic: 'fd-26-history', area: 'sessions', title: 'Earlier sessions in the History tab, reopened with one click', feature: [4],
-    do: ['Open a session in the layer and press History (in More when the pane is narrow).', 'Press Reopen on an earlier session.'],
+    do: ['Open a session in the layer, press More and then History.', 'Press Reopen on an earlier session.'],
     see: ['Up to 10 sessions of the ticket, newest first, each with its time, first message and number of messages.',
       'The session in use says In use; one that is not on this computer has no Reopen.',
       'Reopen starts the helper on that conversation and the list closes.'],
@@ -3165,10 +3179,10 @@ const STEPS = [
   {
     n: 33, pic: 'fd-33-permissions', area: 'sessions', title: 'Start the Manager in a chosen permission mode', feature: [6],
     do: ['Open the New menu in the bar and pick Bypass permissions in its Permissions row.', 'Start the Manager.',
-      'In its pane press "Permissions: Bypass permissions" and pick Auto.', 'In a workspace that allows at most Auto, open the New menu.'],
+      'In its pane press the status pill and pick Auto under Permissions.', 'In a workspace that allows at most Auto, open the New menu.'],
     see: ['The row shows the tool\'s modes: Default, Accept edits, Auto, Bypass permissions.',
-      'Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".',
-      'Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".',
+      'Bypass permissions shows one plain warning the first time; the Manager starts in it and the status popover of its pane marks Bypass permissions (it says a change restarts the helper).',
+      'Auto ends the session and goes on with the same conversation; the popover marks Auto.',
       'Bypass permissions is off when the workspace does not allow it and says why.'],
     async run({ page, dash, width }) {
       await permModes(page, dash, width);
@@ -3189,7 +3203,7 @@ const STEPS = [
     do: ['Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.',
       'Press the arrow beside the helper list and the one beside Results; reload the page; press them again.'],
     see: ['In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.',
-      'The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.',
+      'The pane title shows whole; on a phone there is no split and no pin in the header. The terminal line says "Watch only" beside Turn typing on.',
       'Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.',
       'After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.'],
     run: ({ page, dash, width }) => foldView(page, dash, width).catch(async e => { await extraShot(page, 'fd-35-fold-failed', width).catch(() => {}); throw e; }),
@@ -3197,7 +3211,7 @@ const STEPS = [
   },
   {
     n: 36, pic: 'fd-36-review-reach', area: 'layer', title: 'Focus at the bottom over Review keeps the cards in reach', feature: [],
-    do: ['Open Review while cards wait on you.', 'Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.'],
+    do: ['Open Review while cards wait on you.', 'Open a session that waits on you and split one with nothing in it yet beside it; place Focus at the bottom.'],
     see: ['The panel keeps the page heading and a card above it; the card\'s answer buttons sit above the panel, never under it.',
       'The pane with nothing in it yet waits as a chip on the bar; the session that waits on you fills the panel.'],
     draft: { q: '?page=review&mode=bottom' },

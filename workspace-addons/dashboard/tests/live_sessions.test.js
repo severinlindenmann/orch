@@ -57,7 +57,7 @@ test('the bar and the panes read the sessions API, not the tickets and runs', ()
   const layer = fs.readFileSync(path.join(WEB, 'pages/live-layer.js'), 'utf8');
   assert.match(layer, /LiveSessions\?\.get\(/);
   assert.match(layer, /liveNow\(live\)/);
-  assert.match(layer, /liveMeta\(live\)/);
+  assert.match(layer, /liveWarm\(live\)/, 'the status popover says how long it stays (ORCH-2199)');
   assert.doesNotMatch(layer, /come here next/);
 });
 

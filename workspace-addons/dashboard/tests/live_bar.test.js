@@ -122,7 +122,7 @@ test('the Focus button word: Answer, Watch, Open, In line, Start; none on a fini
   assert.equal(verb(null, null), '');
 });
 
-test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
+test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket in its status popover', () => {
   const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
   const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
   assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working header (Watch in Focus)');
@@ -133,8 +133,7 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
   assert.match(layer, /function liveFocusButton[^]*?liveFocusOn\(\)/, 'only where Focus runs');
-  assert.match(layer, /'data-key':'live-open-ticket'/);
-  assert.match(layer, /'data-key':'live-more-ticket'/);
+  assert.match(layer, /function liveStatusMenu[^]*?'data-key':'live-open-ticket'/, 'Open ticket sits in the status pill popover (ORCH-2199)');
 });
 
 test('the bar says All calm only when nothing waits on the person (ORCH-464), and never repeats the number (ORCH-1616)', () => {

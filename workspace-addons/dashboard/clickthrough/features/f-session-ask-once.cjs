@@ -54,8 +54,11 @@ module.exports = {
     waiting = false;
     await act('answer', () => pane.locator('[data-key="live-ask-option-1"]').click());
     await reload();
-    await page.locator(`#live-dock [data-live-body="${own}"] [data-live-now]`, { hasText: 'Writing the invite' })
+    // the pane has no step line any more: the step is a row of the status popover (ORCH-2199)
+    await page.locator(`#live-dock .live-pane:has([data-live-body="${own}"]) [data-key="live-status"]`).click();
+    await page.locator('#live-dock [data-key="live-status-menu"] [data-key="live-status-step"]', { hasText: 'Writing the invite' })
       .waitFor({ timeout: 20000 });
+    await page.keyboard.press('Escape');
     must(!(await page.locator(`#live-dock [data-live-body="${own}"] [data-live-ask]`).isVisible()),
       'the question box still shows after the answer and a reload');
   },
