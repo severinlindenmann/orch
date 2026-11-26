@@ -87,7 +87,7 @@ def _record(root: Path) -> dict | None:
     pid, port, nonce, started = d.get("pid"), d.get("port"), d.get("nonce"), d.get("started")
     if not (
         valid_pid(pid)
-        and isinstance(port, int)
+        and type(port) is int  # JSON true is not port 1
         and 0 < port < 65536
         and isinstance(nonce, str)
         and NONCE_RE.match(nonce)
@@ -114,7 +114,7 @@ def write_ready(f: Path, port: int) -> None:
 def _preferred_port() -> int | None:
     """ORCH_PREFERRED_PORT (set by `orch start`: the port this service had last time), only when valid."""
     v = os.environ.get("ORCH_PREFERRED_PORT", "")
-    return int(v) if v.isdigit() and 1024 <= int(v) < 65536 else None
+    return int(v) if v.isascii() and v.isdigit() and 1024 <= int(v) < 65536 else None
 
 
 def start(root: Path, port: int | None = None) -> dict:

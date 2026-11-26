@@ -135,6 +135,9 @@ def test_plain_usage_errors(proj, run, capsys):
     assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
     code, err = _exit(run, capsys, "ticket", "nonsense")
     assert code == 2 and '"nonsense" is not an orch ticket command' in err
+    code, err = _exit(run, capsys, "check")  # a missing command names the commands, not argparse's "sub"
+    assert code == 2 and "Say what to do: orch check <command>, one of: add, " in err and "sub" not in err
+    assert ", done." in err
 
 
 def test_wrong_status_filter_is_a_value_not_a_command(proj, run, capsys, new_ticket):

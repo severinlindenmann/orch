@@ -18,6 +18,7 @@ ALLOW = {
     ("workspace/src/orch/people.py", "stamp"): "writer: names the person on a line core just made",
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
+    ("workspace/src/orch/tickets.py", "note_results"): "writer: files with a line already (text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
     ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (Quiet since, G2)",
     ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for Quiet since)",

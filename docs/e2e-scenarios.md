@@ -34,6 +34,7 @@ Format: steps → expected result.
 - A19 Factory authority negatives: an agent's own `factory:start` question (other text) answered `Start` by the person does not start; a forged `ext.factory.stage = running` does not start; `propose` after Start refused (changed and same bytes); `tiny` 3 ok, 4th refused; an agent's answer to a stop is ignored.
 - A20 Factory autopilot: an agent's `Start` on the autopilot gives no grant (`decide` refused); the person's `Start` does; `decide` on a routine/taste stop is recorded ("Decided by agent:factory" in the order history) and `next` moves on; `decide` on the ship stop and `ship` without the person's `Ship it` refused.
 - A21 Factory wake-up (SKIP until wired): after the person's `Start` the automation add-on starts a run of the order ticket; today automation only acts on `automation:failure` answers, so the order stays Ready.
+- A24 R1.2 removal: every shipped add-on plus relay and publish on, a ticket with `ext.<addon>` for each and one with all of them; remove them one by one with the dashboard running. After each removal: no traceback in core commands (`--help`, `ticket list/show`, `needs`, `counts`, `triage`, `addon list`, `status`, `doctor`, `log`, `check add`, `ext set`), the removed command answers with the turn-on hint, every add-on still on answers `--help`, the running dashboard drops the removed add-on and serves every ticket, `ext.<addon>` stays in the file and is hidden (except core `ext.relay`).
 
 ## Publish (P)
 - P1 Admin (private network, admin token) adds Pilatus with description + tags, with rights files + apps (not permanent, not public) → prompt shown once; agent runs `orch publish connect` → skill, AGENTS.md, token in `.orch/secrets/`, gitignored.
@@ -46,6 +47,7 @@ Format: steps → expected result.
 - P8 Workspace lists, restarts, stops, deletes its apps and files; cannot touch Home's items (403/404).
 - P9 Admin portal (Playwright): files show no names, apps show status; restart/stop work. Public `/admin` → 404; admin port without token → 401; admin port not reachable from the public IP.
 - P10 (local, Playwright) Shared-link and app pages at 1440 and 390: the file page decrypts a shared CSV and shows its rows; a cut-short key says so; a stopped link says the file is gone; a stopped app says it is paused. No sideways scrolling, no script error.
+- P11 (local) R5.1 link key only in the fragment: after share + download (page, blob, meta, whole link as Referer) and recording the link on a ticket (ref, summary, evidence), no form of the key is in the server log, the server data, the CLI output or the workspace outside `.orch/secrets/`; the ticket keeps the link as `#k=…`.
 
 ## Relay (R)
 - R1 Admin adds Pilatus, Home, Reports with description + tags; rules Pilatus→Reports text+files+delegate+start, Home→Pilatus text → `orch relay connect` prompts work; on a machine without orch the onboarding.sh/.ps1 line installs it first, then connects.

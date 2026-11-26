@@ -198,6 +198,29 @@ def _contact_withdraw(a):
     return ["relay", "contacts", "withdraw"], [], [_contact_peer(a.get("peer"))]
 
 
+# The one line the phone link's admin page gives ("orch relay connect <url> --workspace ws_… --token orn_…"),
+# pasted into Settings instead of a terminal (ORCH-1693). Only that exact shape is accepted.
+RELAY_LINE = re.compile(
+    r"(?:orch\s+relay\s+connect\s+)?(https?://[^\s\"'<>]+)\s+--workspace\s+(ws_[A-Za-z0-9]{4,40})\s+--token\s+(orn_[A-Za-z0-9_-]{16,200})"
+)
+
+
+def _relay_connect(a):
+    _actions()._only(a, ("line",))
+    line = a.get("line")
+    m = (
+        RELAY_LINE.fullmatch(line.strip().strip("`'\"").strip())
+        if isinstance(line, str) and len(line) <= 600
+        else None
+    )
+    if m is None:
+        raise _bad(
+            "That is not the line from your phone link. Copy it again from its admin page and paste it here."
+        )
+    url, ws, token = m.groups()
+    return ["relay", "connect", url], ["--workspace", ws, "--token", token], []
+
+
 MOBILE_OPS = {
     "group.say": _group_say,
     "group.share": _group_share,
@@ -211,6 +234,7 @@ MOBILE_OPS = {
     "message.send": _relay_send,
     "contact.accept": _contact_accept,  # the Contacts block (ORCH-1203)
     "contact.withdraw": _contact_withdraw,
+    "relay.connect": _relay_connect,  # Settings > Contacts paste (ORCH-1693)
 }
 
 
