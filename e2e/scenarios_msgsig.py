@@ -149,6 +149,11 @@ def r19(e):
     check(mid not in pulled("SigB"), "held message handled on the next pull")
     rc, out, err = e.orch("SigB", "relay", "contacts", "accept", a, "--fingerprint", fp["SigA"], ok=False)
     check(rc != 0 and "Only a person" in (err + out), f"a helper accepted a contact: {rc} {out} {err}")
+    # a person with a fingerprint that is not A's: nothing accepted, the message stays held
+    wrong_fp = fp["SigB"]
+    rc, out, err = e.at_terminal(["orch", "relay", "contacts", "accept", a, "--fingerprint", wrong_fp], cwd=e.path_of("SigB"))
+    check(rc != 0 and "does not match" in (err + out), f"accepted with a wrong fingerprint: {rc} {out} {err}")
+    check(row("SigB", a)["state"] == "not_accepted" and not saved("SigB", mid), "wrong fingerprint let A in")
     e.person_at_terminal("SigB", "relay", "contacts", "accept", a, "--fingerprint", fp["SigA"])
     check(saved("SigB", mid) and mid in pulled("SigB"), "held message not let in after Accept")
     check(row("SigB", a)["state"] == "accepted", "B: A accepted")
@@ -168,12 +173,14 @@ def r19(e):
     # c3 the relay refuses a wrong, missing or changed signature; nothing of it reaches B
     rapi = {"X-Orch-Workspace": a, "Authorization": f"Bearer {tok['SigA']}"}
     m = run_py("SigA", _R19_MAKE, b, "R19-relay")
+    was = bool((e.rel.admin.call("GET", "/admin/api/signing-keys").json() or {}).get("require_signed"))
     sw = e.rel.admin.call("PUT", "/admin/api/signing-keys/settings", {"require_signed": True})
     check(sw.status == 200, f"relay signed-only switch: {sw}")
     try:
         got = {k: http("POST", e.rel.url + "/v1/messages", rapi, m[k]) for k in ("wrong", "missing", "changed", "good")}
     finally:
-        e.rel.admin.call("PUT", "/admin/api/signing-keys/settings", {"require_signed": False})
+        back = e.rel.admin.call("PUT", "/admin/api/signing-keys/settings", {"require_signed": was})
+    check(back.status == 200, f"relay signed-only switch put back to {was}: {back}")
     want = {"wrong": "bad_signature", "missing": "missing_signature", "changed": "signed_mismatch"}
     for k, code in want.items():
         check(got[k].status == 422 and (got[k].json() or {}).get("error") == code, f"relay on {k}: {got[k]}")
