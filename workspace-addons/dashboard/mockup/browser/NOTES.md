@@ -8,6 +8,11 @@ picture; the product gets the real pictures from the browser add-on's stream.
 - "Live now · N": a card per ticket, its title (a link to the ticket) and its wide small live preview; a click on the
   preview opens the live view in the ticket. "Ended today · N": one line per ticket, a link with "ended at 10:02".
 - Empty (`?state=empty`): "No helper is using a browser right now" and one sentence. No Preview tag. Home shows nothing.
+- Error (`?state=error`): the list did not load: "The browsers did not load", "The dashboard could not read them just
+  now. It tries again on its own." and Try again; the page looks again every 5 s and the list replaces it.
+- Off (`?state=off`): the dashboard has the tab but the add-on answers that it is off: "The browser is turned off in
+  this workspace", "Turn it on again in Settings, under Add-ons." and Open add-ons.
+- The nav icon is the master's `globe`; on a phone More is the current tab (the page sits under More).
 
 ## ticket-browser.html: a ticket after a click on its small live preview (`#ticket/<id>?browser=open`)
 - The live view sits next to the steps (side by side from a 960 px column, about 1920 wide; on top of the steps below

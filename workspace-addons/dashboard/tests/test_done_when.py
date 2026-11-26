@@ -87,7 +87,7 @@ def test_tickets_carry_the_core_proof_line():
         "checklist": [{"id": "c1", "text": "a", "done": True, "evidence": [{"type": "command", "ref": "x"}]}]
     }
     add_proof_state([t])
-    assert t["proof"]["line"] == "1 check passed" and t["proof"]["per_item"] == {"c1": "passed"}
+    assert t["proof"]["line"] == "1 task with evidence" and t["proof"]["per_item"] == {"c1": "passed"}
 
 
 def test_proof_line_says_changed_since_the_recorded_check(tmp_path):
@@ -111,7 +111,7 @@ def test_proof_line_says_changed_since_the_recorded_check(tmp_path):
     t = {"checklist": [{"id": "c1", "text": "a", "done": True, "evidence": [ev]}]}
     filesig._CACHE.clear()
     add_proof_state([t], tmp_path)
-    assert t["proof"]["line"] == "1 check passed"
+    assert t["proof"]["line"] == "1 task with evidence"
     (tmp_path / "a.txt").write_text("two\n", encoding="utf-8")
     filesig._CACHE.clear()
     add_proof_state([t], tmp_path)

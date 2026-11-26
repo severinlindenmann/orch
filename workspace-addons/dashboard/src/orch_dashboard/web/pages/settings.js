@@ -19,13 +19,6 @@ async function settingsChoose(key, value, send) {
   return result;
 }
 const settingsSaving = key => settingsPending.has(key) ? settingsText('span', {className:'meta', role:'status', 'data-key':'settings-saving-' + key}, 'Saving…') : null;
-// A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
-const middleShort = (value, max = 48) => {
-  const text = String(value ?? '');
-  if (text.length <= max) return text;
-  const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
-  return text.slice(0, head) + '…' + text.slice(-tail);
-};
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
 const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
@@ -110,14 +103,10 @@ function helpersAtOnceCard(settings) {
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
 }
-// "More": the technical switches in one native fold at the end of a tab, closed until the person opens it.
-// It stays open across re-renders (a switch click inside it re-renders the page).
-const moreOpen = new Set();
+// "More settings": the technical switches shown plainly at the end of a tab under their own heading, no fold
+// (ORCH-1693; owner rule: detail lower down, never a "More" / "Show more" toggle).
 function moreSettings(tab, ...cards) {
-  const fold = h('details', {className:'disclosure stack', 'data-key':'settings-more-' + tab}, h('summary', {}, 'More'), ...cards.filter(Boolean));
-  fold.open = moreOpen.has(tab);
-  fold.ontoggle = () => { if (fold.open) moreOpen.add(tab); else moreOpen.delete(tab); };
-  return fold;
+  return h('div', {className:'stack', 'data-key':'settings-more-' + tab}, h('h2', {className:'set-sub'}, 'More settings'), ...cards.filter(Boolean));
 }
 function shareCard(settings) {
   const on = settings.share === true;
@@ -126,7 +115,7 @@ function shareCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Tell teammates about orch'),
         settingsText('p', {}, 'Adds a short note to your project’s guide file so your teammates’ helpers know orch is used here.'),
         settingsText('p', {className:'meta'}, 'Example: a colleague’s helper learns how to open your tickets.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
       reviewPanel('share', settings)));
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
@@ -160,7 +149,7 @@ function diagCard(settings) {
     h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Problem log'),
       settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
       settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Problem log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Problem log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
     h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
       h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
       snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all')),
@@ -181,7 +170,7 @@ function workflowCard(settings) {
       h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
         settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
         settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.agents_may_finish ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
 // Auto Reviewer (ORCH-1798, owner 24 Nov): turned on here (off by default); the Review page shows its card only while
@@ -197,7 +186,7 @@ function reviewerCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Accept small finished work for me'),
         settingsText('p', {className:'meta'}, 'Merged work where all tests passed and no change to looks, words or rules is marked Done for you. You see it on Review and can send any back.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.reviewer_on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Accept small finished work for me', 'aria-checked':!!settings.reviewer_on, 'data-key':'settings-switch-reviewer', 'data-action':'reviewer-set', disabled:snapshot || settingsBusy.has('reviewer')})),
       reviewerKindsRow(settings)));
 }
 // ORCH-645: which kinds of tickets it accepts by itself (the helper sets a ticket's kind). Draft or design is shown
@@ -243,7 +232,7 @@ const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-peopl
 function peoplePanel(settings) {
   const list = settings.people_list || {state:'off', people:[]};
   const busy = settingsBusy.has('people');
-  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this, at this computer.');
+  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this.');
   if (list.state === 'broken') return [intro, h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people'},
     h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.'))))];
   if (list.state !== 'on') return [intro, h('div', {className:'empty', 'data-key':'settings-people'},
@@ -359,10 +348,12 @@ async function peopleRight(box) {
   await settingsSend('people.rights', {id:person.id, rights, revision:list.revision}, 'people');
 }
 // ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
-// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off. #1228: with the
+// pull-requests add-on on, the release switch lives on its own settings page instead (releaseMergeRow).
+const releaseInAddon = settings => array(settings?.addons).some(a => a.name === 'pull-requests' && a.active);
 function prSwitchCards(settings) {
   const has = settings.pull_requests === true;
-  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, !releaseInAddon(settings) && (has || settings.release_merge_on) ? releaseMergeCard(settings) : null];
 }
 // Put new versions live without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
@@ -370,8 +361,17 @@ function releaseMergeCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-release-merge'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Put new versions live without my click'),
-        settingsText('p', {className:'meta'}, 'A release where all tests passed goes live by itself with your GitHub login. You get the short highlights afterwards. Off: you decide on the card.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Put new versions live without my click', 'aria-checked':!!settings.release_merge_on, 'data-key':'settings-switch-release-merge', 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')}))));
+        settingsText('p', {className:'meta'}, RELEASE_MERGE_WORDS)),
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.release_merge_on ? 'On' : 'Off'), releaseMergeButton(settings))));
+}
+const RELEASE_MERGE_WORDS = 'A release where all tests passed goes live by itself with your GitHub login. You get the short highlights afterwards. Off: you decide on the card.';
+function releaseMergeButton(settings, key = 'settings-switch-release-merge') {
+  return h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Put new versions live without my click', 'aria-checked':!!settings?.release_merge_on, 'data-key':key, 'data-action':'release-merge-set', disabled:snapshot || settingsBusy.has('release_merge')});
+}
+// The same switch as a row of the pull-requests add-on's own settings page (#1228), same words, same release_merge.set.
+function releaseMergeRow(row, settings) {
+  return row('Releases', h('div', {}, settingsText('p', {}, 'Put new versions live without my click'), settingsText('p', {className:'meta'}, RELEASE_MERGE_WORDS)),
+    releaseMergeButton(settings, 'addon-detail-release-merge'), 'addon-detail-release-merge-row');
 }
 // Prepare tickets when I save (ORCH-741, draft ORCH-730 section 4): on by default; off = Save without starting
 // keeps the ticket as written until Start. Only a person turns it on (it starts helpers).
@@ -380,7 +380,7 @@ function prepareCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare tickets when I save'),
         settingsText('p', {className:'meta'}, 'When you save a ticket without starting it, a helper writes the title, description, done-when, estimate and first steps. It does no work until you press Start. At most ' + (settings.prepare_daily_limit ?? 30) + ' tickets a day.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Prepare tickets when I save', 'aria-checked':settings.prepare_on_save !== false, 'data-key':'settings-switch-prepare', 'data-action':'prepare-set', disabled:snapshot || settingsBusy.has('prepare')}))));
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.prepare_on_save !== false ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Prepare tickets when I save', 'aria-checked':settings.prepare_on_save !== false, 'data-key':'settings-switch-prepare', 'data-action':'prepare-set', disabled:snapshot || settingsBusy.has('prepare')}))));
 }
 async function prepareSwitch() {
   await settingsSend('prepare.set', {on:state.settings?.prepare_on_save === false}, 'prepare');
@@ -453,7 +453,7 @@ function copiesCard(settings) {
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Several helpers at once'),
         settingsText('p', {}, 'Each helper works in its own copy of your folder, so two helpers never change the same file.'),
         settingsText('p', {className:'meta'}, 'Example: one helper writes the newsletter while another fixes the website.')),
-        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+        h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
       reviewPanel('copies-switch', settings),
       !on ? null : h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
         h('div', {className:'stack copies-more'},
@@ -481,7 +481,7 @@ const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
 // card = the add-on's last status answer; draft = the person's unsaved choice (the review line shows while it differs)
-const syncUi = {card:null, loading:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
+const syncUi = {card:null, loading:false, failed:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
 const syncSaved = card => ({where:card?.mode === 'remote' ? 'remote' : card?.mode === 'local' ? 'local' : 'off', addr:card?.mode === 'remote' ? card.remote || '' : '', every:String(card?.interval && card.mode === 'remote' ? card.interval : 15)});
 const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
 const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
@@ -526,7 +526,8 @@ async function syncLoad() {
   syncUi.loading = true;
   try {
     const result = await syncRead();
-    if (result.answer && typeof result.answer.shown === 'string') {
+    syncUi.failed = !(result.answer && typeof result.answer.shown === 'string');
+    if (!syncUi.failed) {
       syncUi.card = result.answer;
       // just turned on here: "On this computer only" is offered, the person saves it in the review line
       if (syncUi.wasOff && result.answer.mode === 'off' && !syncUi.draft) syncUi.draft = {where:'local', addr:'', every:'15'};
@@ -586,6 +587,7 @@ function syncWhen(value) {
 function syncInfo(card) {
   if (!card || card.mode === 'off') return null;
   const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
+  const count = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
   const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'card-row sync-info-body'}, h('div', {className:'stack'}, ...body)));
   const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
   const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
@@ -597,22 +599,23 @@ function syncInfo(card) {
     h('div', {className:'grid-3'},
       box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
         remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
-      box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
+      box('sync-what-info', 'What', h('strong', {}, count(c.tickets, 'ticket') + ' · ' + count(c.files, 'file') + ' · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
       box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
         h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
         h('p', {className:'meta', 'data-key':'sync-service'}, card.running ? 'Sync is running.' : 'Sync is stopped on this computer.'))),
     history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
-      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, e.text)))) : null);
+      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, capitalise(e.text || ''))))) : null);
 }
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
   if (!addon || snapshot) return null;
-  const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
+  // aria-busy until the setting is read: orch shot waits for it instead of picturing the placeholder (ORCH-2021)
+  const wrap = (body, busy = false) => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card', 'aria-busy':busy ? 'true' : 'false'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
     clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
+      h('span', {className:'switch-text', 'aria-hidden':'true'}, 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
   const card = syncUi.card;
   if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
@@ -669,19 +672,25 @@ function syncCard(settings) {
       await syncLoad();
     }))) : null;
   const notSynced = array(card?.not_synced);
-  const details = card && card.mode !== 'off' ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
-    h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  const details = card && card.mode !== 'off' && (card.last_error || notSynced.length) ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
+    h('ul', {}, card.last_error ? h('li', {'data-key':'sync-last-error'}, syncLastError(card)) : null, notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  // The Sync page's When card already says "Last: …": its own card shows the status line only when it adds something.
+  const page = route().kind === 'addon';
+  const status = card && card.mode !== 'off' && (!page || syncUi.nowBusy || card.shown !== 'synced' || notSynced.length) ? syncStatusLine(card) : null;
+  const retry = () => { const b = button('Try again', 'outline sm', () => { syncUi.failed = false; render(); return syncLoad(); }); b.dataset.key = 'sync-unread-retry'; return b; };
+  const unread = card ? null : syncUi.failed
+    ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-unread'}, h('p', {}, 'Can’t read the sync setting right now. Nothing was changed.'), retry())
+    : h('p', {className:'meta sync-unread', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…');
   return wrap([
-    // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
-    (() => {
-      const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
-      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Backup') : null, status) : null;
-    })(),
+    // On the Sync page its heading already says Sync: the card heading names the choice instead, like the cards above it.
+    page ? h('header', {className:'card-h', 'data-key':'sync-where-head'}, h('h3', {id:'sync-where-title'}, 'Where to keep a copy'), status)
+      : h('div', {className:'sync-head'}, h('h3', {}, 'Backup'), status),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
-    h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
-    card ? null : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…'),
-    remoteBox, review, details]);
+    page ? h('fieldset', {className:'sync-where', 'aria-labelledby':'sync-where-title'}, radios)
+      : h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    unread,
+    remoteBox, review, details], !card);
 }
 async function syncSave() {
   const s = syncNow();
@@ -780,8 +789,8 @@ function phonePanel(phoneAddon, settings) {
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
     connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
       h('li', {}, 'Open the admin page of your phone link and add this workspace. It gives you one line to copy.'),
-      h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
-      h('li', {}, 'Come back here and press Check again.'))),
+      h('li', {}, 'Paste that line below and press Connect.')),
+      snapshot ? null : relayPaste()),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your phone link.')));
   // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
   const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
@@ -795,6 +804,28 @@ function phonePanel(phoneAddon, settings) {
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
     h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+}
+// Not connected: the line from the phone link's admin page is pasted here and Connect runs it (ORCH-1693).
+const relayUi = {line:'', busy:false};
+function relayPaste() {
+  const input = h('input', {type:'text', className:'input grow', 'data-key':'phone-relay-line', 'aria-label':'Line from your phone link', placeholder:'Paste the line here', autocomplete:'off', spellcheck:'false', disabled:relayUi.busy});
+  input.value = relayUi.line;
+  input.oninput = () => { relayUi.line = input.value; };
+  input.onkeydown = e => { if (e.key === 'Enter') relayConnect(); };
+  return h('div', {className:'card-row row'}, input,
+    h('button', {type:'button', className:'btn sm', 'data-action':'relay-connect', 'data-key':'phone-relay-connect', disabled:relayUi.busy}, relayUi.busy ? 'Connecting…' : 'Connect'));
+}
+async function relayConnect() {
+  const line = relayUi.line.trim();
+  if (relayUi.busy) return;
+  if (!line) { window.orch.toast('Paste the line from your phone link’s admin page first.', 'error'); return; }
+  relayUi.busy = true; render();
+  const result = await act('relay.connect', {line});
+  relayUi.busy = false;
+  if (!result.ok) { window.orch.toast(result.text, 'error'); render(); return; }
+  relayUi.line = '';
+  await refresh();
+  window.orch.toast('Connected. Your phone link is set up.', 'ok');
 }
 async function relayReconnect(control) {
   if (control.disabled) return;
@@ -823,6 +854,7 @@ function addonDetailPage(addon) {
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+    addon.name === 'pull-requests' && addon.active && state.settings ? releaseMergeRow(row, state.settings) : null,
   ];
   // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
   const technical = settingsRows.splice(1, 1).filter(Boolean);
@@ -845,7 +877,7 @@ function settingsPage() {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
-    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer. Install it, then it shows up here.';
+    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' : 'Not found on this computer. Install it, then it shows up here.';
     return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, h('label', {className:'tap-box'}, radio),
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
@@ -867,7 +899,7 @@ function settingsPage() {
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
-      switchBusy(addon),
+      switchBusy(addon), h('span', {className:'switch-text', 'aria-hidden':'true'}, addon.active ? 'On' : 'Off'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name) || !!window.addonJobLive?.()}, addon.active ? 'On' : 'Off'));
   };
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
@@ -885,12 +917,12 @@ function settingsPage() {
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['people', 'People'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
-      // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
+      // Folder: its name plainly and Copy path; the full path only on hover (ORCH-1693: no raw path at first level).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
-        settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
-        settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder))),
+        settingsText('strong', {title:String(settings.folder || ''), 'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace)),
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
-      snapshot ? null : window.OrchLook?.settingsSection(),
+      // Shared pages are files shared with a link: only once sharing is on (R1.1, ORCH-2112).
+      snapshot || !sharingOn() ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
@@ -954,6 +986,8 @@ function buildLine(info, phase) {
     idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to test version', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })(),
       settingsText('span', {className:'meta', 'data-key':'update-switch-note'}, (dev ? 'Installs the newest release' : 'Installs the newest changes, not yet tested as a release,') + ' and restarts. Your helpers keep their work.')) : null];
 }
+// The installed version in plain words: a release number, else just "orch" (a test build's commit only on hover).
+function installedName(have, info) { return have?.release != null ? updNum(have.release) : have || info ? 'orch' : '…'; }
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {
   if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
@@ -991,7 +1025,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
+    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
@@ -1093,7 +1127,7 @@ function autoUpdateCard(info) {
     h('div', {className:'grow'}, settingsText('h3', {}, 'Update automatically when a new release is out'),
       settingsText('p', {}, 'orch installs it by itself at a quiet moment, never while a helper is working, and shows on Home what changed.'),
       auto.branch ? settingsText('p', {className:'meta', 'data-key':'settings-auto-update-branch'}, 'This is a test version: it gets every new change as soon as it is ready, not only releases.') : null),
-    h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
+    h('span', {className:'switch-text', 'aria-hidden':'true'}, auto.on ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':auto.on, 'aria-label':'Update automatically when a new release is out', 'data-key':'settings-switch-auto-update', 'data-action':'auto-update-set', disabled:snapshot || settingsBusy.has('auto-update')})));
 }
 async function autoUpdateSwitch() {
   if (settingsBusy.has('auto-update')) return;
@@ -1367,6 +1401,7 @@ globalThis.addEventListener?.('message', event => {
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
+const sharingOn = () => addons().some(a => a.active !== false && isPublish(a.name));
 const addonTitle = a => a?.dashboard?.title || addonLabel(a);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
@@ -1453,9 +1488,6 @@ function paintAddon(id) {
     blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
-    blocks.querySelectorAll('svg').forEach(n => {
-      n.replaceWith(iconEl('external'));
-    });
     // Block text is supplied by add-ons; keep internal keys out of visible copy.
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);

@@ -57,6 +57,13 @@ def _name(t: dict, fallback: str) -> str:
     return t.get("key") or t.get("id") or fallback
 
 
+def _key(args) -> str:
+    """How a person names the ticket the command was on: its key (MPU-2), else the id (args hold the id)."""
+    tid = _tid(args)
+    t = _load(args, tid) if tid != "<ticket>" else None
+    return _name(t, tid) if t else tid
+
+
 def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     """The one most useful next command for a ticket, from what it holds now."""
     if not t:
@@ -95,32 +102,59 @@ def _triage(data, args) -> str:
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
 
 
+def _one(args) -> str:
+    """The ticket key of a run command; `run status A B` names several, so the hint keeps the placeholder."""
+    tid = _tid(args)
+    if isinstance(tid, list):
+        tid = tid[0] if len(tid) == 1 else "<ticket>"
+    t = _load(args, tid) if tid != "<ticket>" else None
+    return _name(t, tid) if t else tid
+
+
+def _run_status(data, args) -> str:
+    n, d = _one(args), data or {}
+    if "runs" in d:  # several tickets at once
+        return "orch run list"
+    if d.get("running"):
+        return f'send it a message if it needs one: orch run send {n} "<text>"'
+    if d.get("state") == "maybe-stale":
+        return f"orch run start {n} --take-over"
+    return f"orch run start {n}"
+
+
+def _run_start(data, args) -> str:
+    n = _one(args)
+    if (data or {}).get("skipped"):
+        return f"orch ticket show {n}"
+    return f"watch it: orch run status {n}"
+
+
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
-    return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
+    return f'do the step, then record its evidence: orch check done {_key(args)} {c} --note "<evidence>"'
 
 
 def _start_task(data, args) -> str:
     c = getattr(args, "check", "<task>")
-    return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
+    return f'do the step, then record its evidence: orch check done {_key(args)} {c} --note "<evidence>"'
 
 
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
     if getattr(args, "exit_code", None):  # a failed run is not evidence to close on
-        again = f'orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        again = f'orch check record {_key(args)} {c} --cmd "<command>" --exit 0'
         return f"that run failed: fix it, then run it again: {again}"
-    return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
+    return f'if that is the evidence, close the task: orch check done {_key(args)} {c} --note "<evidence>"'
 
 
 def _init(data, args) -> str:
+    from orch import config
     from orch import init as init_mod
 
-    if not getattr(args, "recommended", False) and init_mod.has_recommended(args.orch_root):
-        return "orch init --recommended"
-    if (data or {}).get("starter"):  # a person starts it (dashboard Start, or their helper)
+    # local tickets work after any init; the dashboard is an optional line, never the next step
+    if (data or {}).get("starter") and config.agent_name(args.orch_root):  # dashboard Start, or the helper
         return f"start the starter task to fill in the workspace profile: orch run start {data['starter']}"
-    return 'orch ticket new "<title>"'
+    return init_mod.FIRST_TICKET
 
 
 def _status(data, args) -> str:
@@ -131,16 +165,48 @@ def _status(data, args) -> str:
 
 
 def _list(data, args) -> str:
+    words = (getattr(args, "search", None) or "").strip().replace('"', "'")
+    if words or getattr(args, "waiting", False) or getattr(args, "blocked", False):
+        return _list_picked(data, args, words)
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
+        broken = getattr(args, "_broken_tickets", None)
+        if broken:
+            return f"{tickets.BROKEN_FIX}: .orch/tickets/{broken[0]}"
         return 'create one: orch ticket new "<title>"'
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
+
+
+def _list_picked(data, args, words: str) -> str:
+    """`ticket list --search/--waiting/--blocked`: open the first hit, else widen the search."""
+    rows = data or []
+    if rows:
+        open_ = [t for t in rows if t.get("status") not in ("done", "dropped")]
+        if not open_:
+            return f"orch ticket show {_name(rows[0], rows[0]['id'])}"
+        t = open_[0]
+        return work_on(t if "checklist" in t else _load(args, t["id"]), t["id"])
+    if words and not (getattr(args, "all", False) or getattr(args, "status", None)):
+        return f'look in finished tickets too: orch ticket list --search "{words}" --all'
+    return "see every ticket: orch ticket list"
 
 
 def _ask(data, args) -> str:
     if (data or {}).get("taken_back"):
         return "keep working on the ticket."
-    return "keep working on the steps that do not need the answer."
+    t, q = _load(args), (data or {}).get("id") or "<question>"
+    how = f'orch answer {_name(t, _tid(args)) if t else _tid(args)} {q} "<answer>"'
+    return f"keep working on the steps that do not need the answer (a person answers with: {how})."
+
+
+def _needs(data, args) -> str:
+    q = next((r for r in data or [] if r.get("answer") and r.get("ticket")), None)
+    if q:
+        t = _load(args, q["ticket"])
+        a = q["answer"]
+        pick = a.get("recommended") or (a.get("options") or ["<answer>"])[0]
+        return f"answer it: orch answer {_name(t, q['ticket']) if t else q['ticket']} {a['question']} {pick}"
+    return "keep working on what does not wait: orch ticket list"
 
 
 def _update(data, args) -> str | None:
@@ -243,6 +309,22 @@ HINTS = {
     "session close": "start it again any time: orch session new <kind>",
     "session end": "start it again any time: orch session new <kind>",
     "session stop": "send it a message to go on, or end it: orch session end <kind>",
+    "run start": _run_start,
+    "run status": _run_status,
+    "run list": "look at one: orch run status <ticket>",
+    "run attach": lambda d, a: f"orch run status {_one(a)}",
+    "run screen": lambda d, a: f'send it a message if it needs one: orch run send {_one(a)} "<text>"',
+    "run send": lambda d, a: f"it reads the message at its next step: orch run status {_one(a)}",
+    "run take-back": lambda d, a: f"orch run status {_one(a)}",
+    "run stop": _on_ticket,
+    "run history": lambda d, a: f"continue one: orch run start {_one(a)} --session <id>",
+    "run tend": "orch run list",
+    "agents": "choose one for this folder: orch config agent <name>",
+    "agents test": "choose it for this folder: orch config agent <name>",
+    "config get": lambda d, a: None if a.key else "change one: orch config set <key> <value>",  # a bare value
+    "config set": "keep working: orch ticket list",
+    "config propose": "a person accepts or edits it in Settings; keep working: orch ticket list",
+    "config agent": "start it on a ticket: orch run start <ticket>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
@@ -266,9 +348,9 @@ HINTS = {
     "ticket tidy": _on_ticket,
     "ticket found": lambda d, a: (
         "ask ONE question about the sources that could not be opened, then fill the ticket: "
-        f"orch ticket tidy {_tid(a)} ..."
+        f"orch ticket tidy {_key(a)} ..."
         if tickets.found_counts((d or {}).get("found"))[1]
-        else f"fill the ticket: orch ticket tidy {_tid(a)} ..."
+        else f"fill the ticket: orch ticket tidy {_key(a)} ..."
     ),
     "ticket prepared": _on_ticket,
     "ticket plan": _on_ticket,
@@ -295,6 +377,7 @@ HINTS = {
     "checks init": "orch checks templates",
     "checks templates": "orch checks add <template> [--profile <name>]",
     "checks add": "orch checks list",
+    "checks show": "orch checks approve <name> --hash <h>  (the person, after looking)",
     "checks approve": "orch checks list",
     "checks remove": "orch checks list",
     "checks run": "orch checks list",
@@ -324,7 +407,7 @@ HINTS = {
     "ref wait": _ref_wait,
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
-    "needs": "keep working on what does not wait: orch ticket list",
+    "needs": _needs,
     "counts": "what each number stands for: orch needs",
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
@@ -349,9 +432,11 @@ HINTS = {
     "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
+    "publish invite": lambda d, a: f"open {a.folder} in your helper; it is connected to publish.",
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
+    "relay invite": lambda d, a: f"open {a.folder} in your helper; it is connected to the relay.",
     "relay problem share": "carry on with your ticket: orch ticket list",
     "relay problem list": lambda d, a: (
         "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."
