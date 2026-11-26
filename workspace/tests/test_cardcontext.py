@@ -184,3 +184,25 @@ def test_the_reviewer_never_answers_a_question_whose_quote_is_out_of_date(proj, 
     rows = reviewer.answer_routine(proj, dry_run=True, now=later)
     row = next(r for r in rows if r["ticket"] == tid)
     assert row["routine"] is False and row["why"] == reviewer.QUOTE_STALE
+
+
+def test_the_locked_answer_checks_the_quote_again(proj, run, new_ticket):
+    import pytest
+
+    from orch.errors import Refused
+
+    assert run("config", "set", "workflow.reviewer_answers", "on", "--by", "human:tester")[0] == 0
+    tid = new_ticket("Flaky test in the run tests")
+    line = _say(proj, tid, "human:lea", "Fix flaky tests first.")
+    code, out, err = run(
+        "ask", tid, "The run test fails once in ten. Fix it now or open an issue?", "--option", "Fix it now",
+        "--option", "Open an issue", "--recommend", "Fix it now", "--said", line["id"],
+        "--by", "agent:helper",
+    )  # fmt: skip
+    assert code == 0, out + err
+    q = tickets.load(proj, tid)["questions"][0]
+    digest = tickets.question_digest(q)
+    _edit(proj, tid, lambda d: d.update(done_when="Only open an issue"))
+    with pytest.raises(Refused, match="words it quotes changed"):
+        tickets.answer_for_owner(proj, tid, "q1", digest, "routine")
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None

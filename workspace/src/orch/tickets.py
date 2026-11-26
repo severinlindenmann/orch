@@ -1659,6 +1659,11 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away
             raise Refused(f"{qid} waits for the owner.")
         if q.get(autoreview.OWNER_ONLY):
             raise Refused(f"{qid} waits for the owner: they took it back from the Reviewer.")
+        if "said" in q:  # ORCH-2183: the quote is checked again on the fresh ticket
+            from orch import cardcontext
+
+            if cardcontext.stale(root, ticket, q) is not None:
+                raise Refused(f"{qid} waits for the owner: the words it quotes changed since.")
         rec = q.get("recommended")
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
