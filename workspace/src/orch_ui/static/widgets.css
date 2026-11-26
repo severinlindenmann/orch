@@ -1223,6 +1223,11 @@ button.live-pt:hover{color:var(--brand)}
 .live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
+.live-cmd{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.live-cmd code{font-family:var(--font-mono);overflow-wrap:anywhere;min-width:0}
+.live-cmd .live-run{flex:none}
+.live-cmd .live-run .menu-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:60;min-width:176px}
+.live-cmd .live-run .menu-pop .btn{width:100%;justify-content:flex-start}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
@@ -1452,7 +1457,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-line+.wall-line{border-top:1px solid var(--border)}
 .wall-line:hover{background:var(--surface-2)}
 .wall-lopen{display:flex;gap:var(--s1) var(--s3);align-items:center;flex:1;min-width:0;min-height:var(--s7);padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.wall-line .wall-tt{white-space:nowrap}
+.wall-line .wall-tt{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}  /* a long title ends in … and never runs over the line (ORCH-2063) */
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
 /* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
@@ -2892,3 +2897,21 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .attn-decided-row{display:flex;gap:var(--s2);align-items:baseline;padding:var(--s2) 0;border-bottom:1px solid var(--border)}
 .swipe-done.attn-end .attn-still{margin:0;color:var(--text)}
 .attn-end-acts{flex-wrap:wrap}
+
+/* Pick several and change them at once (25 Nov, ORCH-2034; Tickets list). A checkbox per row (.pick-cell, .row-pick:
+   32 px target), a picked row tinted (tr.is-picked), and the bar that stays at the foot of the screen while rows are
+   picked (.bulk-bar, UI.bulkBar): "3 selected", the actions as menus that open upwards, Clear. aria-busy while saving. */
+.pick-cell{width:40px;padding-inline:4px 0}
+.row-pick{display:inline-grid;place-items:center;min-width:32px;min-height:32px;border-radius:8px;cursor:pointer}
+.row-pick:hover{background:var(--surface-3)}
+.row-pick input{margin:0;cursor:pointer}
+tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
+.bulk-bar{position:sticky;bottom:16px;z-index:30;display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:12px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface-2);box-shadow:var(--lift-shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
+.bulk-bar .bulk-count{display:inline-flex;align-items:center;gap:8px;font-weight:600;white-space:nowrap}
+.bulk-bar .bulk-count .spinner{width:14px;height:14px;flex:none}
+.bulk-bar .bulk-actions{display:flex;flex-wrap:wrap;gap:8px}
+.bulk-bar .bulk-actions .btn{min-height:32px}
+.bulk-bar .menu-pop{top:auto;bottom:calc(100% + 4px);left:0;right:auto;max-height:min(360px,60vh);overflow:auto}
+.bulk-bar .menu-pop .meta{padding:4px 8px}
+.bulk-bar[aria-busy=true] .bulk-actions{opacity:.5;pointer-events:none}
+.bulk-bar .bulk-clear{margin-left:auto}

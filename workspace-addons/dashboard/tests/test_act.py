@@ -1416,9 +1416,27 @@ def test_chat_new_and_make_ticket_validation():
         ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "files": ["a.txt"]}),
+        ("chat.say", {"text": "hi", "files": "a.txt"}),
+        ("chat.say", {"text": "hi", "files": [f"{i}.txt" for i in range(11)]}),
+        ("chat.say", {"text": "", "files": []}),
     ]:
         with pytest.raises(actions.BadRequest):
             actions.OPS[op](args)
+
+
+def test_chat_say_with_files():
+    """ORCH-2171: files already attached to the Chat ticket go with the message; words may be empty then."""
+    assert actions.OPS["chat.say"]({"text": "see", "files": ["a b.txt", "-x.png"]}) == (
+        ["chat", "say"],
+        ["--file=a b.txt", "--file=-x.png"],
+        ["see"],
+    )
+    assert actions.OPS["chat.say"]({"text": "", "files": ["a.txt"]}) == (
+        ["chat", "say"],
+        ["--file=a.txt"],
+        [""],
+    )
 
 
 # ---- fb19: long text and attached files for a new ticket

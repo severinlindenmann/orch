@@ -991,12 +991,20 @@ def _log(a):
 def _chat_say(a):
     """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
     With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
-    _only(a, ("text", "new", "ticket"))
+    _only(a, ("text", "new", "ticket", "files"))
     if a.get("ticket") is not None:
-        if _flag(a.get("new")):
-            raise BadRequest("A ticket chat has no new conversation.")
+        if _flag(a.get("new")) or a.get("files"):
+            raise BadRequest("A ticket chat has no new conversation and no files here.")
         return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
-    return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+    # files: names already attached to the Chat ticket (ticket.attach first, as the ticket page does)
+    files = a.get("files") or []
+    if not isinstance(files, list) or len(files) > 10:
+        raise BadRequest("A Chat message takes up to 10 files.")
+    flags = ["--new"] if _flag(a.get("new")) else []
+    for name in files:
+        # one argv item, even for a name that starts with "-"
+        flags.append("--file=" + _text(name, "file name", limit=255))
+    return ["chat", "say"], flags, [_text(a.get("text"), empty=bool(files))]
 
 
 TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
@@ -1419,7 +1427,7 @@ MAX_ADD_NAMES = 32
 def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | None]:
     """Add several add-ons in one run (ORCH-1739): `addonjob.launch` starts `orch addon add <names> --yes --job`
     detached and returns the job at once (202); the page follows it with GET /api/addon-job. Every name must be in
-    the catalogue (`orch addon list`: shipped and not installed yet, or installed and off). A live job, or an orch
+    the catalogue (shipped and not installed yet, or installed and off). A live job, or an orch
     update, is refused by the core with one plain sentence (409). The caller checks the page session."""
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
@@ -1434,7 +1442,7 @@ def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | 
         raise BadRequest("Pick the add-ons to add.")
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     if not isinstance(rows, list):
         raise Unavailable("orch could not read the add-on list. Try again in a moment.")
     known = {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
@@ -1661,7 +1669,7 @@ def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
 
 
 def _addon_row(root: Path, orch_bin: str, name: str) -> dict | None:
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     for r in rows if isinstance(rows, list) else []:
         if isinstance(r, dict) and r.get("name") == name:
             return r

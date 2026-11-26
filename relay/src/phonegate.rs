@@ -69,6 +69,10 @@ pub fn check(
     blobs: &[String],
 ) -> Res<Gate> {
     let Some(env) = env else {
+        // the hard cut covers the phone too: once "signed only" is on, no unsigned send (a read error refuses)
+        if crate::signgate::require_signed(c)? {
+            return Err(refused(SigError::MissingSignature));
+        }
         return Ok(Gate::Unsigned);
     };
     let key = crate::phonekeys::raw_key(c, pid).ok_or_else(|| refused(SigError::UnknownKey))?;
@@ -81,9 +85,7 @@ pub fn check(
     }
     let m = &ver.msg;
     let id = m["id"].as_str().unwrap_or_default().to_string();
-    if matches!(outcome, RelayOutcome::Duplicate) {
-        return Ok(Gate::Duplicate(id));
-    }
+    // A retry must say the same as the signed bytes too (checked before it is answered as a duplicate).
     if m.get("type").and_then(Value::as_str) != Some("text") {
         return Err(mismatch("type"));
     }
@@ -102,6 +104,9 @@ pub fn check(
     if m.get("body") != Some(body) {
         return Err(mismatch("body"));
     }
+    if matches!(outcome, RelayOutcome::Duplicate) {
+        return Ok(Gate::Duplicate(id));
+    }
     // Every file the request names is listed in the signed bytes with the stored size and hash, and nothing else.
     let signed_files: Vec<&Value> = m
         .get("files")
@@ -109,6 +114,11 @@ pub fn check(
         .map(|a| a.iter().collect())
         .unwrap_or_default();
     if signed_files.len() != blobs.len() {
+        return Err(mismatch("files"));
+    }
+    // one to one: a file named twice ([A, A] against signed [A, B]) never passes
+    let named: std::collections::HashSet<&str> = blobs.iter().map(String::as_str).collect();
+    if named.len() != blobs.len() {
         return Err(mismatch("files"));
     }
     for b in blobs {

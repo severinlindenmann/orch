@@ -134,3 +134,12 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-show-rows]'); if (!b) return;
   b.previousElementSibling.querySelectorAll('tr[hidden]').forEach(r => { r.hidden = false; }); b.remove();
 });
+/* Pick several (ORCH-2034): row checkboxes and UI.bulkBar. */
+{const q=s=>document.querySelector(s),gb=q('#g-bulk');if(gb&&UI.bulkBar){const boxes=()=>[...gb.querySelectorAll('tbody input')],all=gb.querySelector('thead input');
+ const mk=(label,items)=>{const d=document.createElement('details');d.className='menu';const sm=document.createElement('summary');sm.className='btn outline sm';sm.append(label,UI.chevron());const pop=document.createElement('div');pop.className='menu-pop';pop.setAttribute('role','menu');pop.setAttribute('aria-label',label);
+  items.forEach(w=>{const b=document.createElement('button');b.type='button';b.className='menu-item';b.setAttribute('role','menuitem');b.textContent=w;b.addEventListener('click',()=>{d.open=false;const n=boxes().filter(x=>x.checked).length;UI.toast&&UI.toast(label+' '+w+' on '+n+(n===1?' ticket':' tickets'),()=>{})});pop.append(b)});d.append(sm,pop);return d};
+ const acts=()=>[mk('Status',['Backlog','To do','Working','Check','Done',"Won't do"]),mk('Priority',['High','Normal','Low']),mk('Epic',['Not in an epic','ORCH-40 Spring fair'])];
+ const draw=()=>{const n=boxes().filter(x=>x.checked).length;boxes().forEach(x=>x.closest('tr').classList.toggle('is-picked',x.checked));all.checked=n===boxes().length;all.indeterminate=n>0&&n<boxes().length;
+  q('#g-bulk-bar').replaceChildren(...(n?[UI.bulkBar({label:'Selected tickets (sample)',count:n,actions:acts(),clear:{label:'Clear',onClick:()=>{boxes().forEach(x=>{x.checked=false});draw()}}})]:[]))};
+ boxes().forEach(x=>x.addEventListener('change',draw));all.addEventListener('change',()=>{boxes().forEach(x=>{x.checked=all.checked});draw()});draw();
+ q('#g-bulk-busy').append(UI.bulkBar({label:'Selected tickets, saving (sample)',busy:'Saving 2 of 5…',actions:acts(),clear:{label:'Clear'}}))}}
