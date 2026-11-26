@@ -180,7 +180,7 @@ def test_covers_add_edit_and_show(proj, run, validate, new_ticket):
     assert run("check", "edit", tid, "c2")[0] == 2  # nothing to change
     assert run("check", "add", tid, "x", "--covers", "y" * 301)[0] == 2
     code, out, _ = run("ticket", "show", tid)
-    assert code == 0 and "Evidence: No checks recorded" in out
+    assert code == 0 and "Evidence: No evidence yet" in out
 
 
 # ---- recorded checks (B8): record, files_sig, changed since, failed ----
@@ -277,7 +277,7 @@ def test_proof_state_changed_and_failed(repo, run, new_ticket, validate):
     assert tickets.proof_state(t, repo)["per_item"]["c1"] == "passed"
     run("check", "record", tid, "c1", "--cmd", "uv run pytest -q", "--exit", "1")
     t = tickets.load(repo, tid)
-    assert tickets.proof_state(t, repo)["line"] == "1 check failed"
+    assert tickets.proof_state(t, repo)["line"] == "1 task failed"
 
 
 def test_proof_state_computes_sig_once(repo, run, new_ticket, monkeypatch):
@@ -825,7 +825,7 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
     _done_with_record(repo, run, tid, 0)
     tickets.set_summary(repo, tid, "Half done", "agent:claude")
     prompt = runs.fresh_prompt(tickets.load(repo, tid), [], repo)
-    assert "Where things stand, written by the last run (evidence: 1 check passed;" in prompt
+    assert "Where things stand, written by the last run (evidence: 1 task with evidence;" in prompt
     assert "Half done" in prompt and "how you know it works" in prompt and "orch check record" in prompt
     assert len(prompt) <= 12000
 
@@ -856,7 +856,17 @@ def test_ask_says_to_keep_working(proj, run, new_ticket):
     """R2.6 + R2.7: the ask output names the next step: go on with what does not need the answer."""
     tid = with_checks(proj, run, new_ticket)
     code, out, _ = run("ask", tid, "Which date format?", "--option", "A")
-    assert code == 0 and "Next: keep working on the steps that do not need the answer." in out
+    key = read(proj, tid)["key"]
+    assert code == 0 and "Next: keep working on the steps that do not need the answer" in out
+    assert f'a person answers with: orch answer {key} q1 "<answer>"' in out  # how the answer comes back
+
+
+def test_done_without_evidence_names_the_key_and_a_note(proj, run, new_ticket):
+    """A new person: the refusal uses the ticket key they typed and leads with a plain --note."""
+    tid = with_checks(proj, run, new_ticket)
+    key = read(proj, tid)["key"]
+    code, _, err = run("check", "done", key, "c1")
+    assert code == 2 and f'orch check done {key} c1 --note "what you did"' in err and tid not in err
 
 
 def test_a_yes_with_a_reason_marks_the_step_wont_do(proj, run, new_ticket):
@@ -998,4 +1008,4 @@ def test_failed_run_names_the_task_and_says_run_it_again(proj, run, new_ticket):
     code, out = run("check", "record", tid, c, "--cmd", "pytest", "--exit", "1")[:2]
     assert code == 0 and "that run failed: fix it, then run it again" in out and "close the task" not in out
     shown = run("ticket", "show", tid)[1]
-    assert "1 check failed (c1: tests pass)" in shown
+    assert "1 task failed (c1: tests pass)" in shown
