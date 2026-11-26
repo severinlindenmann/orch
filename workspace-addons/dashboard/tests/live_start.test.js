@@ -77,3 +77,12 @@ test('the page loads the Start choice after the History list, before the layer, 
   assert.ok(at > index.indexOf('pages/live-history.js') && at < index.indexOf('pages/live-layer.js'));
   assert.match(fs.readFileSync(path.join(web, '../server.py'), 'utf8'), /live-history\|live-start\|/);
 });
+
+test('ORCH-2201: Why it waits names the open question, else the review, else nothing', () => {
+  const t = {id:'t_abc123', status:'waiting', questions:[{id:'q1', digest:'d', text:'Run the gold steps\n on INT now?', options:['Now', 'Tonight'], answer:null}]};
+  assert.deepEqual(S.liveStartWhy(t).question, {id:'q1', digest:'d', text:'Run the gold steps on INT now?', options:['Now', 'Tonight']});
+  assert.equal(S.liveStartWhy({id:'t_abc123', status:'review', questions:[]}).review.text, 'Waits for your review');
+  assert.equal(S.liveStartWhy({id:'t_abc123', status:'review', questions:[]}).href, '#ticket/t_abc123');
+  assert.equal(S.liveStartWhy({id:'t_abc123', status:'active', questions:[{id:'q', text:'old', answer:'yes'}]}), null);
+  assert.equal(S.liveStartWhy({id:'t_abc123', status:'active', questions:[{id:'q', text:'a plan', kind:'plan', answer:null}]}), null);
+});
