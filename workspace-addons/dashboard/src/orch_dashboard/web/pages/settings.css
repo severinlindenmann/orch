@@ -88,6 +88,7 @@
 .settings .sync-field{display:flex;flex-direction:column;gap:6px}
 .settings .sync-field-line{display:flex;gap:8px;flex-wrap:wrap}
 .settings .sync-field-line .input{flex:1 1 220px;min-width:0;width:auto}
+.card-row>.input.grow[data-key=phone-relay-line]{flex:1 1 200px;min-width:0;width:auto}
 .settings .check-res{display:inline-flex;gap:6px;align-items:center;font-size:12px}
 .settings .check-res.ok{color:var(--success)}
 .settings .check-res.bad{color:var(--danger)}
