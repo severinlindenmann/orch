@@ -356,7 +356,7 @@ def _read_ticket(p: Path, tid: str) -> dict:
             data = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("id") != tid:
                 raise Refused(
-                    f"The file of ticket {tid} is damaged: its id does not match its filename. "
+                    f"Ticket {tid} is damaged: its id does not match its filename. "
                     f"Put {tid} back as its id, then try again."
                 )
             _check_format(data, tid)
