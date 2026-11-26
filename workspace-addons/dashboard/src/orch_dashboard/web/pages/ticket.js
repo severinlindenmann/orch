@@ -2318,7 +2318,7 @@ function ticketTwoWays(t) {
     h('div', {className:'grid-2'},
       h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'Let orch start a helper')), h('p', {className:'muted'}, 'Set it up once. After that, Start on a ticket is one click.'),
         h('div', {className:'row'}, h('a', {className:'btn primary sm', href:'#settings/helper', 'data-key':'two-ways-setup'}, 'Set up a helper'))),
-      h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'You already work with an AI tool')), h('p', {className:'muted'}, 'Claude Code, Codex, Copilot or another one. Open it in this workspace’s folder and paste this line:'), copy)));
+      h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'You already work with an AI tool')), h('p', {className:'muted'}, 'Open your AI tool in this workspace’s folder and paste this line:'), copy)));
 }
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
 // cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
