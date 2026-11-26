@@ -64,6 +64,11 @@ def _manage(args, root: Path) -> int:
             data.update(pid=cur["pid"], url=service.url(cur["port"]))
         message = f"Files: {data['url']}" if cur else "Files is not running."
     print(json.dumps(data) if args.json else message)
+    if not args.json:
+        if data.get("url"):
+            print(f"Next: browse the files at {data['url']}")
+        else:
+            print("Next: open Files with orch files open")
     return 1 if args.cmd == "status" and not data["running"] else 0
 
 
@@ -93,6 +98,12 @@ def _search(args, root: Path) -> int:
     if res["unread"]:
         tail += f"; the text of {res['unread']:,} files is still being read"
     print(tail + ".")
+    if res["items"]:
+        print("Next: open a matching file in the workspace.")
+    elif res["unread"]:
+        print("Next: finish reading the files with orch files index, then search again.")
+    else:
+        print('Next: try another word with orch files search "<word>".')
     return 0
 
 
@@ -107,6 +118,7 @@ def _index(args, root: Path) -> int:
             f"{pr.total:,} files; {pr.changed:,} new or changed, {pr.removed:,} gone, "
             f"text read of {pr.read:,}, in {pr.seconds} s."
         )
+        print('Next: find a file with orch files search "<word>".')
     return 0
 
 
@@ -143,7 +155,7 @@ def main(argv=None) -> int:
         parser.print_help()
         return 0
     if args.cmd in ("search", "index") and not index.has_fts5():
-        msg = "This computer's Python has no full-text search (SQLite FTS5), so Files cannot search here."
+        msg = "Files cannot search with this Python (SQLite FTS5 is missing); search in your file manager instead."
         print(json.dumps({"error": msg}) if getattr(args, "json", False) else msg, file=sys.stdout)
         return 2
     try:

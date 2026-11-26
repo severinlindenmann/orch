@@ -60,6 +60,9 @@ struct ChatsListView: View {
                     }
                 }.toolbar({ if case .group = route { return Visibility.hidden }; return Visibility.visible }(), for: .navigationBar)
             }
+            // An invitation opened while paired (ORCH-2127): the Add workspace confirmation, after an open New topic closes.
+            .onChange(of: model.incomingInvite, initial: true) { _, _ in showIncomingInvite() }
+            .onChange(of: sheet) { _, _ in showIncomingInvite() }
             .sheet(item: $sheet) { item in
                 switch item {
                 case .newTopic:
@@ -69,6 +72,11 @@ struct ChatsListView: View {
                 }
             }
         }
+    }
+
+    private func showIncomingInvite() {
+        guard model.incomingInvite != nil, sheet == nil, !model.addWorkspaceOpen else { return }
+        sheet = .addWorkspace
     }
 
     private var header: some View {

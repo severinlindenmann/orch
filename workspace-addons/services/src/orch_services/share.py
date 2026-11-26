@@ -324,8 +324,12 @@ def cmd_share(args, root: Path) -> int:
             ok, last = check_link(
                 cfg["check"], port, mark, running=lambda spec=spec: drv.status(spec).running
             )
-        except BaseException:
-            _drop(root, drv, spec, sid)
+        except BaseException as e:
+            if not _drop(root, drv, spec, sid) and isinstance(e, Exception):
+                why = str(e) if isinstance(e, Refused) else f"Sharing failed ({e.__class__.__name__})."
+                raise Refused(
+                    f"{why} The share could not be stopped either. End it with: orch services remove {sid}"
+                ) from e
             raise
         if ok:
             return _done(args, cli, root, drv, wid, rec, cfg)
