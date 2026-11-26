@@ -181,6 +181,15 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Save ticket is the filled button and the default for Enter with Cmd or Ctrl. With a helper: "Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts." (prepare on save off: "… as you wrote it. Nothing starts.") and "Start now has your helper begin the work at once. This uses its time and may cost money." Start now is outlined, never the default.
 - Preview pill "No helper" (`?helper=none`): no Start now, no Helper row, and "Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. Set up a helper".
 
+## Pick several (25 Nov, ORCH-2034)
+
+### list.html
+
+- Each row has a checkbox in a first column; the box in the header picks every shown row (mixed when only some are).
+- While rows are picked, the bar from the master (`UI.bulkBar`) stays at the foot of the screen: "3 selected", Status, Priority, Epic (menus that open upwards), Clear. One click sets it for all of them; one notice with Undo.
+- Status offers Backlog, To do, Working, Check, Done and Won't do. Waiting and Superseded ask something per ticket and stay on each ticket's Move to.
+- Wide screens only: the phone list has no checkboxes. Open `list.html?pick=2` to see two rows picked.
+
 ## Tickets page polish (ORCH-2091)
 
 - `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
