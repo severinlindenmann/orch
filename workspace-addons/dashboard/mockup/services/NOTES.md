@@ -94,3 +94,13 @@ fills it with `orch services view --json`. Where the product differs from this p
   line from the view's good notice.
 - `?case=stale`: when the regular check has stopped, the question says "It was failing at the last check and orch has
   not checked it since." and the page never says it runs fine again.
+
+## Polish (ORCH-2105, 25 Nov)
+
+- The pinned question keeps a 12 px gap to the list below it (it touched the list's edge), also between two questions.
+- An empty log says its one line ("… has not written anything yet.") in the page's own font, not the log's code font.
+- On a phone a switch and its words stay on one line (the words wrap beside the switch, not under it).
+- A found program started by hand (no background job entry, ORCH-934) has no Manage with orch button, so its note no
+  longer says "until you say so": "It was started by hand, so orch cannot manage it. orch leaves it alone." The
+  mockup shows it as "Python web server".
+- Empty state: the button is "Ask the helper" (filled), as the product has it; the mockup had an outlined "Chat".

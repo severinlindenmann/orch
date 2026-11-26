@@ -56,12 +56,14 @@
     else preview = `<span class="tile-txt">${esc(String(ev.summary || ev.text || ev.ref || '').replace(/\s+/g, ' '))}</span>`;
     return `<button type="button" class="tile${ctx.missing ? ' ev-missing' : ''}" aria-label="${esc(caption)}${ctx.missing ? ' · on another computer' : ''}"><span class="tile-img">${preview}</span><span class="tile-t">${esc(caption)}</span></button>`;
   }
+  // No address to show: say what happened and what to do, not a bare line.
+  const gone = word => `<div class="empty-state"><strong>${word} not available</strong><p>It could not be found. Check the file on the ticket, or ask the helper to add it again.</p></div>`;
   function full(ev, ctx = {}) {
     const kind = kindOf(ev), src = safeSrc(ctx.url), caption = ev.summary || basename(ev.ref);
     let body;
     if (ctx.missing) body = '<p class="ev-missing">on another computer</p>';
-    else if (kind === 'image') body = src ? `<figure class="ev-img"><img src="${esc(src)}" alt="${esc(caption)}" loading="lazy"></figure>` : '<p class="muted">Picture preview unavailable.</p>';
-    else if (kind === 'page') body = src ? `<div class="ev-html"><div class="agent-chrome">Helper preview</div><iframe sandbox="" referrerpolicy="no-referrer" src="${esc(src)}" title="${esc(caption)}" loading="lazy"></iframe></div>` : '<p class="muted">Page preview unavailable.</p>';
+    else if (kind === 'image') body = src ? `<figure class="ev-img"><img src="${esc(src)}" alt="${esc(caption)}" loading="lazy"></figure>` : gone('Picture');
+    else if (kind === 'page') body = src ? `<div class="ev-html"><div class="agent-chrome">Helper preview</div><iframe sandbox="" referrerpolicy="no-referrer" src="${esc(src)}" title="${esc(caption)}" loading="lazy"></iframe></div>` : gone('Page');
     else if (kind === 'table') {
       const data = tableData(ev, ctx);
       body = data.columns.length ? `<div class="ev-table" tabindex="0" role="region" aria-label="${esc(caption)}"><table><thead><tr>${data.columns.map(c => `<th scope="col">${esc(c)}</th>`).join('')}</tr></thead><tbody>${data.rows.slice(0, 50).map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${data.rows.length > 50 ? `<p class="ev-cap">Showing 50 of ${data.rows.length} rows.</p>` : ''}` : '<p class="muted">No table rows to show.</p>';
