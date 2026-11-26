@@ -212,7 +212,8 @@ test('same numbers: every page shows the same count, date and state for the same
       const rows = {};                                  // key -> {lane, due}: the lane a row sits in and its Due cell
       let lane = '';
       for (const r of main.querySelectorAll('tr')) {
-        const cells = [...r.children].map(c => (c.innerText || '').trim());
+        // the pick checkbox cell (ORCH-2034) holds no text: read the cells after it
+        const cells = [...r.children].filter(c => !c.classList.contains('pick-cell')).map(c => (c.innerText || '').trim());
         const key = /(?:^|\n)\s*([A-Z]+-\d+)\b/.exec(cells[0] || '');
         const head = /^[^\w]*\s*(Needs you|Review|Working|Waiting|Backlog|Done|Stuck)\b/.exec((r.innerText || '').trim());
         if (head && !key) { lane = head[1]; continue; }

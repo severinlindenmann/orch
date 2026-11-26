@@ -189,6 +189,14 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Owner comment: the helper list names only the helpers this workspace has, without "good at …" lines.
 - Preview "No helper" (`?helper=none`): no helper box and no Start now; Optional takes the right column and holds the
   plan choice.
+## Pick several (25 Nov, ORCH-2034)
+
+### list.html
+
+- Each row has a checkbox in a first column; the box in the header picks every shown row (mixed when only some are).
+- While rows are picked, the bar from the master (`UI.bulkBar`) stays at the foot of the screen: "3 selected", Status, Priority, Epic (menus that open upwards), Clear. One click sets it for all of them; one notice with Undo.
+- Status offers Backlog, To do, Working, Review, Done and Won't do. Waiting and Superseded ask something per ticket and stay on each ticket's Move to.
+- Wide screens only: the phone list has no checkboxes. Open `list.html?pick=2` to see two rows picked.
 
 ## Tickets page polish (ORCH-2091)
 
