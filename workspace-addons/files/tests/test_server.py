@@ -322,7 +322,10 @@ def test_zip_files_and_drawings_are_checked_before_they_are_served(srv, built, m
         "leak.svg": f"<svg xmlns='x'><text>{key}</text></svg>".encode(),
         "cut.zip": b"PK\x03\x04 not really a zip",
     }
-    good = {"ok.zip": make({"a.txt": "Breakfast for 60"}), "ok.svg": b"<svg xmlns='x'><text>Menu</text></svg>"}
+    good = {
+        "ok.zip": make({"a.txt": "Breakfast for 60"}),
+        "ok.svg": b"<svg xmlns='x'><text>Menu</text></svg>",
+    }
     for name, data in {**bad, **good}.items():
         write(built, "Sales/" + name, data)
     with monkeypatch.context() as m:

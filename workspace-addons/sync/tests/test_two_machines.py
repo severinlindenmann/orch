@@ -1092,9 +1092,8 @@ def test_a_ticket_file_with_a_bom_stays_here_and_the_rest_still_syncs(machines):
 def test_step_lock_blocks_a_second_holder_and_frees_itself(root):
     configure(root)
     with step.step_lock(root):
-        with pytest.raises(repo.Refused, match="already running"):
-            with step.step_lock(root):
-                pass
+        with pytest.raises(repo.Refused, match="already running"), step.step_lock(root):
+            pass
         assert run(root)["last_error"]  # a step meanwhile ends with a message, never a crash
     with step.step_lock(root):
         pass

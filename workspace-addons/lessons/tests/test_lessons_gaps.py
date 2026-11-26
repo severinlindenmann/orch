@@ -42,7 +42,7 @@ def test_view_shows_at_most_50_and_counts_all(cli, ws):
     block = v["blocks"][0]
     assert block["count"] == 55 and len(block["items"]) == 50
     assert block["items"][0]["title"] == "Short 54."
-    assert "notice" not in v
+    assert "5 older are hidden" in v["notice"]
 
 
 def test_view_item_without_a_ticket_has_no_link(cli, ws):
