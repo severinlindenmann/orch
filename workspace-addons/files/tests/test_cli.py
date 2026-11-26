@@ -2,6 +2,7 @@ import json
 import tomllib
 from pathlib import Path
 
+from orch_files import index
 from orch_files.cli import main
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch_files"
@@ -27,8 +28,17 @@ def test_search_json(ws, capsys):
 def test_search_words_and_plain_output(ws, capsys):
     code, out, _ = run(capsys, "--dir", str(ws), "search", "price", "check")
     assert code == 0 and "Finance/summary.md" in out and "found among" in out
+    assert out.splitlines()[-1].startswith("Next: open a matching file")
     code, out, _ = run(capsys, "--dir", str(ws), "search", "birthday", "cake", "--no-refresh")
     assert code == 0 and "Nothing found" in out
+    assert out.splitlines()[-1].startswith("Next: try another word")
+
+
+def test_stopped_status_offers_a_way_to_open_files(ws, capsys):
+    code, out, _ = run(capsys, "--dir", str(ws), "status")
+    assert code == 1 and out.splitlines()[-1] == "Next: open Files with orch files open"
+    code, out, _ = run(capsys, "--dir", str(ws), "status", "--json")
+    assert code == 1 and json.loads(out) == {"running": False}
 
 
 def test_index_command(ws, capsys):
@@ -46,6 +56,12 @@ def test_index_command(ws, capsys):
 def test_no_workspace(tmp_path, capsys):
     code, _, err = run(capsys, "--dir", str(tmp_path), "search", "x")
     assert code == 2 and "No orch workspace" in err
+
+
+def test_missing_search_support_names_an_alternative(ws, capsys, monkeypatch):
+    monkeypatch.setattr(index, "has_fts5", lambda: False)
+    code, out, _ = run(capsys, "--dir", str(ws), "search", "map", "--json")
+    assert code == 2 and "search in your file manager" in json.loads(out)["error"]
 
 
 def test_manifest_and_skill():
