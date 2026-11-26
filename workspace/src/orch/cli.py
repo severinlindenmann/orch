@@ -155,6 +155,16 @@ def _line(t: dict) -> str:
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
+def _picked_text(args, ts: list[dict], txt: str) -> str:
+    """`orch ticket list --search/--waiting/--blocked` with no hit says so (nextstep says where to look)."""
+    if ts:
+        return txt
+    words = (args.search or "").strip()
+    if words:
+        return f'No tickets match "{words}".'
+    return "No tickets wait on a person." if args.waiting else "No tickets wait on something else."
+
+
 def _ago(iso: str) -> str:
     import datetime as dt
 
@@ -453,9 +463,9 @@ ADVANCED_SUB = {"relay": {"allow"}}
 
 _EXAMPLES = {
     "orch ticket new": 'A ticket needs a title, for example: orch ticket new "Fix the login"',
-    "orch check add": 'A checklist item needs a ticket and text, e.g.: orch check add t_abc "Write the test"',
-    "orch check done": 'Say which ticket and item, for example: orch check done t_abc c1 --command "pytest"',
-    "orch ticket show": "Say which ticket, for example: orch ticket show t_abc. List them: orch ticket list",
+    "orch check add": 'A task needs a ticket and text, for example: orch check add ABC-1 "Write the text"',
+    "orch check done": 'Say which ticket and task, e.g.: orch check done ABC-1 c1 --note "what you did"',
+    "orch ticket show": "Say which ticket, for example: orch ticket show ABC-1. List them: orch ticket list",
     "orch relay send": 'Say who and what, for example: orch relay send "Design" "The report is ready"',
 }
 
@@ -496,6 +506,16 @@ class _Parser(argparse.ArgumentParser):
         if self.prog in _EXAMPLES:
             self.exit(2, _EXAMPLES[self.prog] + "\n")
         m = re.search(r"required: (.*)", message)
+        sp = next((a for a in self._actions if isinstance(a, argparse._SubParsersAction)), None)
+        if m and sp is not None and m.group(1) == sp.dest:  # a command is missing, not a value
+            seen: set[int] = set()  # an alias names the same command once
+            hidden = getattr(sp, "_hidden", set())
+            names = ", ".join(
+                n for n, c in sp.choices.items() if n not in hidden and not (id(c) in seen or seen.add(id(c)))
+            )
+            self.exit(
+                2, f"Say what to do: {self.prog} <command>, one of: {names}.\nMore help: {self.prog} --help\n"
+            )
         if m:
             usage = self.format_usage().replace("usage: ", "").strip()
             self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
@@ -507,6 +527,7 @@ def _drop_hidden(parser: argparse.ArgumentParser) -> None:
     Leave such subcommands out of every help list, at every level (they still run)."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
+            action._hidden = {a.dest for a in action._choices_actions if a.help == argparse.SUPPRESS}
             action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
             for child in {id(c): c for c in action.choices.values()}.values():
                 _drop_hidden(child)
@@ -516,6 +537,7 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
     def hide(sp, names):
+        sp._hidden = getattr(sp, "_hidden", set()) | set(names)
         sp._choices_actions[:] = [a for a in sp._choices_actions if a.dest not in names]
 
     top = parser._subparsers._group_actions[0]
@@ -701,6 +723,16 @@ def _ticket_parsers(sub, common):
         "--ext",
         metavar="ADDON",
         help="only tickets with this add-on's data (no children counts); fast for an add-on's own tickets",
+    )
+    x.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="only tickets with these words in the title, tasks, note or description, or this number",
+    )
+    wait = x.add_mutually_exclusive_group()
+    wait.add_argument("--waiting", action="store_true", help="only tickets waiting on a person: a question")
+    wait.add_argument(
+        "--blocked", action="store_true", help="only tickets waiting on a time, a ticket or the outside"
     )
     x = t.add_parser("show", parents=[common])
     x.add_argument("id")
@@ -1398,21 +1430,25 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads, ticketindex
+        from orch import reads, ticketindex, ticketsearch
 
+        search = ticketsearch.needle(args.search)
+        picked = bool(search or args.waiting or args.blocked)
         if args.ext:  # an add-on's own tickets, read once (ORCH-603)
             ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
-        elif args.json:  # the dashboard reads the same rows in-process
+        elif args.json or search:  # the dashboard reads these rows in-process; a search needs the full texts
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
         else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
             with ticketindex.reuse():
                 ts, everything = reads.index_list(root, args.status, args.all)
                 args._broken_tickets = ticketindex.broken(root)
+        if picked:  # the dashboard's own search and waiting split (R4.3)
+            ts = ticketsearch.pick(ts, search, only_blocked=args.blocked, only_waiting=args.waiting)
         ids = {x["id"] for x in everything}
         hidden = (
             0
-            if args.status or args.all or args.ext
+            if args.status or args.all or args.ext or picked
             else sum(1 for t in everything if t["status"] in ("done", "dropped"))
         )
         txt = (
@@ -1427,6 +1463,8 @@ def run(args: argparse.Namespace) -> None:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
             txt += "\n" + tickets.broken_file(name)
+        if picked and not args.json:
+            txt = _picked_text(args, ts, txt)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))

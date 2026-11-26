@@ -25,6 +25,9 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
     orch usage list
     orch usage history
 
+When an account is past 80% of a limit, `list` prints one `Warning:` line with the fix (the Usage page shows the
+same line); tell the person, change a rule only when they ask.
+
 **Change a rule** (only what the person asked for)
 
     orch usage limit <account> 70%                 # the weekly limit when it has one limit

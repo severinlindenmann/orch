@@ -87,6 +87,8 @@ card with the before and after pictures.
 | Master gallery at 1280, 390 and 320 px wide: no page sideways scroll | I1, H9 (width part) | `workspace/src/orch_ui/tests/ux_checks.cjs` (job `page-smoke`) |
 | Every control at least 24x24 CSS px, or 24 px clear of the next one (WCAG 2.5.8; links inside a sentence exempt) | H5 (pointer part) | same |
 | Every control reached with Tab shows a focus mark (outline or ring), first 60 Tab stops | H4 (mark part) | same |
+| Every control has a name (text, `aria-label`, a label, `title`); an icon-only button needs `aria-label` | H6 (name part) | same |
+| Keyboard path by real key presses: a modal dialog takes focus, keeps Tab and Shift+Tab inside with a focus mark, closes on Escape and gives focus back to its opener (or the menu button when the opener was a menu item); a menu opens with Enter, ArrowDown moves into it, Escape closes it with focus back on its button, Tab out closes it; arrow keys move between tabs and choose one | H3, H4 | same |
 | With reduced motion asked for, no animation or transition still runs | H10 | same |
 | Rendered text at least 4.5:1 (large 3:1) against the colour behind it | H1 | same |
 | No console error, uncaught exception or failed request on the gallery and on every Insights and dashboard screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
@@ -332,6 +334,9 @@ says "Already open: go to it". The same four are buttons at the top of Focus. A 
 has no peek. A working tile shows a peek of its last three lines (`.wall-peek`). In line and idle are one line each
 (`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
 the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
+The filter finds a session by its key, name, title and the words on its tile ("Check", "Idle"); one that sits in Needs
+you is also found by "Needs you" (ORCH-2045). The summary keeps counting the whole workspace, and with a filter a band
+without a match is left out. Typing only filters: nothing is sent or started.
 
 ### Pin and rename (ORCH-361)
 Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
@@ -511,7 +516,7 @@ Static validation covers HTML structure/local references, JS syntax, CSS token r
 Load `interaction.css` after page styles and load `overlay.js`, `select.js`, `date.js`, and `components.js` before page scripts. Keep `preview-controls.js` at the end of each shell page.
 
 - Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, backdrop, focus containment and restoration, scroll lock, 150 ms entry / 100 ms exit. Reduced motion is instant. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
-- Native selects are enhanced automatically, including dynamic controls. They retain their form values and change events. Use `data-prefix="Sort"` for labels inside the trigger and `UI.select.sync()` after programmatic value changes outside click/change/reset handlers.
+- Native selects are enhanced automatically, including dynamic controls. They retain their form values and change events. Use `data-prefix="Sort"` for labels inside the trigger and `UI.select.sync()` after programmatic value changes outside click/change/reset handlers. Type to jump works like a native select (ORCH-2051): keys typed within 1 s form one prefix (a whole key such as SALES-097), one letter again cycles, Escape closes without choosing; typing only moves focus, Enter, Space or a click chooses. Focus given to the hidden native select goes to the trigger. Open choices wrap to show their whole text; the trigger edge is `--input`.
 - `UI.toast(message, undo)` and `UI.copy(url)` provide one notification pattern. Details menus with `.menu` and ARIA tablists get shared keyboard behaviour. Page handlers may update domain content, but should not add separate keyboard or overlay lifecycles.
 - `UI.date(valueInput, trigger, oldCalendar)` provides the shared calendar. `UI.question.render(host, config)` provides recommended choices, custom input, answered state and Undo. `UI.phone()` opens demo pairing and the same question component in a phone frame.
 - `gallery.html` is the clickable source of truth. Each example has a state selector and a usage note. `COMPONENT-QA.md` records the audit and browser results.
