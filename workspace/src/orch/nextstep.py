@@ -209,6 +209,10 @@ def _needs(data, args) -> str:
     return "keep working on what does not wait: orch ticket list"
 
 
+def _answer(data, args) -> str:
+    return f"the agent picks the answer up on its next run: orch ticket show {_tid(args)}"  # R2.6
+
+
 def _update(data, args) -> str | None:
     if getattr(args, "project_only", False) or getattr(args, "after_install", False):
         return None  # the installer's own internal runs: nothing for a person or agent to follow
@@ -398,7 +402,7 @@ HINTS = {
     "check done": _on_ticket,
     "log": _on_ticket,
     "ask": _ask,
-    "answer": "the helper picks the answer up on its next run: orch ticket list",
+    "answer": _answer,
     "ref add": _on_ticket,
     "ref list": _on_ticket,
     "ref rm": _on_ticket,

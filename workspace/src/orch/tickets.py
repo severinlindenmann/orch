@@ -4628,6 +4628,71 @@ def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
                 ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
 
 
+PICKED_UP = "Picked up the answer to "
+
+
+def new_answers(root: Path, ticket: dict) -> list[dict]:
+    """R2.6: answers an agent has not picked up yet. An answer is new until a `PICKED_UP` line names it or an
+    agent other than the one who answered writes to the ticket after it (the agent then went on with it)."""
+    ticket = history.shown_ticket(root, ticket)
+    hist = [h for h in history.lines(root, ticket) if isinstance(h, dict)]
+    out = []
+    for q in ticket.get("questions") or []:
+        at = q.get("answered_at") if isinstance(q, dict) else None
+        if q.get("answer") is None or not isinstance(at, str) or taken_back_text(q) is not None:
+            continue
+        if any(
+            h.get("text") == PICKED_UP + str(q.get("id"))
+            or (
+                str(h.get("by") or "").startswith("agent:")
+                and h.get("by") != q.get("answered_by")
+                and str(h.get("at") or "") > at
+            )
+            for h in hist
+        ):
+            continue
+        out.append(q)
+    return out
+
+
+def _stale_question_wait(ticket: dict) -> str | None:
+    """The question id a `waiting_on` still points at although it is answered or gone, else None."""
+    w = ticket.get("waiting_on")
+    if not isinstance(w, dict) or w.get("kind") != "question":
+        return None
+    q = next((x for x in ticket.get("questions") or [] if x.get("id") == w.get("ref")), None)
+    return str(w.get("ref")) if q is None or q.get("answer") is not None else None
+
+
+def needs_pick_up(root: Path, ticket: dict, by: str, mark: bool = True) -> bool:
+    """Cheap in-memory test: would pick_up_answers write anything? (a read path calls it before any lock)"""
+    if ticket.get("status") in CLOSED:
+        return False
+    if _stale_question_wait(ticket) is not None:
+        return True
+    return mark and str(by).startswith("agent:") and bool(new_answers(root, ticket))
+
+
+def pick_up_answers(root: Path, tid: str, by: str, mark: bool = True) -> dict:
+    """R2.6: an agent picks up the new answers (one PICKED_UP line each; mark=False: none), and a `waiting_on`
+    that still points at an answered question clears (or moves to the oldest open one) as an answer would."""
+
+    def op(ticket):
+        if ticket.get("status") in CLOSED:
+            return NO_WRITE
+        changed = False
+        if (stale := _stale_question_wait(ticket)) is not None:
+            _release_wait(root, tid, ticket, stale)
+            changed = True
+        if mark and str(by).startswith("agent:"):
+            for q in new_answers(root, ticket):
+                add_history(ticket, by, PICKED_UP + str(q["id"]))
+                changed = True
+        return None if changed else NO_WRITE
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
 TAKEN_BACK = "Taken back: "
 MAX_TAKE_BACK_REASON = 300
 
