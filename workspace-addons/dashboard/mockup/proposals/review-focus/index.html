@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Focused review · orch mockup</title><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css"><link rel="stylesheet" href="draft.css"></head>
+<body class="mk-review-focus"><main id="content" class="page" aria-label="Focused review"><div class="stack rf-col">
+<div class="page-heading"><div><h1>Focused review</h1><p>A draft of the Review page to click through and feel (ORCH-2178). It builds on the Review that exists: the same twelve kinds of cards, the same five lanes, the same buttons. New is how you get in and what every card tells you.</p></div></div>
+<section class="card" aria-label="Pick a team"><div class="card-h"><h2>Pick a team</h2></div>
+ <div class="card-row"><div class="grow"><h3><a href="focus.html?team=data">Data</a></h3><p class="meta">Data platform lead at an insurer: access to an email column (140 people, not 12), warehouse costs, a stuck nightly load.</p></div><a class="btn outline sm" href="focus.html?team=data">Open</a></div>
+ <div class="card-row"><div class="grow"><h3><a href="focus.html?team=marketing">Marketing</a></h3><p class="meta">Marketing manager, campaign starts tomorrow: &ldquo;may reduce&rdquo; became &ldquo;guarantees 40% savings&rdquo;, subject lines, banners, budget.</p></div><a class="btn outline sm" href="focus.html?team=marketing">Open</a></div>
+ <div class="card-row"><div class="grow"><h3><a href="focus.html?team=sales">Sales</a></h3><p class="meta">Sales lead: 22% discount before 16:00 that Lea must also approve, a quote, a stuck contract, the forecast.</p></div><a class="btn outline sm" href="focus.html?team=sales">Open</a></div>
+ <div class="card-row"><div class="grow"><h3><a href="focus.html?team=support">Support</a></h3><p class="meta">Support lead: a refund another helper already sent, a saved answer that promises 14 days, three cases for a person.</p></div><a class="btn outline sm" href="focus.html?team=support">Open</a></div>
+ <div class="card-row"><div class="grow"><h3><a href="focus.html?team=dev">orch dev</a></h3><p class="meta">orch itself: release 0.42 that waits for Friday's phone sign-in tests, the merge queue, 108 small fixes under your own rule.</p></div><a class="btn outline sm" href="focus.html?team=dev">Open</a></div>
+</section>
+<section class="card pad stack" aria-label="What changed after the challenge"><h2>What changed after the challenge</h2>
+<ul class="rf-brief">
+ <li>Quick look no longer passes by itself. &ldquo;OK all&rdquo; comes only after the list is shown, one line each. Passing by itself exists only as a rule you made, shown with its name (orch dev team only).</li>
+ <li>Every card starts with the decision and what happens if you wait, then the one fact that decides it, always open.</li>
+ <li>&ldquo;Where were we?&rdquo; names the day and the place you said something, with a link, and warns when it may be out of date.</li>
+ <li>Every card says why it is in its group. &ldquo;Needs more time&rdquo; moves it to Take your time.</li>
+ <li>Take your time cards fill no answer and ask one small check question first.</li>
+ <li>A round is at most 5 cards, the ones that hold up work first, cards of one project together.</li>
+ <li>Every answer can be undone on its own; Later asks when to remind you; sending back takes your own words.</li>
+ <li>A second person who must also say yes is a line on the card. A condition (&ldquo;waits until: tests green&rdquo;) is shown and the early button is closed.</li>
+ <li>Results that only passed a check are not cards: they sit in one line, &ldquo;Checked by the Reviewer&rdquo;.</li>
+ <li>Ideas can be sorted in part: &ldquo;Save, 2 left for later&rdquo;.</li>
+ <li>Practice cards (a planted mistake) are off and only a setting row; no such card is in the rounds.</li>
+ <li>The groups are named Quick look, Short decision and Take your time, because &ldquo;Decide&rdquo; is already a family of card kinds.</li>
+</ul></section>
+<p class="meta">Notes, new words and open questions: NOTES.md in this folder.</p>
+</div></main></body></html>

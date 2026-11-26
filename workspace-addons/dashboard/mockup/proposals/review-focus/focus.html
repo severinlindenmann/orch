@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Review · orch mockup</title><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/composer.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/preview.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../../workspace/src/orch_ui/static/components.js"></script><script src="../../../../../workspace/src/orch_ui/static/icons.js"></script><script src="../../../../../workspace/src/orch_ui/static/composer.js"></script><script src="../../../../../workspace/src/orch_ui/static/widgets.js"></script><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/term.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/fileviewer.css"><script src="../../../../../workspace/src/orch_ui/static/fileviewer.js"></script><script src="../../../../../workspace/src/orch_ui/static/motion.js"></script><link rel="stylesheet" href="draft.css"><script src="data-data.js"></script><script src="data-marketing.js"></script><script src="data-sales.js"></script><script src="data-support.js"></script><script src="data-dev.js"></script></head>
+<body class="has-shell mk-review-focus"><a class="skip-link btn primary" href="#content">Skip to content</a><div class="shell"><aside class="sidebar" id="side-menu" aria-label="Workspace navigation">
+<a class="brand" href="../../home/home.html" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></a>
+<details class="workspace"><summary class="ws-switch" aria-label="Choose workspace, Demo selected"><span class="wsb">D</span><span class="ws-text"><strong>Demo</strong><span class="meta">Workspace</span></span><span class="ws-chev" aria-hidden="true">⌄</span></summary><div class="menu"><p class="eyebrow pad">Your workspace</p><a class="menu-item" href="../../home/home.html"><span class="wsb">D</span> Demo <span class="grow"></span>✓</a><a class="menu-item" href="../../relay/relay.html">Manage workspaces →</a></div></details>
+<div class="sidebar-scroll"><nav aria-label="Main"><a class="nav-item" href="../../home/home.html" aria-label="Home"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span class="nav-label">Home</span></a><a class="nav-item" href="../../board/board.html" aria-label="Tickets"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg><span class="nav-label">Tickets</span></a><a class="nav-item" href="../../review/review.html" aria-label="Review" aria-current="page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></svg><span class="nav-label">Review</span><span class="count" aria-label="20 need you">20</span></a><a class="nav-item" href="../../chat/chat.html" aria-label="Chat"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/></svg><span class="nav-label">Chat</span></a></nav>
+<details class="nav-group" open><summary class="nav-item" aria-label="Add-ons"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Add-ons</span></summary><nav aria-label="Add-ons"><a class="nav-item" href="../../automation/automation.html" aria-label="Automation"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-7z"/></svg><span class="nav-label">Automation</span></a><a class="nav-item" href="../../focus/focus-v4d.html" aria-label="Live"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-label">Live</span></a><a class="nav-item" href="../../insights/insights.html" aria-label="Insights"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v17h17M8 16v-4m5 4V7m5 9v-6"/></svg><span class="nav-label">Insights</span></a><a class="nav-item" href="../../sync/sync.html" aria-label="Backup"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 9a8 8 0 0 0-14-3L3 9m0-5v5h5m-4 6a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/></svg><span class="nav-label">Backup</span></a><a class="nav-item" href="../../publish/publish.html" aria-label="Shared"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span class="nav-label">Shared</span></a><a class="nav-item" href="../../relay/relay.html" aria-label="Contacts"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/></svg><span class="nav-label">Contacts</span></a></nav></details></div>
+<div class="side-foot"><label class="phone-toggle"><span>Send questions<br>to my phone</span><input class="switch" type="checkbox" aria-label="Send questions to my phone (demo)"></label><nav class="side-settings" aria-label="Settings"><a class="nav-item" href="../../settings/settings.html" aria-label="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/></svg><span class="nav-label">Settings</span></a><a class="nav-item nav-icon-only" href="../../docs/docs.html" aria-label="Documentation" title="Documentation"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/></svg></a></nav></div></aside><div class="shell-body"><header class="topbar"><span class="meta">Review <span class="badge needs">Draft</span></span><div class="topbar-actions"><a class="btn ghost sm" href="../../chat/chat.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Chat</a><a class="btn outline sm" href="../../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a></div></header><main id="content" class="page" tabindex="-1" aria-label="Review">
+<p id="rf-live" class="sr-only" aria-live="polite" role="status"></p>
+<div id="rf" class="rf"></div>
+</main></div></div>
+<script>
+/* Focused review (ORCH-2178): draft F after the Codex challenge, as a clickable mockup with five teams' data.
+   The card is drawn here with the kit's .swipe-* parts: UI.swipeDeck has no place for the "Where were we?" box, the
+   check question or the ideas list. Nothing is saved: a reload starts again. */
+(()=>{
+const TEAMS=window.RF_TEAMS,ORDER=['data','marketing','sales','support','dev'],qs=new URLSearchParams(location.search);
+const teamId=TEAMS[qs.get('team')]?qs.get('team'):'data',team=TEAMS[teamId],host=document.getElementById('rf');
+/* the twelve kinds in four families, icons as review.js CARD_ICON (pull request 3201) */
+const KIND={question:['Question','comment'],choice:['Choice','cards'],before_after:['Before and after','compare'],pictures:['Pictures','image'],document:['Document','file'],changed_words:['Changed words','diff'],numbers:['Numbers','chart'],check_result:['Check result','check'],put_live:['Put it live','link'],run_it:['Run it','code'],try_yourself:['Try it yourself','user'],stuck:['Stuck','pause']};
+const LANE={holds:'Holds up work now',press:'Only you can press it',person:'Needs you in person',look:'Look at the result',checked:'Checked by the Reviewer'},LANES=Object.keys(LANE);
+const GROUP={quick:{name:'Quick look',mins:.5,say:'Small and tested. One line each.'},short:{name:'Short decision',mins:2,say:'One clear question each.'},time:{name:'Take your time',mins:6,say:'Big, public or hard to take back.'}};
+const MAX=5,S={view:'start',project:'',group:'',run:[],ans:{},later:{},moved:{},ideas:{},checks:{},flash:null,showChecked:false,practice:false,panel:null,ran:{},pins:{},offset:0,where:{},fixed:{},reveal:null,fail:null,said:''};
+const h=(tag,cls,...kids)=>{const n=document.createElement(tag);if(cls)n.className=cls;kids.flat().forEach(k=>{if(k!=null&&k!==false&&k!=='')n.append(k)});return n};
+const ic=(name,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(name,z||16):'';return t.content};
+const btn=(cls,label,fn)=>{const b=h('button',cls,label);b.type='button';if(fn)b.onclick=fn;return b};
+const mock=what=>UI.toast('Mockup: '+what);
+const byId=id=>team.cards.find(c=>c.id===id);
+const groupOf=c=>S.moved[c.id]?'time':c.group;
+const isOpen=c=>!S.ans[c.id]&&!S.later[c.id];
+const inProject=c=>!S.project||c.project===S.project;
+const laneOf=c=>c.holds?'holds':c.lane;
+const waiting=g=>team.cards.filter(c=>isOpen(c)&&inProject(c)&&(!g||groupOf(c)===g));
+/* inside a group the five lanes give the order (Holds up work now first); cards of one project stay together */
+const ordered=list=>{const rank=c=>LANES.indexOf(laneOf(c)),best={};list.forEach(c=>{best[c.project]=Math.min(best[c.project]??9,rank(c))});
+ return list.slice().sort((a,b)=>best[a.project]-best[b.project]||team.projects.indexOf(a.project)-team.projects.indexOf(b.project)||rank(a)-rank(b))};
+const about=list=>'about '+Math.max(1,Math.round(list.reduce((n,c)=>n+GROUP[groupOf(c)].mins,0)))+' min';
+const urgency=c=>{const d=c.deadline||'';return d==='now'?0:/^today \d/.test(d)?1:d==='today'?2:/^tomorrow \d/.test(d)?3:d==='tomorrow'?4:d?5:9};
+const short=t=>t.length>48?t.slice(0,46)+'…':t;
+
+/* ---- moves: every one can be undone; the Undo line has its own reserved row and stays 6 s ---- */
+const STATE=qs.get('state')||'',phone=()=>matchMedia('(max-width:720px)').matches,calmMotion=()=>!window.orch||orch.reduce();
+const liveEl=document.getElementById('rf-live');let sayT=0;
+const say=t=>{clearTimeout(sayT);liveEl.textContent='';sayT=setTimeout(()=>{liveEl.textContent=t},40)};
+let flashT=0;
+const flash=(text,ids,o)=>{S.flash=Object.assign({text,ids:[].concat(ids),fresh:true},o||{});S.said='Answered: '+text+(S.flash.fixed?' · This cannot be undone.':' · Undo with U.');clearTimeout(flashT);
+ flashT=setTimeout(()=>{S.flash=null;const l=host.querySelector('.rf-undo-in');if(!l)return;if(calmMotion()){l.remove();return}l.classList.add('rf-fade-out');setTimeout(()=>l.remove(),140)},6000)};
+const openRun=()=>S.run.map(byId).filter(c=>isOpen(c)&&groupOf(c)===S.group);
+const now=()=>{const o=openRun();S.offset=Math.max(0,Math.min(S.offset||0,o.length-1));return o[S.offset]};
+const undo=ids=>{ids=[].concat(ids).filter(id=>!(S.ans[id]&&S.ans[id].fixed));if(!ids.length)return;ids.forEach(id=>{delete S.ans[id];delete S.later[id];delete S.moved[id];delete S.checks[id];delete S.ran[id]});S.flash=null;clearTimeout(flashT);
+ const c=byId(ids[0]);if(S.batch){S.batch=null;S.view='quick'}else if(S.run.includes(c.id)){S.group=groupOf(c);S.view='run';S.offset=Math.max(0,openRun().indexOf(c))}S.said='Taken back: '+c.title+'.';draw()};
+const next=()=>{if(S.view==='run'&&!openRun().length)S.view='done';draw()};
+/* ?state=savefail: the first answer does not save; the card stays and the bar offers Try again */
+const answer=(c,label,o)=>{if(STATE==='savefail'&&!S.savedOnce){S.fail={id:c.id,label,o};S.said='Not saved: '+label+'. Try again.';draw();return}S.fail=null;S.ans[c.id]=Object.assign({label},o||{});flash(label+': '+short(c.title),c.id,o);next()};
+const later=(c,when)=>{S.later[c.id]=when||'no reminder';flash((when?'Later, '+when:'Later')+': '+short(c.title),c.id);next()};
+const moreTime=c=>{S.moved[c.id]=true;flash('Moved to Take your time: '+short(c.title),c.id);next()};
+const step=n=>{const o=openRun();if(o.length<2)return;S.offset=((S.offset||0)+n+o.length)%o.length;draw()};
+const startRun=(g,first)=>{let list=ordered(waiting(g));if(first){const same=list.filter(c=>c.project===first.project&&c!==first);list=[first,...same,...list.filter(c=>c.project!==first.project)]}
+ S.group=g;S.batch=null;S.offset=0;S.run=list.slice(0,MAX).map(c=>c.id);S.view=S.run.length?'run':'start';S.flash=null;draw()};
+
+/* ---- small parts ---- */
+const rows=list=>{const dl=h('dl','facts rf-rows');list.forEach(([k,v])=>dl.append(h('dt','',k),h('dd','',v)));return dl};
+const kindChip=c=>h('span','swipe-kind',ic(KIND[c.kind][1],14),KIND[c.kind][0]);
+const undoLine=()=>{const l=h('div','rf-undo');if(!S.flash)return l;const f=S.flash,inn=h('div','rf-undo-in'+(f.fresh?' rf-fade':''),h('span','',f.text));f.fresh=false;
+ if(f.fixed)inn.append(h('span','meta','This cannot be undone'));else{const u=btn('btn ghost sm',[ic('undo',16),'Undo',h('kbd','rf-kbd','U')],()=>undo(f.ids));inn.append(u)}l.append(inn);return l};
+const mockBar=()=>{const seg=h('nav','segmented');seg.setAttribute('aria-label','Mockup: pick a team');
+ ORDER.forEach(id=>{const a=h('a','btn sm',TEAMS[id].label);a.href='?team='+id+(STATE?'&state='+STATE:'');a.setAttribute('aria-pressed',String(id===teamId));seg.append(a)});
+ const st=h('nav','segmented rf-mock-wide');st.setAttribute('aria-label','Mockup: show a state');[['','Normal'],['loading','Loading'],['empty','Nothing waits'],['savefail','Save fails'],['panelfail','Panel fails']].forEach(([k,w])=>{const a=h('a','btn sm',w);a.href='?team='+teamId+(k?'&state='+k:'');a.setAttribute('aria-pressed',String(k===STATE));st.append(a)});
+ return h('div','rf-mock',h('span','rf-mock-label','Mockup: pick a team'),seg,h('span','rf-mock-label rf-mock-wide','State'),st,h('span','meta rf-mock-wide',team.who+' · '+team.company))};
+
+/* ---- the deciding fact, by kind ---- */
+function fact(c){const f=c.fact,box=h('section','rf-fact');box.setAttribute('aria-label','What matters');
+ if(f.summary)box.append(h('p','rf-flabel','The helper says'),h('h4','rf-sum',f.summary));else box.append(h('p','rf-flabel','What matters'));
+ if(f.type==='big')box.append(h('p','rf-big',h('strong','',f.big),' '+f.label+', not ',h('strong','',f.vs),' '+f.vsLabel),h('p','',f.note));
+ if(f.type==='ba')box.append(h('div','rf-pics two',h('figure','',pic(f.before),h('figcaption','meta','Before')),h('figure','',pic(f.after),h('figcaption','meta','After'))),h('div','row',bigger(c,[f.before,f.after],0,true)));
+ if(f.type==='pics')box.append(h('div','rf-pics',f.pics.map((p,i)=>{const b=btn('rf-pic-btn',pic(p),e=>zoom(c,f.pics,i,false,e.currentTarget));b.setAttribute('aria-label','Make bigger: '+p.head+', '+p.sub);return h('figure','',b,h('figcaption','meta',p.sub))})),h('div','row',bigger(c,f.pics,0)));
+ if(f.type==='words')box.append(h('p','meta muted',f.where),h('div','rf-words',h('p','',h('span','meta','Before'),h('del','',f.before)),h('p','',h('span','meta','After'),h('ins','',f.after))),f.more&&h('p','',f.more));
+ if(f.type==='conflict'){const b=h('div','banner slim error',h('strong','',f.text));b.setAttribute('role','alert');box.append(b)}
+ if(f.type==='cmd')box.append(UI.commandCopy(f.command));
+ if(f.type==='doc'){f.paras.forEach(p=>box.append(h('p','',p)));box.append(h('div','row',btn('btn outline sm',[ic('file',16),'Open the document'],()=>openPanel(c,'ticket',{file:'doc'}))))}
+ if(f.type==='nums'){const t=h('table','mini-table rf-nums'),hr=h('tr');f.cols.forEach(x=>hr.append(h('th','',x)));t.append(h('thead','',hr));const tb=h('tbody');f.rows.forEach(r=>tb.append(h('tr','',r.map(x=>h('td','',x)))));t.append(tb);box.append(t)}
+ if(f.rows&&f.type!=='nums')box.append(rows(f.rows));
+ if(f.type==='options'||f.type==='optpics'){const ol=h('div','rf-options'+(f.type==='optpics'?' pics':''));f.options.forEach((o,i)=>ol.append(h('div','rf-option',o.pic&&pic(o.pic),h('p','',h('span','opt-letter','ABC'[i]),h('strong','',o.t)),h('p','meta muted',o.n))));box.append(ol);if(f.type==='optpics')box.append(h('div','row',bigger(c,f.options.map((o,i)=>Object.assign({cap:'ABC'[i]+': '+o.t},o.pic)),0)))}
+ if(f.type==='ideas')box.append(ideas(c));
+ if(f.link)box.append(btn('btn outline sm',[ic('external',16),f.link],()=>mock('this opens what you try yourself')));
+ if(f.open){const [a,...b]=f.open.split(': ');box.append(h('div','banner slim attn',h('p','',h('strong','',a+': '),b.join(': '))))}
+ return box}
+
+/* ideas (draft D): a 3-point brief, then Keep / Later / No per idea; saving part of them is fine. Save sits in the answer bar. */
+function ideas(c){const f=c.fact,pick=S.ideas[c.id]=S.ideas[c.id]||{},wrap=h('div','rf-ideas'),ol=h('ol','rf-brief');f.brief.forEach(b=>ol.append(h('li','',b)));wrap.append(ol);
+ f.items.forEach((it,i)=>{const seg=h('div','segmented');seg.setAttribute('role','group');seg.setAttribute('aria-label',it.t);
+  ['Keep','Later','No'].forEach(w=>{const b=btn('btn sm',w,()=>{if(pick[i]===w)delete pick[i];else pick[i]=w;seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(pick[i]===x.textContent)));refreshBar(c)});b.setAttribute('aria-pressed',String(pick[i]===w));b.setAttribute('aria-label',w+': '+it.t);seg.append(b)});
+  wrap.append(h('div','rf-idea',h('div','grow',h('strong','',it.t),h('p','meta muted',it.n)),seg))});
+ wrap.append(h('p','meta','Ideas you do not sort stay here for later.'));return wrap}
+
+/* ---- the answers: the kit's sticky bar under the card (above the tab bar on a phone); everything else is under More ---- */
+const answersOf=c=>{let list=c.answers||c.fact.options.map((o,i)=>({label:'Use '+'ABC'[i],full:'Use '+'ABC'[i]+': '+o.t,sug:c.sug===i})).concat([{label:'None of these',v:'no'}]);return c.kind==='stuck'?list.filter(a=>a.label!=='Open the ticket'):list};
+const closeMore=()=>{const m=host.querySelector('.rf-more[open]');if(m)m.open=false;document.querySelectorAll('dialog.rf-sheet[open]').forEach(d=>d.close())};
+const sheet=(title,content)=>{const d=h('dialog','sheet rf-sheet',h('div','sheet-h',h('h2','',title)),content);d.setAttribute('aria-label',title);d.addEventListener('close',()=>d.remove());document.body.append(d);if(window.orch)orch.open(d);else d.showModal();return d};
+function sendBack(c){closeMore();const ta=h('textarea','input rf-note');ta.rows=3;ta.placeholder='What should change?';ta.setAttribute('aria-label','Your comment for the helper');
+ const go=l=>{d.close();answer(c,l)},back=btn('btn primary','Send back',()=>go(ta.value.trim()?'Sent back with your comment':'Sent back'));ta.oninput=()=>{back.textContent=ta.value.trim()?'Send back with your comment':'Send back'};
+ const reasons=h('div','row');['Not what I asked','Explain it shorter','Show me more first'].forEach(r=>reasons.append(btn('chip-btn',r,()=>go('Sent back: '+r.toLowerCase()))));
+ const d=sheet('Send back',h('div','stack',h('p','meta muted',c.decide),ta,h('div','row',back),h('p','meta','Or one tap:'),reasons));setTimeout(()=>ta.focus(),0)}
+function laterSheet(c){closeMore();const go=w=>{d.close();later(c,w)},chips=h('div','row');['this afternoon','tomorrow','when '+c.ticket+' is done'].forEach(w=>chips.append(btn('chip-btn',w,()=>go(w))));
+ const d=sheet('Later',h('div','stack',h('p','meta muted',c.decide),h('div','row',btn('btn primary','Later, no reminder',()=>go(''))),h('p','meta','Remind me:'),chips))}
+function moreItems(c){const g=groupOf(c),it=(icon,label,fn)=>{const b=btn('menu-item',[ic(icon,16),label],()=>{closeMore();fn()});b.setAttribute('role','menuitem');return b};
+ const out=[h('p','meta rf-more-why','In '+GROUP[g].name+': '+(S.moved[c.id]?'you asked for more time':c.why)+'.'),it('undo','Send back…',()=>sendBack(c)),it('clock','Later…',()=>laterSheet(c)),it('comment','Ask about this',()=>openPanel(c,'chat',{draft:'About: '+c.decide}))];
+ if(c.kind!=='stuck')out.push(it('code','Open the session',()=>openPanel(c,'term')));out.push(it('ticket','Open the ticket',()=>openPanel(c,'ticket')));
+ if(g!=='time')out.push(it('expand','Needs more time',()=>moreTime(c)));return out}
+function more(c){if(phone()){const b=btn('btn ghost rf-more-btn','More',()=>sheet('More',h('div','rf-more-list',moreItems(c))));return b}
+ const d=h('details','dropdown rf-more'),s=h('summary','btn ghost rf-more-btn','More',h('kbd','rf-kbd','M'));s.setAttribute('aria-haspopup','menu');const m=h('div','menu',moreItems(c));m.setAttribute('role','menu');d.append(s,m);return d}
+function bar(c,strip){const g=groupOf(c),calm=g==='time',locked=calm&&c.check&&S.checks[c.id]==null,ran=S.ran[c.id],isRun=c.kind==='run_it',b=h('div',strip?'rf-strip-acts':'swipe-actions rf-bar'),row=h('div','swipe-acts-row'),notes=[];let n=0;
+ const act=(cls,label,fn,o)=>{o=o||{};n++;const x=btn('swipe-act'+(cls?' '+cls:''),h('span','act-label',o.icon&&ic(o.icon,18),label,o.sug&&h('span','swipe-sug act-sug','Suggested')),fn);x.dataset.key=n;if(!strip)x.append(h('kbd','rf-kbd',String(n)));if(o.off)x.disabled=true;row.append(x);return x};
+ if(S.fail&&S.fail.id===c.id){const f=S.fail;b.classList.add('rf-bar-bad');const p=h('p','swipe-bar-then rf-bad',h('b','','Not saved. '),'“'+f.label+'” did not reach orch. Nothing is lost.');p.setAttribute('role','alert');b.append(p);
+  act('ok suggested','Try again',()=>{S.savedOnce=true;answer(c,f.label,f.o)});row.append(btn('btn ghost','Cancel',()=>{S.fail=null;draw()}));b.append(row);return b}
+ if(c.fact.type==='ideas'){const pick=S.ideas[c.id]||{},v=Object.values(pick),sorted=v.length,left=c.fact.items.length-sorted;
+  act('ok suggested',sorted&&left?'Save, '+left+' left for later':'Save',()=>{const k=v.filter(x=>x==='Keep').length,no=v.filter(x=>x==='No').length,l=c.fact.items.length-k-no;answer(c,k+' kept, '+no+' no'+(l?', '+l+' for later':''))},{off:!sorted});if(!sorted)notes.push('Sort at least one idea, then save.')}
+ else if(isRun&&ran&&!ran.busy&&ran.ok){const p=h('p','swipe-bar-then rf-ran',ic('check',16),'Ran at '+ran.at+' · ',btn('rf-tk','see terminal',()=>openPanel(c,'term')));b.append(p);act('ok suggested','Next card',()=>answer(c,'Ran at '+ran.at,{fixed:true}))}
+ else if(isRun&&ran&&!ran.busy){const p=h('p','swipe-bar-then rf-bad',h('b','','It did not work: '),ran.fail+'. ',btn('rf-tk','see terminal',()=>openPanel(c,'term')));p.setAttribute('role','alert');b.append(p);
+  act('ok suggested','Ask the helper',()=>openPanel(c,'chat',{draft:'“'+c.decide+'” did not work: '+ran.fail+'. What now?'}),{icon:'comment'});act('','Run it again',()=>runIt(c))}
+ else{if(isRun&&ran&&ran.busy)notes.push('Running, see the terminal.');
+  if(c.kind==='stuck')act('ok suggested rf-os','Open the session',()=>openPanel(c,'term',{stop:true}),{icon:'code',off:locked});
+  answersOf(c).forEach(an=>{const sug=an.sug&&!calm&&c.kind!=='stuck';act((an.v==='no'?'no':'')+(sug?' ok suggested':''),an.label,()=>isRun&&an.v==='ok'?runIt(c):answer(c,an.full||an.label),{sug,off:an.off||locked||(ran&&ran.busy)});if(an.off)notes.push(an.label+': '+an.off.toLowerCase()+'.')});
+  if(c.proposes&&!calm)notes.push('The Reviewer proposes to accept: '+c.proposes+'.');if(locked)notes.push('Answer the question first, then the buttons open.')}
+ if(notes.length)b.append(h('p','swipe-bar-then',notes.join(' ')));if(!strip)row.append(more(c));b.append(row);if(!strip)b.append(keysLine());return b}
+const refreshBar=c=>{const o=host.querySelector('.rf-bar');if(o)o.replaceWith(bar(c));syncStrip()};
+
+/* ---- one card: head, the decision, the fact, one "You said" line. Nothing else until asked. ---- */
+function card(c){const g=groupOf(c),calm=g==='time',locked=calm&&c.check&&S.checks[c.id]==null,a=h('article','swipe-card rf-card');a.setAttribute('aria-labelledby','rf-title');a.dataset.kind=c.kind;a.dataset.id=c.id;
+ const tk=btn('rf-tk',c.ticket,()=>openPanel(c,'ticket'));tk.setAttribute('aria-label','Open ticket '+c.ticket+' beside the card');tk.title=c.ticketTitle;
+ const meta=h('div','swipe-meta rf-meta',kindChip(c),tk,laneOf(c)==='holds'&&h('span','swipe-need soon','Holds up work now'),c.deadline&&h('span','rf-due',ic('clock',14),c.deadline));
+ const title=h('h3','',h('span','rf-lead','You decide: '),c.decide);title.id='rf-title';title.tabIndex=-1;
+ const head=h('div','swipe-head',meta,title,h('p','rf-wait',h('span','rf-lead','If you wait: '),c.wait));
+ if(c.second)head.append(h('p','meta rf-line2',ic('users',14),c.second));
+ if(c.waits)head.append(h('p','rf-second rf-waits',ic('clock',16),h('span','grow',c.waits.text)));
+ if(c.rule&&team.rule)head.append(ruleLine());
+ a.append(head);
+ /* Take your time: one small check question first; the fact keeps its place and shows after the answer */
+ if(calm&&c.check){const k=c.check,done=S.checks[c.id]!=null,q=h('section','rf-check',h('h4','','First: '+k.q));q.setAttribute('aria-label','Check question');
+  const opts=h('div','row');k.options.forEach((o,i)=>{const b=btn('btn outline sm',[h('kbd','rf-kbd',String(i+1)),o],()=>{S.checks[c.id]=i;S.reveal=c.id;S.said='What it is: '+k.reveal;draw()});b.setAttribute('aria-pressed',String(S.checks[c.id]===i));opts.append(b)});
+  const rv=h('p','rf-reveal'+(done?(S.reveal===c.id?' rf-fade':''):' rf-hold'),h('span','rf-lead','What it is: '),k.reveal);if(!done)rv.setAttribute('aria-hidden','true');q.append(opts,rv);a.append(q)}
+ const fb=fact(c);if(locked){fb.classList.add('rf-veil');fb.inert=true;fb.setAttribute('aria-hidden','true');fb.append(h('span','skeleton rf-veil-sk'))}else if(S.reveal===c.id)fb.classList.add('rf-reveal-in');a.append(fb);
+ /* the one line of context; the rest opens with "Where were we?" */
+ const x=c.ctx,isRule=/rule/i.test(x.said.src),open=h('a','rf-open','open');open.href='#';open.onclick=e=>{e.preventDefault();openSource(c)};
+ a.append(h('p','rf-said',h('span','rf-lead',(isRule?'Team rule, '+x.said.date:'You said on '+x.said.date)+': '),'‘'+x.said.text+'’ ',h('span','meta',x.said.src+' · '),open));
+ if(x.stale)a.append(h('p','rf-stale',ic('clock',14),'This may be out of date: things changed after you said this.'));
+ const wd=h('details','rf-where'),sm=h('summary','',h('span','chev'),'Where were we?');wd.open=!!S.where[c.id];wd.ontoggle=()=>{S.where[c.id]=wd.open};wd.append(sm,h('p','',x.goal));
+ if(x.since&&x.since.length){const ul=h('ul','');x.since.slice(0,3).forEach(s=>ul.append(h('li','',s)));wd.append(h('p','meta','Since then'),ul)}a.append(wd);
+ return a}
+const ruleLine=()=>h('p','meta rf-line2 rf-rule',ic('clock',14),h('span','','Passes by itself at '+team.rule.at+' because of your rule ‘'+team.rule.name+'’'),btn('rf-tk','Change rule',()=>mock('this opens your rules in Settings')));
+
+/* ==== Round 2: the panel beside the card (Ticket, Chat, Terminal, a file), Run it in the terminal, bigger pictures ==== */
+const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const clock=()=>{const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+/* drawn pictures: simple pages, banners, charts and figures as inline SVG; colours are classes on tokens (draft.css) */
+function art(p){const w=p.w||320,H=p.h||180,d=p.draw||'page',R=(c,x,y,a,b,o)=>`<rect class="${c}" x="${x}" y="${y}" width="${a}" height="${b}" rx="${o==null?2:o}"/>`,T=(c,x,y,s,t)=>`<text class="${c}" x="${x}" y="${y}" font-size="${s}">${esc(t)}</text>`;let g=R('p',0,0,w,H,0);
+ if(d==='banner'){const s=Math.min(w,H)/180,hx=w>H?w-H*.62:w*.5-H*.14,hy=w>H?H*.36:H*.5,hs=w>H?H*.44:H*.28;
+  g+=R('sky',0,0,w,H,0)+R('m',0,H*.86,w,H*.14,0)+R('d',hx,hy+hs*.45,hs,hs*.75,1)+`<polygon class="i" points="${hx-hs*.12},${hy+hs*.5} ${hx+hs*.5},${hy} ${hx+hs*1.12},${hy+hs*.5}"/>`+R('p',hx+hs*.38,hy+hs*.8,hs*.24,hs*.4,1);
+  const fs=w>H?Math.max(11,H*.14):Math.max(10,w*.085),tx=w>H?12:8,ty=w>H?H*.34:H*.16,words=p.head.split(' '),half=Math.ceil(words.length/2);
+  if(w>H*1.5)g+=T('t',tx,ty,fs,p.head);else g+=T('t',tx,ty,fs,words.slice(0,half).join(' '))+T('t',tx,ty+fs*1.25,fs,words.slice(half).join(' '));
+  const cw=Math.min(w-2*tx,fs*7.6),cy=w>H?H*.56:H*.34;g+=R('b',tx,cy,cw,fs*1.7,3)+T('tb',tx+6,cy+fs*1.18,fs*.72,p.cta||'Free consultation')}
+ else if(d==='chart'){g+=T('t',12,22,12,p.head);[70,96,52,84,112,64].forEach((v,i)=>{g+=R('n',22+i*46,150-v,30,v,2)});g+=R('m',12,150,296,1.5,0);
+  const lx=p.legend==='over'?196:22,ly=p.legend==='over'?44:158;g+=R(p.legend==='over'?'lg warnb':'lg',lx,ly,p.legend==='over'?104:150,p.legend==='over'?44:16,3);
+  ['2025','2026'].forEach((t,i)=>{const x=lx+8+(p.legend==='over'?0:i*70),y=ly+(p.legend==='over'?14+i*16:11);g+=R(i?'n':'m',x,y-7,8,8,1)+T('ts',x+13,y,9,t)})}
+ else if(d==='home'){const o=p.off?8:0;g+=R('s',0,0,w,16,0)+T('t',16,40,15,'Home');[0,1,2,3].forEach(i=>{g+=R('s',16+o+i*72,54,64,46,4)+R('m',24+o+i*72,64,30,5,1)+T('t',24+o+i*72,90,13,String([3,5,2,7][i]))});
+  g+=R('m',16,116,288,6,1)+R('m',16,130,220,6,1)+R('m',16,144,250,6,1)+(p.off?`<line class="guide" x1="16" y1="28" x2="16" y2="108"/>`:'')}
+ else if(d==='figure'){const cx=w/2;
+  if(p.fig==='leg')g+=`<path class="ln" d="M${cx-14},20 L${cx-18},150 M${cx+14},20 L${cx+18},150 M${cx-18},150 h-10 M${cx+18},150 h10"/><path class="ar" d="M${cx},28 V150 M${cx-5},36 L${cx},28 L${cx+5},36 M${cx-5},142 L${cx},150 L${cx+5},142"/>`;
+  else if(p.fig==='arm')g+=`<circle class="ln" cx="70" cy="50" r="16"/><path class="ln" d="M70,66 V150 M70,82 H230"/><path class="ar" d="M78,100 H230 M86,95 L78,100 L86,105 M222,95 L230,100 L222,105"/>`;
+  else g+=`<circle class="ln" cx="${cx}" cy="84" r="46"/><path class="ln" d="M${cx-14},128 v30 M${cx+14},128 v30"/><ellipse class="ar" cx="${cx}" cy="64" rx="47" ry="9"/>`;
+  g+=T('t',12,22,12,p.head)+T('ts',12,H-8,10,p.sub)}
+ else if(d==='empty'){g+=R('s',0,0,w,16,0)+T('t',16,38,13,'Files');
+  if(p.v==='line')g+=T('ts',16,84,11,'No files yet. Add one.')+R('b',16,96,76,20,3)+T('tb',25,110,10,'Add a file');
+  else if(p.v==='examples'){g+=T('ts',16,62,10,'What lands here');['Weekly report','Banner picture','Price sheet'].forEach((t,i)=>{g+=R('s',16,72+i*30,288,24,3)+R('n',22,78+i*30,12,12,2)+T('ts',42,88+i*30,10,t)})}
+  else g+=`<rect class="dash" x="16" y="54" width="288" height="104" rx="6"/>`+T('ts',112,110,11,'Drop files here')}
+ else{const n=p.lines||5,top=p.btn==='top';g+=R('s',0,0,w,16,0)+R('m',8,5,40,6,1)+T('t',16,40,15,p.head);let y=52;
+  if(top){g+=R('b',16,y,Math.max(96,(p.cta||'Open').length*6.4),20,3)+T('tb',24,y+14,10,p.cta||'Open');y+=30}
+  for(let i=0;i<n;i++){if(y>H-14)break;g+=(p.steps?`<circle class="n" cx="21" cy="${y+3}" r="5"/>`:'')+R('m',p.steps?32:16,y,[270,240,284,200,256,230,276,214,262][i%9]-(p.steps?90:0),6,1);y+=p.steps?18:11}
+  if(p.btn==='bottom'&&y<H-8)g+=R('lk',16,Math.min(y+2,H-12),70,6,1)}
+ const t=document.createElement('template');t.innerHTML=`<svg class="rf-art" viewBox="0 0 ${w} ${H}" role="img" aria-label="${esc(p.head+', '+p.sub)}">${g}</svg>`;return t.content.firstChild}
+const pic=p=>h('div','rf-pic',art(p));
+
+/* Make bigger: the kit's full-screen overlay; arrows or a swipe move between pictures, a before and after pair has
+   Side by side and a drag Slider, one click on a spot leaves a comment pin (pictures only, never text) */
+function zoom(c,list,start,pair,from){const fr=from&&from.getBoundingClientRect();const d=h('dialog','ui-dialog ui-fullscreen rf-zoom');d.setAttribute('aria-label','Picture, bigger');let i=start||0,view='both';
+ const stage=h('div','rf-zoom-stage'),cap=h('p','rf-zoom-cap'),bar=h('div','row rf-zoom-bar'),note=h('div','rf-zoom-note');
+ const prev=btn('btn outline sm','← Before',()=>go(-1)),nextB=btn('btn outline sm','Next →',()=>go(1));prev.textContent='←';prev.setAttribute('aria-label','Picture before');nextB.textContent='→';nextB.setAttribute('aria-label','Next picture');
+ const seg=h('nav','segmented');seg.setAttribute('aria-label','How to compare');[['both','Side by side'],['slide','Slider']].forEach(([v,w])=>{const b=btn('btn sm',w,()=>{view=v;paint()});b.dataset.v=v;seg.append(b)});
+ const pinKey=()=>c.id+':'+(pair?'pair':i);
+ const drawPin=box=>{const pn=S.pins[pinKey()];box.querySelectorAll('.swipe-pin,.swipe-pin-pop').forEach(x=>x.remove());note.replaceChildren();if(!pn){note.append(h('p','meta','Click a spot to comment.'));return}
+  const m=h('span','swipe-pin'+(pn.edit?' row-new':''),h('span','','1'));m.style.left=pn.x+'%';m.style.top=pn.y+'%';box.append(m);
+  if(pn.text!=null&&!pn.edit){note.append(h('p','swipe-pin-note',h('b','','1'),h('span','',pn.text||'No words yet'),btn('btn ghost sm','Remove',()=>{delete S.pins[pinKey()];drawPin(box)})))}
+  else{const pop=h('div','swipe-pin-pop'),ta=h('textarea','input');ta.rows=2;ta.placeholder='What about this spot?';ta.setAttribute('aria-label','Comment on this spot');pop.style.left='min('+pn.x+'%, calc(100% - 276px))';pop.style.top='calc('+pn.y+'% + 8px)';
+   pop.onclick=e=>e.stopPropagation();pop.append(ta,h('div','row',btn('btn primary sm','Save comment',()=>{pn.text=ta.value.trim();pn.edit=false;drawPin(box)}),btn('btn ghost sm','Cancel',()=>{delete S.pins[pinKey()];drawPin(box)})));box.append(pop);setTimeout(()=>ta.focus())}};
+ const pinOn=box=>{box.classList.add('rf-pinnable');box.onclick=e=>{if(e.target.closest('.swipe-pin-pop,input'))return;const r=box.getBoundingClientRect();S.pins[pinKey()]={x:Math.round((e.clientX-r.left)/r.width*1000)/10,y:Math.round((e.clientY-r.top)/r.height*1000)/10,edit:true};drawPin(box)};drawPin(box)};
+ function paint(){stage.replaceChildren();
+  if(pair){seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===view)));
+   const cmp=h('div','swipe-compare rf-cmp');cmp.dataset.view=view;const mk=(cls,p,tag)=>h('div','cmp-pane '+cls,art(p),h('span','cmp-tag',tag));
+   const range=h('input','cmp-range');range.type='range';range.min=0;range.max=100;range.value=50;range.setAttribute('aria-label','Drag to compare before and after');
+   const line=h('span','cmp-line'),knob=h('span','rf-cmp-knob');knob.setAttribute('aria-hidden','true');line.append(knob);
+   cmp.append(mk('before',list[0],'Before'),mk('after',list[1],'After'),line,range);
+   if(view==='slide'){const set=v=>{cmp.style.setProperty('--cut',v+'%');range.value=v};set(50);let drag=false;const at=e=>{const r=cmp.getBoundingClientRect();set(Math.max(0,Math.min(100,Math.round((e.clientX-r.left)/r.width*100))))};
+    line.style.pointerEvents='auto';line.onpointerdown=e=>{drag=true;line.setPointerCapture(e.pointerId);e.stopPropagation()};line.onpointermove=e=>{if(drag)at(e)};line.onpointerup=()=>{drag=false};line.onclick=e=>e.stopPropagation();range.oninput=()=>set(range.value);
+    cap.textContent='Drag the line. Left of it is before, right of it is after.'}else cap.textContent='Before first, then after.';
+   stage.append(cmp);pinOn(cmp)}
+  else{const p=list[i],box=h('div','rf-zoom-pic',art(p));stage.append(box);cap.textContent=(i+1)+' of '+list.length+' · '+(p.cap||p.head+', '+p.sub);prev.disabled=i===0;nextB.disabled=i===list.length-1;pinOn(box)}}
+ const go=n=>{if(pair)return;const j=i+n;if(j<0||j>=list.length)return;i=j;paint()};
+ d.addEventListener('keydown',e=>{if(e.target.matches('textarea'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1)});
+ let sx=null;stage.addEventListener('touchstart',e=>{sx=e.touches[0].clientX},{passive:true});stage.addEventListener('touchend',e=>{if(sx==null)return;const dx=e.changedTouches[0].clientX-sx;sx=null;if(Math.abs(dx)>48)go(dx<0?1:-1)});
+ bar.append(...(pair?[seg]:[prev,nextB]),cap);d.append(h('h2','rf-zoom-h',c.title),bar,note,stage);d.addEventListener('close',()=>d.remove());document.body.append(d);paint();if(window.orch)orch.open(d);else d.showModal();if(fr&&window.orch)orch.flip(d.querySelector('.rf-zoom-pic,.rf-cmp'),fr)}
+const bigger=(c,list,i,pair)=>btn('btn outline sm',[ic('expand',16),'Make bigger'],e=>zoom(c,list,i,pair,e.currentTarget.closest('.rf-fact').querySelector('.rf-pic')));
+
+/* ---- the panel: one ticket beside the card ---- */
+const chats={},terms={};let panelEl=null;
+const stuckLines=c=>{const tried=(c.fact.rows||[]).find(r=>r[0]==='Tried'),stop=(c.fact.rows||[]).find(r=>r[0]==='Stopped at');const out=[];
+ [1,2,3].forEach(n=>out.push(['$ '+(c.termCmd||'try again')+'   (try '+n+' of 3)','cmd'],['✗ '+(c.termFail||(tried?tried[1]:'It did not work')),'bad']));
+ out.push(['● Stopped here'+(stop?': '+stop[1]:'')+'. 3 tries failed. Waiting for you.','stop']);return out};
+const sessionLines=c=>{const out=[['● '+c.ticket+' · '+c.ticketTitle,'dim'],['● Goal: '+c.ctx.goal,'']];(c.ctx.since||[]).forEach(s=>out.push(['● '+s,'']));
+ if(c.kind==='stuck')out.push(...stuckLines(c));else out.push(['● Waiting for you in Review: '+c.decide,'stop']);return out};
+function termOf(c){if(terms[c.id])return terms[c.id];
+ const box=h('div','term rf-term'),say=h('span','term-say meta','Watching only'),sw=h('label','term-sw','Let me type'),inp=h('input','switch');inp.type='checkbox';inp.setAttribute('aria-label','Let me type');
+ inp.onchange=()=>{box.dataset.typing=inp.checked?'on':'off';say.textContent=inp.checked?'You can type now':'Watching only'};sw.append(inp);
+ const scr=h('pre','term-screen rf-screen');scr.tabIndex=0;scr.setAttribute('aria-label','The helper’s session');
+ const add=([t,cls])=>{const l=h('span','rf-tl'+(cls?' '+cls:''),t+'\n');scr.append(l);return l};sessionLines(c).forEach(add);
+ box.append(h('div','term-bar',say,h('div','term-tools',sw,btn('btn ghost sm','Copy',()=>{UI.copyText&&UI.copyText(scr.textContent);UI.toast('Copied')}))),scr);
+ return terms[c.id]={box,scr,add,toStop:()=>{const s=[...scr.querySelectorAll('.rf-tl.stop,.rf-tl.bad')];if(s.length)scr.scrollTop=Math.max(0,s[0].offsetTop-scr.offsetTop-8)},toEnd:()=>{scr.scrollTop=scr.scrollHeight}}}
+const chatOf=c=>chats[c.id]||(chats[c.id]=[{w:'h',t:'I started on “'+c.ticketTitle+'”. The goal: '+c.ctx.goal,at:c.ctx.said.date},
+ /chat/i.test(c.ctx.said.src)?{w:'y',t:c.ctx.said.text,at:c.ctx.said.date,said:true}:{w:'h',t:'You wrote ('+c.ctx.said.src+'): ‘'+c.ctx.said.text+'’ I work by that.',at:c.ctx.said.date,said:true},
+ ...((c.ctx.since||[]).length?[{w:'h',t:c.ctx.since.join('\n'),at:'today'}]:[]),{w:'h',t:'I need you now: '+c.decide,at:'today'}]);
+const rulesOf=()=>{const seen=new Set(),lines=[];team.cards.forEach(c=>{const s=c.ctx.said;if(/rule/i.test(s.src)&&!seen.has(s.text)){seen.add(s.text);lines.push(s.text)}});
+ return '# Team rules\n\nWhat the helpers of '+team.company.split(' · ')[0]+' always follow. You wrote these; a helper never changes them.\n\n'+lines.concat(['Ask before anything leaves the company.','Plain words in everything a customer reads.']).map(l=>'- '+l).join('\n')+'\n'};
+const docOf=c=>({name:c.title.split(':')[0].toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)+'-2026-11-25.md',md:'# '+c.ticketTitle+'\n\n'+(c.fact.summary?'> '+c.fact.summary+'\n\n':'')+(c.fact.paras||[]).join('\n\n')+'\n\n'+(c.fact.open||'')+'\n'});
+const hasDoc=c=>c.fact.type==='doc';
+/* an "open" link goes where its source is: the chat message, the rules file, or the place in the ticket */
+const openSource=c=>{const s=c.ctx.said.src;if(/chat/i.test(s))openPanel(c,'chat',{hl:true});else if(/rule/i.test(s))openPanel(c,'ticket',{file:'rules',hl:c.ctx.said.text});else openPanel(c,'ticket',{hl:true})};
+function fileView(c,P){const f=P.file==='rules'?{name:'team-rules.md',md:rulesOf()}:docOf(c),v=h('div','stack rf-fv');
+ v.append(h('div','row',btn('btn ghost sm','← Back to the ticket',()=>openPanel(c,'ticket')),h('span','file-type','MD'),h('strong','',f.name)));
+ const md=window.FileViewer&&FileViewer.renderMd?FileViewer.renderMd(f.md,{name:f.name}):h('pre','',f.md);const wrap=h('div','fv-panel rf-fv-body',md);v.append(wrap);
+ if(typeof P.hl==='string')[...md.querySelectorAll('li,p')].filter(n=>n.textContent.trim()===P.hl).forEach(n=>n.classList.add('rf-hit'));return v}
+function chatView(c,P){const v=h('div','rf-cv'),log=h('div','live-chat rf-chat');log.setAttribute('role','log');log.setAttribute('aria-label','Chat with the helper');
+ const paint=()=>{log.replaceChildren(...chatOf(c).map(m=>{const b=h('div','live-chat-msg'+(m.said&&P.hl?' rf-hit':''),h('p','',m.t),h('span','meta',(m.w==='y'?'You':'Helper')+' · '+m.at));b.dataset.w=m.w;return b}));requestAnimationFrame(()=>{if(!log.querySelector('.rf-hit'))log.scrollTop=log.scrollHeight})};
+ const root=h('div','rf-compose');root.id='rf-compose-'+c.id;v.append(log,root);paint();
+ UI.composer(root,{layout:'row',sendLabel:'Send',label:'Message to the helper',placeholder:'Write to the helper',hint:'',enterSends:true,voice:false,draft:P.draft||'',onSend:async m=>{const t=typeof m==='string'?m:(m&&(m.text||m.message))||'';if(!t.trim())return {ok:false,text:'Write a few words first.'};if(failed('chat')){S.fixed.chat=1;return {ok:false,text:'Not sent. Your words are still here. Try again.'}}
+  chatOf(c).push({w:'y',t:t.trim(),at:clock()});P.draft='';P.hl=false;paint();setTimeout(()=>{chatOf(c).push({w:'h',t:'Got it. I look at it and answer here. The card stays open until you decide.',at:clock()});if(S.panel&&S.panel.id===c.id&&S.panel.tab==='chat')paint()},900);return {ok:true}}});return v}
+function termView(c,P){const t=termOf(c),v=h('div','rf-termv');v.append(h('p','meta','The helper’s session for '+c.ticket+', live.'),t.box);return v}
+/* Run it: plays in the Terminal tab, then the card says when it ran */
+/* ---- the panel: opens with a slide, follows the card, Esc closes it ---- */
+function openPanel(c,tab,o){closeMore();const fresh=!S.panel;S.panel=Object.assign({id:c.id,tab:tab||'ticket'},o||{});drawPanel();
+ if(!panelEl.isConnected){draw();if(fresh&&!calmMotion()){panelEl.classList.remove('rf-panel-in');void panelEl.offsetWidth;panelEl.classList.add('rf-panel-in');const pe=panelEl;pe.addEventListener('animationend',()=>pe.classList.remove('rf-panel-in'),{once:true})}}
+ const hd=panelEl.querySelector('.review-ticket-h h2');if(hd&&!(o&&o.draft))hd.focus({preventScroll:true})}
+const closePanel=()=>{if(!S.panel)return;const el=panelEl,r=el&&el.isConnected&&!phone()?el.getBoundingClientRect():null;S.panel=null;panelEl=null;draw();if(r&&window.orch)orch.leave(el,r);const t=host.querySelector('#rf-title');if(t)t.focus({preventScroll:true})};
+const failed=(tab)=>STATE==='panelfail'&&!S.fixed[tab];
+function drawPanel(){const P=S.panel,c=byId(P.id),el=panelEl||(panelEl=h('aside','card review-ticket rf-panel'));el.setAttribute('aria-label','Ticket '+c.ticket);
+ const hd=h('h2','',c.ticket+' · '+c.ticketTitle);hd.tabIndex=-1;const head=h('div','review-ticket-h',btn('btn outline sm rf-panel-back',['← Back to the card'],closePanel),hd);
+ const x=btn('btn ghost icon sm rf-panel-x',ic('x',16),closePanel);x.setAttribute('aria-label','Close the panel');x.title='Close (Esc)';head.append(x);
+ const tabs=h('nav','segmented rf-panel-tabs');tabs.setAttribute('aria-label','Show');[['ticket','Ticket'],['chat','Chat'],['term','Terminal']].forEach(([k,w])=>{const b=btn('btn sm',w,()=>openPanel(c,k));b.setAttribute('aria-pressed',String(P.tab===k));tabs.append(b)});
+ const body=h('div','review-ticket-b rf-panel-b'),again=t=>({label:'Try again',onClick:()=>{S.fixed[t]=1;drawPanel()}});
+ if(P.tab==='ticket'&&failed('ticket'))body.append(UI.state({kind:'error',title:'The ticket did not load',text:'Your card is still here. You can answer without it.',action:again('ticket')}));
+ else if(P.tab==='term'&&failed('term'))body.append(UI.state({kind:'error',title:'Not connected to the session',text:'The helper’s computer did not answer.',action:again('term')}));
+ else if(P.tab==='ticket'&&P.file)body.append(fileView(c,P));else if(P.tab==='ticket')body.append(ticketView(c,P));else if(P.tab==='chat')body.append(chatView(c,P));else body.append(termView(c,P));
+ el.replaceChildren(head,h('div','rf-panel-tabrow',tabs),body,h('div','rf-strip'));syncStrip();
+ requestAnimationFrame(()=>{const hit=el.querySelector('.rf-hit');if(hit)hit.scrollIntoView({block:'center'});if(P.tab==='term'&&!failed('term')){const t=termOf(c);P.stop?t.toStop():t.toEnd()}})}
+/* on a phone the sheet covers the card: the question and its answers stay in a strip at the bottom of the sheet */
+function syncStrip(){if(!panelEl||!S.panel)return;const st=panelEl.querySelector('.rf-strip'),c=S.view==='run'&&now();if(!st)return;if(!c){st.replaceChildren();return}st.replaceChildren(h('p','rf-strip-q',c.decide),bar(c,true))}
+function ticketView(c,P){const v=h('div','stack rf-tv'),sec=(t,...k)=>h('section','card',h('div','card-h',h('h2','',t)),...k);
+ const fold=(t,n,open,...k)=>{const d=h('details','card rf-fold'),s=h('summary','card-h',h('h2','',t),h('span','meta',String(n)),h('span','grow'),h('span','chev'));d.open=!!open;d.append(s,...k);return d};
+ v.append(h('p','meta',h('span','key',c.ticket),' · '+c.project+' · ',h('span','pill needs','Review')),h('h3','rf-tv-title',c.ticketTitle));
+ v.append(sec('Done when',h('div','card-row',h('p','',c.ctx.goal))));
+ const tasks=(c.ctx.since||[]).map(s=>[s,true]).concat([[c.kind==='stuck'?'Go on after your answer':'Check the result with you',false]]);
+ v.append(sec('Tasks',...tasks.map(([t,dn],i)=>h('div','card-row',UI.statusIcon(dn?'done':c.kind==='stuck'&&i===tasks.length-1?'paused':'todo'),h('div','grow',h('p','',t),dn&&h('p','meta','Shown with a note · '+['09:12','10:40','11:05'][i%3]))))));
+ if(c.prs)v.append(fold('Pull requests',c.prs.length,P.open==='prs',...c.prs.map(p=>{const a=h('a','btn ghost icon sm rf-ext',ic('external',16));a.href='#';a.target='_blank';a.rel='noopener';a.setAttribute('aria-label','Open pull request '+p.n+' on GitHub');a.title='Open on GitHub';a.onclick=e=>{e.preventDefault();mock('this opens the pull request on GitHub in a new tab, the only link that leaves orch')};
+  return h('div','card-row',ic('pull',16),h('div','grow',h('p','',h('strong','','#'+p.n+' '),p.t),h('p','meta',p.checks+' · '+p.state)),a)})));
+ const ev=(t,w,hit)=>h('div','history-event'+(hit?' rf-hit':''),h('div','history-event-line',h('span','history-dot'),h('p','grow',t),h('time','meta',w)));
+ const hs=[ev('Waits for you in Review','today')].concat((c.ctx.since||[]).slice().reverse().map(s=>ev(s,'today')),[ev('You, '+c.ctx.said.src+': ‘'+c.ctx.said.text+'’',c.ctx.said.date,P.hl===true)]);
+ v.append(fold('History',hs.length,P.hl===true,...hs));
+ const frow=(type,name,sub,fn)=>h('div','card-row file-row',h('span','file-type',type),h('div','grow',h('p','file-name',name),h('p','meta',sub)),btn('btn ghost sm','Open',fn));
+ const fl=[];if(hasDoc(c))fl.push(frow('MD',docOf(c).name,'From the helper · today',()=>openPanel(c,'ticket',{file:'doc'})));fl.push(frow('MD','team-rules.md','Your rules for this team',()=>openPanel(c,'ticket',{file:'rules'})));
+ v.append(fold('Files',fl.length,false,...fl));return v}
+/* Run it: plays in the Terminal tab; the result takes the place of the answers, the card does not grow */
+function runIt(c){const r=c.run||{lines:['Started.','Done.']};S.ran[c.id]={busy:true};openPanel(c,'term');draw();const t=termOf(c);
+ const q=[['$ '+(r.cmd||c.fact.command||'run: '+c.title.toLowerCase()),'cmd']].concat(r.lines.map(l=>[l,''])).concat([[r.fail?'✗ '+r.fail:'✓ Done',r.fail?'bad':'ok']]);let i=0;
+ const stepLine=()=>{const l=t.add(q[i++]);l.classList.add('row-new');t.toEnd();if(i<q.length)setTimeout(stepLine,420);else{S.ran[c.id]={at:clock(),ok:!r.fail,fail:r.fail};S.said=r.fail?'It did not work: '+r.fail:'Ran at '+S.ran[c.id].at+'.';draw()}};setTimeout(stepLine,300)}
+
+/* ---- screens ---- */
+function howDialog(){const d=h('dialog','dialog rf-how');d.setAttribute('aria-label','How Review works');
+ const sw=btn('switch','',()=>{S.practice=!S.practice;sw.setAttribute('aria-checked',String(S.practice));pl.textContent='Practice cards now and then: '+(S.practice?'on':'off')});sw.setAttribute('role','switch');sw.setAttribute('aria-checked',String(S.practice));sw.setAttribute('aria-label','Practice cards now and then');
+ const pl=h('h3','','Practice cards now and then: '+(S.practice?'on':'off'));
+ d.append(h('div','dialog-head',h('h2','','How Review works for you')),
+  h('div','card-row',h('div','grow',h('h3','','Cards in one go'),h('p','meta','Up to 5, then you see what you decided.'))),
+  h('div','card-row',h('div','grow',h('h3','','Passes by itself'),h('p','meta',team.rule?'‘'+team.rule.name+'’ pass at '+team.rule.at+'. Nothing else passes without you.':'No rule. Nothing passes without you.')),team.rule&&btn('btn outline sm','Change rule',()=>mock('this opens your rules in Settings'))),
+  h('div','card-row',h('div','grow',pl,h('p','meta','A made-up card with a mistake in it, to see if a quick yes would have caught it.')),sw));
+ d.addEventListener('close',()=>d.remove());document.body.append(d);window.orch?orch.open(d):d.showModal()}
+function start(){const all=STATE==='empty'?[]:waiting(),col=h('div','stack rf-col');const h1=h('h1','','Review');h1.tabIndex=-1;h1.id='rf-h1';
+ col.append(h('div','page-heading',h('div','',h1,h('p','',STATE==='loading'?'Looking what waits on you…':all.length?all.length+(all.length===1?' thing waits':' things wait')+' on you. Pick where to start.':'Nothing waits on you.'))));
+ if(STATE==='loading'){const t=h('div','stat-row rf-tiles');t.setAttribute('aria-busy','true');t.setAttribute('aria-label','Loading');[0,1,2].forEach(()=>t.append(h('div','stat-tile rf-tile',h('span','skeleton line short'),h('span','skeleton title'),h('span','skeleton line'))));col.append(t);return col}
+ const reviewer=()=>{col.append(h('p','rf-line',ic('check',16),team.reviewer.length+' checked by the Reviewer, nothing to do. ',btn('rf-tk',S.showChecked?'Hide':'Show',()=>{S.showChecked=!S.showChecked;draw()})));
+  if(S.showChecked){const sec=h('section','card',h('div','card-h',h('h2','','Checked by the Reviewer')));sec.setAttribute('aria-label','Checked by the Reviewer');
+   team.reviewer.forEach(r=>sec.append(h('div','card-row',h('div','grow',h('strong','',r.title),h('p','meta',r.why)),btn('btn ghost sm','Send back',()=>mock('this sends the result back to the helper')))));col.append(sec)}};
+ const nl=STATE==='empty'?0:Object.keys(S.later).length,how=()=>col.append(h('p','rf-line',btn('rf-tk','How Review works',howDialog)));
+ if(!all.length&&!S.project){col.append(UI.state({kind:'empty',title:'Nothing waits on you',text:'New cards show up here when a helper needs you.'}));if(nl)col.append(h('p','rf-line',nl+' put off for later. ',btn('rf-tk','Bring them back',()=>{S.later={};draw()})));reviewer();how();return col}
+ const chips=h('div','row rf-chips');chips.setAttribute('role','group');chips.setAttribute('aria-label','Project');
+ [''].concat(team.projects).forEach(p=>{const n=team.cards.filter(c=>isOpen(c)&&(!p||c.project===p)).length,b=btn('chip-btn'+(S.project===p?' sel':''),[p||'All projects',h('span','n',String(n))],()=>{S.project=p;draw()});b.setAttribute('aria-pressed',String(S.project===p));chips.append(b)});
+ col.append(chips);
+ const due=ordered(all).sort((a,b)=>urgency(a)-urgency(b))[0],tiles=h('div','stat-row rf-tiles');
+ Object.keys(GROUP).forEach(g=>{const list=waiting(g),hold=list.filter(c=>laneOf(c)==='holds').length,mine=due&&urgency(due)<9&&groupOf(due)===g;
+  const t=btn('stat-tile rf-tile',[h('span','stat-label',GROUP[g].name),h('span','stat-value',String(list.length)),h('span','stat-delta',list.length?GROUP[g].say:'Nothing waits here'),
+   list.length&&hold?h('span','rf-tile-line',hold+(hold===1?' holds':' hold')+' up work'):null,mine?h('span','rf-tile-line rf-due',ic('clock',14),'Next deadline: '+short(due.title)+' · '+due.deadline):null],()=>{if(!list.length)return;if(g==='quick'){S.group=g;S.view='quick';S.flash=null;draw()}else startRun(g,mine?due:null)});
+  if(!list.length){t.setAttribute('aria-disabled','true');t.classList.add('is-empty')}t.setAttribute('aria-label',GROUP[g].name+', '+list.length+' waiting');tiles.append(t)});
+ col.append(tiles);
+ if(nl)col.append(h('p','rf-line',nl+' put off for later. ',btn('rf-tk','Bring them back',()=>{S.later={};draw()})));
+ reviewer();how();return col}
+
+const top=(title,sub)=>{const b=btn('btn ghost icon sm',ic('undo',16),()=>{S.view='start';S.batch=null;draw()});b.setAttribute('aria-label','Back to the start');b.title='Back to the start';return h('div','swipe-top rf-top',b,h('strong','',title),h('span','',sub))};
+function quick(){const list=ordered(waiting('quick')),col=h('div','stack rf-col');col.append(top('Quick look',list.length+' waiting'));
+ if(!list.length){col.append(UI.state({kind:'empty',title:'Nothing waits in Quick look',text:'New cards show up here when a helper needs you.'}));return col}
+ const ruled=list.filter(c=>c.rule&&team.rule);
+ if(ruled.length)col.append(h('div','banner slim info',h('p','grow',h('strong','',ruled.length+' of these passes by itself at '+team.rule.at),' because of your rule ‘'+team.rule.name+'’.'),btn('btn outline sm','Change rule',()=>mock('this opens your rules in Settings'))));
+ const sec=h('section','card rf-qlist');sec.setAttribute('aria-label','Quick look');
+ list.forEach(c=>{const k=h('span','rf-qkind',ic(KIND[c.kind][1],16));k.title=KIND[c.kind][0];const r=btn('card-row rf-qrow',[k,h('span','grow',h('strong','',c.title),h('span','meta',c.ticket+' · '+c.why+(c.rule&&team.rule?' · passes by itself at '+team.rule.at:''))),h('span','chev rf-qgo')],()=>startRun('quick',c));r.dataset.row='';r.setAttribute('aria-label','Look closer: '+c.title);sec.append(r)});
+ const okAll=()=>{const ids=list.map(c=>c.id),go=()=>{ids.forEach(id=>S.ans[id]={label:'OK'});S.run=ids;S.batch=ids;S.group='quick';S.view='done';S.said='OK for all '+ids.length+'.';draw()};
+  if(calmMotion())return go();sec.querySelectorAll('.rf-qrow').forEach(r=>{r.style.setProperty('--row-height',r.getBoundingClientRect().height+'px');r.classList.add('row-out')});setTimeout(go,170)};
+ col.append(sec,h('div','row rf-okall',btn('btn primary','OK all '+list.length,okAll),btn('btn outline','One at a time',()=>startRun('quick')),h('span','meta','Each one can be taken back afterwards.')));return col}
+
+const keysLine=()=>h('p','meta rf-keys','Keys: the numbers answer,',h('kbd','','J'),'next card,',h('kbd','','K'),'card before,',h('kbd','','U'),'undo,',h('kbd','','Esc'),'close');
+function run(){const c=now(),col=h('div','stack rf-col'),at=S.run.indexOf(c.id)+1,gone=S.run.length-openRun().length;
+ const t=top(GROUP[S.group].name,at+' of '+S.run.length),bar_=h('div','progress',h('span'));bar_.firstChild.style.setProperty('--value',Math.round(gone/S.run.length*100)+'%');bar_.setAttribute('role','progressbar');bar_.setAttribute('aria-label','Cards answered');bar_.setAttribute('aria-valuenow',String(gone));bar_.setAttribute('aria-valuemax',String(S.run.length));t.append(bar_);
+ col.append(h('div','rf-headrow',t,undoLine()),card(c),bar(c));const sp=h('div','rf-split'+(S.panel?' with-panel':''),col);if(S.panel){if(!panelEl)drawPanel();sp.append(panelEl)}return sp}
+
+function done(){const col=h('div','stack rf-col'),ids=S.run.filter(id=>!isOpen(byId(id))||S.moved[id]),sec=h('section','card');
+ col.append(top(GROUP[S.group].name,'this round is through'));const h1=h('h1','','What you decided');h1.tabIndex=-1;h1.id='rf-h1';
+ col.append(h('div','page-heading',h('div','',h1,h('p','',ids.length+(ids.length===1?' card':' cards')+'. Each one can still be taken back, unless it says so.'))));sec.setAttribute('aria-label','What you decided');
+ ids.slice(0,MAX).forEach(id=>{const c=byId(id),a=S.ans[id],w=a?a.label:S.later[id]?(S.later[id]==='no reminder'?'Later':'Later, '+S.later[id]):'Moved to Take your time',row=h('div','card-row',h('div','grow',h('strong','',c.title),h('p','meta',w)));row.dataset.row='';
+  if(a&&a.fixed)row.append(h('span','meta','Cannot be undone'));else row.append(btn('btn ghost sm',[ic('undo',16),'Undo'],async()=>{S.batch=null;if(window.orch&&!calmMotion())await orch.resolve(row);undo(id)}));sec.append(row)});
+ if(ids.length>MAX)sec.append(h('div','card-row',h('p','meta grow','and '+(ids.length-MAX)+' more'),btn('btn ghost sm','Undo all '+ids.length,()=>undo(ids))));col.append(sec);
+ const rest=Object.keys(GROUP).map(g=>[g,waiting(g).length]).filter(x=>x[1]),nl=Object.keys(S.later).length;
+ col.append(h('p','rf-line',h('strong','','Still waiting: '),rest.length?rest.map(([g,n])=>n+' in '+GROUP[g].name).join(' · '):'nothing',nl?' · '+nl+' for later':''));
+ const nextG=waiting(S.group).length&&S.group!=='quick'?S.group:(rest.find(([g])=>g!=='quick'&&g!==S.group)||[])[0],acts=h('div','row');
+ if(nextG)acts.append(btn('btn primary','Next '+Math.min(MAX,waiting(nextG).length)+' in '+GROUP[nextG].name,()=>startRun(nextG)));
+ acts.append(btn('btn '+(nextG?'outline':'primary'),'Back to the start',()=>{S.view='start';S.batch=null;draw()}));col.append(acts);return col}
+
+/* one place draws; it also starts the motion (kit helpers and classes only) and moves the focus */
+let last={key:'',view:''};
+function draw(){if(S.view==='run'&&!openRun().length)S.view='done';if(S.view!=='run'&&S.panel){S.panel=null;panelEl=null}
+ const c=S.view==='run'?now():null,key=S.view+(c?':'+c.id:''),changed=key!==last.key,old=host.querySelector('.rf-card'),oldRect=changed&&old&&last.view==='run'&&!calmMotion()?old.getBoundingClientRect():null,y=window.scrollY,first=!last.key;
+ if(c&&S.panel&&S.panel.id!==c.id&&changed){S.panel={id:c.id,tab:S.panel.tab};drawPanel()}/* the panel follows the card */
+ const body=S.view==='quick'?quick():S.view==='run'?run():S.view==='done'?done():start();
+ host.replaceChildren(mockBar(),body);syncStrip();
+ const n=STATE==='empty'?0:team.cards.filter(isOpen).length;document.querySelectorAll('.nav-item[aria-current] .count,.tabbar [aria-current] .count').forEach(x=>{x.textContent=String(n);x.hidden=!n});
+ if(changed){const nc=host.querySelector('.rf-card');
+  if(oldRect&&nc){orch.leave(old,oldRect);nc.classList.add('rf-enter-late')}else if(nc&&!first)nc.classList.add('page-enter');else if(!first&&window.orch)orch.enter(body);
+  window.scrollTo(0,0);document.getElementById('content').scrollTop=0;
+  if(!first){const f=host.querySelector('#rf-title,#rf-h1');if(f)f.focus({preventScroll:true})}
+  if(c)S.said=(S.said?S.said+' ':'')+(S.run.indexOf(c.id)+1)+' of '+S.run.length+': '+c.decide}
+ else{window.scrollTo(0,y);if(S.reveal){const b=host.querySelector('.rf-bar .swipe-act:not(:disabled)');if(b)b.focus({preventScroll:true})}}
+ S.reveal=null;if(S.said){say(S.said);S.said=''}last={key,view:S.view}}
+/* keys: 1 2 3 answer (the check question first), J K or the arrows move, M More, U Undo, Esc closes zoom, More, then the panel */
+document.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;const t=e.target,typing=t.matches&&t.matches('input,textarea,select,[contenteditable]'),dlg=document.querySelector('dialog[open]');
+ if(e.key==='Escape'){if(dlg)return;const m=host.querySelector('.rf-more[open]');if(m){m.open=false;m.querySelector('summary').focus();e.preventDefault()}else if(S.panel){closePanel();e.preventDefault()}return}
+ if(typing||dlg||S.view!=='run')return;const c=now();if(!c)return;const k=e.key.toLowerCase();let hit=true;
+ if(/^[1-9]$/.test(k)){const locked=groupOf(c)==='time'&&c.check&&S.checks[c.id]==null,b=locked?host.querySelectorAll('.rf-check .row .btn')[k-1]:host.querySelector('.rf-bar [data-key="'+k+'"]:not(:disabled)');if(b)b.click()}
+ else if(k==='j'||k==='arrowright')step(1);else if(k==='k'||k==='arrowleft')step(-1);
+ else if(k==='u'){const u=host.querySelector('.rf-undo .btn');if(u)u.click()}
+ else if(k==='m'){const s=host.querySelector('.rf-bar .rf-more-btn');if(s){s.click();s.focus()}}else hit=false;if(hit)e.preventDefault()});
+document.addEventListener('click',e=>{const m=host.querySelector('.rf-more[open]');if(m&&!m.contains(e.target))m.open=false});
+document.title='Review · '+team.label+' · orch mockup';draw();document.addEventListener('DOMContentLoaded',()=>{last.key='';draw()});
+})();
+</script><!-- Phone (up to 720 px, ORCH-73): the bottom bar from the master (.tabbar) replaces the side menu and top bar; More opens the side menu. --><nav class="tabbar" aria-label="Main"><a href="../../home/home.html"><span class="tab-label">Home</span></a><a href="../../board/list.html"><span class="tab-label">Tickets</span></a><a href="../../review/review.html" aria-current="page" aria-label="Review, 19 need you"><span class="tab-label">Review</span><span class="count">19</span></a><button type="button" aria-expanded="false" aria-controls="side-menu" onclick="const s=document.querySelector('.sidebar');const o=s.dataset.open!=='true';s.dataset.open=String(o);this.setAttribute('aria-expanded',String(o))"><span class="tab-label">More</span></button></nav></body></html>
