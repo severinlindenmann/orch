@@ -70,7 +70,7 @@ card with the before and after pictures.
 | B Hierarchy | B1 5-second test: what, why, what can I do · B2 exactly one filled button per view, counting the top bar; New ticket outlined · B3 at most 7 facts per card, 5 KPIs, no Details toggles · B4 long text at most 3 lines on level 1, prose at most 76ch · B5 no repeated sentence, counts match everywhere |
 | C Navigation | C1 active nav, crumb, title = nav label · C2 every view, tab and filter has a URL; Back keeps scroll · C3 no dead ends, every state has a next step |
 | D Actions | D1 verb labels that name the outcome, no OK or Submit · D2 costly action: cost and time above it, not filled, not autofocused, a cheaper choice beside it · D3 destructive: Danger style, set apart, Undo over confirm · D4 dialog footer `[tertiary] … [Cancel] [Primary]` · D5 a disabled control says why, next to it |
-| E States | E1 skeleton shaped like the result within 100 ms when a load may pass 1 s, no page spinner · E2 master empty state, one sentence, one button, only after loading · E3 error: what happened, what to do, one button, next to its source · E4 stale, partial or offline keeps the data, "Updated … ago" · E5 0 / 1 / many, plurals, a 200-character title, a long word · E6 missing permission or add-on: hidden, or disabled with the reason |
+| E States | E1 skeleton shaped like the result: its place is held at once, it shows after 300 ms (`.skeleton-page`, `.skeleton-late`), no page spinner, no bare "Loading…" text · E2 master empty state, one sentence, one button, only after loading · E3 error: what happened, what to do, one button, next to its source · E4 stale, partial or offline keeps the data, "Updated … ago" · E5 0 / 1 / many, plurals, a 200-character title, a long word · E6 missing permission or add-on: hidden, or disabled with the reason |
 | F Feedback | F1 response within 0.1 s · F2 1-10 s inline spinner with a label; over 10 s the step, elapsed time and Cancel · F3 toast 5 s, names the object, Undo; error toasts stay · F4 live updates `role=status`, never steal the scroll |
 | G Forms | G1 visible labels, `autocomplete` / `inputmode` · G2 a default chosen, choices before typing · G3 validate on continue, error next to the field plus a summary |
 | H Accessibility (WCAG 2.2 AA) | H1 text 4.5:1, large text 3:1 · H2 control borders and focus 3:1 · H3 everything by keyboard, visual order, no trap, Escape returns focus · H4 focus visible and never under a sticky bar · H5 targets at least 24x24 CSS px (touch 44x44) · H6 name, role and state; axe 0 serious · H7 one h1, ordered headings, landmarks, skip link, unique title · H8 colour never the only signal · H9 320 px and 200% text, no page sideways scroll · H10 reduced motion = no motion |
@@ -159,8 +159,10 @@ the first rows without any extra work.
   the click target, the single action appears on hover/focus and always in the group header; no "…" per row.
 - SX-15 Card: 20 px padding, title 16/24, optional meta right (time only), one action in the footer row; cards hold
   previews or grouped content, never a single sentence (Autopilot off, Finished today, Insights empty).
-- SX-16 Skeletons: every route and every add-on frame shows a skeleton shaped like its final layout within 100 ms
-  (BP-61/62); never text + bars together; "No items" only after loading finished (BP-56).
+- SX-16 Skeletons: every route and every add-on frame holds a skeleton shaped like its final layout within 100 ms
+  (BP-61/62); it fades in only after 300 ms (`.skeleton-page`, `.skeleton-late` in motion.css), so a fast load never
+  flashes grey and a slow one never shows a blank or jumps; never text + bars together (a small region uses skeleton
+  lines with the words for screen readers only); "No items" only after loading finished (BP-56).
 - SX-17 Motion tokens: hover/press 100 ms, open/close 150 ms (QA-09), page change 200 ms, panels 240 ms, enter
   ease-out / exit ease-in (BP-70), reduced-motion = instant; used by: route change, tab switch, dialog, list
   insert/remove (Home answered card), status pill change (one pulse), skeleton → content cross-fade.

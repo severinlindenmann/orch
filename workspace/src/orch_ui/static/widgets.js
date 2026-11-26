@@ -165,7 +165,7 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
- if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
+ if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
  const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
