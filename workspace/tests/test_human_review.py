@@ -25,7 +25,7 @@ def test_new_ticket_is_on_by_default(proj, run, validate):
     assert "human_review" not in t  # no field = on
     assert tickets.human_review(t) is True
     code, out, _ = run("ticket", "show", t["id"])
-    assert "Human review needed: yes" in out
+    assert "I review the result: yes" in out
 
 
 def test_older_ticket_without_field_counts_as_on():
@@ -41,8 +41,8 @@ def test_person_makes_a_ticket_with_it_off(proj, run, validate):
     t = read(proj, _id(out))
     validate(t)
     assert t["human_review"] is False
-    assert texts(proj, t["id"])[-1] == "Human review needed: off"
-    assert "Human review needed: no" in run("ticket", "show", t["id"])[1]
+    assert texts(proj, t["id"])[-1] == "I review the result: off"
+    assert "I review the result: no" in run("ticket", "show", t["id"])[1]
 
 
 def test_person_turns_it_off_and_on_again(proj, run, validate, new_ticket):
@@ -51,14 +51,14 @@ def test_person_turns_it_off_and_on_again(proj, run, validate, new_ticket):
     assert code == 0, err
     validate(read(proj, tid))
     assert read(proj, tid)["human_review"] is False
-    assert texts(proj, tid)[-1] == "Human review needed: off"
+    assert texts(proj, tid)[-1] == "I review the result: off"
     rev = read(proj, tid)["revision"]
     assert run("ticket", "edit", tid, "--human-review", "no", "--by", "human:tester")[0] == 0
     assert read(proj, tid)["revision"] == rev  # no change: no write, no extra history line
     code, _, err = run("ticket", "edit", tid, "--human-review", "yes", "--by", "human:tester")
     assert code == 0, err
     assert "human_review" not in read(proj, tid)
-    assert texts(proj, tid)[-1] == "Human review needed: on"
+    assert texts(proj, tid)[-1] == "I review the result: on"
 
 
 def test_an_agent_cannot_turn_it_off(proj, run, new_ticket, monkeypatch):
