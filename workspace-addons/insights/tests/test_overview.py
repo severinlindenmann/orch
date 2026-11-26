@@ -16,9 +16,9 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from orch_insights import server
 from orch_insights.lists import build_list
 from orch_insights.overview import ERROR, PARTIAL, build_overview
-from orch_insights import server
 from orch_insights.server import read_counts
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"

@@ -166,7 +166,7 @@ def answer(root: Path, argv: list[str]):
         and a[-2:-1] == ["--ext"]
         and a[2:-2] in ([], ["--all"])
         and _EXT_NAME.fullmatch(a[-1])
-    ):  # an add-on's own tickets (Factory's page and watcher): at 10,000 tickets about 800 of them, several MB
+    ):  # an add-on's own tickets (Factory's page and watcher): at 10,000 tickets about 800, several MB
         # through the read worker's pipe and parsed twice took about a second (ORCH-2288)
         return _plain(root, ticket_rows(root, all_=a[2:-2] == ["--all"], ext=a[-1]))
     if a[:2] == ["ticket", "show"] and len(a) == 3 and tickets._ID_RE.fullmatch(a[2]):

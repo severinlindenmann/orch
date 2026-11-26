@@ -22,9 +22,11 @@ def test_a_read_goes_through_the_read_worker_with_the_cleaned_environment(ws, mo
 
     monkeypatch.setattr(orch, "reads", Reads, raising=False)
     monkeypatch.setitem(__import__("sys").modules, "orch.reads", Reads)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no process")))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no process"))
+    )
     assert server.read_json(ws, None, ["record", "counts", "--json"]) == {"schema": "orch.counts/1"}
-    (root, argv, timeout, env), = seen
+    ((root, argv, timeout, env),) = seen
     assert (str(root), argv, timeout) == (str(ws), ["record", "counts", "--json"], 10)
     assert env["ORCH_ROOT"] == str(ws)
 
@@ -52,14 +54,15 @@ def test_a_refused_read_is_unknown_and_a_worker_miss_runs_the_command(ws, monkey
     monkeypatch.setattr(subprocess, "run", run)
     assert server.read_json(ws, None, ["usage", "list", "--json"]) is None  # refused: no command after it
     assert started == []
-    assert server.read_json(ws, None, ["usage", "list", "--json"]) == {"ok": True}  # the worker could not answer
+    assert server.read_json(ws, None, ["usage", "list", "--json"]) == {
+        "ok": True
+    }  # the worker could not answer
     assert started and started[0][-3:] == ["usage", "list", "--json"]
 
 
 def test_a_test_orch_keeps_its_own_process(ws, fake_orch, monkeypatch):
     monkeypatch.setattr(server, "_by_worker", lambda *a: (_ for _ in ()).throw(AssertionError("no worker")))
     assert server.read_counts(ws, fake_orch)["schema"] == "orch.counts/1"
-
 
 
 def test_the_slow_tokens_read_keeps_its_own_process(ws, monkeypatch):
@@ -74,6 +77,7 @@ def test_the_slow_tokens_read_keeps_its_own_process(ws, monkeypatch):
     monkeypatch.setattr(subprocess, "run", run)
     assert server.read_json(ws, None, ["tokens", "--days", "30", "--json"]) == {"models": []}
     assert started[0][-4:] == ["tokens", "--days", "30", "--json"]
+
 
 def test_one_counts_read_answers_every_ask_at_once(ws, monkeypatch):
     calls = []

@@ -45,7 +45,6 @@ def test_same_answer_as_the_command(three, run, argv):
     assert reads.answer(root, argv) == json.loads(out)
 
 
-
 def test_an_addons_own_tickets_same_answer(three, run):
     """`ticket list [--all] --ext <add-on>` (Factory's page and watcher) is answered here too (ORCH-2288)."""
     root, ids = three
@@ -63,6 +62,7 @@ def test_an_addons_own_tickets_same_answer(three, run):
         ids[0],
         ids[2],
     ]
+
 
 _AGES = {"seconds", "idle_seconds", "age_seconds"}
 
