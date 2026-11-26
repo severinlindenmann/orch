@@ -353,6 +353,7 @@ def _outer_matches(m: dict, s: dict) -> bool:
 # Fields the signed bytes speak for: what is delivered is the signed value, never the relay's outer copy, and
 # an outer copy the signed bytes do not have is dropped (outside review, ORCH-1206).
 _SIGNED_SAYS = (
+    "v",
     "id",
     "from",
     "type",
@@ -364,18 +365,19 @@ _SIGNED_SAYS = (
     "expires_ms",
     "files",
     "origin",
+    "created_ms",
 )
 
 
-def _from_signed(m: dict, s: dict) -> dict:
+def _from_signed(m: dict, s: dict, me: str) -> dict:
     out = dict(m)
     for k in _SIGNED_SAYS:
         if k in s:
             out[k] = s[k]
         else:
             out.pop(k, None)
-    if isinstance(s.get("to"), str):
-        out["to"] = s["to"]
+    # a string `to` was compared above; a group's signed `to` names the group, so the copy here is ours
+    out["to"] = s["to"] if isinstance(s.get("to"), str) else me
     return out
 
 
@@ -570,7 +572,7 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
             return _refuse(st, m, e.code)
         signed = msgsig.read_envelope(env).signed
         digest = hashlib.sha256(signed).hexdigest()
-        out = _from_signed(m, s)
+        out = _from_signed(m, s, me)
         out["created_at"] = _iso(s["created_ms"])
         out["signed"] = {"origin": s["origin"], "created_ms": s["created_ms"], "key_id": env.get("key_id")}
         if "expires_ms" in s:

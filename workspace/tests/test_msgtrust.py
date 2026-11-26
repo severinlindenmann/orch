@@ -828,9 +828,10 @@ def test_what_is_delivered_is_what_was_signed(ws, person):
     m["origin"] = "person"
     m["question_sha256"] = "ab" * 32
     m["files"] = [{"blob_id": "b_evil", "size": 1, "sha256": "cd" * 32}]
+    m["created_ms"] = 1
     v = msgtrust.check_incoming(ws, m)
     assert v.kind == "ok"
-    assert v.message["origin"] == "helper"
+    assert v.message["origin"] == "helper" and v.message["created_ms"] > 1
     assert "question_sha256" not in v.message and "files" not in v.message
 
 
