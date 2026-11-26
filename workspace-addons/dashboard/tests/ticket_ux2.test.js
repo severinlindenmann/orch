@@ -56,6 +56,23 @@ test('Tickets toolbar: search and a Person choice when there is more than one ow
   assert.ok(parts.some(n => n.attrs['data-key'] === 'ticket-person'), 'a Person choice');
   assert.ok(!parts.some(n => n.attrs.className === 'btn ghost seg'), 'no All / Mine toggle');
 });
+test('ORCH-2091: the toolbar is layout, filters, search, then the view chips on their own row', () => {
+  const c = listCtx({URLSearchParams, iconEl:() => null, tickets:() => [{id:'a', owner:'anna'}, {id:'b', owner:'ben'}]});
+  const bar = vm.runInContext('viewToggle()', c);
+  assert.deepEqual(bar.children.map(n => n.attrs['data-key'] || n.attrs.className), ['view-toggle', 'ticket-person', 'grow', 'search-field', 'view-chips']);
+});
+test('ORCH-2091: no tickets at all shows the master empty state with one sentence and New ticket, no toolbar', () => {
+  const made = [];
+  const state = o => { made.push(o); const b = h('div', {className:'state'}); b.append = k => b.children.push(k); return b; };
+  const c = listCtx({newButton:() => h('button', {className:'btn primary', 'data-action':'new'}, 'New ticket')});
+  c.window.UI.state = state;
+  const box = c.ticketsEmpty();
+  assert.equal(made[0].title, 'No tickets yet');
+  assert.equal(made[0].text.split(/[.!?](\s|$)/).filter(s => s && s.trim()).length, 1, 'one sentence');
+  assert.equal(box.dataset.key, 'empty');
+  assert.equal(text(box.children.at(-1)), 'New ticket');
+  assert.match(listSrc, /tickets\(\)\.length \? viewToggle\(\) : null/);
+});
 test('Dash 02: rows, board cards and step names carry no ticket key', () => {
   assert.doesNotMatch(listSrc, /t\.key \+ ' '|mono key|part\.key/);
   const c = {clean:String}; vm.createContext(c);

@@ -34,6 +34,9 @@ On `503 transcription_off`, `502`, `429` or no network, fall back to on-device s
 
 ## Data storage
 Token and phone id in the Keychain. Nothing else is stored; lists come from the relay.
+The Keychain item is this device only (no backup, no iCloud Keychain) and is updated in place. The token goes only to an
+`https` relay (plain `http` just to this device's own loopback, for the Simulator e2e), and a redirect that leaves the relay
+is not followed. An invitation link taken from the clipboard is removed from it (the code works once).
 
 ## Tests
 - T0: `xcodebuild test -scheme OrchMobile -only-testing:OrchMobileTests/RelayClientTests -destination 'platform=iOS Simulator,name=iPhone 16'`.

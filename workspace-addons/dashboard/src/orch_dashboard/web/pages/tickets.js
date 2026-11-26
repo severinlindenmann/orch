@@ -292,7 +292,7 @@ function ticketFilters() {
   const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, boardShort(t.title, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
-  return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
+  return [group, person, h('span', {className:'grow'}), h('label', {className:'search-field'}, input)];
 }
 // The Person choices: one [key, name] per person (ownerKey), named as "You: ..." says when it is the person, else the
 // first spelling that starts with a capital letter.
@@ -440,8 +440,9 @@ function whenLine(t) {
 let ticketView = 'list';
 try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
-const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+// Two steady rows at every width (as the mockup): layout, Part of, Person and search; then the view chips on their own row.
+const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'},
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters(), viewChips());
 /* ORCH-576 (owner picked draft C, 18 Nov): every status is a row of small tiles, the most urgent row first. A tile is
    the title (2 lines) and one line: tasks, ONE signal, the ticket it is part of, one add-on icon, ⋯. Kit: .status-row,
    .ticket-tile, .parts-bar, .kind-tag, .scope-bar (widgets.css). Drag, the ⋯ menu and the moves are the same as before. */
@@ -869,7 +870,7 @@ function ticketTable(visible) {
   for (const group of rel.groups) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, folded ? '› ' : '⌄ '), group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
     if (folded) continue;
@@ -884,7 +885,7 @@ function ticketTable(visible) {
     // a search shows its hits: every group opens while a search is typed; folding then lasts for that search (ORCH-58)
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, (folded ? '› ' : '⌄ ') + icon + ' '), group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (folded) continue;
@@ -1107,14 +1108,23 @@ function list() {
   syncTicketAddress();
   const visible = filteredTickets();
   // ORCH-1699: no ticket at all: no views, filters or search, only the first step
-  if (!tickets().length) return fragment(heading('Tickets'), firstStep('No tickets yet'));
+  if (!tickets().length) return fragment(heading('Tickets'), ticketsEmpty());
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
-  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
+  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board') return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar') return fragment(top, calendarView(visible));
   return fragment(top, ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null);
+}
+// No tickets at all: the master empty state with one sentence and New ticket (the page's one filled button).
+function ticketsEmpty() {
+  const text = 'Describe a job in plain words; a helper works on it and asks you only when it needs a decision.';
+  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
+  const add = typeof newButton === 'function' ? newButton() : null;
+  if (add) box.append(add);
+  box.dataset.key = 'empty';
+  return box;
 }
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.

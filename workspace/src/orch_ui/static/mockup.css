@@ -206,6 +206,7 @@ body:where(.mk-home-states)[data-preview=loading] .column-heading:after{inset:8p
 :where(body.mk-board-new) #file-list li,:where(body.mk-board-new)#file-list li{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:4px 0}
 :where(body.mk-board-new) #file-list li span,:where(body.mk-board-new)#file-list li span{flex:1;overflow-wrap:anywhere}
 :where(body.mk-board-new) #file-error:empty,:where(body.mk-board-new)#file-error:empty{display:none}
+:where(body.mk-board-new) #epic-add,:where(body.mk-board-new)#epic-add{justify-self:start}
 :where(body.mk-board-new) .new-options>div,:where(body.mk-board-new).new-options>div{position:relative;display:grid;align-content:start;gap:8px}
 :where(body.mk-board-new) .new-options select,:where(body.mk-board-new).new-options select{font-size:12px;width:100%}
 :where(body.mk-board-new) .date-picker,:where(body.mk-board-new).date-picker{position:absolute;right:0;top:70px;z-index:5;width:292px;padding:12px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow);animation:page-in 100ms ease}

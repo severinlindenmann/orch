@@ -866,8 +866,11 @@ test('ORCH-1699: an empty workspace shows one first step on Home and Tickets, no
   assert.match(JSON.stringify(step[0]), /Make your first ticket.*New ticket/);
   assert.doesNotMatch(text, /All 0 tickets|all-tickets|new-ticket-phone|finished-today|All clear/);
   vm.runInContext("ticketSearch = 'x'", c);
+  const originalH = c.h;
+  c.h = (...args) => ({...originalH(...args), dataset:{}, append(child) { this.children.push(child); }});
+  c.newButton = () => c.h('button', {className:'btn primary'}, 'New ticket');
   const list = c.list(), words = JSON.stringify(list);
-  assert.equal(nodes(list, n => n.attrs?.['data-key'] === 'first-step').length, 1);
+  assert.equal(nodes(list, n => n.dataset?.key === 'empty').length, 1);
   assert.match(words, /No tickets yet/);
   assert.doesNotMatch(words, /board-tools|How to show tickets|No tickets match|Backlog →/, 'no views, filters or search for zero tickets');
   assert.equal(nodes(list, n => n.tag === 'button' || n.tag === 'a').length, 1, 'one button: New ticket');
