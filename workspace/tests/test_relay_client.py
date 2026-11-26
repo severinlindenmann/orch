@@ -1746,9 +1746,15 @@ def test_allow_question_once_applied_once(proj, run, rel):
     t = _allow_ticket_of(run)
     assert len(_tickets(run)) == 1 and t["status"] == "waiting"
     q = t["questions"][0]
-    assert q["kind"] == "relay:allow" and q["options"][0] == "Allow this task" and q["options"][2] == "Decline"
+    assert (
+        q["kind"] == "relay:allow" and q["options"][0] == "Allow this task" and q["options"][2] == "Decline"
+    )
     assert q["options"][1].startswith("Always allow tasks from ")
-    assert q["text"].startswith("Task from ") and "Add rate limit" in q["text"] and "If you allow it" in q["text"]
+    assert (
+        q["text"].startswith("Task from ")
+        and "Add rate limit" in q["text"]
+        and "If you allow it" in q["text"]
+    )
     assert q["action"]["message"] == mid and q["action"]["peer"] == PEER
     assert relay.allowed(proj, msg(mid, "delegate", {"title": "Add rate limit"})) is None
     # answered on the dashboard; the next relay command applies it once
@@ -2356,7 +2362,9 @@ def test_view_without_messages_shows_an_empty_thread_and_the_next_step(proj, run
     v = json.loads(run("relay", "view", "--json")[1])
     convs = next(b for b in v["blocks"] if b["type"] == "conversations")
     assert [(c["name"], c["messages"]) for c in convs["items"]] == [("Reports", [])]
-    assert [b["title"] for b in _lists(v)] == ["Workspaces"]  # no empty "Recent messages" card beside the thread
+    assert [b["title"] for b in _lists(v)] == [
+        "Workspaces"
+    ]  # no empty "Recent messages" card beside the thread
 
 
 def test_view_without_a_workspace_says_it_is_the_admins_step(proj, run, rel):
@@ -3066,15 +3074,20 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     assert "task" not in sent[1] and "about" not in sent[1]
 
 
-def test_allow_words_rp4(proj, run, rel):
-    """RP4 A: the three buttons say what they do; the sender's own words are on the card; old words still count."""
+    """RP4 A: three buttons that say what they do; the sender's words are on the card; old words count."""
+    """RP4 A: the three buttons say what they do; the sender's words are on the card; old words still count."""
     from orch import relay
 
     assert relay.allow_choice("Allow this task") == "once"
     assert relay.allow_choice("  always allow tasks from  Marketing ") == "always"
     assert relay.allow_choice("Decline") == "no"
     assert relay.allow_choice("Always allow tasks from ") is None
-    assert [relay.allow_choice(w) for w in ("Allow once", "Always", "Ignore", "No")] == ["once", "always", "no", "no"]
+    assert [relay.allow_choice(w) for w in ("Allow once", "Always", "Ignore", "No")] == [
+        "once",
+        "always",
+        "no",
+        "no",
+    ]
     assert relay.allow_choice("maybe") is None
     connect(run, rel)
     mid, deny = "m_deleg0000000rp41", "m_deleg0000000rp42"
@@ -3092,3 +3105,58 @@ def test_allow_words_rp4(proj, run, rel):
     assert [a["body"]["mode"] for a in allows] == ["permanent"]
     dropped = json.loads(run("ticket", "show", by_msg[deny]["id"], "--json")[1])
     assert dropped["status"] == "dropped"
+
+
+def test_needs_new_contact_on_home(proj, run, rel, monkeypatch):
+    """RP3 Home line: a workspace the admin paired, taken in on its first message, shows on Home as one quiet
+    line (an OK notice, not counted) for three days; one a person accepted, an old one or a phone does not."""
+    import datetime as dt
+
+    from orch import msgtrust, relay_view
+
+    now = dt.datetime(2026, 11, 26, 12, 0, tzinfo=dt.UTC)
+    base = {"kind": "workspace", "state": "accepted", "accepted_by": "relay-pairing"}
+    monkeypatch.setattr(
+        msgtrust,
+        "contacts",
+        lambda root: [
+            {**base, "id": "ws_marketing01", "name": "Marketing", "accepted_at": "2026-11-26T09:00:00Z"},
+            {**base, "id": "ws_old00000001", "name": "Old", "accepted_at": "2026-11-20T09:00:00Z"},
+            {
+                **base,
+                "id": "ws_person00001",
+                "name": "Hand",
+                "accepted_at": "2026-11-26T09:00:00Z",
+                "accepted_by": None,
+            },
+            {
+                **base,
+                "id": "ph_phone000001",
+                "name": "Phone",
+                "kind": "phone",
+                "accepted_at": "2026-11-26T09:00:00Z",
+            },
+            {
+                **base,
+                "id": "ws_held0000001",
+                "name": "Held",
+                "state": "new_key",
+                "accepted_at": "2026-11-26T09:00:00Z",
+            },
+        ],
+    )
+    rows = relay_view.needs(proj, now)
+    assert [r["id"] for r in rows] == ["relay:new-contact:ws_marketing01"]
+    r = rows[0]
+    assert (
+        r["source"] == "relay"
+        and r["ticket"] is None
+        and r["tone"] == "warn"
+        and r["since"] == "2026-11-26T09:00:00Z"
+    )
+    assert "Marketing" in r["text"] and "connected by your admin" in r["text"] and "Relay page" in r["text"]
+    assert r["actions"] == [{"label": "OK", "later": True}]
+    monkeypatch.setattr(msgtrust, "contacts", lambda root: [])
+    connect(run, rel)
+    code, txt = run("relay", "needs")[:2]
+    assert txt.startswith("Nothing new.") and rel.sent == []  # no network, nothing sent

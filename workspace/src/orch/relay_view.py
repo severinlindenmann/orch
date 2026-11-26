@@ -361,7 +361,10 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
         if m["type"] == "file":
             item["file"] = {"name": line, **({"size": extra} if extra else {})}
         elif m["type"] in ("delegate", "start"):
-            item["task"] = {"title": line, "note": "Asks your helper to work on it. You decide here whether it may."}
+            item["task"] = {
+                "title": line,
+                "note": "Asks your helper to work on it. You decide here whether it may.",
+            }
         else:
             item["text"] = line
         if m["type"] in ("text", "file"):  # where orch passed it on (#2051)
@@ -402,10 +405,22 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
             continue
         pid, name = w["id"], plain(w.get("name") or w["id"], 60)
         msgs = sorted(by_peer.get(pid, []), key=lambda x: x[0])[-CONV_MESSAGES:]
-        row: dict = {"id": pid, "name": name, "messages": [it for _, it in msgs], "_at": msgs[-1][0] if msgs else ""}
+        row: dict = {
+            "id": pid,
+            "name": name,
+            "messages": [it for _, it in msgs],
+            "_at": msgs[-1][0] if msgs else "",
+        }
         if w.get("description"):
             row["about"] = plain(w["description"], 80)
-        last = next((it.get("text") or (it.get("file") or {}).get("name") or (it.get("task") or {}).get("title") for _, it in reversed(msgs) if it), "")
+        last = next(
+            (
+                it.get("text") or (it.get("file") or {}).get("name") or (it.get("task") or {}).get("title")
+                for _, it in reversed(msgs)
+                if it
+            ),
+            "",
+        )
         if last:
             row["last"] = plain(last, 60)
         wait = waiting.get(pid, [])
@@ -469,7 +484,12 @@ def view(root: Path) -> dict:
             f"{waiting} message{s} wait to be sent: {problem}"
             if problem
             else f"The relay can't be reached. You can keep writing. {waiting} message{s} "
-            f"wait{'s' if waiting == 1 else ''} here and go{'es' if waiting == 1 else ''} out by itself. Nothing is lost."
+            + (
+                "waits here and goes out by itself."
+                if waiting == 1
+                else "wait here and go out by themselves."
+            )
+            + " Nothing is lost."
         )
         out["notice_tone"] = "warn"
         out["header"] = {"status": {"label": "Waiting to send", "tone": "warn"}}
@@ -623,3 +643,44 @@ def view(root: Path) -> dict:
     if not convs:
         out["blocks"][-1]["span"] = "half"
     return out
+
+
+NEW_CONTACT_DAYS = 3
+
+
+def needs(root: Path, now: dt.datetime | None = None) -> list[dict]:
+    """Home rows (contracts/needs.schema.json) for a workspace the admin paired and this one took in on its
+    first message (RP3 A): one quiet line each, for three days; OK puts it off for the day. No network."""
+    from orch import msgtrust
+
+    now = now or dt.datetime.now(dt.UTC)
+    rows = []
+    for c in msgtrust.contacts(root):
+        if (
+            c.get("kind") != "workspace"
+            or c.get("accepted_by") != "relay-pairing"
+            or c.get("state") != "accepted"
+        ):
+            continue
+        try:
+            since = dt.datetime.fromisoformat(str(c.get("accepted_at")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if since.tzinfo is None or not dt.timedelta(0) <= now - since <= dt.timedelta(days=NEW_CONTACT_DAYS):
+            continue
+        name = plain(c.get("name") or "Another workspace", 60)
+        rows.append(
+            {
+                "id": f"relay:new-contact:{c['id']}",
+                "source": "relay",
+                "kind": "relay:new-contact",
+                "ticket": None,
+                "title": f"New contact: {name}",
+                "text": f"New contact: {name}, connected by your admin. "
+                "Their messages are on the Relay page.",
+                "tone": "warn",
+                "since": since.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "actions": [{"label": "OK", "later": True}],
+            }
+        )
+    return rows

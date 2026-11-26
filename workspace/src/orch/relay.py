@@ -2475,8 +2475,8 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
 
 # ---- phone texts and the allow question (SA-01, SA-12, UX-02) -----------------------------------
 
-# RP4 A (owner, 25 Nov 2026): three buttons that each say what they do. The middle one names the sender, so the
-# options are made per question (allow_options); old answers ("Allow once", "Always", "Ignore", "No") still count.
+# RP4 A (owner, 25 Nov 2026): three buttons that each say what they do. The middle one names the sender,
+# so the options are made per question (allow_options); old answers (Allow once, Always, Ignore, No) count.
 ALLOW_OPTIONS = ("Allow this task", "Always allow tasks from {peer}", "Decline")
 _ALWAYS_PREFIX = "always allow tasks from "
 
@@ -3097,8 +3097,8 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
         text = (
             f"Task from {peer}: {task}"
             + (f'\n\n"{said}"' if said and said != task else "")
-            + f"\n\nIf you allow it, a helper here works on it as a new ticket, with this workspace's files and "
-            f"tools. It may send results, including files, back to {peer}."
+            + "\n\nIf you allow it, a helper here works on it as a new ticket, with this workspace's files "
+            f"and tools. It may send results, including files, back to {peer}."
         )
     options = ["once", "always", "no"] if grouped else allow_options(peer)  # G11 wire words for a group
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
@@ -3216,7 +3216,6 @@ def apply_allow_answers(root: Path) -> list[str]:
                     f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} to ignore it"
                 )
                 continue
-            from orch import chat_groups
 
             choice = {"once": "once", "always": "permanent", "no": "ignore"}.get(allow_choice(q["answer"]))
             if choice is None:
