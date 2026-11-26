@@ -1549,11 +1549,11 @@ def person_names(root: Path) -> dict:
 
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
-    """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
+    """What the Settings page shows: agents and the full add-on installation catalog."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_agents = pool.submit(run_orch, orch_bin, ["agents", "--json"], root)
-        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--catalog", "--json"], root)
         f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
         f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
