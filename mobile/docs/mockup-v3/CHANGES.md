@@ -102,6 +102,9 @@ New page `team-chat.html`: in a ticket chat a strip under the title names who is
 ## 25 Nov fingerprint text size (ORCH-2128)
 
 The fingerprint to compare (Accept card on a workspace chat, "This phone" in Settings) is monospaced and follows the phone's text size like the words around it (15 pt at the default size). At accessibility sizes it wraps between groups of four, stays selectable as one value, and VoiceOver reads the whole value. Not mocked: the mockup has no large-text mode and no fingerprint screen.
+## 25 Nov who replaces an invitation (ORCH-2129)
+
+Setup and Add workspace no longer send a recipient to orch on their own computer. The hint says "Ask the person who set up orch for you to send an invitation."; the steps behind it are titled "If you are the admin" and name the relay admin page and Add phone. An expired, used or unknown link says "… Ask the person who invited you for a new one." (the same words as the relay's error), and so does a link that does not look right.
 
 ## 25 Nov voice play button says its next action (ORCH-2064)
 

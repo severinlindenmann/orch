@@ -832,7 +832,8 @@ final class AppModelV3Tests: XCTestCase {
         await m.setMute(MockRelay.pilatus, .forever); XCTAssertTrue(m.workspace(MockRelay.pilatus)!.isMuted())
         await m.setMute(MockRelay.pilatus, .off); XCTAssertFalse(m.workspace(MockRelay.pilatus)!.isMuted())
         let added = await m.redeemInvitation(PairingLink.sample.link); XCTAssertEqual(added.map(\.id), ["ws_home000001"]); XCTAssertEqual(m.workspaces.count, 3)
-        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty); XCTAssertNotNil(m.message)
+        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty)
+        XCTAssertEqual(m.message, "This invitation has expired or was already used. Ask the person who invited you for a new one.", "a used link names who can replace it")
         await m.removeWorkspace(MockRelay.reports)
         XCTAssertNil(m.workspace(MockRelay.reports)); XCTAssertTrue(m.messages.allSatisfy { $0.workspaceId != MockRelay.reports })
     }
