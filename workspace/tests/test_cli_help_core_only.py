@@ -55,7 +55,9 @@ def test_no_help_screen_uses_a_never_word(screens):
     for name, text in screens:
         # `agent:<tool>` is the actor key the CLI keeps (docs/wording.md), not the screen word
         # the command and flag names `agents`, `config agent` and `--agent` are CLI words too
-        text = re.sub(r"agent:<tool>|--agent\b|orch agents|orch config agent|^\s+agents?\s{2,}", "", text, flags=re.M)
+        text = re.sub(
+            r"agent:<tool>|--agent\b|orch agents|orch config agent|^\s+agents?\s{2,}", "", text, flags=re.M
+        )
         words = wording.never_words(text)
         bad += [f"{name}: {w}" for w in words]
     assert not bad, "R7.5: words from docs/wording.md 'never use' in help:\n" + "\n".join(sorted(set(bad)))

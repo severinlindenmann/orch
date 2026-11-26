@@ -91,14 +91,11 @@
   "agent": 1
  },
  "workspace/src/orch/cli.py": {
-  "agent": 7
+  "agent": 1
  },
  "workspace/src/orch/cli_config.py": {
   "Agents": 1,
-  "agent": 7
- },
- "workspace/src/orch/cli_diag.py": {
-  "agent": 1
+  "agent": 6
  },
  "workspace/src/orch/cli_leave.py": {
   "agent": 2
@@ -110,7 +107,7 @@
   "agent": 1
  },
  "workspace/src/orch/cli_run.py": {
-  "agent": 4
+  "agent": 1
  },
  "workspace/src/orch/collect_claude.py": {
   "Agent": 1
