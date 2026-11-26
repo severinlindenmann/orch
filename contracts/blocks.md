@@ -1,6 +1,6 @@
 # Blocks: `orch.blocks/1`
 
-Results that stay (ticket Work tab, Check result, Focus job view, the phone) are drawn from the same 10 blocks on every
+Results that stay (ticket Work tab, Test results, Focus job view, the phone) are drawn from the same 10 blocks on every
 surface: the web kit (both copies: `workspace/src/orch_ui/static/` and the dashboard's `web/kit/`) and SwiftUI.
 
 Schema: `blocks.schema.json`. Shared fixtures: `vectors/blocks/*.json` (one file per case, used by validate.py, the web kit
@@ -10,7 +10,7 @@ tests and the SwiftUI tests; both renderers must pass all of them to release). T
 
 `{"schema": "orch.blocks/1", "from": "job" | "agent" | "orch", "title"?, "blocks": [ … ]}`, at most 50 blocks and 64 KB
 (compact UTF-8 JSON). `from` decides the label: `job` → "reported by the job" (never a passed check, never a Needs-you card,
-job-events.md), `agent` → the agent's proof (Check result, where the person decides Looks good / Send back), `orch` →
+job-events.md), `agent` → the agent's proof (Test results, where the person decides Looks good / Send back), `orch` →
 computed by orch.
 
 | type | fields | limits |

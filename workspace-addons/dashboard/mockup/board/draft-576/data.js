@@ -12,7 +12,7 @@ window.D576 = {
   ],
   boardOrder: ['backlog','todo','working','needs','waiting','check','done','wontdo'],
   t: [
-    {k:'ORCH-428',lane:'check',title:'Away mode: answer cards and accept merged tickets while the owner is away',tasks:[2,2],age:'just now',act:'Check result'},
+    {k:'ORCH-428',lane:'check',title:'Away mode: answer cards and accept merged tickets while the owner is away',tasks:[2,2],age:'just now',act:'Test results'},
 
     {k:'ORCH-518',lane:'working',title:'Stress test: orch and the dashboard stay fast with 10,000 tickets',tasks:[1,6],age:'3 min ago',subs:[
       {k:'ORCH-519',title:'Seed script for big test workspaces (500, 2,000, 10,000, 50,000 tickets)',s:'done',when:'today'},
