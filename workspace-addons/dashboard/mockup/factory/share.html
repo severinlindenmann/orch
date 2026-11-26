@@ -69,9 +69,16 @@
 <div class="actions"><button class="btn primary sm" type="button">Allow once</button><button class="btn sm" type="button">Always</button><button class="btn ghost sm" type="button">No</button></div></section>
 </section>
 <section class="f-section" aria-labelledby="s6"><h2 id="s6">6 · When something goes wrong</h2>
-<section class="card f-card"><div class="card-h"><h3>Ask: a file holds a password</h3></div>
-<label class="check-label"><input type="checkbox" disabled> window-poster.pdf · <strong>not sent: it looks like it holds a password (line 3)</strong></label>
-<p class="meta">Found when the dialog opens, before you press Send. Untick it or remove the password from the file.</p></section>
+<section class="card f-card"><div class="card-h"><h3>Ask: a picture holds a password</h3></div>
+<label class="check-label"><input type="checkbox" disabled><span> Window poster · before and after (2 pictures)<strong> · not sent: password or key found</strong></span></label>
+<label class="check-label"><input type="checkbox" checked><span> Opening hours board · before and after (1 picture)</span></label>
+<div class="stack" role="status"><div class="banner attn"><div class="grow"><strong>Password or key found · “Window poster” is not sent</strong><p>after.png looks like it holds a password or a key. The item and its 2 pictures stay here.</p></div></div>
+<p class="meta">Still sent: “Opening hours board” (1 of 2 items), plus the title, the line and the question above.</p></div>
+<p class="meta">Checked when the dialog opens, before you press Send. Send checks again before anything leaves.</p></section>
+<section class="card f-card"><div class="card-h"><h3>Ask: a picture could not be checked</h3></div>
+<label class="check-label"><input type="checkbox" disabled><span> Window poster · before and after (2 pictures)<strong> · not sent: could not check</strong></span></label>
+<div class="stack" role="status"><div class="banner attn"><div class="grow"><strong>Could not check · “Window poster” is not sent</strong><p>after.png is missing or too big. The item and its 2 pictures stay here.</p></div></div>
+<p class="meta">No items ticked. Send still sends the title, the line and the question above.</p></div></section>
 <section class="card f-card"><div class="card-h"><h3>Ask: delivery states</h3></div>
 <div class="list-row"><span class="pill"><span data-st="todo"></span>Queued</span><span class="grow">Design is offline. Your question goes out when it is back.</span></div>
 <div class="list-row"><span class="pill needs"><span data-st="needs"></span>Failed</span><span class="grow">Not delivered: Design is no longer connected to you.</span><button class="btn outline sm" type="button">Send again</button></div></section>
