@@ -1092,14 +1092,12 @@ main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
+  const convSend = event.target.closest('[data-conv-send]');
+  if (convSend) { convSendClick(convSend); return; }
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
   // checked id, the fingerprint that was shown and the name typed beside it.
-  const acceptControl = event.target.closest('[data-contact-accept]');
-  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
-  const withdrawControl = event.target.closest('[data-contact-withdraw]');
-  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
@@ -1201,6 +1199,7 @@ main.addEventListener('click', async event => {
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'relay-connect') { await relayConnect(); return; }
+  if (action === 'relay-note') { await relayNote(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);

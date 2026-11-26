@@ -44,6 +44,7 @@ The profile change waits for the owner's approval. Then this skill is rewritten 
     orch relay download <message id> # the file of a file message -> received/
     orch relay outbox                # what is saved but not sent yet (goes out with the next relay command)
     orch relay view                  # who you can reach and the recent messages (the dashboard Relay tab)
+    orch relay needs --json          # Home notices for new contacts connected by your admin (no network)
     orch relay pickups               # texts and files from other workspaces passed on to a ticket, and their runs
     orch relay contacts list         # the workspaces your admin paired with this one, and their state
     orch relay contacts refused      # messages refused as forged or changed

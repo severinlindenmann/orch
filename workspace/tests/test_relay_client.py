@@ -1747,12 +1747,19 @@ def test_allow_question_once_applied_once(proj, run, rel):
     t = _allow_ticket_of(run)
     assert len(_tickets(run)) == 1 and t["status"] == "waiting"
     q = t["questions"][0]
-    assert q["kind"] == "relay:allow" and q["options"] == ["Allow once", "Always", "Ignore"]
-    assert "wants" in q["text"] and "Add rate limit" in q["text"]
+    assert (
+        q["kind"] == "relay:allow" and q["options"][0] == "Allow this task" and q["options"][2] == "Decline"
+    )
+    assert q["options"][1].startswith("Always allow tasks from ")
+    assert (
+        q["text"].startswith("Task from ")
+        and "Add rate limit" in q["text"]
+        and "If you allow it" in q["text"]
+    )
     assert q["action"]["message"] == mid and q["action"]["peer"] == PEER
     assert relay.allowed(proj, msg(mid, "delegate", {"title": "Add rate limit"})) is None
     # answered on the dashboard; the next relay command applies it once
-    run("answer", t["id"], q["id"], "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("answer", t["id"], q["id"], "Allow this task", "--via", "dashboard", "--by", "human:Marco")
     run("relay", "inbox")
     run("relay", "inbox")
     run("relay", "outbox")
@@ -2167,7 +2174,7 @@ def test_delegate_allowed_by_cli_is_one_ticket(proj, run, rel):
     assert a["ticket"] == b["ticket"] == q_ticket and len(_tickets(run)) == 1
     t = json.loads(run("ticket", "show", q_ticket, "--json")[1])
     assert t["title"] == f"From {PEER}: Add rate limit" and t["status"] == "active"
-    assert t["questions"][0]["answer"] == "Allow once"
+    assert t["questions"][0]["answer"] == "Allow this task"
     assert [c["text"] for c in t["checklist"]] == [f"From {PEER}: Code"]
     assert t["ext"]["relay"]["message"] == mid and t["ext"]["relay"]["from"] == PEER
 
@@ -2274,12 +2281,12 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
 
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
-    recent, people = _lists(v)  # messages first, then who you can talk to
+    people = _lists(v)[-1]  # who you can talk to
+    convs = next(b for b in v["blocks"] if b["type"] == "conversations")  # what was said, one thread each
     assert v["notice"].startswith("Connected.") and v["header"] == {
         "status": {"label": "Connected", "tone": "good"}
     }
-    assert recent["span"] == people["span"] == "half"  # two cards side by side
-    assert people["title"] == "Workspaces you can talk to" and people["count"] == 1
+    assert people["title"] == "Workspaces" and people["count"] == 1
     first = people["items"][0]
     assert first["title"] == "Reports" and first["subtitle"] == "Workspace · messages and files"
     assert all(c["label"] != "Messages and files" for c in first["chips"])  # plain text, not a pill
@@ -2294,13 +2301,16 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     ]
     details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
     assert details["You may give them tasks"] == "Not yet"
-    items = recent["items"]
-    assert {i["title"] for i in items} == {"Reports → you", "you → Reports"}
-    assert any("Thanks, got it" in i["subtitle"] for i in items)  # sent text
-    assert any("March numbers bready/b" in i["subtitle"] for i in items)  # received text, markup stripped
-    # file chip first; since ORCH-1762 a workspace's file is picked up like a text, so its chip follows
-    assert any((i.get("chips") or [None])[0] == {"label": "march.csv · 2.0 KB"} for i in items)
-    assert any(c["label"].startswith("Picked up") for i in items for c in i.get("chips") or [])
+    (thread,) = convs["items"]
+    assert thread["name"] == "Reports" and thread["id"] == first["actions"][0]["action"]["args"]["workspace"]
+    msgs = thread["messages"]
+    assert [m["who"] for m in msgs].count("you") == 1 and [m["who"] for m in msgs].count("them") == 2
+    mine = next(m for m in msgs if m["who"] == "you")
+    assert mine["text"] == "Thanks, got it" and mine["state"] == {"label": "Sent", "tone": "good"}
+    assert any(m.get("text") == "March numbers bready/b" for m in msgs)  # received text, markup stripped
+    assert any(m.get("file") == {"name": "march.csv", "size": "2.0 KB"} for m in msgs)  # a file card
+    assert any(m.get("note", "").startswith("Picked up") for m in msgs)  # where orch passed it on
+    assert not any(b.get("title") == "Recent messages" for b in v["blocks"])  # nothing said twice
 
 
 def test_view_not_connected_says_so(proj, run):
@@ -2312,28 +2322,20 @@ def test_view_not_connected_says_so(proj, run):
     assert code == 0 and "not connected" in v["notice"]
     assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
     assert v["blocks"][0]["empty"]["title"] == "Not connected"
+    assert v["notice"].startswith("Relay is not connected")
 
 
-def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
-    """ORCH-969: the page says the add-on's menu name (Contacts), never the folder name.
-
-    Its button names the Settings tab it opens."""
-    import tomllib
-    from pathlib import Path
-
+def test_view_not_connected_says_relay_and_names_the_settings_tab(proj, run):
+    """RP8: the page says Relay, never Contacts or Phone link, and its button opens the Relay settings."""
     from conftest import turn_on
 
-    import orch
-
-    manifest = Path(orch.__file__).parent / "builtin" / "relay" / "orch-addon.toml"
-    label = tomllib.loads(manifest.read_text())["dashboard"]["label"]
     turn_on(proj, "relay")
     v = json.loads(run("relay", "view", "--json")[1])
-    words = [v["notice"]] + [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
-    assert v["notice"].startswith(label + " ")
-    assert not any("relay" in w for w in words), words  # the folder name, lowercase
+    words = [v["notice"]] + [str(b.get("empty", {})) for b in v["blocks"]]
+    assert v["notice"].startswith("Relay ")
+    assert not any("Contacts" in w or "Phone link" in w for w in words), words
     button = v["blocks"][0]["empty"]["button"]
-    assert button == {"label": f"Open {label} settings", "to": "app:settings/phone"}
+    assert button == {"label": "Open Relay settings", "to": "app:settings/phone"}
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
@@ -2355,14 +2357,23 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     assert list(elsewhere.iterdir()) == []
 
 
-def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
+def test_view_without_messages_shows_an_empty_thread_and_the_next_step(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert _lists(v)[0]["items"] == []
-    assert _lists(v)[0]["empty"]["text"] == "Send one from the phone or from another workspace."
-    button = _lists(v)[0]["empty"]["button"]
-    assert button == {"label": "Open Relay settings", "to": "app:settings/phone"}
+    convs = next(b for b in v["blocks"] if b["type"] == "conversations")
+    assert [(c["name"], c["messages"]) for c in convs["items"]] == [("Reports", [])]
+    assert [b["title"] for b in _lists(v)] == [
+        "Workspaces"
+    ]  # no empty "Recent messages" card beside the thread
+
+
+def test_view_without_a_workspace_says_it_is_the_admins_step(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = []
+    connect(run, rel)
+    v = json.loads(run("relay", "view", "--json")[1])
+    assert not any(b["type"] == "conversations" for b in v["blocks"])
+    assert "Your admin chooses who you can write to" in json.dumps(v)
 
 
 @pytest.mark.parametrize(
@@ -3136,3 +3147,91 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     relay.send_question(proj, t, t["questions"][1])
     assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
     assert "task" not in sent[1] and "about" not in sent[1]
+
+
+def test_allow_words_rp4(proj, run, rel):
+    """RP4 A: three buttons that say what they do; the sender's words are on the card; old words count."""
+    from orch import relay
+
+    assert relay.allow_choice("Allow this task") == "once"
+    assert relay.allow_choice("  always allow tasks from  Marketing ") == "always"
+    assert relay.allow_choice("Decline") == "no"
+    assert relay.allow_choice("Always allow tasks from ") is None
+    assert [relay.allow_choice(w) for w in ("Allow once", "Always", "Ignore", "No")] == [
+        "once",
+        "always",
+        "no",
+        "no",
+    ]
+    assert relay.allow_choice("maybe") is None
+    connect(run, rel)
+    mid, deny = "m_deleg0000000rp41", "m_deleg0000000rp42"
+    rel.inbox.append(msg(mid, "delegate", {"title": "Price list", "text": "PDF, valid from 1 Jan."}))
+    rel.inbox.append(msg(deny, "delegate", {"title": "Delete all", "text": "x"}))
+    run("relay", "inbox")
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run) if t.get("ext", {}).get("relay")}
+    q = by_msg[mid]["questions"][0]
+    assert '"PDF, valid from 1 Jan."' in q["text"]
+    run("answer", by_msg[mid]["id"], "q1", q["options"][1], "--via", "dashboard", "--by", "human:Marco")
+    run("answer", by_msg[deny]["id"], "q1", "Decline", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "outbox")
+    allows = [m for m in rel.sent if m["type"] == "allow"]
+    assert [a["body"]["mode"] for a in allows] == ["permanent"]
+    dropped = json.loads(run("ticket", "show", by_msg[deny]["id"], "--json")[1])
+    assert dropped["status"] == "dropped"
+
+
+def test_needs_new_contact_on_home(proj, run, rel, monkeypatch):
+    """RP3 Home line: a workspace the admin paired, taken in on its first message, shows on Home as one quiet
+    line (an OK notice, not counted) for three days; one a person accepted, an old one or a phone does not."""
+    import datetime as dt
+
+    from orch import msgtrust, relay_view
+
+    now = dt.datetime(2026, 11, 26, 12, 0, tzinfo=dt.UTC)
+    base = {"kind": "workspace", "state": "accepted", "accepted_by": "relay-pairing"}
+    monkeypatch.setattr(
+        msgtrust,
+        "contacts",
+        lambda root: [
+            {**base, "id": "ws_marketing01", "name": "Marketing", "accepted_at": "2026-11-26T09:00:00Z"},
+            {**base, "id": "ws_old00000001", "name": "Old", "accepted_at": "2026-11-20T09:00:00Z"},
+            {
+                **base,
+                "id": "ws_person00001",
+                "name": "Hand",
+                "accepted_at": "2026-11-26T09:00:00Z",
+                "accepted_by": None,
+            },
+            {
+                **base,
+                "id": "ph_phone000001",
+                "name": "Phone",
+                "kind": "phone",
+                "accepted_at": "2026-11-26T09:00:00Z",
+            },
+            {
+                **base,
+                "id": "ws_held0000001",
+                "name": "Held",
+                "state": "new_key",
+                "accepted_at": "2026-11-26T09:00:00Z",
+            },
+        ],
+    )
+    rows = relay_view.needs(proj, now)
+    assert [r["id"] for r in rows] == ["relay:new-contact:ws_marketing01"]
+    r = rows[0]
+    assert (
+        r["source"] == "relay"
+        and r["ticket"] is None
+        and r["tone"] == "warn"
+        and r["since"] == "2026-11-26T09:00:00Z"
+    )
+    assert "Marketing" in r["text"] and "connected by your admin" in r["text"] and "Relay page" in r["text"]
+    assert r["actions"] == [{"label": "OK", "later": True}]
+    monkeypatch.setattr(msgtrust, "contacts", lambda root: [])
+    connect(run, rel)
+    code, txt = run("relay", "needs")[:2]
+    assert txt.startswith("Nothing new.") and rel.sent == []  # no network, nothing sent

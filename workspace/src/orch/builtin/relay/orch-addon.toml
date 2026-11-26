@@ -6,6 +6,7 @@ version = "0.1.0"
 description = "Messages and tasks between workspaces and phones."
 docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch"
+needs = true                               # orch relay needs --json: a new contact your admin connected (Home)
 skill = "skills/orch-relay"
 agents_block = "skills/orch-relay/AGENTS-block.md"
 gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", ".agents/skills/orch-relay/workspaces.json"]

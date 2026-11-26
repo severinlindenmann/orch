@@ -20,9 +20,11 @@ const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
+// The built-in add-ons' menu labels come from their own toml (RP8 B: Relay, Publish), never typed here.
+const builtinLabel = name => /^label = "([^"]+)"/m.exec(fs.readFileSync(path.join(__dirname, '..', 'workspace', 'src', 'orch', 'builtin', name, 'orch-addon.toml'), 'utf8'))[1];
 const ADDONS = [['automation', 'Automation', true], ['dashboard-tester', 'Dashboard-tester', false], ['factory', 'Factory', true], ['focus', 'Focus', true],
-  ['insights', 'Insights', true], ['lessons', 'Lessons', true], ['publish', 'Publish', true], ['pull-requests', 'Pull requests', true],
-  ['relay', 'Relay', true], ['services', 'Services', true], ['sync', 'Sync', true], ['usage', 'Usage', true]];
+  ['insights', 'Insights', true], ['lessons', 'Lessons', true], ['publish', builtinLabel('publish'), true], ['pull-requests', 'Pull requests', true],
+  ['relay', builtinLabel('relay'), true], ['services', 'Services', true], ['sync', 'Sync', true], ['usage', 'Usage', true]];
 
 function fixture() {
   const state = JSON.parse(fs.readFileSync(path.join(DASH, 'tests', 'fixtures', 'state-chat-settings.json'), 'utf8'));

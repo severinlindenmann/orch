@@ -118,7 +118,7 @@ test('the chip row is gone: no From my phone checkbox (the New chat picker has Y
   const page = JSON.stringify(c.chatPage());
   assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
   assert.doesNotMatch(page, /Working on/);
-  assert.doesNotMatch(page, /From my phone/); assert.doesNotMatch(page, /"Relay"|phone-link/, 'relay off: no Relay link (R1.1)');
+  assert.doesNotMatch(page, /From my phone/); assert.doesNotMatch(page, /Contacts|"Relay"|phone-link/, 'relay off: no Relay link (R1.1)');
   assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
   assert.match(JSON.stringify(c.chatHeading()), /working on 2 tickets/);
@@ -394,7 +394,7 @@ test('the Relay link shows only while the add-on with the phone panel is on, and
   assert.equal(c.chatPhoneLink(), null, 'another add-on on: still no link');
   c.state.addons.push({name:'relay', dashboard:{label:'Relay', panel:'phone'}});
   const link = c.chatPhoneLink();
-  assert.equal(link.textContent, 'Relay');
+  assert.equal(link.textContent, 'Relay', 'the add-on\'s own menu label');
   assert.equal(link.attrs.href, '#addon/relay');
   assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /#settings/);
 });

@@ -198,24 +198,24 @@ def _contact_withdraw(a):
     return ["relay", "contacts", "withdraw"], [], [_contact_peer(a.get("peer"))]
 
 
-# The one line the phone link's admin page gives ("orch relay connect <url> --workspace ws_… --token orn_…"),
-# pasted into Settings instead of a terminal (ORCH-1693). Only that exact shape is accepted.
+# The line the relay's admin page gives ("orch relay connect <url> --workspace ws_… --token orn_…"), pasted into
+# Settings instead of a terminal (ORCH-1693). The admin's whole text may be pasted (RP1): the first line of that
+# exact shape is found in it and used, nothing else in the text is read or sent anywhere.
 RELAY_LINE = re.compile(
-    r"(?:orch\s+relay\s+connect\s+)?(https?://[^\s\"'<>]+)\s+--workspace\s+(ws_[A-Za-z0-9]{4,40})\s+--token\s+(orn_[A-Za-z0-9_-]{16,200})"
+    r"(?<![^\s`'\"])(?:orch\s+relay\s+connect\s+)?(https?://[^\s\"'<>`]+)\s+--workspace\s+(ws_[A-Za-z0-9]{4,40})\s+--token\s+(orn_[A-Za-z0-9_-]{16,200})(?![^\s`'\"])"
 )
+OTHER_CONNECT = re.compile(r"orch\s+(?!relay\b)[a-z-]+\s+connect\s+$")
 
 
 def _relay_connect(a):
     _actions()._only(a, ("line",))
     line = a.get("line")
-    m = (
-        RELAY_LINE.fullmatch(line.strip().strip("`'\"").strip())
-        if isinstance(line, str) and len(line) <= 600
-        else None
-    )
+    m = RELAY_LINE.search(line) if isinstance(line, str) and len(line) <= 4000 else None
+    if m is not None and OTHER_CONNECT.search(line[: m.start(1)]):
+        m = None  # the line of another add-on (orch publish connect ...) never connects the relay
     if m is None:
         raise _bad(
-            "That is not the line from your phone link. Copy it again from its admin page and paste it here."
+            "I can't find the connect line in that text. Copy the whole text from your admin again and paste it here."
         )
     url, ws, token = m.groups()
     return ["relay", "connect", url], ["--workspace", ws, "--token", token], []

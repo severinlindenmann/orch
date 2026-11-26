@@ -172,6 +172,9 @@ def add_parsers(sub, common) -> None:
         help="this workspace's signing key: its fingerprint, made and registered if needed",
     )
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
+    rel.add_parser(
+        "needs", parents=[common], help="Home lines: a new contact your admin connected (no network)"
+    )
     _add_mobile(rel, common)
     _add_profile(rel)
     _add_contacts(rel, common)
@@ -807,7 +810,7 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "invite", "status", "outbox", "view", "key") and not dry
+        sub not in ("connect", "invite", "status", "outbox", "view", "needs", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
         _key_once(root)
@@ -871,11 +874,18 @@ def run_relay(args, root: Path, out) -> None:
         rows = [
             f"{i['title']}  {i['subtitle']}"
             if b["type"] == "list"
+            else f"{i['name']}  {i.get('last', '')}".strip()
+            if b["type"] == "conversations"
             else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
             for b in v["blocks"]
             for i in b["items"]
         ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
+    elif sub == "needs":
+        from orch import relay_view
+
+        rows = relay_view.needs(root)
+        out(args, rows, "\n".join(r["text"] for r in rows) or "Nothing new.")
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]

@@ -11,10 +11,11 @@ test('sidebar has no Notes link and no Ticket views group', () => {
   assert.doesNotMatch(app, /Ticket views/);
   assert.doesNotMatch(app, /nav-views/);
 });
-test('Relay replaces "Phone & workspaces" and "Contacts" everywhere in the product', () => {
+test('Relay (RP8 B) replaces "Phone & workspaces" and "Contacts" everywhere in the product', () => {
   const toml = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch/builtin/relay/orch-addon.toml'), 'utf8');
   assert.match(toml, /label = "Relay"/);
   assert.match(toml, /title = "Relay"/);
+  assert.doesNotMatch(web('pages/chat.js'), /'phone-link'\}, 'Contacts'/);
   assert.doesNotMatch(web('pages/chat.js'), /Phone & workspaces/);
 });
 test('the Tickets page shows the views as chips (no save chip since ORCH-236)', () => {

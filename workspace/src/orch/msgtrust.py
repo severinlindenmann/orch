@@ -822,6 +822,7 @@ def contacts(root: Path) -> list[dict]:
                 "relay_name": relay_name,
                 "kind": "phone" if peer.startswith("ph_") else "workspace",
                 "accepted_at": keys[0].get("accepted_at"),
+                "accepted_by": keys[0].get("by"),  # relay-pairing: taken in on first contact (RP3 A)
                 "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
                 "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else _kept_fp(c),
