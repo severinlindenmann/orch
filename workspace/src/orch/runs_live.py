@@ -1397,7 +1397,7 @@ def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | Non
     return True
 
 
-# ORCH-2197: a tool's own confirm prompt, read from the whole dialog at the bottom of the pane. Claude's hook
+# ORCH-2197: a tool's own confirm prompt, read from the whole dialog at the bottom of the pane. A tool's hook
 # confirm ("Hook PreToolUse:Bash requires confirmation ... Do you want to proceed? ❯ 1. Yes  2. No") sends no
 # Notification, so the run stayed "working" while the helper waited. Recognised only as a whole: a question
 # that ends in "?", right under it numbered options 1..n with the select cursor on one of them, a "Yes" and a
@@ -1409,7 +1409,7 @@ CONFIRM_TAIL = 60  # rows from the bottom the dialog may take (a long command wr
 _OPTION = re.compile(r"^(?:[>❯›]\s*)?([1-9])\.\s+(\S.*?)\s*$")
 _SELECTED = re.compile(r"^[>❯›]")
 _SEPARATOR = re.compile(r"^[─-╿\-=_.·• ]{10,}$")
-_TOOL_HEAD = re.compile(r"^([A-Z][\w ]{0,30}?) command$")  # "Bash command" (Claude's title of a shell call)
+_TOOL_HEAD = re.compile(r"^([A-Z][\w ]{0,30}?) command$")  # "Bash command" (a tool's title of a shell call)
 _HOOK_HEAD = re.compile(r"^Hook \S+ requires confirmation", re.IGNORECASE)
 _SIDES = "│┃║|"  # a dialog drawn in a box: its side bars are not text
 
@@ -1491,7 +1491,7 @@ def confirm_prompt(pane: str) -> dict | None:
         ):  # a boxed dialog has no inner lines: any line is the command's own
             unclear = bool(seps)
         elif len(seps) == 2 and seps[0] <= 2 and seps[1] == filled_body[-1]:
-            body = body[seps[0] + 1 : seps[1]]  # Claude's newer look: the words, a line, the command, a line
+            body = body[seps[0] + 1 : seps[1]]  # a newer look: the words, a line, the command, a line
         elif seps:
             unclear = True
         command = None if unclear else (_unwrap(body) or None)
@@ -1548,7 +1548,7 @@ def _asks_line(root: Path, prompt: dict) -> str | None:
 def check_confirm(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
     """A working run whose pane shows a confirm prompt (confirm_prompt) on two looks CONFIRM_SECONDS apart
     waits for the person: its state becomes attention with the call it asks about, so Needs you, the pane's
-    card and the phone show it within seconds, also when the tool sent no notice (Claude's hook confirm,
+    card and the phone show it within seconds, also when the tool sent no notice (a hook confirm,
     ORCH-2197). check_attention sets it back to working once the prompt is gone. Nothing is answered here.
     True when the state was changed."""
     t = time.time() if now is None else now
