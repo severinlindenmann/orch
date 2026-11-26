@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config, reminder_settings
+from orch import adapters, agentsdata, config, reminder_settings, tickets
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -175,7 +175,8 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
     assert flags("auto") == ("--permission-mode", "auto")
 
 
-def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run):
+def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     assert config.permissions(proj) == "auto"  # the default
     assert (
         adapters.render("claude", "fresh", "oneshot", {"prompt": "p", "new_session": NEW}, proj).count(

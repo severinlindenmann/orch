@@ -122,13 +122,14 @@ def _approve(root: Path, name: str, argv: list[str]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def an_agent() -> str | None:
-    """The agent tool this process runs under (core's rule), else None. Without core: count as an agent."""
+def an_agent(by: str | None = None) -> str | None:
+    """The helper making this change, including unattended callers. Without core: count as an agent."""
     try:
         from orch import tickets
     except ImportError:
         return "unknown"
-    return tickets.agent_tool()
+    who = tickets.acting_actor(by)
+    return who.removeprefix("agent:") if who.startswith("agent:") else None
 
 
 def shown(argv: list[str]) -> str:
@@ -150,9 +151,9 @@ def showable(argv: list[str]) -> bool:
     )
 
 
-def allow(root: Path, name: str, given_key: str) -> None:
+def allow(root: Path, name: str, given_key: str, by: str | None = None) -> None:
     """A person's yes for exactly ONE entry, and only if it is still what was shown (the key matches now)."""
-    if an_agent():
+    if an_agent(by):
         raise ScriptError("Only a person can allow a script, not an agent.")
     argv = load(root).get(name) if isinstance(name, str) else None
     if argv is None:
