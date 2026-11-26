@@ -5,6 +5,9 @@ from orch.diag_checks import data, verdict
 
 NAME = "clock_skew"
 SKEW_S = 5 * 60
+FIX = (
+    "Turn on setting the date and time automatically in your computer's settings, then run orch doctor again."
+)
 
 
 def _future(snap):
