@@ -517,8 +517,11 @@
   };
 
   /* ---------- the layer: bar on every page, a panel (bottom, right, full) split in up to 3, or closed to the side ---------- */
-  function inList(o, l) { var w = o.s === 'wait'; return l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
-  var LIST = { wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
+  function inList(o, l) { var w = o.s === 'wait'; return l === 'helpers' ? true : l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
+  var LIST = { helpers: ['', 'helpers', 'Helpers'], wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
+  /* ORCH-2198 (owner pick J b, "calmer"): the Helpers menu groups every session as Needs you, Working, Quiet (in line, idle) */
+  var HGROUPS = [['wait', 'Needs you'], ['run', 'Working'], ['quiet', 'Quiet']];
+  function hgroup(o) { return o.s === 'wait' ? 'wait' : (grp(o) === 'run' ? 'run' : 'quiet'); }
   function chip(o) {
     var on = shownIn(o);
     return btn('mw-swb', 'switch', stat(o, true) + '<span class="mw-cn">' + esc(o.name || o.k) + '</span>', { 'data-k': o.k, 'data-s': o.s, 'aria-pressed': String(on), title: nm(o) });
@@ -529,17 +532,21 @@
     var text = compact ? sym + n : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
     return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': compact ? n + ' ' + LIST[l][1] : null });
   }
+  /* ORCH-2198: the bar holds one Helpers button (a ◆ when something needs you, no number) instead of chips and counts */
   function chipsHTML() {
-    var all = sorted(), need = all.filter(function (o) { return o.s === 'wait'; }), pin = all.filter(function (o) { return inList(o, 'pin'); }), open = all.filter(function (o) { return shownIn(o) && o.s !== 'wait' && !o.pin; });
-    var grpH = function (g, label, list) { return '<span class="mw-bg" role="group" data-g="' + g + '" aria-label="' + (g === 'pin' ? 'Pinned' : label) + '"><span class="mw-bl">' + label + '</span>' + list.map(chip).join('') + '</span>'; };
-    if (BL >= 3) return ['wait', 'pin', 'run', 'queue', 'idle'].map(function (l) { return cnt(l, true); }).join('') + mk(11);
-    var h = grpH('wait', need.length ? 'Needs you' : 'All calm', need);
-    if (pin.length) h += BL >= 1 ? cnt('pin') : grpH('pin', I.pin, pin);
-    if (open.length && BL < 2) h += grpH('open', 'Open', open);
-    return h + (BL >= 2 ? cnt('more') : cnt('run') + cnt('queue') + cnt('idle')) + mk(11);
+    var need = sorted().some(function (o) { return o.s === 'wait'; });
+    return btn('mw-swb mw-grp', 'list', (need ? '<span class="mw-st" data-s="wait"><span class="mw-sym" aria-hidden="true">◆</span></span>' : '') + '<span>Helpers</span>' + I.down,
+      { 'data-l': 'helpers', 'aria-expanded': String(st.list === 'helpers'), 'aria-haspopup': 'true', 'aria-label': need ? 'Helpers: something needs you' : 'Helpers' }) + mk(11);
   }
   function listRows() {
     var q = st.lq.trim().toLowerCase(), l = sorted().filter(function (o) { return inList(o, st.list) && (!q || (o.k + ' ' + nm(o)).toLowerCase().indexOf(q) >= 0); });
+    if (st.list === 'helpers') {
+      var out = HGROUPS.map(function (g) {
+        var rows = l.filter(function (o) { return hgroup(o) === g[0]; });
+        return rows.length ? '<div class="lbar-gh" data-g="' + g[0] + '"><span>' + g[1] + '</span><b>' + rows.length + '</b></div>' + rows.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow mw-hrow', 'switch', '<span class="mw-st" data-s="' + o.s + '"><span class="mw-sym" aria-hidden="true">' + ST[o.s][0] + '</span></span><span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + (g[0] === 'quiet' ? '<span class="meta"> · ' + esc(word(o)) + '</span>' : '') + '</span><span class="lbar-go">Open</span>', { 'data-k': o.k, 'aria-current': shownIn(o) ? 'true' : null }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '';
+      }).join('');
+      return out || '<p class="meta">' + (q ? 'No helper matches.' : 'No helper is open. New starts one.') + '</p>';
+    }
     return l.length ? l.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow', 'switch', stat(o) + '<span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + '</span><span class="meta">' + esc(tlabel(o)) + '</span>', { 'data-k': o.k }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '<p class="meta">No session matches.</p>';
   }
   function popHTML(mode) {
@@ -552,7 +559,7 @@
     }
     if (st.list) {
       var n = sorted().filter(function (o) { return inList(o, st.list); }).length;
-      return '<div class="mw-pop mw-pop-list" role="group" aria-label="' + LIST[st.list][2] + '"><p class="mw-poph">' + LIST[st.list][2] + ' (' + n + ')</p>' + (n >= 9 ? '<label class="sr-only" for="mw-lq">Search these sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search these sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
+      return '<div class="mw-pop mw-pop-list" role="group" aria-label="' + LIST[st.list][2] + '">' + (st.list === 'helpers' ? '' : '<p class="mw-poph">' + LIST[st.list][2] + ' (' + n + ')</p>') + (n >= 9 ? '<label class="sr-only" for="mw-lq">Search these sessions</label><input class="input" id="mw-lq" type="search" placeholder="Search these sessions" value="' + esc(st.lq) + '" autocomplete="off">' : '') + '<div class="mw-plist" id="mw-plist">' + listRows() + '</div></div>';
     }
     return '';
   }
@@ -1011,7 +1018,7 @@
     st.foldR = q.get('fold') === 'r';
     st.ask = q.get('ask') === '1' && live(by(st.cur));
     if (q.get('ren') === '1') st.ren = st.cur;
-    if (/^(wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
+    if (/^(helpers|wait|pin|run|queue|idle|more)$/.test(v = q.get('list') || '')) st.list = v;
     if (/^(new|pos)$/.test(v = q.get('menu') || '')) st.menu = v;
     if (MODELS[v = q.get('tool')]) { st.nt = v; st.nm = MODELS[v].indexOf(q.get('model')) >= 0 ? q.get('model') : AG[v].usual; }
     else if (MODELS.t1.indexOf(q.get('model')) >= 0) st.nm = q.get('model');

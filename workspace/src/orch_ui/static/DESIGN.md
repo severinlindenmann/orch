@@ -316,12 +316,16 @@ says "Can't preview this file." with Try again and Download, too big says so and
 (`item.shown`) or, for media, only the sentence. Text goes in with `textContent` only; a web page only in an
 `<iframe sandbox="">`.
 
-### Live bar (ORCH-337)
+### Live bar (ORCH-337, ORCH-2198)
 `.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
-Sessions that need you are orange chips, pinned ones are chips after them, everything else is a quiet count ("3
-working", "9 in line", "2 idle") that opens a list (`.lbar-pop`, search from 9 sessions). It never wraps: it folds
-(`data-fold` 0 to 4) into counts instead, and on a phone it shows symbols and numbers above the tab bar. Counts in
-words read right: "1 session", "2 sessions". The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
+It holds the page's name, one **Helpers** menu button (`.lbar-helpers`) and New: no chips, no counts in the row
+(owner pick J b, 26 Nov: calmer). The button shows an orange ◆ when something needs you, never a number (the number is
+on the Review badge). The menu (`.lbar-pop`) lists every session in groups (`.lbar-gh`, heading and count): Needs you,
+Working, Quiet (in line and idle); each `.lbar-row` has its symbol, key, name and "Open", opens its pane, and has More
+(Stop, End). A pinned session comes first in its group; an open one is marked (`aria-current`). Search from 9
+sessions. The menu opens inside the window on the side of the bar with room (`data-at` above or below: below when the
+bar sits at the top in full screen) and scrolls there. On a phone New is an icon (`data-fold` 3), above the tab bar.
+The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a session without a ticket (Empty helper,
 Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open
 says "Already open: go to it". The same four are buttons at the top of Focus. A new one is pinned (ORCH-364).
@@ -359,8 +363,8 @@ scrolls inside itself) when the pane is narrow (`.live-pane[data-narrow]`: split
 a dashed `.chip.gtree-tag` "Small helper", says "watch only" and opens its helper. Only "Main helper" and "Small helper"
 carry a tag. The selected row is `aria-current` (brand edge), a helper that needs you is orange (`data-s=needs-you`).
 A helper that needs you turns the whole tile orange. The pane's message box (`.live-msg`) starts with `.live-to`:
-"Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar the group is one chip with the helper
-count (`.lbar-n`), the same number as its tile.
+"Message to: Write the texts (ORCH-301). Only this helper gets it." In the bar's Helpers menu the group is one row with
+the helper count (`.lbar-n`), the same number as its tile.
 
 ### Chat view of a session (ORCH-687)
 A ticket's pane has Chat | Terminal in its header (`.segmented.live-view`, `aria-pressed`; in a narrow pane "Show
