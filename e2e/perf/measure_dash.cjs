@@ -71,9 +71,17 @@ const SHOWN = () => {
 
 async function usable(page, isAddon) {
   if (!isAddon) { await page.waitForFunction(SHOWN, null, { timeout: LIMIT_MS, polling: 50 }); return; }
-  // an add-on page runs in a frame on its own port (another origin): wait inside that frame
-  const handle = await page.waitForSelector('main iframe', { timeout: LIMIT_MS });
+  // An add-on page runs in a frame on its own port (another origin), or the dashboard draws it itself (Focus, the
+  // live wall: no frame, ORCH-526 / ORCH-2271). Wait for whichever comes: a frame, or the page shown without one.
   const deadline = Date.now() + LIMIT_MS;
+  const how = await page.waitForFunction(() => {  // SHOWN, plus the frame (a page function cannot call SHOWN)
+    const m = document.querySelector('main') || document.body;
+    if (m && m.querySelector('iframe.embed')) return 'frame';  // the add-on's frame, not a result preview on the wall
+    return !!m && !m.querySelector('[aria-busy="true"]') && m.innerText.trim().length > 20 ? 'page' : false;
+  }, null, { timeout: LIMIT_MS, polling: 50 });
+  if ((await how.jsonValue()) === 'page') return;
+  const handle = await page.$('main iframe.embed');
+  if (!handle) throw new Error('the add-on frame went away');
   let frame = null;
   while (!frame && Date.now() < deadline) { frame = await handle.contentFrame(); if (!frame) await page.waitForTimeout(50); }
   if (!frame) throw new Error('the add-on frame never loaded');

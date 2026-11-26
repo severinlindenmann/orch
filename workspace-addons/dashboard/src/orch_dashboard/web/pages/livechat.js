@@ -61,6 +61,38 @@ function liveChatMine(run, local) {
   const said = new Set(kept.map(m => clean0(m.text)));
   return [...kept, ...(Array.isArray(local) ? local : []).filter(m => m && !said.has(clean0(m.text)))];
 }
+// Commands in a helper's words (ORCH-2203, draft D a): a ``` block of one line, a line that is only `code`, and a line
+// starting with "!" (the helper's own way to say "run this in a shell"). Each gets "Run in terminal" in the chat. A
+// block of several lines stays plain text: typing it would press Enter in the middle.
+const LIVE_CMD_MAX = 1000;
+const liveCmdOk = c => c.length > 0 && c.length <= LIVE_CMD_MAX && !/[\x00-\x1f\x7f]/.test(c);
+// [{t:'text', text} | {t:'cmd', text}] in order; a message with no command is one text part.
+function liveChatParts(text) {
+  const out = [], buf = [];
+  const flush = () => { const t = buf.join('\n').trim(); buf.length = 0; if (t) out.push({t:'text', text:t}); };
+  const lines = String(text ?? '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i], line = ln.trim();
+    const fence = /^```/.test(line);
+    if (fence) {
+      const end = lines.findIndex((x, j) => j > i && /^```\s*$/.test(x.trim()));
+      if (end < 0) { buf.push(ln); continue; }
+      const inner = lines.slice(i + 1, end).map(x => x.trim()).filter(Boolean);
+      flush();
+      if (inner.length === 1 && liveCmdOk(inner[0])) out.push({t:'cmd', text:inner[0]});
+      else if (inner.length) out.push({t:'text', text:inner.join('\n')});
+      i = end;
+      continue;
+    }
+    const code = /^`([^`]+)`$/.exec(line), bang = /^!\S/.test(line);
+    const cmd = code ? code[1].trim() : bang ? line : '';
+    if (cmd && liveCmdOk(cmd)) { flush(); out.push({t:'cmd', text:cmd}); } else buf.push(ln);
+  }
+  flush();
+  return out;
+}
+// What is typed: into a plain terminal a "!command" is just the command; the helper takes the "!" itself. Never Enter.
+function liveCmdTyped(cmd, plain) { return plain ? String(cmd).replace(/^!\s*/, '') : String(cmd); }
 // rows: {w: 'e' | 'h' | 'y', text, at, who?, links?}; me: the person looking ("human:<name>"), whose lines say You.
 function liveChatModel(t, me = '', sent = []) {
   if (!t || typeof t !== 'object') return [];
@@ -133,6 +165,31 @@ function liveViewSet(id, view) {
   liveViews = v;
   liveViewWrite(typeof liveLayerStore === 'function' ? liveLayerStore() : null, v);
 }
+// "Run in terminal" (ORCH-2203): types the command into the helper of this pane, into an open plain terminal (a new one
+// when none is open) or into a new plain terminal; the person presses Enter. Every refusal says what to do.
+const liveTermsOpen = () => (Array.isArray(state?.sessions) ? state.sessions : []).filter(x => x && x.kind === 'terminal' && x.open === true && typeof x.id === 'string');
+async function liveRunIn(to, tid, cmd) {
+  const say = (t, kind) => window.orch?.toast?.(t, kind);
+  if (!window.LiveTerm?.send) return say('The terminal is not ready. Reload the page and try again.', 'error');
+  let id = tid, plain = false;
+  if (to === 'helper') {
+    const live = typeof liveLayerSession === 'function' ? liveLayerSession(tid) : null;
+    if (live && live.running === false) return say('This helper is not running. Start it, then run the command.', 'error');
+  } else {
+    plain = true;
+    const was = liveTermsOpen().map(x => x.id);
+    if (to === 'new' || !was.length) {
+      const r = await act('session.new', {kind:'terminal'}, {quiet:true});
+      if (!r.ok) return say(r.text || 'The terminal did not start. Try again.', 'error');
+      await window.LiveSessions?.refresh?.();
+      id = liveTermsOpen().map(x => x.id).find(x => !was.includes(x)) || '';
+    } else id = was[0];
+    if (!id) return say('The new terminal is not listed yet. Open it from New and try again.', 'error');
+  }
+  const r = await window.LiveTerm.send(id, liveCmdTyped(cmd, plain), {plain});
+  if (r.ok) say('Typed into ' + (plain ? 'the plain terminal' : 'the helper') + '. Press Enter to run it.', 'ok');
+  else if (r.text && !r.status) say(r.text, 'error');
+}
 function liveChatNote(id, text) {  // shows at once; orch's own list takes over on the next poll
   const list = liveChatSent.get(id) || [];
   list.push({text, at:new Date().toISOString()});
@@ -162,6 +219,13 @@ function liveChatFiles(tid, names) {
       h('span', {className:'live-chat-fname'}, n));
   }));
 }
+// A suggested command with its "Run in terminal" menu: it types the command, the person presses Enter.
+function liveCmdBlock(cmd, tid) {
+  const item = (to, word) => h('button', {type:'button', className:'btn ghost sm', role:'menuitem', 'data-live-run':to, 'data-ticket':tid, 'data-cmd':cmd, 'data-key':'live-run-' + to}, word);
+  return h('div', {className:'live-cmd'}, h('code', {}, cmd),
+    h('details', {className:'menu live-run'}, h('summary', {className:'btn primary sm', 'data-key':'live-run'}, 'Run in terminal ▾'),
+      h('div', {className:'menu-pop', role:'menu', 'aria-label':'Where to type it'}, item('helper', 'This helper'), item('plain', 'Plain terminal'), item('new', 'New plain terminal'))));
+}
 function liveChatRow(r, tid = '') {
   const stamp = typeof time === 'function' ? time(r.at) : '';
   if (r.w === 'e') return h('p', {className:'live-ev meta'}, h('span', {'aria-hidden':'true'}, '✓'), ' ' + r.text + (stamp ? ' · ' + stamp : ''));
@@ -170,7 +234,7 @@ function liveChatRow(r, tid = '') {
   const links = widgets ? [] : (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
-    r.text ? h('p', {}, r.text) : null,
+    ...(r.w === 'h' && r.text ? liveChatParts(r.text) : r.text ? [{t:'text', text:r.text}] : []).map(p => p.t === 'cmd' ? liveCmdBlock(p.text, tid) : h('p', {}, p.text)),
     liveChatFiles(tid, r.files),
     links.length ? h('div', {className:'live-links'}, links) : null,
     widgets ? resultsHost(tid, {key:'chat-results-' + tid + '-' + r.step, step:r.step, cls:'live-results', label:'Results of this step'}) : null);
@@ -245,6 +309,8 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   document.addEventListener('click', e => {
     const f = e.target.closest?.('#live-dock [data-live-file]');
     if (f && typeof previewFile === 'function') { previewFile(f.dataset.ticket, 'artifacts', f.dataset.liveFile); return; }
+    const run = e.target.closest?.('#live-dock [data-live-run]');
+    if (run) { run.closest('details')?.removeAttribute('open'); if (typeof liveRunIn === 'function') liveRunIn(run.dataset.liveRun, run.dataset.ticket, run.dataset.cmd); return; }
     const b = e.target.closest?.('#live-dock button[data-live-view]');  // the pane body carries data-live-view too
     if (!b) return;
     const id = b.dataset.session, view = b.dataset.liveView === 'term' ? 'term' : 'chat';

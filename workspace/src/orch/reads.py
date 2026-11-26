@@ -189,10 +189,10 @@ def answer(root: Path, argv: list[str]):
         from orch import ticketchats
 
         return _plain(root, ticketchats.chats(root, a[3] if len(a) == 4 else None))
-    if a == ["addon", "list"]:  # asked every round by Automation and every poll by the dashboard (ORCH-1295)
+    if a in (["addon", "list"], ["addon", "list", "--catalog"]):
         from orch import addons
 
-        return _plain(root, addons.listing(root))
+        return _plain(root, addons.listing(root, catalog="--catalog" in a))
     if a == ["chat", "id"]:  # asked every Automation round (ORCH-1295)
         from orch import chat
 

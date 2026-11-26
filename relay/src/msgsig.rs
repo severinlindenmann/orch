@@ -664,14 +664,17 @@ pub fn read_envelope(env: &Value) -> Result<Envelope, SigError> {
                     .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         })
         .ok_or(E("key_id"))?;
+    // bounded before decoding: never decode more than the largest signed message could take
     let signed = e
         .get("signed")
         .and_then(|v| v.as_str())
+        .filter(|s| s.len() <= (MAX_SIGNED_BYTES * 4).div_ceil(3))
         .and_then(b64url_decode_strict)
         .ok_or(E("signed"))?;
     let sig = e
         .get("sig")
         .and_then(|v| v.as_str())
+        .filter(|s| s.len() == 86)
         .and_then(b64url_decode_strict)
         .ok_or(E("sig"))?;
     if !(2..=MAX_SIGNED_BYTES).contains(&signed.len()) {

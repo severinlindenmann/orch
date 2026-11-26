@@ -1,6 +1,6 @@
 /* Shared interaction contract (overlay, select, toast, calendar, switch). Port of mockup/system/interaction.css. */
 /* Shared interaction contract. Keep these rules after page styles. */
-:root{--ui-enter:150ms;--ui-exit:100ms}
+:root{--ui-enter:150ms;--ui-exit:var(--dur-exit,120ms)}
 @media(min-width:721px){html{scrollbar-gutter:stable}}
 button,a,input,textarea,summary{touch-action:manipulation}
 button,.btn,summary{transition:background-color 100ms,color 100ms,border-color 100ms,box-shadow 100ms}

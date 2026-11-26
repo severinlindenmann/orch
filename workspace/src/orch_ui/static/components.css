@@ -594,6 +594,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 @media(max-width:900px){.demo-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){
   .btn,.icon-btn,.input{height:var(--touch)}
+  .check-label{min-height:var(--touch)}
   .icon-btn{width:var(--touch)}
   .qoption{height:auto;min-height:var(--touch)}
   .ev-technical summary{min-height:var(--touch)}
@@ -618,7 +619,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
    dark strip on the right of every page (bug hunt 17 Nov). */
 @media(min-width:721px){html{scrollbar-gutter:stable}}
 /* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
-.ticket-table .who,.ticket-table .due-cell,.ticket-table .spend-cell{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
+.ticket-table .who,.ticket-table .due-cell,.ticket-table .spend-cell{white-space:nowrap}.ticket-table td:nth-child(3 of :not(.pick-cell)){min-width:112px}
 /* A quiet ticket's "No news since Friday 14:32" wraps in its own column: as one line it stretched Last change until the table was wider than the page and the Answer buttons were cut off at 1280 px (ORCH-1464). */
 .ticket-table .when.quiet{white-space:normal;min-width:96px;max-width:150px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}

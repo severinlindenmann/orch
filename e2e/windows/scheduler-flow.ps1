@@ -8,8 +8,10 @@ $fails = @()
 function L($m) { Add-Content -Path $log -Value $m }
 function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; $script:fails += $what } }
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
+# stdout only: a note on stderr (e.g. the secret scan's) must not break the JSON a caller parses
+function OJ { cmd /c "orch $($args -join ' ') < NUL 2>NUL" }
 function NewScheduledTicket($title) {
-    $out = O ticket new ('"' + $title + '"') --json --by human:owner | Out-String
+    $out = OJ ticket new ('"' + $title + '"') --json --by human:owner | Out-String
     if ($LASTEXITCODE -ne 0) { L $out; throw "ticket creation failed: $title" }
     try { $tid = ($out | ConvertFrom-Json -ErrorAction Stop).id }
     catch { L $out; throw "ticket creation returned invalid JSON: $title" }
