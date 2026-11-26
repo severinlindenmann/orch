@@ -91,10 +91,12 @@ test('a typed search asks the server once per words and serves its hits', async 
 test('the more mark first draws the next rows it holds, then fetches', () => {
   const ctx = page(), {api} = ctx;
   let fetched = 0;
+  assert.equal(api.capOf('list-done'), 20, 'a list group draws its first 20 rows (ORCH-2271)');
+  assert.equal(api.capOf('lane-done', 30), 30, 'a board lane keeps its own step');
   const mark = api.moreMark('list-done', 10, () => fetched++);
   assert.equal(mark.attrs['data-more'], 'list-done');
   api.moreHandlers.get('list-done')();
-  assert.equal(api.capOf('list-done'), 100);
+  assert.equal(api.capOf('list-done'), 70);
   assert.equal(fetched, 0);
   api.moreMark('list-done', 0, () => fetched++);
   api.moreHandlers.get('list-done')();
