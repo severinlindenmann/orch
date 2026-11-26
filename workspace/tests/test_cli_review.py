@@ -360,13 +360,14 @@ def test_answer_agent_acting_as_person_needs_person(tk, run, monkeypatch):
 
 def test_unattended_review_leaves_the_decision_for_the_terminal(tk, run, monkeypatch):
     root, tid = tk
+    monkeypatch.setattr(tickets, "attended", lambda: False)
     _in_review(root, tid)
     code, out, _ = run("review", "answer", tid, "review", "--verdict", "ok", "--json")
     assert code == 2 and json.loads(out)["code"] == "needs_person"
     code, _, err = run("review", "undo", tid)
     assert code == 2 and "Only a person" in err
     assert tickets.load(root, tid)["status"] == "review"
-    monkeypatch.setattr(tickets.term, "is_terminal", lambda stream: True)
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     monkeypatch.setenv("ORCH_RUN", "r_test")
     code, out, _ = run("review", "answer", tid, "review", "--verdict", "ok", "--json")
     assert code == 2 and json.loads(out)["code"] == "needs_person"

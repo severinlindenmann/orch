@@ -176,7 +176,7 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
 
 
 def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run, monkeypatch):
-    monkeypatch.setattr(tickets.term, "is_terminal", lambda stream: True)
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     assert config.permissions(proj) == "auto"  # the default
     assert (
         adapters.render("claude", "fresh", "oneshot", {"prompt": "p", "new_session": NEW}, proj).count(

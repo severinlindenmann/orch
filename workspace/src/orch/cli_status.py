@@ -137,7 +137,8 @@ def _services_cmd(args, root: Path) -> None:
         if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
             from orch import tickets
 
-            if tickets.acting_by(args).startswith("agent:") and not pagelaunch.is_test_workspace(root):
+            # a detected helper only: a headless server or proxy setup prints it from a script (pagelaunch)
+            if tickets.agent_tool() is not None and not pagelaunch.is_test_workspace(root):
                 raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
         from orch import worktrees
 

@@ -125,7 +125,19 @@ def agent_tool() -> str | None:
     """The agent tool this process runs under (from the environment), else None."""
     from orch import adapters
 
-    return adapters.detect_env(os.environ) or ("unknown" if os.environ.get("ORCH_RUN") else None)
+    return adapters.detect_env(os.environ)
+
+
+def _helper_tool() -> str | None:
+    """For the actor label only: the detected agent tool, else `unknown` inside an orch run (a helper whose
+    tool orch does not recognise is still a helper, never the person)."""
+    return agent_tool() or ("unknown" if os.environ.get("ORCH_RUN") else None)
+
+
+def attended() -> bool:
+    """A person at an interactive terminal runs this command (stdin is a terminal). Not an identity check:
+    only the default label for a caller that names nobody (R4.3)."""
+    return term.is_terminal(sys.stdin)
 
 
 def require_human(question: str, what: str, by: str | None = None) -> None:
@@ -145,9 +157,9 @@ def current_actor(explicit: str | None = None) -> str:
     """An explicit label, otherwise the detected helper or the person at an interactive terminal."""
     if explicit:
         who = explicit
-    elif tool := agent_tool():
+    elif tool := _helper_tool():
         who = "agent:" + tool
-    elif not term.is_terminal(sys.stdin):
+    elif not attended():
         who = "agent:unknown"
     else:
         try:
@@ -164,7 +176,7 @@ def current_actor(explicit: str | None = None) -> str:
 
 def acting_actor(explicit: str | None = None) -> str:
     """A detected helper keeps its own identity even when a different --by was supplied."""
-    tool = agent_tool()
+    tool = _helper_tool()
     if tool:
         return "agent:" + str(tool)
     return current_actor(explicit)

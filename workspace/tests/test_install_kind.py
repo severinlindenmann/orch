@@ -203,11 +203,9 @@ def test_a_refused_sign_in_link_says_why(tws, monkeypatch):
     assert why == [home_mod.MSG_TEST_INSTALL]
 
 
-@pytest.mark.parametrize("tool", [None, "claude"])
-def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run, tool):
+def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run):
     monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
-    if tool:
-        monkeypatch.setenv("ORCH_AGENT", tool)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
     code, out, err = run("start", "--no-open", "--print-launch-url")
     assert code == 2 and "Only a person" in (out + err)
 
