@@ -82,8 +82,8 @@ function chatSearch(history = false) {
 const CHAT_HELPER = 'Your helper';
 const chatLocalDay = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
 const chatToday = () => state?.chat?.day || chatLocalDay(new Date(state?.now || Date.now()));
-// A time today reads "09:11"; an older one reads as its day.
-const chatWhen = at => !at ? '' : chatLocalDay(new Date(at)) === chatLocalDay(new Date(state?.now || Date.now())) ? time(at) : date(at);
+// A time today reads "09:11" (as in ticket chats); an older one reads as its day, with its time inside a thread.
+const chatWhen = (at, withTime = false) => !at ? '' : chatLocalDay(new Date(at)) === chatLocalDay(new Date(state?.now || Date.now())) && window.UI?.clock ? window.UI.clock(at) : withTime ? time(at) : date(at);
 const chatHelpers = g => { const n = chatObjects(g.members).length; return n + (n === 1 ? ' helper' : ' helpers'); };
 function chatListRow(g) {
   const id = g?.id || 'chat', messages = chatObjects(state?.chat?.messages), last = messages[messages.length - 1];
@@ -93,7 +93,7 @@ function chatListRow(g) {
     h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
       g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
       chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
-    h('span', {className:'chat-row-time'}, time(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
+    h('span', {className:'chat-row-time'}, chatWhen(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
 }
 // With other workspaces or groups: one list grouped as the draft — This workspace (your helper), Other workspaces (direct chats), Groups.
 function chatDmRow(c) {
@@ -101,17 +101,19 @@ function chatDmRow(c) {
   return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
     'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
     h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', chatPreview(last?.text))),
-    h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
+    h('span', {className:'chat-row-time'}, chatWhen(last?.shown_at || last?.at || c.last_at)));
 }
 const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
-// Contacts or messages still loading: master skeleton lines (app.js skeletonLines), not a bare "Loading…".
-const chatLoading = key => typeof skeletonLines === 'function' ? skeletonLines('Loading…', 2, key) : chatText('p', 'chat-muted', 'Loading…');
 // Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
 function chatDmPending() {
   if (snapshot || chatDm.loaded) return null;
   return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
-    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatLoading('dm-loading'));
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatSkeleton());
 }
+// The master loading shape (rows) where the dashboard's skeleton exists; the plain line when this file runs alone.
+const chatSkeleton = () => typeof skeletonFor === 'function' ? skeletonFor('section') : chatText('p', 'chat-muted', 'Loading…');
+// The master empty state (UI.state) with its one next step; a plain line when the kit is not loaded.
+const chatState = (title, text) => typeof stateNote === 'function' ? stateNote(title, text) : chatText('p', 'chat-muted', title);
 function chatList() {
   // Newest group first, so an old group never sits above a fresh one.
   const groups = chatGroups().filter(g => !chatFinished(g)).sort((a, b) => chatGroupTime(b) - chatGroupTime(a)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
@@ -120,7 +122,7 @@ function chatList() {
   const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), rows = [helperRow, ...dmRows, ...groupRows];
   rows.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
   const heading = (text, list) => list.length && list.some(row => !row.hidden) ? h('h2', {}, text) : null;
-  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
+  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h2', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
     snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), history ? null : chatSearch(),
     heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, dmRows.length || history ? null : chatDmPending(), heading('Groups', groupRows), groupRows,
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
@@ -181,14 +183,16 @@ function chatHeader(g, history) {
   // who it is with. Beside the list of chats it says its name like every other chat (report r-1122-0539).
   const plain = helper && !agent && chatUi.filter !== 'phone' && !chatRich();
   const earlier = history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g || !chatHasEarlier() ? null : chatButton('Earlier', 'history');
+  const newChat = chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), phoneLink = chatPhoneLink(), rowEarlier = plain ? earlier : null;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
       helper ? chatAvatar('Helper') : null,
       h('div', {className:'chat-head-text'}, g ? chatText('p', 'chat-eyebrow', 'Group · ' + others + (others === 1 ? ' workspace' : ' workspaces')) : null,
-        h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
+        h('h2', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null, earlier),
     // The phone filter and the workspace link stay visible, no options disclosure.
-    helper && !agent ? h('div', {className:'chat-head-row'}, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink(), plain ? h('span', {className:'grow'}) : null, plain ? earlier : null) : null,
+    // No empty row (and no blank band under the title) when the list beside it already holds New chat.
+    helper && !agent && (newChat || phoneLink || rowEarlier) ? h('div', {className:'chat-head-row'}, newChat, phoneLink, plain ? h('span', {className:'grow'}) : null, rowEarlier) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -291,7 +295,7 @@ function chatEvent(ev, g) {
 function chatMessage(m, previous, g, index, readOnly, lastMine) {
   const key = 'message-' + (m.id || index), mine = m.by === 'you';
   if (g && m.group_event) return m.group_event.kind === 'approval_needed' ? chatApproval(m, g, index, readOnly) : chatText('div', 'chat-system', chatEvent(m.group_event, g));
-  const member = g ? chatObjects(g.members).find(item => item.ws === m.by) || {name:m.name} : {name:chatWorkspace()};
+  const member = g ? chatObjects(g.members).find(item => item.ws === m.by) || {name:m.name} : {name:'Helper'};
   const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : CHAT_HELPER);
   const grouped = previous && !previous.group_event && previous.by === m.by;
   return h('article', {className:'chat-message' + (mine ? ' chat-out' : '') + (grouped ? ' chat-grouped' : ''), 'data-key':key, 'data-message-id':m.id, tabindex:'-1'},
@@ -302,7 +306,7 @@ function chatMessage(m, previous, g, index, readOnly, lastMine) {
       g && m.added_to ? h('a', {className:'chat-card', href:chatLink(g.ticket)}, 'Added to ', clean(m.added_to.key), ' › ', clean(m.added_to.label)) : null,
       m.share ? chatText('span', 'chat-file-chip', m.share.title || m.share.kind) : null),
     // How a message travelled is shown only when it came from your phone ("13:00 · helper" said nothing).
-    chatText('small', 'chat-message-time' + (m.via === 'phone' ? ' chat-from-phone' : ''), [mine ? 'You' : '', time(m.at), m.via === 'phone' ? 'from your phone' : '', m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
+    chatText('small', 'chat-message-time' + (m.via === 'phone' ? ' chat-from-phone' : ''), [mine ? 'You' : '', chatWhen(m.at, true), m.via === 'phone' ? 'from your phone' : '', m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
     mine && index === lastMine && g?.delivered?.text ? chatText('small', 'chat-delivery', g.delivered.text) : null);
 }
 const CHAT_PROMPTS = [['Plan something', 'Help me plan my week'], ['Compare options', 'Help me compare two options'], ['Check a result', 'What is still open this week?']];
@@ -675,8 +679,8 @@ function chatDmContacts() {
         const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
         retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
         rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
-      } else rows.push(chatLoading('picker-loading'));
-    } else if (!chatDm.contacts.length) rows.push(chatText('p', 'chat-muted', 'No contacts.'));
+      } else rows.push(chatSkeleton());
+    } else if (!chatDm.contacts.length) rows.push(chatState('No contacts yet', 'Other workspaces show up here once your admin has paired them with yours.'));
     body.replaceChildren(...rows);
   };
   chatDm.picker = paint; paint();
@@ -695,12 +699,12 @@ function chatDmThread() {
   return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
     h('header', {className:'chat-thread-head'}, h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), chatAvatar(c || title),
       // The name once; under it ONE line about the workspace (its description, then small tags). No repeated name.
-      h('div', {className:'chat-head-text'}, h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+      h('div', {className:'chat-head-text'}, h('h2', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
         c?.description ? chatText('p', 'chat-muted chat-head-meta chat-desc', clean(c.description)) : null,
         array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, !c && !messages.length && !chatDm.error ?
-      chatDm.loaded ? chatText('p', 'chat-muted', 'This workspace is not in your contacts.') : chatLoading('thread-loading') : null, messages.map(m =>
+      (chatDm.loaded ? chatState('This workspace is not in your contacts', 'Go back to your chats and pick one from the list.') : chatSkeleton()) : null, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,

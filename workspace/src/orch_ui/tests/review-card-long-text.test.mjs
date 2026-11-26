@@ -22,6 +22,12 @@ test('the All cards list stays beside the deck below 1440 px and folds away only
   assert.match(css, /@media \(max-width:720px\)\{\.review-layout\{grid-template-columns:minmax\(0,1fr\)\}\.review-side\{display:none\}\}/);
   assert.match(css, /\.review-layout\{display:grid;grid-template-columns:var\(--panel-width\) minmax\(0,1fr\)/);
 });
+// ORCH-2113: one card alone leaves the All cards list empty (deck.drawList draws nothing for a lone card); the rail
+// then folds away and the page is one column, as for an empty Review (ORCH-2024), not only when the deck is empty.
+test('an empty All cards list with nothing else in the rail leaves no empty left column, with or without cards', () => {
+  assert.match(css, /\n\.review-layout>\.review-rail:has\(>\.review-side:only-child>\.review-queue:empty\)\{display:none\}/);
+  assert.match(css, /\n\.review-layout:not\(\.with-ticket\):has\(>\.review-rail>\.review-side:only-child>\.review-queue:empty\)\{grid-template-columns:minmax\(0,1fr\)\}/);
+});
 
 test('a cut copy of the question is not shown above the full question', () => {
   const js = readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8');

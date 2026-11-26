@@ -17,10 +17,10 @@
   const STARTING_MS = 60000; /* no helper seen a minute after the start: stop saying Starting… and say so */
   const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
 
-  /* Helper places: how many are in use (live helpers), the most allowed (null = no limit), who waits in line. */
+  /* Helper places: how many are in use (live and one-step helpers), the most allowed (null = no limit), who waits in line. */
   function places(runs, settings, line) {
     const rows = runs && typeof runs === 'object' ? Object.values(runs) : [];
-    const used = rows.filter(r => r && r.running === true && ((r.claim && r.claim.mode) || 'live') === 'live').length;
+    const used = rows.filter(r => r && r.running === true).length; /* one-step helpers hold a place too (ORCH-1677) */
     const max = Number.isInteger(settings && settings.live_max) && settings.live_max > 0 ? settings.live_max : null;
     const waiting = Array.isArray(line && line.waiting) ? line.waiting.filter(x => typeof x === 'string') : [];
     return {used, max, waiting, full: max !== null && used >= max};

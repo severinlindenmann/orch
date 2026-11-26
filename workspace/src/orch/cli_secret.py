@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from orch import home as orch_home
-from orch import keystore, secretrun, secretscan, term, tickets
+from orch import keystore, renew, secretrun, secretscan, term, tickets
 from orch.errors import Refused
 
 SUBCOMMANDS = ("env", "file", "exec", "list", "get", "add", "remove", "profile", "scan")
@@ -210,6 +210,9 @@ def dispatch(args, root: Path) -> bool:
         _scan(args, root)
     elif action in ("add", "remove", "profile"):
         who = tickets.acting_by(args)
+        lowering = action == "profile" and args.profile_action in ("get-disable", "agents-disable")
+        if not lowering:  # a helper may switch access off, never overwrite or remove a key or widen a profile
+            renew.not_helper(who)
         extra: dict = {}
         if action == "add":
             if args.file is not None and args.type != "key-file":
