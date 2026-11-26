@@ -246,40 +246,48 @@ test('Save ticket is the one filled button; Start now sits beside it only with a
 
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
-  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files: pick, drop or paste them here' && n.className === 'new-ticket-attach'));
+  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files' && n.className.includes('new-ticket-attach')));
   assert.equal(s.input.rows, 3);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');
   const labels = s.chips().map(n => n.children.map(c => c.textContent).join('|'));
-  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md|3 B']);
+  assert.deepEqual(labels, ['MD|Pasted text (about 3 pages)', 'MD|plan.md|3 B']);  // ORCH-2162: each chip says its kind
   assert.equal(s.c.pastedLabel('x'.repeat(100)), 'Pasted text (about 1 page)');
 });
 
-test('helper choice: only real helpers, distinct labels, default first', () => {
+test('helper choice: only the helpers this workspace has, by name only, distinct labels, default first', () => {
   const c = setup().c;
-  const hs = c.ticketHelpers({agents:[{name:'claude', label:'Helper', found:true}, {name:'codex', label:'Helper', chosen:true, found:true, description:'Builds code'}, {name:'gone', found:false}, {name:'claude', label:'Helper'}]});
+  const hs = c.ticketHelpers({agents:[{name:'claude', label:'Helper', found:true}, {name:'codex', label:'Helper', chosen:true, found:true, description:'Builds code'}, {name:'gone', found:false}, {name:'copilot', label:'Copilot', status:'not found'}, {name:'claude', label:'Helper'}]});
   assert.deepEqual([...hs.map(h => h.name)], ['codex', 'claude']);
   assert.equal(new Set(hs.map(h => h.label.toLowerCase())).size, 2);
-  assert.equal(hs[0].description, 'Builds code');
+  assert.equal(hs[0].description, undefined, 'owner, 25 Nov: no "good at" line');
   assert.equal(c.ticketHelpers(null).length, 0);
 });
-test('several helpers: a select, each once; a non-default choice is the owner. One helper: fixed text. None: empty state', async () => {
-  const s = setupWith({agents:[{name:'claude', label:'Claude', chosen:true}, {name:'codex', label:'Codex', description:'Websites and code'}]});
-  const select = walk(s.d).find(n => n.name === 'helper');
-  assert.deepEqual([...select.children.map(o => o.textContent)], ['Claude (default)', 'Codex']);
-  select.value = 'codex'; await select.fire('change');
-  assert.equal(walk(s.d).find(n => n.className.includes('new-ticket-helper-about')).textContent, 'Websites and code');
+test('several helpers: a short list, each once, no "good at" line; a non-default choice is the owner and names the lines. One helper: its name. None: no box', async () => {
+  const s = setupWith({agents:[{name:'claude', label:'Claude', chosen:true}, {name:'codex', label:'Codex', description:'Websites and code'}, {name:'copilot', label:'Copilot', found:false}]});
+  const radios = walk(s.d).filter(n => n.name === 'helper');
+  assert.deepEqual(radios.map(r => r.value), ['claude', 'codex'], 'a helper not found here is not offered');
+  assert.equal(radios[0].checked, true);
+  const box = walk(s.d).find(n => n.className.includes('new-ticket-helper'));
+  assert.doesNotMatch(text(box), /Websites and code/);
+  assert.match(text(box), /^HelperClaudeDefaultCodex$/);
+  const lines = () => walk(s.d).filter(n => n.className.includes('new-ticket-what')).map(n => n.textContent);
+  assert.deepEqual(lines(), ['Goes to Tickets. Claude may prepare a short plan; no work starts.', 'Claude begins at once. This may cost money.']);
+  radios[0].checked = false; radios[1].checked = true; await radios[1].fire('change');
+  assert.deepEqual(lines(), ['Goes to Tickets. Codex may prepare a short plan; no work starts.', 'Codex begins at once. This may cost money.']);
+  assert.match(text(walk(s.d).find(n => n.className.includes('new-ticket-plan'))), /Codex waits for your OK before work begins\./);
   s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
   assert.equal(s.calls[0].args.owner, 'agent:codex');
   const one = setupWith({agents:[{name:'claude', label:'Claude'}]});
   assert.equal(walk(one.d).some(n => n.name === 'helper'), false);
   assert.equal(walk(one.d).find(n => n.className === 'new-ticket-helper-fixed').textContent, 'Claude');
   const same = setupWith({agents:[{name:'helper', label:'Helper'}]});
-  assert.equal(walk(same.d).some(n => n.className === 'new-ticket-helper-fixed' || n.className === 'new-ticket-helper'), false, 'no dead Helper / Helper row');
+  assert.equal(walk(same.d).some(n => n.className === 'new-ticket-helper-fixed' || n.className.includes('new-ticket-helper')), false, 'no dead Helper / Helper row');
+  assert.match(text(walk(same.d).find(n => n.className.includes('new-ticket-what'))), /^Goes to Tickets\. Your helper may prepare/);
   const none = setupWith({agents:[]});
   assert.equal(walk(none.d).some(n => n.name === 'helper' || n.className === 'new-ticket-helper-fixed'), false);
-  assert.match(text(walk(none.d).find(n => n.className.includes('new-ticket-what'))), /No helper is set up yet, so nothing is prepared or started now/);
+  assert.match(text(walk(none.d).find(n => n.className.includes('new-ticket-what'))), /No helper is set up yet, so nothing starts/);
   assert.equal(walk(none.d).find(n => n.textContent === 'Set up a helper').href, '#settings/helper');
 });
 test('due date uses the shared date picker; the chosen day is sent with the ticket', async () => {
@@ -384,14 +392,18 @@ const stepBoxes = s => walk(s.d).filter(n => n.className.split(' ').includes('ne
 const addStepButton = s => walk(s.d).find(n => n.className.includes('new-ticket-add-step'));
 test('ORCH-14: Make it an epic adds numbered ticket boxes; Remove takes one out and renumbers', async () => {
   const s = setup();
-  const help = walk(s.d).find(n => /This ticket is split into parts/.test(n.textContent));
+  const help = walk(s.d).find(n => /Each part becomes its own ticket inside this one/.test(n.textContent));
   assert.equal(stepBoxes(s).length, 0); assert.equal(help.hidden, true);
   assert.equal(addStepButton(s).textContent, '＋ Split into parts');
   await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
-  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'strong').textContent), ['Ticket 1', 'Ticket 2', 'Ticket 3']);
+  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.className.includes('new-ticket-step-name')).textContent), ['Part 1', 'Part 2', 'Part 3']);  // ORCH-2162: one word, part
   assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another part');
-  await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove ticket 1').click();
-  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Ticket 1: what needs doing?', 'Ticket 2: what needs doing?']);
+  await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove part 1').click();
+  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Part 1: what needs doing?', 'Part 2: what needs doing?']);
+  // the first press sits beside Add files; with parts, "Add another part" follows the last part
+  assert.ok(addStepButton(s).parent.className.includes('new-ticket-step-foot'));
+  await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove part 1').click(); await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove part 1').click();
+  assert.ok(addStepButton(s).parent.className.includes('new-ticket-file-bar'));
 });
 test('ORCH-14: Start now makes the epic, then one ticket inside it per box with its own files; only the epic starts', async () => {
   const s = setupWith(HELPER, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
@@ -430,7 +442,7 @@ test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 139 MB i
   walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(145 * 1024 * 1024);
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
-  assert.match(walk(big.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /^Ticket 2 is too big/);
+  assert.match(walk(big.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /^Part 2 is too big/);
 });
 test('ORCH-14: a ticket that fails keeps the window open; pressing again sends only that one, not the epic twice', async () => {
   const s = setupWith(HELPER);
@@ -449,7 +461,7 @@ test('ORCH-14: a ticket that fails keeps the window open; pressing again sends o
   const start = await pressStart(s);
   assert.equal(s.d.open, true);
   assert.equal(start.hidden, true, 'the epic exists: only the retry is left');
-  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not all of its parts\. Ticket 1: busy/);
+  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not all of its parts\. Part 1: busy/);
   assert.equal(stepBoxes(s).length, 1, 'the step that was made left the list');
   assert.equal(walk(s.d).find(n => n.type === 'submit').textContent, 'Send the rest');
   await saveBtn(s).click(); await s.form.fire('submit');  // the retry keeps the first choice: Start now
@@ -465,7 +477,7 @@ test('ORCH-156: an empty ticket box is refused with a plain message; nothing is 
   await s.form.fire('submit');
   assert.deepEqual(s.calls, []);
   const error = walk(s.d).find(n => n.className === 'bad' && n.role === 'alert');
-  assert.equal(error.textContent, 'Ticket 1 is empty. Write what needs doing in it, or remove it.');
+  assert.equal(error.textContent, 'Part 1 is empty. Write what needs doing in it, or remove it.');
   assert.equal(s.d.open, true);
   await walk(s.d).find(n => n.textContent === 'Remove').click();  // removed: a plain ticket, as before
   await s.form.fire('submit');
@@ -480,7 +492,7 @@ test('ORCH-156: the second of two boxes empty names Ticket 2; a filled one alone
   boxes[0].value = 'First';
   await s.form.fire('submit');
   assert.deepEqual(s.calls, []);
-  assert.match(walk(s.d).find(n => n.className === 'bad').textContent, /^Ticket 2 is empty/);
+  assert.match(walk(s.d).find(n => n.className === 'bad').textContent, /^Part 2 is empty/);
   boxes[1].value = 'Second';
   await s.form.fire('submit');
   assert.equal(s.calls[0].args.epic, true);
@@ -547,7 +559,7 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(stepBoxes(s).length, 1, 'the ticket that was made left the list');
   const err = walk(s.d).find(n => n.className === 'bad');
-  assert.match(err.textContent, /not all of its parts\. Ticket 2: Too long/);
+  assert.match(err.textContent, /not all of its parts\. Part 2: Too long/);
   s.calls.length = 0;
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
@@ -650,24 +662,25 @@ test('ORCH-1037: a form left while saving never moves the person later', async (
   assert.ok(s.toasts.some(x => x[0] === 'Ticket created'));
 });
 
-// ORCH-1842 / ORCH-1852: capture first. The request and Save ticket sit side by side (#2813); a line under them says
-// what each button does; everything else is optional, below.
-const requestRow = s => walk(s.d).find(n => n.className === 'new-ticket-request');
-const buttonsOf = n => walk(n).filter(b => b.tag === 'button' && /btn|outline|primary/.test(b.className)).map(b => b.textContent);
+// ORCH-1842 / ORCH-1852 / ORCH-2162 (option A): capture first. The request, its files and parts; then Save ticket and
+// Start now side by side, one line under each; the helper and the optional settings in their own boxes.
+const requestRow = s => walk(s.d).find(n => n.className === 'new-ticket-buttons');
+const buttonsOf = n => walk(n).filter(b => b.tag === 'button' && /btn|outline|primary|ghost/.test(b.className)).map(b => b.textContent);
 const whatOf = s => walk(s.d).find(n => n.className.includes('new-ticket-what'));
 test('ORCH-1852: with no helper, one sentence and Save ticket make exactly one ticket; nothing optional comes first', async () => {
   const s = pageSetup({helper:false});
-  const kinds = s.form.children.map(n => n.className.split(' ').find(c => /^(new-ticket-more|form-fields|bad|actions)$/.test(c) && !(c === 'form-fields' && n.className.includes('new-ticket-more'))) || n.className);
-  assert.deepEqual(kinds.slice(0, 4), ['form-fields', 'bad', 'new-ticket-more', 'actions'], 'request with its Save, message, the options, then Cancel');
-  const row = requestRow(s), more = s.form.children[2];
-  assert.ok(walk(row).includes(s.input), 'the request is in the row');
-  assert.deepEqual(buttonsOf(row), ['Save ticket']);
+  const kinds = s.form.children.map(n => n.className.split(' ').find(c => /^new-ticket-(main|helper|go|more)$/.test(c)) || n.className);
+  assert.deepEqual(kinds.slice(0, 3), ['new-ticket-main', 'new-ticket-go', 'new-ticket-more'], 'request, its buttons, then the options; no helper box');
+  assert.match(s.form.className, /no-helper/, 'the options take the whole right column');
+  const [main, go, more] = s.form.children, row = requestRow(s);
+  assert.ok(walk(main).includes(s.input), 'the request comes first');
+  assert.ok(walk(main).some(n => n.className.includes('new-ticket-add-step')) && walk(main).some(n => n.type === 'file'), 'files and parts sit right under the request');
+  assert.deepEqual(buttonsOf(row), ['Save ticket', 'Cancel']);
   assert.match(saveBtn(s).className, /primary/);
-  assert.ok(walk(s.form.children[0]).includes(whatOf(s)), 'what Save does sits with the request, above the options');
-  for (const name of ['plan_first', 'human_review', 'done_when', 'due']) assert.ok(walk(more).some(n => n.name === name), name + ' is below the request');
-  assert.ok(walk(more).some(n => n.className.includes('new-ticket-add-step')) && walk(more).some(n => n.type === 'file'), 'parts and files stay reachable');
+  assert.ok(walk(go).includes(whatOf(s)), 'what Save does sits under its button');
+  for (const name of ['plan_first', 'human_review', 'done_when', 'due']) assert.ok(walk(more).some(n => n.name === name), name + ' is with the options');
   assert.equal(walk(more).find(n => n.tag === 'h2').textContent, 'Optional');
-  assert.match(text(whatOf(s)), /^Save ticket puts it in Tickets\. No helper is set up yet, so nothing is prepared or started now\./);
+  assert.match(text(whatOf(s)), /^Goes to Tickets\. No helper is set up yet, so nothing starts\./);
   assert.equal(startNow(s), undefined);
   s.input.value = 'Plan the spring campaign launch'; await s.input.fire('input');
   await saveBtn(s).click(); await s.form.fire('submit');
@@ -686,10 +699,12 @@ test('ORCH-1852: no helper: Cmd+Enter saves one ticket and asks for no run', asy
 });
 test('ORCH-1852: with a helper, Start now stays explicit with its cost said; Save ticket stays the default', async () => {
   const s = pageSetup({prepare:true});
-  const what = text(whatOf(s));
-  assert.match(what, /Save ticket puts it in Tickets\. Your helper may prepare it with a short plan; no work starts\./);
-  assert.match(what, /Start now has your helper begin the work at once\. This uses its time and may cost money\./);
-  assert.deepEqual(buttonsOf(requestRow(s)), ['Save ticket', 'Start now'], 'the filled default first, the costly choice outlined under it');
+  const [saveCell, startCell] = requestRow(s).children;
+  assert.deepEqual([saveCell, startCell].map(cell => cell.children.map(n => n.textContent)), [
+    ['Save ticket', 'Goes to Tickets. Claude may prepare a short plan; no work starts.'],
+    ['Start now', 'Claude begins at once. This may cost money.', '']], 'each button with its own line right under it');
+  assert.ok(walk(startCell).some(n => n.name === 'plan_first'), 'Show me the plan first sits under Start now');
+  assert.deepEqual(buttonsOf(requestRow(s)), ['Save ticket', 'Start now', 'Cancel'], 'side by side: the filled default first, the costly choice outlined beside it, Cancel last');
   assert.doesNotMatch(startNow(s).className, /primary/);
   assert.equal(saveBtn(s).type, 'submit');  // Enter with Cmd or Ctrl saves; it never starts the helper
   s.input.value = 'Plan it'; await s.input.fire('input');
@@ -699,7 +714,7 @@ test('ORCH-1852: with a helper, Start now stays explicit with its cost said; Sav
   await s.form.fire('submit');  // what the browser does next: a submit with no Start now press
   assert.deepEqual(s.calls.map(x => x.op + (x.args.prepare ? ':prepare' : '')), ['ticket.new', 'run.start:prepare']);
   const off = pageSetup({prepare:false});
-  assert.match(text(whatOf(off)), /Save ticket puts it in Tickets as you wrote it\. Nothing starts\./);
+  assert.match(text(whatOf(off)), /^Goes to Tickets as you wrote it\. Nothing starts\./);
 });
 test('ORCH-1852: the text box has the focus on the page; restored text is saved as one ticket', async () => {
   const focused = [];
@@ -712,7 +727,7 @@ test('ORCH-1852: the text box has the focus on the page; restored text is saved 
   const d = host.children[0], input = walk(d).find(n => n.name === 'text'), form = walk(d).find(n => n.tag === 'form');
   assert.equal(focused.at(-1), input);
   assert.equal(input.value, 'Draft for the newsletter');
-  assert.deepEqual(buttonsOf(walk(d).find(n => n.className === 'new-ticket-request')), ['Save ticket', 'Start now']);
+  assert.deepEqual(buttonsOf(walk(d).find(n => n.className === 'new-ticket-buttons')), ['Save ticket', 'Start now', 'Cancel']);
   s.calls.length = 0;
   await form.fire('submit');
   assert.deepEqual(s.calls.filter(x => x.op === 'ticket.new').map(x => x.args.title), ['Draft for the newsletter']);
