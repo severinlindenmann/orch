@@ -36,7 +36,7 @@ test('the Contacts picker says Loading… first, then fills in when the contacts
 test('No contacts only after a real empty answer; a failure shows an error line, not "No contacts"', async () => {
   const empty = context(async () => ({ok:true, json:async () => []}));
   await vm.runInContext("chatDmContacts(), chatDmLoad(true)", empty);
-  assert.match(empty.shown(), /No contacts\./);
+  assert.match(empty.shown(), /No contacts yet/);
   const failing = context(async () => ({ok:false, json:async () => ({})}));
   await vm.runInContext("chatDmContacts(), chatDmLoad(true)", failing);
   assert.match(failing.shown(), /Could not load contacts\./);
