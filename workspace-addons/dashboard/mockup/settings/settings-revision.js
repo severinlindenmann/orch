@@ -17,11 +17,12 @@
     const b=e.target.closest('button'); if(!b)return;
     if(b.dataset.icon){draft.icon=b.dataset.icon;paint()}
     if(b.dataset.colour){draft.colour=b.dataset.colour;paint()}
-    if(b.hasAttribute('data-look-save')){saved={...draft};look.close();announce('Appearance saved in this preview')}
-    if(b.hasAttribute('data-look-cancel'))look.close();
+    // One shared close (kit/overlay.js): the await ends once the dialog is closed and focus is back on Change.
+    if(b.hasAttribute('data-look-save')){saved={...draft};await look.close();announce('Appearance saved in this preview')}
+    if(b.hasAttribute('data-look-cancel'))await look.close();
     if(b.hasAttribute('data-copy-path')){
       try{await navigator.clipboard.writeText('/Users/lume/.orch-test/demo-dash/ws/Demo');announce('Folder path copied')}
-      catch{const path=b.closest('.setting-row').querySelector('[data-folder-path]');const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(path);selection.removeAllRanges();selection.addRange(range);announce('Select the full path to copy it')}
+      catch{announce('Could not copy. Point at the folder name to see its full path.')}
     }
     if(b.hasAttribute('data-reconnect')){
       b.disabled=true; const label=b.closest('.setting-row').querySelector('[data-relay-status]');label.textContent='Connecting…';

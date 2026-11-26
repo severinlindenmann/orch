@@ -114,7 +114,9 @@ def write_ready(f: Path, port: int) -> None:
 def _preferred_port() -> int | None:
     """ORCH_PREFERRED_PORT (set by `orch start`: the port this service had last time), only when valid."""
     v = os.environ.get("ORCH_PREFERRED_PORT", "")
-    return int(v) if v.isdigit() and 1024 <= int(v) < 65536 else None
+    if not (v.isascii() and v.isdigit()):  # "²".isdigit() is True but int("²") fails
+        return None
+    return int(v) if 1024 <= int(v) < 65536 else None
 
 
 def start(root: Path, port: int | None = None) -> dict:

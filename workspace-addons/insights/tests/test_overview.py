@@ -189,7 +189,8 @@ def test_cards_order_limit_and_honest_units(answer):
     cards = build_overview(answer)["needs"]
     assert [card["kind"] for card in cards] == ["skill", "connection", "key"]
     assert cards[0]["text"] == "2 of 5 uses failed; 0 refused."
-    assert cards[1]["title"] == 'Stripe said "not allowed" 3 times'
+    assert cards[1]["title"] == "Stripe said “not allowed” 3 times"
+    assert cards[1]["text"] == "Check what this service is allowed to do."
     assert cards[2]["title"] == "1 key not used in 30 days"
     assert all(card["button"] == "Look" for card in cards)
     answer["items"].append({**answer["items"][2], "name": "also-bad", "uses": 5, "ok": 0, "failed": 5})

@@ -292,7 +292,9 @@ def _found_item(f: dict) -> dict | None:
     # A plain program (no launchd/systemd entry) cannot be taken over: adopt refuses it, so the page draws no
     # button for it, only what was found (ORCH-934).
     panel: dict = {"facts": facts, "note": "orch leaves it alone until you say so."}
-    if not sid.startswith("process:"):
+    if sid.startswith("process:"):  # no button, so the note must not promise one (no dead end)
+        panel["note"] = "It was started by hand, so orch cannot manage it. orch leaves it alone."
+    else:
         panel["buttons"] = [_btn("Manage with orch", "adopt", vid)]
     return {
         "id": vid,

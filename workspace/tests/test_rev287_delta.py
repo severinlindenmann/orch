@@ -53,6 +53,7 @@ def test_parallel_remember_calls_are_all_kept(proj, run, new_ticket, conn):  # n
 def test_lock_is_released_after_a_failing_update(proj):
     with pytest.raises(ZeroDivisionError):
         phone_view.update_state(proj, lambda st: 1 / 0)
+    assert not (phone_view.net.secrets_dir(proj) / "phone-views.lock").exists()
     t = time.monotonic()
     phone_view.update_state(proj, lambda st: None)
-    assert time.monotonic() - t < 1
+    assert time.monotonic() - t < 5  # a held lock would wait the full 10 s; slow Windows runners need > 1 s

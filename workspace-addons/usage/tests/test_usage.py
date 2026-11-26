@@ -401,3 +401,36 @@ def test_every_argument_has_a_help_line(monkeypatch, capsys):
     capsys.readouterr()
     assert len(seen) > 20
     assert [n for n, h in seen if not h] == []
+
+
+def test_a_limit_past_80_percent_is_one_warning_with_the_fix_on_the_command_line_and_the_page(
+    cli, fake_switcher, ws
+):
+    from orch_usage import cli as c
+    from orch_usage import page
+
+    code, d = jrun(cli, "list")  # first: 97% of the 5 hours, no own limit; nothing is off
+    want = "first is at 97% of its 5-hour limit. Fix: wait until it resets ("
+    assert (
+        code == 0
+        and d["near"].startswith(want)
+        and d["near"].endswith(") or add an API credit with orch usage add")
+    )
+    assert d["warnings"] == []  # the switcher's warnings stay as they were
+    _code, out, _ = cli("list")
+    assert f"Warning: {d['near']}" in out.splitlines()
+    assert page.build(c.gather(ws), ws)["near"] == d["near"]  # the page's banner: the same words
+
+    jrun(cli, "off", "second", "--by", "human:owner")
+    assert jrun(cli, "list")[1]["near"].endswith("Fix: turn another account on with orch usage on second")
+
+    fake_switcher.answer(switcher_data(first=(10.0, 10.0), second=(0.0, 10.0), third=(23.0, 44.0)))
+    assert jrun(cli, "list")[1]["near"] is None
+    assert "Warning:" not in cli("list")[1]
+
+    jrun(
+        cli, "limit", "TEAMCO", "50", "--period", "week", "--by", "human:owner"
+    )  # 44 of 50 = 88% of its own limit
+    assert jrun(cli, "list")[1]["near"] == (
+        "TEAMCO is at 88% of its weekly limit. Fix: raise it with orch usage limit TEAMCO 100% --period week"
+    )

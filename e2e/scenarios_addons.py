@@ -504,3 +504,85 @@ def a17(e):
     finally:
         e.sh(["orch", "stop", "--all"], cwd=e.tmp)
     return "start in two workspaces (two ports), status, stop inside / by name, refused outside without a terminal"
+
+
+@scenario("A24")
+def a24(e):
+    """R1.2: every add-on on, a ticket with ext.<addon> for each; remove them one by one. After each removal the core
+    CLI, the add-ons still on (their --help, the running dashboard) and every ticket keep working, never a traceback."""
+    ws = e.ws("Removal")
+    names = sorted(json.loads((Path(e.repo) / "workspace/src/orch/shipped_addons.json").read_text()))
+    rc, out, err = e.sh(["orch", "addon", "add", *names, "--yes"], cwd=ws, timeout=1800)
+    check(rc == 0, f"add every add-on: {(err or out)[-300:]}")
+    for core in ("relay", "publish"):
+        rc, out, err = e.addon_add(ws, core)
+        check(rc == 0, f"add {core}: {(err or out)[-300:]}")
+    on = [n for n in names + ["publish", "relay"] if n in json.loads((ws / ".orch/addons.json").read_text())["active"]]
+    check(sorted(on) == sorted(names + ["publish", "relay"]), f"not every add-on is on: {on}")
+    ids = {}
+    for n in on:
+        t = e.orchj(ws, "ticket", "new", f"A24 {n}")["id"]
+        e.orch(ws, "check", "add", t, f"step for {n}")
+        d = tload(ws, t)
+        d.setdefault("ext", {})[n] = {"e2e": n, "recurring": False}  # what an add-on leaves on its tickets
+        (ws / ".orch/tickets" / f"{t}.json").write_text(json.dumps(d))
+        ids[n] = t
+    all_ext = e.orchj(ws, "ticket", "new", "A24 every add-on")["id"]
+    d = tload(ws, all_ext)
+    d["ext"] = {n: {"e2e": n} for n in on}
+    (ws / ".orch/tickets" / f"{all_ext}.json").write_text(json.dumps(d))
+
+    def no_trace(what, rc, out, err, ok=(0,)):
+        check("Traceback" not in out + err, f"{what}: traceback\n{(err or out)[-600:]}")
+        check(rc in ok, f"{what}: exit {rc}: {(err or out).strip()[-300:]}")
+
+    def core_works(gone: str, still: list[str], get=None):
+        for args in (["--help"], ["--help-all"], ["ticket", "list"], ["needs"], ["counts"], ["triage"], ["addon", "list"],
+                     ["status"], ["doctor"], ["ticket", "show", all_ext], ["ticket", "show", all_ext, "--json"]):
+            no_trace(f"after removing {gone}: orch {' '.join(args)}", *e.sh(["orch", *args], cwd=ws, timeout=120),
+                     ok=(0, 1) if args[0] == "doctor" else (0,))
+        for n, t in ids.items():
+            rc, out, err = e.sh(["orch", "ticket", "show", t, "--json"], cwd=ws)
+            no_trace(f"after removing {gone}: ticket show {t} (ext.{n})", rc, out, err)
+            shown = set(json.loads(out).get("ext") or {})
+            # ext.relay stays shown: the core writes it on tickets that came over the relay (cli.CORE_EXT)
+            check(shown <= {*still, "relay"}, f"ticket {t} shows ext of add-ons that are off: {shown - set(still)}")
+            check(tload(ws, t)["ext"][n]["e2e"] == n, f"ext.{n} lost from {t} after removing {gone}")
+        e.orch(ws, "log", ids[gone], f"still works after removing {gone}")
+        e.orch(ws, "check", "add", ids[gone], f"new step after removing {gone}")
+        no_trace(f"ext set on {all_ext} after removing {gone}",
+                 *e.sh(["orch", "ext", "set", all_ext, gone, '{"e2e": "%s"}' % gone], cwd=ws))
+        rc, out, err = e.sh(["orch", gone, "--help"], cwd=ws)
+        check("Traceback" not in out + err, f"orch {gone} after its removal: traceback\n{err[-600:]}")
+        check(rc == 2 and (f"orch addon add {gone}" in err or "not an orch command" in err),
+              f"orch {gone} after its removal: {rc} {err[-200:]}")
+        for n in still:
+            no_trace(f"orch {n} --help after removing {gone}", *e.sh(["orch", n, "--help"], cwd=ws))
+        if get:
+            # a running dashboard drops the removed add-on at once (it watches .orch/addons.json)
+            end = time.time() + 30  # one state rebuild: a dozen orch reads, slow on a busy runner
+            while True:
+                st, state = get("/api/state")
+                check(st == 200, f"dashboard /api/state after removing {gone}: {st}")
+                if gone not in [a["name"] for a in state.get("addons") or []]:
+                    break
+                check(time.time() < end, f"dashboard still lists {gone}: "
+                      f"{[a for a in state['addons'] if a['name'] == gone]} "
+                      f"active={list(json.loads((ws / '.orch/addons.json').read_text())['active'])} "
+                      f"list={[a for a in e.orchj(ws, 'addon', 'list') if a['name'] == gone]}")
+                time.sleep(0.5)
+            for t in [*ids.values(), all_ext]:
+                st, _ = get(f"/api/ticket/{t}")
+                check(st == 200, f"dashboard /api/ticket/{t} after removing {gone}: {st}")
+
+    order = [n for n in on if n != "dashboard"] + ["dashboard"]
+    still = list(on)
+    with _dashboard(e, ws) as (_, get):
+        for n in order[:-1]:
+            no_trace(f"addon remove {n}", *e.sh(["orch", "addon", "remove", n], cwd=ws, timeout=300))
+            still.remove(n)
+            core_works(n, still, get)
+    no_trace("addon remove dashboard", *e.sh(["orch", "addon", "remove", "dashboard"], cwd=ws, timeout=300))
+    still.remove("dashboard")
+    core_works("dashboard", still)
+    return f"{len(order)} add-ons removed one by one; core, the rest and {len(ids) + 1} tickets kept working"

@@ -28,8 +28,8 @@ const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 
 const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844},
   {name: 'small phone', width: 320, height: 700}, {name: 'zoom 150%', width: 960, height: 600}].map(v => ({...v, label: `${v.name} ${v.width}px`}));
-// Smallest tap target at phone width, in CSS px (WCAG 2.2 level AA, 2.5.8: 24 x 24).
-const TAP_MIN = 24;
+// Smallest tap target at phone width, in CSS px (the master --touch size; WCAG 2.5.8 asks 24 x 24).
+const TAP_MIN = 44;
 const PHONE = vp => vp.width <= 720;
 // The never-list comes from its one source, docs/wording.md (last column of the table). Entries that only make sense
 // in a sentence (with a note in brackets, quotes or a placeholder) are left to the wording test in brand/.
