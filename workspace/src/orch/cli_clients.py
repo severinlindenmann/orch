@@ -506,6 +506,11 @@ def run_group(args, root: Path, out) -> None:
 
 
 def run_publish(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_publish(args, root, out)
+
+
+def _run_publish(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -798,6 +803,11 @@ def _problem(args, root: Path, out) -> None:
 
 
 def run_relay(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_relay(args, root, out)
+
+
+def _run_relay(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -849,6 +859,13 @@ def run_relay(args, root: Path, out) -> None:
         if fp:
             st["fingerprint"] = fp
             text += f"\nSigning key fingerprint: {fp}"
+        if st["configured"] and (n := len(relay.outbox_list(root))):  # queued stays visible (R1.1, R3.1)
+            st["waiting"], problem = n, relay.outbox_problem(root)
+            text += f"\n{n} message{'s' if n != 1 else ''} not sent yet: " + (
+                f"{problem} They go out once this is fixed."
+                if problem
+                else "the relay could not be reached. They go out with the next orch relay command."
+            )
         out(args, st, text)
     elif sub == "key":
         from orch import signkey
