@@ -601,8 +601,8 @@ function liveSplitMenu(menu, key, label, others, note) {
 let liveSplitWant = null;
 // The More menu of every pane (ORCH-2199, owner pick G a): only Stop, End session, History and Where it sits (Bar only
 // is the old Minimise). Pin and Split sit in the header; a pane under LIVE_FOLD_W px folds them into here (CSS
-// container query on .live-pane: [data-fold] hides in the header, [data-fold-item] shows here). A phone pane keeps
-// Chat | Terminal here too.
+// container query on .live-pane: [data-fold] hides in the header, [data-fold-item] shows here), and Chat | Terminal
+// with them (Show terminal / Show chat here); a phone pane always has it here.
 function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
   const sess = liveLayerSession(key), phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
   return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
@@ -610,7 +610,7 @@ function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
     phone ? null : item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold-item':''}),
     ...(phone ? [] : ['right', 'down'].map(dir => h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':'split:' + dir + ':' + key, 'data-key':'live-more-split-' + dir, 'aria-haspopup':'true', 'data-fold-item':''},
       liveIc('split-' + dir), h('span', {}, dir === 'right' ? 'Split right' : 'Split down')))),
-    narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
+    sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view', 'data-fold-item':narrow ? null : ''},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
     sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
     typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
@@ -660,7 +660,7 @@ function liveMoreEnd(key) {
 const liveEndHere = (key, label) => typeof window.liveEndButtons !== 'function' ? []
   : [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null];
 // ORCH-2199: a pane narrower than this folds Pin and Split into More (owner pick G a; widgets.css container query)
-const LIVE_FOLD_W = 480;
+const LIVE_FOLD_W = 600;  // owner's drawing: 480 px; the header here also has Split down and Copy, so it folds at 600
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n, compact = o.compact;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
@@ -1009,7 +1009,7 @@ function liveLayerView(s, where) {
   // ORCH-2200: every pane of the tree shows (the person sized them); a phone shows the selected one, and quiet panes
   // still fold to the bar while the page behind has cards to answer (ORCH-261)
   const hush = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [];
-  const shown = phone ? liveLayerFit(s.panes, s.cur, where, room, phone, hush) : liveLayerFit(s.panes, s.cur, where, Infinity, false, hush).filter(k => s.panes.includes(k));
+  const shown = phone ? liveLayerFit(s.panes, s.cur, where, room, phone, hush) : liveLayerFit(s.panes, s.cur, 'bottom', Infinity, false, hush).filter(k => s.panes.includes(k));
   const tree = liveTreeKeep(s.tree || liveTreeFrom(s.panes, where), shown);
   const others = liveLayerOthers(s.panes);
   return {shown, tree, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),

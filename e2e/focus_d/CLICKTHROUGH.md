@@ -174,7 +174,7 @@ Do:
 1. Open a session from the bar.
 2. Change to Tickets, Review and Home.
 3. Use Place: bottom, right, full screen; press Esc twice.
-4. Open it again, minimise it to the bar, then put it to the side and open it from the edge.
+4. Open it again, put it on the bar only (More), then put it to the side and open it from the edge.
 5. Make it larger, then reload the page.
 
 Must be seen:
@@ -183,7 +183,7 @@ Must be seen:
 - The layer stays open while the page changes.
 - Esc goes back one step: full screen, then the panel, then the bar.
 - In full screen Tab stays in the layer.
-- Minimise leaves only the bar; to the side leaves a slim edge.
+- Bar only (in More, Where Focus sits) leaves only the bar; to the side leaves a slim edge.
 - After the reload the layer opens where it was last, at the same size.
 
 ## 11. Zoom and full screen, Esc goes one step back
@@ -204,7 +204,7 @@ Must be seen:
 - Full screen keeps only a slim strip of the other sessions.
 - Each Esc goes back one step: full screen, then the layer, then the wall.
 
-## 12. Split into two and three sessions with the pane controls
+## 12. Split into up to four sessions with the pane controls
 
 - Part: split (draft D feature 7)
 - State: ready, clicked by the script
@@ -212,18 +212,18 @@ Must be seen:
 
 Do:
 
-1. In the layer press Add beside twice.
+1. In the layer press Split right, pick Chat with... and a session; do it three times.
 2. Change to Tickets, Review and Home.
-3. On one pane use pin, Place, minimise and close.
+3. On one pane use pin, Where Focus sits (More), Bar only and close.
 
 Must be seen:
 
-- Two, then three panes sit next to each other; on the right they are stacked.
-- Every pane has pin, add beside, place, minimise and close.
-- With three panes Add beside is not greyed: its menu says three is the most and to close one first.
+- Two, three, then four panes sit next to each other with a thin divider between them; panes keep the order they were opened in.
+- Every pane has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and Pin are in More.
+- With four panes Split is not greyed: its menu says four is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
-- On a phone one session shows at a time and there is no add beside.
+- On a phone one session shows at a time and there is no split and no pin in the header.
 - A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.
 
 ## 13. Focus stays open with typed text and split while you change pages
@@ -289,14 +289,14 @@ Must be seen:
 Do:
 
 1. Open a session that needs you from the bar.
-2. Look at the pane: what it does now, its last lines and the line under them.
+2. Look at the pane: its last lines; open the status pill for model, step and open time.
 3. Press Stop in the pane; open an idle session and read its Stop button.
-4. Open the model choice of a working session and pick another model.
+4. Press the status pill of a working session and pick another model there.
 
 Must be seen:
 
-- The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").
-- How long it is open and how long it stays (warm while it works, or when it closes for being idle).
+- The open question and the last lines of its screen; no line of tool and model under them.
+- Press the status pill in the header: the model (for example "Opus"), the step, how long it is open and how long it stays (warm while it works, or when it closes for being idle), and Open ticket.
 - All of it stays current while you look; the keyboard place does not jump.
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
 - A new model applies when the helper finishes its current step (or at its next start) and says so.
@@ -404,15 +404,15 @@ Do:
 
 1. Switch a session to Terminal.
 2. Press a key: nothing is sent (watching only).
-3. Turn on Let me type, type a command and press Enter.
-4. Paste two lines, then Cancel.
+3. Click into the screen, type a command and press Enter.
+4. Paste two lines.
 5. Select text and copy it.
 
 Must be seen:
 
 - The helper's real screen with its colours; it starts watching only.
-- Keys go to the helper only after Let me type.
-- A paste with a line end asks first.
+- Keys go to the helper only after a click into the screen (a small keyboard sign shows while typing).
+- A paste goes in at once as one block, without its last line end and without a question.
 - Selecting and copying works like on any page; Copy copies the selection or the screen.
 - While typing the screen follows the size of its pane.
 - It can only be reached from this computer (the bridge, ORCH-743).
@@ -478,7 +478,7 @@ Must be seen:
 
 Do:
 
-1. Open a session in the layer and press History (in More when the pane is narrow).
+1. Open a session in the layer, press More and then History.
 2. Press Reopen on an earlier session.
 
 Must be seen:
@@ -594,14 +594,14 @@ Do:
 
 1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
 2. Start the Manager.
-3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+3. In its pane press the status pill and pick Auto under Permissions.
 4. In a workspace that allows at most Auto, open the New menu.
 
 Must be seen:
 
 - The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
-- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
-- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and the status popover of its pane marks Bypass permissions (it says a change restarts the helper).
+- Auto ends the session and goes on with the same conversation; the popover marks Auto.
 - Bypass permissions is off when the workspace does not allow it and says why.
 
 ## 34. Results shelf beside or above the chat
@@ -635,7 +635,7 @@ Do:
 Must be seen:
 
 - In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.
-- The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
+- The pane title shows whole; on a phone there is no split and no pin in the header. The terminal line says "Watch only" beside Turn typing on.
 - Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
 - After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
 
@@ -648,7 +648,7 @@ Must be seen:
 Do:
 
 1. Open Review while cards wait on you.
-2. Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.
+2. Open a session that waits on you and split one with nothing in it yet beside it; place Focus at the bottom.
 
 Must be seen:
 

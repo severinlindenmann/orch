@@ -1166,8 +1166,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-term-tools:empty{display:none}
 .live-term-tools .term-say{max-width:18ch}
 .live-pop [data-fold-item]{display:none}
-@container live-pane (max-width:479px){
-  .live-ctl [data-fold]{display:none}
+@container live-pane (max-width:599px){
+  .live-ctl [data-fold],.live-ph>.live-view{display:none}
   .live-pop [data-fold-item]{display:flex}
   .live-term-tools .term-say{display:none}
 }

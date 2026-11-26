@@ -103,7 +103,8 @@ module.exports = {
     await shot('pane-idle-note', ep);
 
     // 3. The wall: the chat helper's tile More: Stop (not greyed, ORCH-1362: says nothing runs), End session asks, then ends.
-    await (await more(ep, 'live-more-min')).click();  // the pane to the bar: the wall in full view
+    await ep.locator('[data-key="live-pane-more"]').click();  // More, Where Focus sits, Bar only: the wall in full view
+    await page.locator('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]').click();
     await open('#addon/focus');
     const tileMore = page.locator(`main [data-key="tile-end-${IDS.chat}"]`);
     await tileMore.waitFor({ timeout: 15000 });
