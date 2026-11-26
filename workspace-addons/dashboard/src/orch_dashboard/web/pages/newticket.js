@@ -62,6 +62,7 @@ function ticketFileChip(file, remove, label = file.name) {
   const row = el('li', 'new-ticket-file');
   const body = button('', 'new-ticket-file-main', () => ticketPreview(file));
   if (file.type === 'image' && file.url) { const thumb = el('img', 'thumbnail'); thumb.alt = ''; thumb.src = file.url; body.append(thumb); }  // ORCH-185: a picture shows itself
+  else { const kind = el('span', 'new-ticket-file-kind', (file.name.match(/\.([a-z0-9]{1,4})$/i)?.[1] || 'file').toUpperCase()); kind.setAttribute('aria-hidden', 'true'); body.append(kind); }  // ORCH-2162: MD, CSV, …
   body.append(el('span', '', label));
   if (label === file.name && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
   const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (label === file.name ? file.name : 'pasted text'));
@@ -92,10 +93,11 @@ function ticketStepArgs(text, files, parent, owner) {
   return {...ticketFromText(text, long ? '' : text, long ? text : '', files), parent, ...(owner ? {owner} : {})};
 }
 const ticketTooBig = args => new Blob([JSON.stringify({op:'ticket.new', args})]).size > 139 * 1024 * 1024;  // the server takes 140 MB for a new ticket (MAX_BIG_BODY): 100 MB of files as base64 plus the text
-// Helpers the workspace really has: one entry per helper, the default first, never two with the same label.
+// Helpers this workspace can really use (owner, 25 Nov: only the active ones, by name only): one entry per helper,
+// the default first, never two with the same label. A helper not found on this computer is left out.
 function ticketHelpers(settings) {
   const out = [], labels = new Set();
-  const agents = (Array.isArray(settings?.agents) ? settings.agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false);
+  const agents = (Array.isArray(settings?.agents) ? settings.agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false && a.status !== 'not found');
   agents.sort((a, b) => (b.chosen === true) - (a.chosen === true));
   for (const a of agents) {
     if (out.some(h => h.name === a.name)) continue;
@@ -103,7 +105,7 @@ function ticketHelpers(settings) {
     let label = plain.charAt(0).toUpperCase() + plain.slice(1);
     if (labels.has(label.toLowerCase())) label += ' (' + a.name + ')';
     labels.add(label.toLowerCase());
-    out.push({name:a.name, label, description:typeof a.description === 'string' ? a.description.slice(0, 120) : '', chosen:a.chosen === true});
+    out.push({name:a.name, label, chosen:a.chosen === true});
   }
   return out;
 }
@@ -127,7 +129,7 @@ function mountNewTicket(main) {
 }
 // The page's stand-in for dialog(): a card with the same title and actions, closed by leaving the page.
 function ticketFormPage(host) {
-  const d = el('section', 'card pad new-ticket new-ticket-on-page');
+  const d = el('section', 'new-ticket new-ticket-on-page');
   const title = el('h1', 'new-ticket-title', 'New ticket'); title.id = 'new-ticket-title-' + (++serial);
   d.setAttribute('aria-labelledby', title.id); d.append(title);
   const actions = el('div', 'actions');
@@ -143,12 +145,17 @@ function ticketFormPage(host) {
 function ticketForm(t, {host = null} = {}) {
   const onPage = !t && !!host;
   const {d, actions, close: pageClose} = onPage ? ticketFormPage(host) : dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
-  // ORCH-1852: the request and its Save come first; everything that sets up the run (files, parts, helper, date,
-  // plan, review, done when) sits plainly below the buttons, so one sentence is saved without passing them.
-  const form = el('form'), fields = el('div', 'form-fields'), more = t ? fields : el('div', 'form-fields new-ticket-more'), inputs = {};
-  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'One sentence is enough. Everything below the buttons is optional.')); }
+  // ORCH-2162 (owner chose option A, 25 Nov): two columns on a wide screen. Left: the request, its files and parts,
+  // then Save ticket and Start now side by side, each with one line under it. Right: the helper, then the optional
+  // settings. On a phone one column: request, helper, the two buttons, then the optional settings.
+  const form = el('form', t ? '' : 'new-ticket-form'), fields = el('div', t ? 'form-fields' : 'form-fields new-ticket-main'), more = t ? fields : el('section', 'form-fields new-ticket-more'), inputs = {};
+  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'One sentence is enough. Everything else is optional.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
-  let helpers = [], helperSelect = null, doneWrap = null, requestRow = null, saveCol = null, explain = null;
+  let helpers = [], helperBox = null, sayWhat = () => {};
+  const helperRadios = [];
+  const helperChoice = () => helperRadios.find(r => r.checked)?.value || helpers[0]?.name || '';
+  let planBox = null, planLabel = null, reviewBox = null;
+  const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
   let updateAttachments = () => {}, grow = () => {}, readInto = null;
   const steps = [];  // ORCH-14: an epic. Each entry becomes its own ticket inside the new one, with its own text and files
@@ -177,19 +184,18 @@ function ticketForm(t, {host = null} = {}) {
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
-    // ORCH-1852: the request and its Save sit side by side (stacked on a phone); the run options come after them.
     label.htmlFor = input.id; label.append(input); inputs.text = input;
-    requestRow = el('div', 'new-ticket-request'); saveCol = el('div', 'new-ticket-save'); requestRow.append(label, saveCol);
-    explain = el('div', 'meta new-ticket-explain new-ticket-what'); explain.setAttribute('role', 'status');
-    fields.append(requestRow, explain);
-    const zone = el('div', 'new-ticket-drop');
-    const attach = button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach', () => picker.click());
-    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 25 MB each'));
+    fields.append(label);
+    // ORCH-2162 (owner chose option A): the files sit in a row right under the request, with Add files and Split
+    // into parts as two plain buttons beside them; drops anywhere on the form land here.
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
+    const attach = button('＋ Add files', 'btn outline sm new-ticket-attach', () => picker.click());
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
     const chips = el('ul', 'new-ticket-files'); chips.setAttribute('aria-label', 'Added files');
+    const fileBar = el('div', 'new-ticket-file-bar');
     const status = el('p', 'meta new-ticket-reading'); status.setAttribute('role', 'status');
+    const hint = el('p', 'meta new-ticket-file-hint', 'or drop or paste files and pictures on this page · up to 25 MB each');
     const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The helper writes the title and a short description.');
     updateAttachments = () => {
       chips.replaceChildren();
@@ -201,7 +207,7 @@ function ticketForm(t, {host = null} = {}) {
       }));
       help.hidden = !pastedText; updateValidity();
     };
-    // Reads picked, dropped or pasted files into a list (the ticket's own or a step's), one after the other: the
+    // Reads picked, dropped or pasted files into a list (the ticket's own or a part's), one after the other: the
     // submit waits for `reading`, so nothing is sent half read.
     readInto = (incoming, list, errorEl, changed) => {
       reading = reading.then(async () => {
@@ -242,36 +248,37 @@ function ticketForm(t, {host = null} = {}) {
       if (combined.length > 500000) { fileError.textContent = 'Text is over 500000 characters'; return; }
       pastedText = combined; updateAttachments();
     });
-    // What was added (pasted text, files, a refused file) stays with the request; the drop box itself is optional.
-    fields.append(status, fileError, chips, help); updateAttachments();
-    more.append(el('h2', 'new-ticket-more-title', 'Optional'), zone, picker);
-    // Epic: several tickets at once (owner, ORCH-14). The text above is the epic; each entry below becomes its own
-    // ticket inside it (the epic page lists them), with its own text, screenshots and files.
-    const stepList = el('div', 'stack new-ticket-steps');
-    const stepHelp = el('p', 'meta new-ticket-help', 'This ticket is split into parts. Each part below becomes its own ticket, with its own files.');
+    // Epic: several tickets at once (owner, ORCH-14). The text above is the epic; each part below becomes its own
+    // ticket inside it (the epic page lists them), with its own text, screenshots and files. One word on screen: part.
+    const stepList = el('div', 'new-ticket-steps');
+    const stepHelp = el('p', 'meta new-ticket-help', 'Each part becomes its own ticket inside this one, with its own files.');
+    const stepFoot = el('div', 'new-ticket-step-foot');
     const renumber = () => {
       steps.forEach((step, i) => {
-        step.head.textContent = 'Ticket ' + (i + 1);
-        step.input.setAttribute('aria-label', 'Ticket ' + (i + 1) + ': what needs doing?');
-        step.remove.setAttribute('aria-label', 'Remove ticket ' + (i + 1));
+        step.head.textContent = 'Part ' + (i + 1);
+        step.input.setAttribute('aria-label', 'Part ' + (i + 1) + ': what needs doing?');
+        step.remove.setAttribute('aria-label', 'Remove part ' + (i + 1));
+        step.attach.setAttribute('aria-label', 'Add files to part ' + (i + 1));
       });
       stepHelp.hidden = !steps.length;
       addStep.textContent = steps.length ? '＋ Add another part' : '＋ Split into parts';
+      // the first press sits beside Add files; once there are parts, "Add another part" follows the last one
+      (steps.length ? stepFoot : fileBar).append(addStep);
     };
     const newStep = () => {
-      const step = {files:[]}, box = el('section', 'card pad stack new-ticket-step'), top = el('div', 'row between');
-      step.head = el('strong');
-      step.remove = button('Remove', 'btn ghost xs', () => {
+      const step = {files:[]}, box = el('div', 'new-ticket-step'), top = el('div', 'new-ticket-step-row');
+      step.head = el('span', 'meta new-ticket-step-name');
+      step.remove = button('Remove', 'btn ghost sm', () => {
         for (const file of step.files) if (file.url) URL.revokeObjectURL(file.url);
         steps.splice(steps.indexOf(step), 1); box.remove(); renumber();
       });
-      top.append(step.head, step.remove);
-      const text = el('textarea', 'input'); text.name = 'step'; text.rows = 2; text.maxLength = 500000;
-      text.placeholder = 'What needs doing in this ticket?';
+      const text = el('textarea', 'input'); text.name = 'step'; text.rows = 1; text.maxLength = 500000;
+      text.placeholder = 'What needs doing in this part?';
       const stepPicker = el('input'); stepPicker.type = 'file'; stepPicker.multiple = true; stepPicker.hidden = true; stepPicker.accept = picker.accept;
-      const stepAttach = button('＋ Add files', 'new-ticket-attach', () => stepPicker.click());
+      step.attach = button('＋ Files', 'btn ghost sm new-ticket-step-files', () => stepPicker.click());
+      top.append(step.head, text, step.attach, step.remove);
       const stepError = el('p', 'bad new-ticket-file-error'); stepError.setAttribute('role', 'alert');
-      const stepChips = el('ul', 'new-ticket-files'); stepChips.setAttribute('aria-label', 'Files for this ticket');
+      const stepChips = el('ul', 'new-ticket-files'); stepChips.setAttribute('aria-label', 'Files for this part');
       const draw = () => stepChips.replaceChildren(...step.files.map(file => ticketFileChip(file, () => {
         step.files.splice(step.files.indexOf(file), 1);
         if (file.url) URL.revokeObjectURL(file.url);
@@ -279,7 +286,7 @@ function ticketForm(t, {host = null} = {}) {
       })));
       const add = incoming => readInto(incoming, step.files, stepError, draw);
       stepPicker.addEventListener('change', () => { add(Array.from(stepPicker.files)); stepPicker.value = ''; });
-      box.addEventListener('drop', event => {  // a drop on a ticket box is that ticket's, not the epic's
+      box.addEventListener('drop', event => {  // a drop on a part is that part's, not the epic's
         if (!event.dataTransfer?.files.length) return;
         event.preventDefault(); event.stopPropagation?.(); add(Array.from(event.dataTransfer.files));
       });
@@ -287,46 +294,55 @@ function ticketForm(t, {host = null} = {}) {
         const pasted = window.UI?.pastedFiles?.(event) || [];
         if (pasted.length) { event.preventDefault(); add(pasted); }
       });
-      box.append(top, text, stepAttach, stepPicker, stepError, stepChips);
+      box.append(top, stepPicker, stepError, stepChips);
       Object.assign(step, {box, input:text});
       steps.push(step); stepList.append(box); renumber(); text.focus();
       return step;
     };
     d.newStep = newStep;
-    const addStep = button('', 'new-ticket-attach new-ticket-add-step', newStep);
-    more.append(stepHelp, stepList, addStep); renumber();
-    // Helper: only the helpers this workspace has. One helper is fixed text; none is said beside the Save button.
-    // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
+    const addStep = button('', 'btn outline sm new-ticket-add-step', newStep);
+    fileBar.append(chips, attach);
+    fields.append(status, fileBar, picker, fileError, hint, help, stepHelp, stepList, stepFoot); updateAttachments(); renumber();
+    // Helper (owner, 25 Nov): only the helpers this workspace really has, by name only (no "good at" lines). Several:
+    // a short list to pick from; one: its name; one that is just called "Helper", or none: no box at all.
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
-    const helperBox = el('div', 'new-ticket-helper');
     noHelper = helpers.length === 0;
-    const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
-    if (helpers.length > 1) {
-      const helperLabel = el('label', '', 'Helper');
-      helperSelect = el('select', 'input'); helperSelect.name = 'helper'; helperSelect.id = 'field-' + serial + '-helper';
-      for (const h of helpers) { const option = el('option', '', h.label + (h.chosen ? ' (default)' : '')); option.value = h.name; helperSelect.append(option); }
-      helperSelect.value = helpers[0].name;
-      const about = el('p', 'meta new-ticket-helper-about');
-      const describe = () => { about.textContent = helpers.find(h => h.name === helperSelect.value)?.description || ''; about.hidden = !about.textContent; };
-      helperSelect.addEventListener('change', describe); describe();
-      helperLabel.htmlFor = helperSelect.id; helperLabel.append(helperSelect); helperBox.append(helperLabel, about);
-    } else if (noHelperRow) {
-      // one helper that is just called "Helper": a "Helper / Helper" row says nothing
-    } else if (helpers.length) {
-      helperBox.append(el('span', 'new-ticket-label', 'Helper'));
-      helperBox.append(el('p', 'new-ticket-helper-fixed', helpers[0].label));
-      if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
+    const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label);
+    if (helpers.length && !noHelperRow) {
+      helperBox = el('section', 'form-fields new-ticket-helper');
+      helperBox.append(el('h2', 'new-ticket-side-title', 'Helper'));
+      if (helpers.length > 1) {
+        const list = el('div', 'sync-options new-ticket-helper-list'); list.setAttribute('role', 'radiogroup'); list.setAttribute('aria-label', 'Helper');
+        for (const one of helpers) {
+          const row = el('label', 'new-ticket-helper-opt'), radio = el('input');
+          radio.type = 'radio'; radio.name = 'helper'; radio.value = one.name; radio.checked = one === helpers[0];
+          radio.addEventListener('change', () => sayWhat());
+          row.append(radio, el('span', '', one.label));
+          if (one.chosen) row.append(el('span', 'chip active def', 'Default'));
+          list.append(row); helperRadios.push(radio);
+        }
+        helperBox.append(list);
+      } else helperBox.append(el('p', 'new-ticket-helper-fixed', helpers[0].label));
     }
     const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; dueInput.id = 'field-' + serial + '-due-value'; inputs.due = dueInput;
     const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
     const dueLabel = el('label', '', 'Due date'); dueLabel.htmlFor = dueToggle.id;
     const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
     if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
-    const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow || !helpers.length ? [] : [helperBox]), dueBox); more.append(options);
+    // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
+    const reviewLabel = el('label', 'new-ticket-check');
+    reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
+    reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
+    // With a helper the plan choice sits under Start now (moved there below); with none it stays here, kept on the
+    // ticket for when it starts.
+    planLabel = el('label', 'new-ticket-check new-ticket-plan');
+    planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
+    planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'When it starts, the helper waits for your OK before work begins.'));
+    more.append(el('h2', 'new-ticket-side-title', 'Optional'), reviewLabel, planLabel, dueBox);
     const doneLabel = el('label', '', 'Done when');
     const done = el('textarea', 'input new-ticket-text'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
-    done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
-    doneLabel.htmlFor = done.id; doneLabel.append(done); more.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
+    done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done?';
+    doneLabel.htmlFor = done.id; doneLabel.append(done); more.append(doneLabel); inputs.done_when = done;
   }
   for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : [])) {
     const label = el('label', '', field === 'done_when' ? 'What should be true when it is done?' : field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
@@ -354,38 +370,34 @@ function ticketForm(t, {host = null} = {}) {
   // choice beside it, offered only when this workspace has a helper. Nothing starts a helper without that press.
   const startBtn = t || noHelper ? null : button('Start now', 'outline new-ticket-save-btn', () => { if (!created) startAfter = true; form.requestSubmit(); });
   let startAfter = false;
-  let planBox = null, reviewBox = null;
-  const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
+  let go = null, startCell = null;
   if (!t) {
-    const planLabel = el('label', 'new-ticket-check');
-    planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
-    // With a helper the plan choice belongs to Start now; with none it is kept on the ticket for when it starts.
-    planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', startBtn ? 'With Start now, the helper waits for your OK before work begins.' : 'When it starts, the helper waits for your OK before work begins.'));
-    // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
-    const reviewLabel = el('label', 'new-ticket-check');
-    reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
-    reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
-    for (const box of [planLabel, reviewLabel]) {
-      if (doneWrap && typeof more.insertBefore === 'function' && doneWrap.parentNode === more) more.insertBefore(box, doneWrap); else more.append(box);
-    }
-    // What each button really does here, right under the request and its buttons (Save may still prepare; Start uses the helper).
-    const what = explain;
+    // Save ticket and Start now side by side, each with one line under it saying what it does with the helper
+    // picked on the right (owner, ORCH-2162 option A); Cancel last.
+    const whoName = () => { const one = helpers.find(x => x.name === helperChoice()); return one && !/^helper$/i.test(one.label) ? one.label : 'Your helper'; };
+    const prepares = !(typeof state !== 'undefined' && state && state.settings?.prepare_on_save === false);
+    const saveLine = el('p', 'meta new-ticket-what'), startLine = el('p', 'meta new-ticket-what');
+    saveLine.setAttribute('role', 'status');
+    sayWhat = () => {
+      if (!startBtn) return;
+      const who = whoName();
+      saveLine.textContent = prepares ? 'Goes to Tickets. ' + who + ' may prepare a short plan; no work starts.' : 'Goes to Tickets as you wrote it. Nothing starts.';
+      startLine.textContent = who + ' begins at once. This may cost money.';
+      planLabel.children[2].textContent = who + ' waits for your OK before work begins.';
+    };
     if (!startBtn) {
-      const line = el('p', '', 'Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. ');
+      saveLine.textContent = 'Goes to Tickets. No helper is set up yet, so nothing starts. ';
       const setup = el('a', 'new-ticket-link', 'Set up a helper'); setup.href = '#settings/helper';
-      line.append(setup); what.append(line);
-    } else {
-      const prepares = !(typeof state !== 'undefined' && state && state.settings?.prepare_on_save === false);
-      what.append(el('p', '', prepares ? 'Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts.' : 'Save ticket puts it in Tickets as you wrote it. Nothing starts.'),
-        el('p', '', 'Start now has your helper begin the work at once. This uses its time and may cost money.'));
+      saveLine.append(setup);
     }
-  }
-  // The request and its Save sit side by side (Save right under it on a phone, ORCH-1852 / #2813).
-  if (!t) {
     submit.addEventListener('click', () => { if (!created) startAfter = false; });  // a retry keeps the first choice
     submit.className = 'btn primary new-ticket-save-btn';
-    saveCol.append(submit);
-    if (startBtn) saveCol.append(startBtn);
+    const saveCell = el('div', 'new-ticket-choice'); saveCell.append(submit, saveLine);
+    const buttons = el('div', 'new-ticket-buttons'); buttons.append(saveCell);
+    if (startBtn) { startCell = el('div', 'new-ticket-choice'); startCell.append(startBtn, startLine, planLabel); buttons.append(startCell); }
+    actions.className = 'actions new-ticket-cancel'; buttons.append(actions);
+    go = el('div', 'new-ticket-go'); go.append(error, buttons);
+    sayWhat();
   } else actions.append(submit);
   const startNow = async (quiet = false) => {
     // Save ticket prepares the ticket in the background (ORCH-738): no word on screen when it cannot
@@ -400,7 +412,10 @@ function ticketForm(t, {host = null} = {}) {
     return run.ok;
   };
   if (t) form.append(fields, error, reload, actions);
-  else form.append(fields, error, more, actions, reload);
+  else {
+    form.append(fields, ...(helperBox ? [helperBox] : []), go, more, reload);
+    if (!helperBox) form.className += ' no-helper';  // the optional settings take the whole right column
+  }
   d.append(form);
   const steps_ = () => steps.filter(step => step.input.value.trim() || step.files.length);
   let launch = null, launchAt = 0;
@@ -452,7 +467,7 @@ function ticketForm(t, {host = null} = {}) {
     }
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
-    if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
+    if (!t) values.owner = helperRadios.length && helperChoice() !== helpers[0].name ? 'agent:' + helperChoice() : '';
     let result;
     if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
     else {
@@ -469,12 +484,12 @@ function ticketForm(t, {host = null} = {}) {
       // with only empty boxes was saved as a plain ticket with no epic mark).
       const emptyStep = steps.findIndex(step => !ticketStepArgs(step.input.value, step.files, 'x'));
       if (emptyStep >= 0) {
-        error.textContent = 'Ticket ' + (emptyStep + 1) + ' is empty. Write what needs doing in it, or remove it.';
+        error.textContent = 'Part ' + (emptyStep + 1) + ' is empty. Write what needs doing in it, or remove it.';
         steps[emptyStep].input.focus(); submit.disabled = false; idle(); return;
       }
       // Every ticket is checked before anything is created, so a too-big one never leaves half the tickets behind.
       const bigStep = steps.findIndex(step => ticketTooBig(ticketStepArgs(step.input.value, step.files, 'x', values.owner) || {}));
-      if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 139 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
+      if (bigStep >= 0) { error.textContent = 'Part ' + (bigStep + 1) + ' is too big to send at once (over 139 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
         const planFirst = (startAfter || !startBtn) && !!planBox?.checked;
@@ -498,8 +513,8 @@ function ticketForm(t, {host = null} = {}) {
           if (args.steps && result.state?.steps) {  // the tickets inside came with the same answer
             togetherDone = true;
             const {made = [], failed: notMade = []} = result.state.steps;
-            for (const m of made) { filled[m.index]?.remove.click(); if (m.attached?.failed?.length) window.orch.toast('Ticket ' + (m.index + 1) + ' was created. Not saved: ' + m.attached.failed.join(', '), 'error'); }
-            if (notMade.length) epicProblems = notMade.map(f => 'Ticket ' + (f.index + 1) + ': ' + window.DashHelpers.scrubText(f.message));
+            for (const m of made) { filled[m.index]?.remove.click(); if (m.attached?.failed?.length) window.orch.toast('Part ' + (m.index + 1) + ' was created. Not saved: ' + m.attached.failed.join(', '), 'error'); }
+            if (notMade.length) epicProblems = notMade.map(f => 'Part ' + (f.index + 1) + ': ' + window.DashHelpers.scrubText(f.message));
           }
           // The reply names the new ticket; the title match is only for an older server without that.
           const newId = result.state?.created?.id || result.state?.attached?.id;
@@ -522,9 +537,9 @@ function ticketForm(t, {host = null} = {}) {
           step.actId = step.actId || window.orchActId?.();  // the same id when the button is pressed again
           const made = await act('ticket.new', args, {id:step.actId});
           if (made.ok) {
-            if (made.state?.attached?.failed?.length) window.orch.toast('Ticket ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');
+            if (made.state?.attached?.failed?.length) window.orch.toast('Part ' + (steps.indexOf(step) + 1) + ' was created. Not saved: ' + made.state.attached.failed.join(', '), 'error');
             step.remove.click();
-          } else failed.push('Ticket ' + (steps.indexOf(step) + 1) + ': ' + window.DashHelpers.scrubText(made.text));
+          } else failed.push('Part ' + (steps.indexOf(step) + 1) + ': ' + window.DashHelpers.scrubText(made.text));
         }
         if (failed.length) result = {ok:false, status:0, text:'The ticket was created, but not all of its parts. ' + failed.join(' ') + ' Press the button again to send the rest.'};
       }
@@ -542,7 +557,7 @@ function ticketForm(t, {host = null} = {}) {
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.text.disabled = true; submit.textContent = steps.length ? 'Send the rest' : 'Save details'; if (startBtn) startBtn.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = steps.length ? 'Send the rest' : 'Save details'; if (startBtn) { startBtn.hidden = true; startCell.hidden = true; } }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');

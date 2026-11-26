@@ -9,48 +9,114 @@
 .new-ticket-check .meta { grid-column: 2; }
 .new-ticket .new-ticket-check input { min-height: 0; width: 18px; height: 18px; }
 .new-ticket .input, .new-ticket .btn { min-height: 44px; }
-.new-ticket .new-ticket-attach, .new-ticket .new-ticket-link {
-  align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: transparent;
-  color: var(--brand); text-decoration: underline; cursor: pointer; font-size: 14px;
+.new-ticket .new-ticket-link {
+  align-self: flex-start; padding: 0; border: 0; background: transparent;
+  color: var(--brand); text-decoration: underline; cursor: pointer; font-size: inherit;
 }
-.new-ticket-files { display: flex; flex-direction: column; }
-.new-ticket .new-ticket-file { display: flex; padding: 0; min-width: 0; }
-.new-ticket-file-main {
-  display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0;
-  border: 0; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; font-size: 12px;
-}
-.new-ticket-file-main > :first-child { overflow-wrap: anywhere; }
-.new-ticket-file-main .meta { margin-left: auto; white-space: nowrap; }
-.new-ticket-file-remove { border: 0; background: transparent; color: var(--text-muted); padding: 8px 10px; }
-.new-ticket-file-error { white-space: pre-line; }
+.new-ticket-file-error { white-space: pre-line; margin: 0; }
 .new-ticket-file-error:empty, .new-ticket-files:empty { display: none; }
-.new-ticket .new-ticket-what { display: grid; gap: 4px; margin: 0; }
-.new-ticket .new-ticket-what p { margin: 0; }
 .new-ticket-preview { max-height: 65vh; overflow: auto; }
 .new-ticket-preview pre { white-space: pre; font-size: 12px; }
 .new-ticket-preview img { max-width: 100%; height: auto; }
-.new-ticket-drop { display: grid; gap: 4px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface); }
-.new-ticket-drop:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
-.new-ticket-file-hint { margin: 0; }
-ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow: auto; gap: 0; }
-.new-ticket .new-ticket-file { align-items: center; border-bottom: 1px solid var(--border); border-radius: 0; }
 .new-ticket-reading:empty { display: none; }
-.new-ticket-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.new-ticket-helper, .new-ticket-due { display: grid; gap: 6px; align-content: start; }
+.new-ticket p.new-ticket-file-hint, .new-ticket p.new-ticket-help { margin: 0; }
+
+/* Files (ORCH-2162 option A): one wrapping row right under the request; each file a small bordered chip with its
+   kind, name, size and Remove; Add files and Split into parts follow in the same row. */
+.new-ticket-file-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+ul.new-ticket-files { display: contents; list-style: none; margin: 0; padding: 0; }
+.new-ticket-step ul.new-ticket-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.new-ticket .new-ticket-file {
+  display: flex; align-items: center; min-width: 0; max-width: 100%; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+}
+.new-ticket-file-main {
+  display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px;
+  border: 0; background: transparent; color: var(--text); padding: 4px 4px 4px 6px; text-align: left; font-size: 13px; cursor: pointer;
+}
+.new-ticket-file-main > span:not(.meta, .new-ticket-file-kind) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-ticket-file-main .meta { white-space: nowrap; }
+.new-ticket-file-kind {
+  display: inline-grid; place-items: center; min-width: 32px; height: 28px; padding: 0 4px; border-radius: var(--radius);
+  background: var(--surface-3); color: var(--text-muted); font-size: 11px; font-weight: 600;
+}
+.new-ticket-file-main .thumbnail { width: 32px; height: 28px; object-fit: cover; border-radius: var(--radius); }
+.new-ticket .new-ticket-file-remove { min-height: 40px; border: 0; background: transparent; color: var(--text-muted); padding: 4px 10px; font-size: 12px; }
+
+/* Parts: short rows "Part 1 | text | + Files | Remove", each with its own files under it. */
+.new-ticket-steps { display: grid; gap: 8px; }
+.new-ticket-steps:empty, .new-ticket-step-foot:empty { display: none; }
+.new-ticket-step { display: grid; gap: 6px; }
+.new-ticket-step-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.new-ticket-step-name { min-width: 44px; }
+.new-ticket-step textarea.input { resize: vertical; min-height: 44px; }
+
+/* Helper and Optional (the right column on a wide screen). */
+.new-ticket .new-ticket-side-title { margin: 0; font-size: 16px; line-height: 24px; }
 .new-ticket-helper p { margin: 0; }
 .new-ticket-helper-fixed { min-height: 44px; display: flex; align-items: center; }
-/* Second pass (accepted New ticket draft): title + one line, X at the top right. ORCH-1852: Save ticket (and Start now) sit beside
-   the request, one or two lines under them say what they do; the optional part follows below a line. */
+.new-ticket-helper-list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.new-ticket .new-ticket-helper-list label { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 10px 12px; min-height: 44px; }
+.new-ticket .new-ticket-helper-list label:first-child { border-top: 0; }
+.new-ticket .new-ticket-helper-list label:has(:checked) { background: var(--surface-2); }
+.new-ticket-helper-list .chip { margin-left: auto; }
+.new-ticket-due { display: grid; gap: 6px; align-content: start; }
+
+/* Save ticket and Start now side by side, each with its line; Cancel last. */
+.new-ticket-go { display: grid; gap: 8px; }
+.new-ticket-go > .bad:empty { display: none; }
+.new-ticket-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.new-ticket-choice { display: grid; gap: 6px; align-content: start; }
+.new-ticket-choice > p { margin: 0; }
+.new-ticket-choice > .btn { width: 100%; }
+.new-ticket .new-ticket-buttons > .new-ticket-cancel { grid-column: 1 / -1; justify-content: flex-end; margin: 0; }
+
 dialog.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
-.new-ticket :is(h1,h2){margin:0 40px 4px 0}
+.new-ticket :is(h1,h2):not(.new-ticket-side-title){margin:0 40px 4px 0}
 .new-ticket .new-ticket-sub{margin:0 0 16px}
 .new-ticket .new-ticket-text{min-height:96px}
 .new-ticket .actions{justify-content:flex-end;align-items:center;margin-top:12px}
-.new-ticket .new-ticket-more{margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}
-.new-ticket .new-ticket-more-title{margin:0;font-size:14px;line-height:20px}
-/* ORCH-1852: the request and its Save side by side; stacked (Save right under the text) on a phone */
-.new-ticket-request { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: end; }
-.new-ticket-save { display: flex; flex-direction: column; gap: 8px; }
-@media (min-width: 720px) {
-  .new-ticket-request { grid-template-columns: minmax(0, 1fr) auto; }
+
+/* The page: one column on a phone (request, helper, the two buttons, then Optional), the request part drawn as one
+   card; two columns from 1000 px (request, files and buttons left; helper and Optional right). */
+.form-page.new-ticket-page { max-width: 1120px; }
+.new-ticket-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.new-ticket-form > :is(.new-ticket-main, .new-ticket-helper, .new-ticket-go, .new-ticket-more) {
+  display: grid; gap: 12px; align-content: start; margin: 0; padding: var(--card-padding);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.new-ticket-form > .new-ticket-main { border-bottom: 0; border-radius: var(--radius-card) var(--radius-card) 0 0; }
+.new-ticket-form > .new-ticket-helper { border-top: 0; border-bottom: 0; padding-top: 0; }
+.new-ticket-form > .new-ticket-go { border-top: 0; border-radius: 0 0 var(--radius-card) var(--radius-card); padding-top: 0; }
+.new-ticket-form > .new-ticket-go::before { content: ""; border-top: 1px solid var(--border); padding-bottom: 4px; }
+.new-ticket-form > .new-ticket-more { margin-top: var(--s5); border-radius: var(--radius-card); }
+@media (max-width: 999px) {
+  /* the helper is one row above the buttons: the choices sit side by side */
+  .new-ticket-form .new-ticket-helper-list { display: flex; flex-wrap: wrap; border: 0; gap: 8px; }
+  .new-ticket .new-ticket-form .new-ticket-helper-list label { border: 1px solid var(--border); border-radius: var(--radius); }
+  .new-ticket-form .new-ticket-helper-list .chip { margin-left: 0; }
+  .new-ticket-form .new-ticket-side-title { font-size: 14px; }
+  /* a part: its name, + Files and Remove on one line, its text full width under them */
+  .new-ticket-step-row { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name files remove" "text text text"; }
+  .new-ticket-step-row > .new-ticket-step-name { grid-area: name; }
+  .new-ticket-step-row > textarea { grid-area: text; }
+  .new-ticket-step-row > .new-ticket-step-files { grid-area: files; }
+  .new-ticket-step-row > :last-child { grid-area: remove; }
+}
+@media (min-width: 1000px) {
+  .new-ticket-form {
+    /* the request spans the helper's row and the next, so Optional follows the helper and the buttons follow the
+       request, whichever is taller; leftover height goes to the last row */
+    grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto auto 1fr; column-gap: var(--s5);
+    grid-template-areas: "main helper" "main more" "go more";
+  }
+  .new-ticket-form.no-helper { grid-template-areas: "main more" "main more" "go more"; }
+  .new-ticket-form > .new-ticket-main { grid-area: main; }
+  .new-ticket-form > .new-ticket-go { grid-area: go; align-self: start; }
+  .new-ticket-form > .new-ticket-helper { grid-area: helper; align-self: start; border: 1px solid var(--border); border-radius: var(--radius-card); padding-top: var(--card-padding); }
+  .new-ticket-form > .new-ticket-more { grid-area: more; align-self: start; }
+  .new-ticket-form:not(.no-helper) > .new-ticket-more { margin-top: var(--s5); }
+  .new-ticket-form.no-helper > .new-ticket-more { margin-top: 0; }
+  .new-ticket-buttons { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .new-ticket .new-ticket-buttons > .new-ticket-cancel { grid-column: auto; }
 }
