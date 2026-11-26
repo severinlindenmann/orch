@@ -132,8 +132,10 @@ def away(root: Path) -> bool:
 
 def mode(root: Path) -> str:
     """What decides tickets now, so a ticket decided under another mode is looked at again."""
-    return ("away" if away(root) else "auto" if active(root) else "") + (
-        "+r" if config.reviewer_on(root) else ""
+    return (
+        ("away" if away(root) else "auto" if active(root) else "")
+        + ("+r" if config.reviewer_on(root) else "")
+        + ("+p" if config.reviewer_mode(root) == "propose" else "")
     )
 
 

@@ -61,7 +61,10 @@ final class WiringUITests: XCTestCase {
         let app = launch(["-openChat", "ws_pilatus001"])
         let general = app.buttons["general-ws_pilatus001"]
         must(app, general, "General row"); general.tap()
-        must(app, el(app, "voice-play"), "memo play button")
+        let play = el(app, "voice-play")
+        must(app, play, "memo play button")
+        XCTAssertTrue(play.label.hasPrefix("Play voice message"), "label is the next action: \(play.label)")
+        XCTAssertNotEqual(play.value as? String, "Pause", "value never contradicts the label (ORCH-2064)")
     }
 
     /// Screenshots for the PR when the shots folder exists.

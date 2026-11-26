@@ -70,6 +70,14 @@
     },
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
+    "request": {
+      "type": "object",
+      "description": "Optional (#1812). What was first asked, kept as it was: note = the note at creation (the note itself stays editable), files = the names (in artifacts/) of the files sent with the new ticket. Written at creation and by `orch ticket attach --request`; an older ticket has none.",
+      "properties": {
+        "note": { "type": "string", "maxLength": 2000 },
+        "files": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+      }
+    },
     "estimate": {
       "type": "object",
       "description": "Optional (ORCH-189). The helper's estimate from its first run (orch ticket tidy --estimate-minutes / --estimate-cost): helper minutes and dollars at list price, who and when. Set once.",
@@ -210,7 +218,7 @@
       "properties": {
         "kind": { "enum": ["person", "agent"], "description": "person = a proven verdict (page or terminal proof, the phone through its own signed channel, the dev test human); agent = an agent finished while agents_may_finish was effective." },
         "nonce": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Random, fresh for every signing, so equal decisions get different MACs." },
-        "person": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, only on a person verdict signed from #484 on, always together with at. Who signed, inside the MAC. Legacy entries lack it and cannot authorise a synced person history line." },
+        "person": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, only on a person verdict signed from #484 on, always together with at. Who signed, inside the MAC together with at and line. Legacy entries lack it and cannot authorise a synced person history line." },
         "at": { "$ref": "#/$defs/time", "description": "Optional, with person and line. When the person signed, inside the MAC (the sync merge ties the person's history line to it)." },
         "line": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional, with person and at. sha256 hex of canonical JSON {text, via} of the history line the signing operation wrote, inside the MAC: only that exact line can be attributed to the person over sync." },
         "mac": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "base64url HMAC-SHA256(human.key, \"verdict1.\" + workspace id + \".\" + ticket id + \".\" + canonical JSON of {status: \"done\", kind, checks, nonce[, person, at, line]}); checks = sha256 hex of canonical JSON [[step id, text, done is true, wont_do is true], ...]." }
@@ -250,7 +258,7 @@
         "wont_nonce": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. A random value fresh for every signed Won't do decision (or its undo); part of what wont_mac covers, so equal decisions get different MACs. See human-proof.md, Synced won't do." },
         "wont_by": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, new Won't do decisions only, with wont_at. Who decided, inside wont_mac (record field person). Legacy decisions lack it and cannot authorise a synced person history line." },
         "wont_line": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional, with wont_by and wont_at. sha256 hex of canonical JSON {text, via} of the history line the decision writes, inside wont_mac (record field line)." },
-        "wont_at": { "$ref": "#/$defs/time", "description": "Optional, with wont_by. When the person decided, inside wont_mac (record field at)." },
+        "wont_at": { "$ref": "#/$defs/time", "description": "Optional, with wont_by. When the person decided, inside wont_mac (record field at), together with wont_by and wont_line." },
         "wont_mac": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The receiving core's own wontdo1 MAC over this step's decision {check, wont_do, reason, text, covers, nonce[, person, at, line]} (human-proof.md 'Synced won't do'): written when a person's Won't do (or its undo) was made here with a proof. The sync merge keeps a Won't do only when this is also the CURRENT entry of the receiving core's ledger, never by the text of `by`. Informational for every other reader." },
         "by": { "$ref": "#/$defs/who" },
         "at": { "$ref": "#/$defs/time" },
@@ -471,6 +479,7 @@
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
         "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
         "asked_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was asked (set by the core in orch ask; absent on questions from older versions). The Reviewer's routine answers wait from this time." },
+        "asked_by": { "$ref": "#/$defs/who", "description": "Optional. Who asked the question (the --by of orch ask, e.g. agent:copilot; set by the core; absent on questions from older versions). Screens name the asker from it; without it, the agent of the run on the ticket, else Helper." },
         "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
         "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
         "kind": {

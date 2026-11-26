@@ -68,6 +68,7 @@ def port_answers(port: int) -> bool:
 
 # addresses lsof prints for a listener that takes a connect to 127.0.0.1 (the health probe's address)
 LOOPBACK_V4 = ("127.0.0.1", "*", "0.0.0.0", "[::]", "[::ffff:127.0.0.1]")
+IPV6_FORMS = ("[::]", "[::ffff:127.0.0.1]")
 
 
 def _lsof() -> str:
@@ -85,7 +86,7 @@ def listeners(port: int) -> set[int] | None:
         return None
     try:
         cp = subprocess.run(
-            [_lsof(), "-nP", "-Fpn", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
+            [_lsof(), "-nP", "-Fpnt", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             timeout=OWNER_TIMEOUT,
@@ -99,18 +100,38 @@ def listeners(port: int) -> set[int] | None:
     return parse_lsof(cp.stdout, int(port))
 
 
+def _tier(host: str, family: str | None) -> int | None:
+    """Which listener the computer gives a connect to 127.0.0.1: 0 an exact 127.0.0.1 one, else 1 an IPv4 one on
+    every address, else 2 an IPv6 one on every address (it takes IPv4 too unless it is IPv6-only). lsof shows
+    both wildcards as `*`; its type line (IPv4 / IPv6) tells them apart. None: it does not take the connect."""
+    if host not in LOOPBACK_V4:
+        return None
+    if host == "127.0.0.1":
+        return 0
+    if host in IPV6_FORMS or family == "IPv6":
+        return 2
+    return 1
+
+
 def parse_lsof(text: str, port: int) -> set[int]:
-    """`lsof -Fpn` lines (p<pid>, then n<address>:<port> per socket) -> the pids that take 127.0.0.1:<port>."""
-    out: set[int] = set()
-    pid = None
+    """`lsof -Fpnt` lines (p<pid>, then t<type> and n<address>:<port> per socket) -> the pids that take a connect
+    to 127.0.0.1:<port>: only those of the most exact kind of listener, so a service listening on IPv6 only does
+    not count as answering while another program holds 127.0.0.1 (ORCH-1189 review)."""
+    best: dict[int, set[int]] = {}
+    pid, family = None, None
     for line in text.splitlines():
         if line.startswith("p") and line[1:].isdigit():
-            pid = int(line[1:])
+            pid, family = int(line[1:]), None
+        elif line.startswith("f"):
+            family = None
+        elif line.startswith("t"):
+            family = line[1:]
         elif line.startswith("n") and pid is not None:
             host, _, num = line[1:].rpartition(":")
-            if num == str(port) and host in LOOPBACK_V4:
-                out.add(pid)
-    return out
+            tier = _tier(host, family) if num == str(port) else None
+            if tier is not None:
+                best.setdefault(tier, set()).add(pid)
+    return best[min(best)] if best else set()
 
 
 def parents() -> dict[int, int] | None:
@@ -385,6 +406,26 @@ def _question(root: Path, ticket: str, qid: str) -> dict | None:
     return None
 
 
+def _open_asked(root: Path, ticket: str, shown: str) -> str | None:
+    """The id of an open question this add-on asked on the ticket about this service, else None. A pass that
+    stopped between asking and saving the id (killed, sleep) left it there; its count differs from today's, so
+    the core's "same open question" check would not catch a second one (#1401)."""
+    t = orch(root, "ticket", "show", ticket)
+    t = t.get("ticket", t) if isinstance(t, dict) else {}
+    head = f"{_title(shown)}: "
+    for q in t.get("questions") or []:
+        if (
+            isinstance(q, dict)
+            and isinstance(q.get("id"), str)
+            and q.get("kind") == QUESTION_KIND
+            and q.get("answer") is None
+            and not q.get("taken_back")
+            and str(q.get("text") or "").startswith(head)
+        ):
+            return q["id"]
+    return None
+
+
 # ---------------------------------------------------------------- one pass
 
 
@@ -514,25 +555,29 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     if w["failing"] and w["question"] is None:
         ticket = _ticket_for(root, rec)
         n = len([t for t in w["events"] if t > now - WINDOW])
+        shown = shown_name(root, rec)
         suggested = "Look into it" if n >= MANY else "Restart"
-        q = orch(
-            root,
-            "ask",
-            ticket,
-            question_text(shown_name(root, rec), max(n, LIMIT), depends_of(rec)),
-            *(x for o in OPTIONS for x in ("--option", o)),
-            "--recommend",
-            suggested,
-            "--kind",
-            QUESTION_KIND,  # an add-on's own question: Services picks up the answer, no helper is started
-            write=True,
-        )
-        q = q.get("question", q) if isinstance(q, dict) else {}
-        if not isinstance(q.get("id"), str):
-            raise Refused("orch did not say which question it asked. Try again in a moment.")
+        qid = _open_asked(root, ticket, shown)  # asked before, but that pass ended before it saved the id
+        if qid is None:
+            q = orch(
+                root,
+                "ask",
+                ticket,
+                question_text(shown, max(n, LIMIT), depends_of(rec)),
+                *(x for o in OPTIONS for x in ("--option", o)),
+                "--recommend",
+                suggested,
+                "--kind",
+                QUESTION_KIND,  # an add-on's own question: Services picks up the answer, no helper is started
+                write=True,
+            )
+            q = q.get("question", q) if isinstance(q, dict) else {}
+            if not isinstance(q.get("id"), str):
+                raise Refused("orch did not say which question it asked. Try again in a moment.")
+            qid = q["id"]
         w["question"] = {
             "ticket": ticket,
-            "id": q["id"],
+            "id": qid,
             "open": True,
             "asked_at": _iso(now),
             "suggested": suggested,

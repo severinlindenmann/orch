@@ -387,8 +387,8 @@ def r2(e):
     for tool in ("claude", "codex"):
         check(not shutil.which(tool, path=w.env["PATH"]), f"{tool} is on the test PATH")
     py, ag = shlex.quote(sys.executable), shlex.quote(str(AGENT))
-    # agent name, its command, then Enter at "Your name" (init asks a person's name since r-1119-1255-ws-8)
-    rc, out = pty_run(["orch", "init"], w.root, {**e.env, **w.env}, ["fake", f"{py} {ag} {{prompt}}", ""])
+    # none found: yes to adding one, its name, its command (a plain init asks no name since ORCH-1862)
+    rc, out = pty_run(["orch", "init"], w.root, {**e.env, **w.env}, ["y", "fake", f"{py} {ag} {{prompt}}"])
     check(rc == 0 and "fake" in out, f"orch init with Other: rc={rc} {out[-300:]!r}")
     got = w.o("config", "get", "workspace.agent", by=None)[1].strip()
     check(got == "fake", f"fake is not the chosen agent: {got!r}; init said {out[:900]!r}")
@@ -617,7 +617,8 @@ def t1(e):
                 pass
     check(wait_for(lambda: w.j("run", "status", tid).get("state") == "dead", 15), f"claim of a killed run is not dead: {w.j('run', 'status', tid)}")
     text = w.o("run", "status", tid)[1]
-    check("ended without finishing" in text and f"orch run start {tid}" in text, f"status text {text!r}")
+    key = w.load(tid).get("key") or tid  # the next line names the ticket key, not the t_ id (ORCH-1876)
+    check("ended without finishing" in text and f"orch run start {key}" in text, f"status text {text!r}")
     w.agent("", name="fake2")  # a working agent now
     r = w.j("run", "start", tid)  # no --take-over needed for a dead claim
     w.wait_done(tid)

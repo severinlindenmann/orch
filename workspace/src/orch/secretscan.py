@@ -70,6 +70,11 @@ def too_large(n: int) -> bool:
     return n > MAX_BYTES
 
 
+# a line that is only a label and its colon (`password:`, `- secret:`, `"token":`), the value on the next line
+_BULLET = re.compile(r"\A[-*+][ \t]++")
+_LABEL_LINE = re.compile(r"[ \t]*+(?:[-*+>][ \t]++)?+[\"'`]?+[\w.-]++[\"'`]?+[ \t]*+:[ \t\r]*+")
+
+
 NOTE_SKIPPED = "Couldn't read your saved keys, so this check skipped them. Every other secret check ran."
 _noted = False
 
@@ -137,15 +142,27 @@ def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bo
     # A line's verdict depends only on its own text: each distinct line is checked once (a big file of
     # repeated lines took minutes; ORCH-260).
     scrubbed: dict[str, bool] = {}
-    for n, raw in enumerate(text.split("\n") if labels else (), 1):
-        if n in flagged:
-            continue
+
+    def line_hit(raw: str) -> bool:
         hit = scrubbed.get(raw)
         if hit is None:
             forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
             hit = scrubbed[raw] = any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms))
-        if hit:
+        return hit
+
+    lines = text.split("\n") if labels else []
+    for n, raw in enumerate(lines, 1):
+        if n not in flagged and line_hit(raw):
             found[(n, "secret-value")] = None
+    # A label alone on its line, the value on the next one (#1532): read as one line, reported on the value's
+    # line. Only a label-only line, so prose that ends in a label word and a colon is no label (#2543).
+    for n, raw in enumerate(lines[:-1], 1):
+        if (n, "secret-value") in found or (n + 1, "secret-value") in found or n + 1 in flagged:
+            continue
+        nxt = _BULLET.sub("", lines[n].strip(), count=1)  # a list item is read without its bullet
+        if nxt and not nxt.startswith(("```", "~~~")) and _LABEL_LINE.fullmatch(raw) is not None:
+            if line_hit(raw.rstrip() + " " + nxt):
+                found[(n + 1, "secret-value")] = None
     if root is not None:
         from orch import phone_results
 
@@ -268,24 +285,115 @@ def _views(window: bytes):
         yield part.decode("utf-16-be", "replace")
 
 
+_UNPACK_DEPTH = 3
+# all unpacked bytes of one file; a bigger container is refused, not skipped
+_UNPACK_LIMIT = 256 * 1024 * 1024
+
+
+def _unpacked(data: bytes, budget: list[int], depth: int = 0):
+    """The bytes themselves, then (zip, docx and the like, gzip, tar) everything inside, nested up to a few
+    levels: a secret inside a compressed stream is as much a leak as one in the clear (#915)."""
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+
+    yield data
+    if depth >= _UNPACK_DEPTH:
+        return
+
+    def take(chunk: bytes):
+        budget[0] -= len(chunk)
+        if budget[0] < 0:
+            raise OverflowError("container too large")
+        yield from _unpacked(chunk, budget, depth + 1)
+
+    try:
+        if data[:2] == b"PK" and zipfile.is_zipfile(io.BytesIO(data)):
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                for info in z.infolist():
+                    if info.is_dir():
+                        continue
+                    if info.file_size > budget[0]:
+                        raise OverflowError("container too large")
+                    yield from take(z.read(info))
+        elif data[:2] == b"\x1f\x8b":
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as g:
+                chunk = g.read(budget[0] + 1)
+            yield from take(chunk)
+        elif len(data) > 512 and data[257:262] == b"ustar":
+            with tarfile.open(fileobj=io.BytesIO(data)) as t:
+                for m in t:
+                    f = t.extractfile(m) if m.isfile() else None
+                    if f is not None:
+                        yield from take(f.read(budget[0] + 1))
+    except OverflowError:
+        raise
+    except Exception:  # noqa: BLE001 - not a readable container after all: the bytes above were scanned
+        return
+
+
+def _is_utf8_text(blob: bytes) -> bool:
+    if b"\x00" in blob:
+        return False
+    try:
+        blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+# Bytes that are not UTF-8 text (#997): random or compressed bytes read in every encoding spell a short label,
+# a separator and a value by chance (about 1 in 4 files of 200 KB). The token patterns and the stored-key
+# check still read every byte; the label rules read only what is text there: a whole line without control
+# characters (a UTF-16 or Latin-1 text file), and inside any other line each run of at least TEXT_RUN
+# printable ASCII characters (a string inside a program or a database, like `strings` shows them). A PNG keeps
+# every rule on every byte outside its proven pixel runs (passes, #1022).
+TEXT_RUN = 12
+_NOT_TEXT = re.compile(r"[\x00-\x08\x0b\x0e-\x1a\x1c-\x1f\x7f\ufffd]")
+_ASCII_RUN = re.compile(rf"[\x20-\x7e\t]{{{TEXT_RUN},}}")
+
+
+def _text_lines(view: str) -> str:
+    out = []
+    for line in view.split("\n"):
+        if _NOT_TEXT.search(line) is None:
+            out.append(line)
+        else:
+            out += _ASCII_RUN.findall(line)
+    return "\n".join(out)
+
+
+def _scan_bytes(data: bytes, root: Path | None) -> list[dict]:
+    from orch import pngpixels
+
+    step, overlap = MAX_BYTES, 65536
+    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    for blob, labels in passes(data):
+        text_only = labels and not blob.startswith(pngpixels.MAGIC) and not _is_utf8_text(blob)
+        for start in range(0, max(len(blob), 1), step - overlap):
+            for text in _views(blob[start : start + step]):
+                if text_only:
+                    found = find(text, root, strict=False, labels=False) or find(_text_lines(text))
+                else:
+                    found = find(text, root, strict=False, labels=labels)
+                if found:
+                    return found
+            if start + step >= len(blob):
+                break
+    return []
+
+
 def refuse_if_secret(
     data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
-    runs are kept from the label rules only (passes)."""
-    step, overlap = MAX_BYTES, 65536
-    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    runs are kept from the label rules only (passes). A zip, gzip or tar is scanned inside as well."""
     found: list[dict] = []
     try:
-        for blob, labels in passes(data):
-            for start in range(0, max(len(blob), 1), step - overlap):
-                for text in _views(blob[start : start + step]):
-                    found = find(text, root, strict=False, labels=labels)
-                    if found:
-                        break
-                if found or start + step >= len(blob):
-                    break
+        for blob in _unpacked(data, [_UNPACK_LIMIT]):
+            found = _scan_bytes(blob, root)
             if found:
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass

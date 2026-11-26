@@ -98,9 +98,10 @@ def test_a_new_check_file_runs_only_once_approved(proj, databricks):
     _write(proj, "db-dev", doc)
     rows = health.overview(proj, NOW)
     assert databricks == []  # nothing ran
-    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == (
-        f"orch checks approve db-dev --hash {checkfiles.short(checkfiles.digest(proj, 'db-dev'))}"
-    )
+    short = checkfiles.short(checkfiles.digest(proj, "db-dev"))
+    assert rows[0]["approve"] == "new" and rows[0]["sign_in"] == f"orch checks approve db-dev --hash {short}"
+    # the dashboard's Approve shows what it runs and sends this hash back (#1549)
+    assert rows[0]["runs"] == "databricks current-user me --profile dev" and rows[0]["hash"] == short
     _ok(proj, "db-dev")
     rows = health.overview(proj, NOW)
     assert rows[0]["state"] == "works" and not rows[0].get("approve") and len(databricks) == 1
@@ -393,3 +394,13 @@ def test_logins_add_may_reuse_a_built_in_name_once_the_workspace_sets_its_own(pr
         health.add_recipe(proj, "databricks", {"command": ["databricks", "x"]})
     checkfiles.init(proj)
     assert health.add_recipe(proj, "databricks", {"command": ["databricks", "x"]})["name"] == "databricks"
+
+
+def test_show_prints_what_is_hashed_and_list_names_ignored_files(proj, databricks):
+    _write(proj, "dbx", {"label": "Databricks", "command": ["databricks", "x"]})
+    (proj / ".orch" / "checks" / "Bad.json").write_text("{}", encoding="utf-8")
+    res = checkfiles.show(proj, "dbx")
+    assert res["digest"] == checkfiles.short(checkfiles.digest(proj, "dbx")) and "databricks" in res["file"]
+    assert checkfiles.skipped(proj) == ["Bad.json"]
+    with pytest.raises(Refused):
+        checkfiles.show(proj, "nope")

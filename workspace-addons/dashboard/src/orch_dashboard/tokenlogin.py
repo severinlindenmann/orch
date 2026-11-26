@@ -21,7 +21,10 @@ import threading
 import time
 
 PICK_PROFILE = "Pick a profile first."
-BAD_TOKEN = "This token does not work. It may have expired or been revoked."
+BAD_TOKEN = (
+    "This token does not work: it may have ended or been turned off. "
+    "Ask the person who gave it to you for a new one."
+)
 TOO_MANY = "Too many tries. Wait a minute, then try again."
 MAX_FAILS = 10  # failed logins per minute per server (a token is 256 bits: this only keeps the noise down)
 
