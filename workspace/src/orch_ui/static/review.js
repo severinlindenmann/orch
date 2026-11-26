@@ -53,7 +53,7 @@
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
      hold(item, verdict) / release(item)  optional (ORCH-548): an answer was made (it waits o.hold ms for Undo, then
                   saves) / it was taken back (Undo) or not saved. The dashboard shows a Looks good ticket as Done meanwhile.
-   answer() error code 'decided': the Check result, or a question (ORCH-921), was decided elsewhere; the message says who and when.
+   answer() error code 'decided': the Test results card, or a question (ORCH-921), was decided elsewhere; the message says who and when.
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
@@ -61,7 +61,7 @@ const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link
 /* The twelve kinds of card in four families (owner's pick R3 B, 25 Nov 2026; orch/cardkinds.py names them on every
    stack item as card_kind {family, kind, name, lane}). A card without one (a page's own card: stuck, a Factory draft)
    gets its lane from its plain kind. Lanes are the list's groups, in order (R2 A): what holds up work first. */
-const CARD_ICON={question:'comment',choice:'cards',before_after:'compare',pictures:'image',document:'file',changed_words:'diff',numbers:'chart',check_result:'check',put_live:'link',run_it:'code',try_yourself:'user',stuck:'pause'};
+const CARD_ICON={question:'comment',choice:'cards',before_after:'compare',pictures:'image',document:'file',changed_words:'diff',numbers:'chart',test_results:'check',check_result:'check',put_live:'link',run_it:'code',try_yourself:'user',stuck:'pause'};
 const LANES={holds_up:'Holds up work now',click:'Only you can press it',help:'Needs you in person',look:'Look at the result',proposed:'Checked by the Reviewer'};
 const LANE_ORDER=Object.keys(LANES);
 const PLAIN_LANE={choice:'holds_up',stuck:'holds_up',link:'click',run:'click'};

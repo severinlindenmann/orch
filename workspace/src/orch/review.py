@@ -1031,8 +1031,8 @@ def _find(ticket: dict, qid: str) -> dict:
 
 
 def check_digest(ticket: dict, root: Path | None = None) -> str:
-    """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
-    won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
+    """What a person is shown of a Test results card: exactly check_card(ticket) (title, steps with their done
+    and won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
     shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
@@ -1155,7 +1155,7 @@ def _checks_chips(ticket: dict) -> list[dict]:
 
 
 def accept_blocked(ticket: dict) -> str:
-    """Why Looks good is off on this Check result, with what to press (ORCH-548, owner 18 Nov: open steps and
+    """Why Looks good is off on this Test results, with what to press (ORCH-548, owner 18 Nov: open steps and
     an open question stop it, like the ticket page's Looks good since ORCH-250); "" when nothing stops it."""
     steps = sum(
         1
@@ -1264,7 +1264,7 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
-    """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
+    """A Test results card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
     and the parent. No preview when there is nothing to show (an empty box)."""
     rows, done, total = [], 0, 0
@@ -1363,7 +1363,7 @@ def decide(
     ticket = tickets.load(root, tid)
     if key == "review":
         if picked is not None:
-            raise BadVerdict("A Check result has no options to pick.")
+            raise BadVerdict("A Test results card has no options to pick.")
         return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid, person)
     q = _find(ticket, key)
     tickets.refuse_if_taken_back(q)
@@ -1583,8 +1583,8 @@ _LEFT_REVIEW = re.compile(
 
 
 def not_in_review(root: Path, ticket: dict) -> str:
-    """Why a Check result cannot be answered any more (ORCH-548), in one line with what to do: who moved the
-    ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
+    """Why a Test results card cannot be answered any more (ORCH-548), in one line with what to do: who moved
+    the ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
     decided
     then says what happened, never only "not waiting for your review"."""
     from orch.net import when
@@ -1661,7 +1661,7 @@ def _decide_check(
     person: bool = False,
 ) -> dict:
     tid = ticket["id"]
-    if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
+    if not by.startswith("human:"):  # a verdict on a Test results card is a person's (label check)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
     ownerpick.refuse_ticket(ticket, person)  # ORCH-582: a ticket with a draft is accepted only by a person
     if verdict not in VERDICTS:
@@ -1716,7 +1716,7 @@ def change(
     if old.get("answer") is None:
         raise Refused(f"{qid} is not answered yet. Answer it first.")
     if (old.get("card") or {}).get("kind") == "check":
-        raise Refused("A Check result is final. Reopen the ticket to look at it again.")
+        raise Refused("A Test results card is final. Reopen the ticket to look at it again.")
     if digest is not None and tickets.question_digest(old) != digest:
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)

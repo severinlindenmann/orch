@@ -41,7 +41,7 @@ test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
   for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png', 'artifacts/../x.png', 'evidence/a/../../x.png', 'evidence/.orch/x.png', 'secrets/x.png', 'evidence/a\\b.png']) assert.equal(f(CARD, bad), '', String(bad));
   assert.equal(f({}, 'reviewed/0123456789ab/after.png'), '');
 });
-test('a Check result opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
+test('a Test results card opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
   const f = ctx({}).reviewApi().fileUrl;
   assert.equal(f(CARD, 'evidence/shop photo.png'), '/api/file?t=t_abcdef&k=evidence&n=shop%20photo.png');
   assert.equal(f(CARD, 'artifacts/out/poster.pdf'), '/api/file?t=t_abcdef&k=artifacts&n=out%2Fposter.pdf');

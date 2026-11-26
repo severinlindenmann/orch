@@ -292,7 +292,7 @@ def _review_answer(a):
 def review_error(out, stderr: str, status: int) -> str:
     """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
     codes (changed, too_large, not_found, needs_person, refused, busy, decided) pass through; anything else is
-    "refused". decided (ORCH-548): the Check result was decided elsewhere; the message says who and when."""
+    "refused". decided (ORCH-548): the Test results card was decided elsewhere; the message says who and when."""
     code = out.get("code") if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not isinstance(msg, str) or not msg:
