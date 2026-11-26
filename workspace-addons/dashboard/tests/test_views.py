@@ -193,7 +193,7 @@ def test_timeout_without_killpg_ends_the_tree_with_taskkill(ws, fake_orch, monke
     _script(fake_orch, "print(os.getpid(), flush=True)\ntime.sleep(60)\n")
     _as_windows(monkeypatch, taskkill="C:\\Windows\\System32\\taskkill.exe")
     calls = []
-    monkeypatch.setattr(views.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(views, "_run", lambda argv, **kw: calls.append(argv))
     t0 = time.time()
     r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
     assert r["state"] == "error" and "too long" in r["message"] and time.time() - t0 < 5
@@ -217,7 +217,7 @@ def test_failed_taskkill_still_ends_the_command(ws, fake_orch, monkeypatch):
     def hung(*a, **kw):
         raise subprocess.TimeoutExpired(a[0], 5)
 
-    monkeypatch.setattr(views.subprocess, "run", hung)
+    monkeypatch.setattr(views, "_run", hung)
     t0 = time.time()
     r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
     assert r["state"] == "error" and "too long" in r["message"] and time.time() - t0 < 5

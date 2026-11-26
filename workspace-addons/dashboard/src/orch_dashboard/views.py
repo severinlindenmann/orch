@@ -721,6 +721,7 @@ def check_view(v) -> dict | None:
 
 
 _WINDOWS = os.name == "nt"
+_run = subprocess.run  # module-local, so a test patches this and never the global subprocess.run
 
 
 def _group_kw() -> dict:
@@ -753,7 +754,7 @@ def _kill_tree(p: subprocess.Popen) -> None:
     exe = _taskkill_exe()
     if exe:
         try:
-            subprocess.run(
+            _run(
                 [exe, "/PID", str(p.pid), "/T", "/F"],
                 check=False,
                 capture_output=True,
