@@ -1693,6 +1693,21 @@ def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
     assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
 
 
+def test_crash_while_saving_the_registry_keeps_the_old_list(proj, monkeypatch):
+    addons._save_registry([{"name": "hello", "source": "x", "version": "0.1.0"}])
+    p = addons.registry_path()
+    before = p.read_bytes()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(addons.procs, "replace", boom)
+    with pytest.raises(OSError):
+        addons._save_registry([])
+    assert p.read_bytes() == before
+    assert [x.name for x in p.parent.glob("addons.json*")] == ["addons.json"]
+
+
 def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
     act = {"who": "people"}
     addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
