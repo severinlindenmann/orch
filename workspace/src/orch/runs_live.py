@@ -1498,8 +1498,10 @@ def event(
 
 def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
-    when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
-    resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
+    when it is idle). None works on it: the workspace agent is started again on the ticket (its own session
+    resumed when there is one) once no question an agent asked is open any more, so nobody has to press
+    Continue. The tool that asked is never used for this start: it may be retired or not installed any more,
+    and a session of another tool is never resumed ([workspace] agent decides, ORCH-2270).
     An agent's own answer, or an add-on's question, starts nothing. Returns the start result, if any."""
     if by.startswith("agent:"):
         return None
@@ -1534,11 +1536,7 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
         return None  # tickets.answer left it Ready (not Working): nobody works on it
     try:
-        adapters.load(asker, root)
-    except Refused:
-        asker = None  # not a registry name (e.g. an add-on's agent:<name>): the folder's agent goes on
-    try:
-        return runs.start(root, tid, by, agent=asker)
+        return runs.start(root, tid, by)  # [workspace] agent, never the asker's tool (ORCH-2270)
     except Refused as e:  # no agent set, sessions full (queued), ...: the answer is saved either way
         with contextlib.suppress(Exception):
             tickets.log(root, tid, f"The helper could not start: {e}", "orch")

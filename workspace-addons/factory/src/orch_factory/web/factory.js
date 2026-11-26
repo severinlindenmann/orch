@@ -289,7 +289,8 @@
     const stop = array(order.line).find(x => x.stop && x.state !== 'done');
     if (!stop) return null;
     const need = yourTime(order.owner_min);
-    return meta('Next pause: ' + stageLabel(stop) + (need ? ' · ' + need : ''));
+    const at = order.next_stop_at ? 'around ' + when(order.next_stop_at) : '';
+    return meta(['Next pause: ' + stageLabel(stop), at, need].filter(Boolean).join(' · '));
   }
   // Plain title for an open question, from the structured stop/change data.
   function openTitle(order, open) {
@@ -532,7 +533,7 @@
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Your helper answers routine pauses. Putting it live still asks you.'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
+      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.next_stop_at ? [meta('Next pause around ' + when(o.next_stop_at))] : []), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
     section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
@@ -720,6 +721,38 @@
     return figure;
   }
   const picturesOf = item => [item.before, item.after].filter(imageName);
+  // Look options at a taste item (#949): 2-3 pictures side by side in the kit's decision tiles, each opens big in the
+  // kit's result overlay. The pick is the helper's plain question on the order whose options are the look titles:
+  // "Choose a look" opens the dashboard's own question card for it (the page never answers).
+  function lookQuestion(order, looks) {
+    const titles = looks.map(l => l.title);
+    return array(order.questions).find(x => validQuestion(x?.q) && titles.every(t => array(x.options).includes(t))) || null;
+  }
+  function lookCards(order, item) {
+    const looks = array(item.looks).filter(l => l && typeof l.title === 'string' && l.title).slice(0, 3);
+    if (looks.length < 2) return [];
+    const grid = group('decision-shown');
+    const big = [];
+    for (const [i, look] of looks.entries()) {
+      const name = 'Look ' + 'ABC'[i] + ': ' + look.title;
+      if (!validId(order.id) || !imageName(look.picture)) { grid.append(group('stack', node('b', name), meta('Picture unavailable.'))); continue; }
+      const raw = prefix + '/api/order/' + order.id + '/file/' + look.picture.split('/').map(encodeURIComponent).join('/');
+      const src = window.OrchFrame ? window.OrchFrame.url(raw) : raw;
+      const index = big.push({type: 'picture', name, src, alt: name}) - 1;
+      const shot = node('button', null, 'decision-shot'); shot.type = 'button';
+      shot.setAttribute('aria-label', 'Open big · ' + name);
+      const thumb = node('span', null, 'opt-thumb');
+      const img = node('img'); img.alt = name; img.src = src;
+      img.addEventListener('error', () => thumb.replaceChildren(meta('Picture unavailable.')), {once: true});
+      thumb.append(img); shot.append(thumb, node('b', name));
+      shot.addEventListener('click', () => { if (window.UI?.resultOverlay) window.UI.resultOverlay(big, index); });
+      grid.append(shot);
+    }
+    const q = lookQuestion(order, looks);
+    const out = [node('h3', 'Pick a look'), grid];
+    out.push(q ? tail(decide(order, 'Choose a look', false, q.q)) : meta('Say which look you want when you answer this pause.'));
+    return out;
+  }
   const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', partial: 'Partly sent', closed: 'Closed'};
   const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', partial: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
   // "Maya says" / "Design's helper says": text from another workspace is data, shown as plain text and cut to a few lines.
@@ -805,8 +838,9 @@
     if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
     view.append(toOrder(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), order), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
+      const looks = item.tag === 'taste' ? lookCards(order, item) : [];
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
-      const c = card(item.title, badge(tagWord(item.tag)), compare);
+      const c = card(item.title, badge(tagWord(item.tag)), ...(looks.length && !item.before && !item.after ? [] : [compare]), ...looks);
       if (imageName(item.before) && imageName(item.after)) {
         const label = node('label', 'Compare before / after', 'stack');
         const range = node('input', null, 'f-range'); range.type = 'range'; range.min = '15'; range.max = '85'; range.value = '50';

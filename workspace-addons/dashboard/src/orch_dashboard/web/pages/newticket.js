@@ -365,7 +365,7 @@ function ticketForm(t, {host = null} = {}) {
     // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
     const reviewLabel = el('label', 'new-ticket-check');
     reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
-    reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
+    reviewLabel.append(reviewBox, el('span', '', 'I review the result'), el('span', 'meta', 'Nothing is accepted without you.'));
     for (const box of [planLabel, reviewLabel]) {
       if (doneWrap && typeof more.insertBefore === 'function' && doneWrap.parentNode === more) more.insertBefore(box, doneWrap); else more.append(box);
     }

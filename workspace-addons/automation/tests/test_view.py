@@ -648,7 +648,7 @@ def test_one_time_wake_up_is_a_row_marked_once(ws, monkeypatch):
     assert rep["rows"][0]["cells"]["repeats"] == "Mondays at 07:00" and rep["rows"][0]["toggle"]
     assert [c["label"] for c in once["columns"]] == ["Ticket", "Starts"]
     (row,) = once["rows"]
-    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 4 Nov, 10:00"}
+    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 4 Nov, 10:00 UTC"}
     assert "subtitle" not in row and "toggle" not in row
     assert [a["label"] for a in row["actions"]] == ["Start now"]
     assert rep["compact"] and once["compact"] and rep["show"] == once["show"] == 5
@@ -797,3 +797,32 @@ def test_a_long_zone_name_becomes_its_offset():
         )
         == "UTC-03:30"
     )
+
+
+# ---- ORCH-1969: the calendar and the notice name the zone their times are in, as the list's Next time does --------
+@pytest.mark.parametrize(
+    "here, now, meta, notice",
+    [
+        ("Europe/Zurich", T(7), "4\u201310 November \u00b7 CET", "On. Next: today at 09:00 CET"),
+        ("America/New_York", T(7), "4\u201310 November \u00b7 EST", "On. Next: today at 03:00 EST"),
+        # the week crosses the change from summer time: both names
+        (
+            "Europe/Zurich",
+            datetime(2026, 10, 22, 7, tzinfo=UTC),
+            "22\u201328 October \u00b7 CEST / CET",
+            "On. Next: today at 10:00 CEST",
+        ),
+    ],
+)
+def test_calendar_and_notice_name_their_zone(ws, set_tz, monkeypatch, here, now, meta, notice):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    set_tz(here)
+    add_ticket(ws, "t_rec00011", title="Daily", ext={"automation": {"recurring": True, "cron": "0 8 * * *"}})
+    add_ticket(ws, "t_rec00012", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
+    v = build(ws, now)
+    check(v)
+    (week,) = blocks(v, "calendar")
+    assert week["meta"] == meta
+    assert v["notice"] == notice
