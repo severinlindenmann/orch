@@ -288,3 +288,75 @@ def test_due_day_only_and_with_time_both_load_show_and_save(folder, proj, run):
         assert run("ticket", "edit", tid, "--note", "x", "--by", "human:tester")[0] == 0
     after = _files(proj)
     assert after[other]["due"] == "2020-01-01T09:00" and after[dated[0]]["due"] == before[dated[0]]["due"]
+
+
+SHAPES = Path(__file__).parent / "fixtures" / "ticket_shapes"
+SHAPE_FILES = sorted(SHAPES.glob("t_*.json"))
+
+
+def _long_history(raw: dict) -> dict:
+    raw = json.loads(json.dumps(raw))
+    raw["id"] = "t_long003"
+    raw["title"] = "Very long history"
+    raw["history"] += [
+        {"at": "2026-11-12T10:00:00Z", "by": "agent:fixture", "via": "cli", "text": f"Step {n}"}
+        for n in range(1500)
+    ]
+    return raw
+
+
+def _install_shapes(proj: Path) -> dict[str, dict]:
+    d = proj / ".orch" / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    raws = [json.loads(p.read_text(encoding="utf-8")) for p in SHAPE_FILES]
+    raws.append(_long_history(raws[0]))
+    for r in raws:
+        (d / f"{r['id']}.json").write_text(json.dumps(r, indent=2), encoding="utf-8")
+    return {r["id"]: r for r in raws}
+
+
+def test_odd_shapes_load_check_show_and_round_trip(proj, run):
+    """Missing optional fields, `ext` of a removed add-on, unknown fields (R3.1), an empty checklist,
+    every evidence kind (also an unknown one) and a very long history: nothing crashes and nothing is lost."""
+    before = _install_shapes(proj)
+    assert run("ticket", "list", "--all")[0] == 0
+    assert {t["id"] for t in tickets.list_all(proj)} == set(before)
+    for tid, raw in before.items():
+        code, shown, err = run("ticket", "show", tid)
+        assert code == 0 and raw["title"] in shown and "Traceback" not in err, err
+        state = tickets.proof_state(tickets.load(proj, tid), proj)
+        assert set(state["per_item"]) == {c["id"] for c in raw["checklist"]}
+        assert run("ticket", "show", tid, "--json")[0] == 0
+    assert run("needs")[0] == 0
+    assert run("ticket", "tree", "t_min001")[0] == 0
+
+    for tid in before:
+        assert run("ticket", "edit", tid, "--note", "edited", "--by", "human:tester")[0] == 0
+        assert run("check", "add", tid, "Added", "--by", "human:tester")[0] == 0
+        assert run("log", tid, "a note", "--by", "human:tester")[0] == 0
+    assert run("check", "done", "t_all002", "c8", "--note", "now", "--by", "agent:fixture")[0] == 0
+
+    after = _files(proj)
+    for tid, old in before.items():
+        new = after[tid]
+        for key, value in old.items():
+            if key in ("updated_at", "revision", "history", "checklist", "note", "status"):
+                continue
+            assert new[key] == value, f"{tid}: {key} changed"
+        assert new["history"][: len(old["history"])] == old["history"]
+        n = len(old["checklist"])
+        for a, b in zip(new["checklist"][:n], old["checklist"], strict=True):
+            assert {k: v for k, v in a.items() if k not in ("done", "evidence")} == {
+                k: v for k, v in b.items() if k not in ("done", "evidence")
+            }
+            assert a["evidence"][: len(b["evidence"])] == b["evidence"]
+        assert new["note"] == "edited" and new["revision"] > old["revision"]
+    assert "ext" not in after["t_min001"] and "key" not in after["t_min001"]
+    assert "removedaddon" in after["t_all002"]["ext"]
+
+
+def test_removed_addon_ext_survives_ext_changes_of_another_addon(proj, run):
+    _install_shapes(proj)
+    code, _, err = run("ext", "set", "t_all002", "otheraddon", '{"a": 1}', "--by", "agent:fixture")
+    ext = _files(proj)["t_all002"].get("ext", {})
+    assert ext.get("removedaddon") == {"state": "gone", "list": [1, 2]}, (code, err)
