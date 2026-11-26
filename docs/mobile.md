@@ -25,6 +25,7 @@ mobile/
 | Questions: cards with options, recommended marked, one tap | `GET /v1/phone/questions`, `POST /v1/phone/answer` |
 | Send: pick workspace, type or hold the mic, send | `POST /v1/phone/send` |
 | Settings: relay, workspaces, sign out (deletes the token) | – |
+| Add workspace (paired phone: Settings, or an `orch://pair?…` link opened from outside → the same "Add this workspace?" confirmation; nothing is sent before Add, closing keeps the pairing; an invitation for another server (scheme, host, port) is shown, never sent) | `POST /v1/phone/invitations/redeem` |
 
 Push tap opens the question. Pull to refresh; no background polling.
 
