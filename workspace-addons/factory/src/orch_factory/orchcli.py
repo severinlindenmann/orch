@@ -33,7 +33,10 @@ def _value(code, value):
     if code:
         if not isinstance(value, dict):
             raise Refused("Orch refused the request.", "refused")
-        error = Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
+        code = value.get("code")
+        if code is None and "changed_by" in value and "revision" in value:
+            code = "conflict"  # core's stale-edit refusal (--if-revision) carries no code; callers retry on "conflict"
+        error = Refused(value.get("error", "Orch refused the request."), code or "refused")
         error.found = value.get("found")  # `orch secret scan`: what it found (kind and line, never the text)
         raise error
     if value is None:
