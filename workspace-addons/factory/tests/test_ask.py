@@ -344,7 +344,9 @@ def test_the_scan_gets_bytes(ws, run, monkeypatch):
 
 # ---- ORCH-2062: the dialog says which item a picture check kept here, why, and what is still sent ----------------
 
-LONG = ("Window poster for the Easter week " + "Sonderöffnungszeitenübersicht" * 4)[:120]  # the longest title, a long word
+LONG = ("Window poster for the Easter week " + "Sonderöffnungszeitenübersicht" * 4)[
+    :120
+]  # the longest title, a long word
 
 
 def two_item_stop(ws, run):
@@ -372,9 +374,17 @@ def live(ws, order):
 def received(ws, order):
     """What the fake connected workspace got: the card (title, line, checklist, question) and the shared pictures."""
     [sub] = live(ws, order)
-    shared = [c[4].rsplit("/", 1)[1] for c in calls(ws) if c[:3] == ["relay", "group", "share"] and c[3] == sub["id"]]
-    assert ["relay", "group", "add", sub["id"], WS] == next(c for c in calls(ws) if c[:4] == ["relay", "group", "add", sub["id"]])[:5]
-    assert any(c[:3] == ["relay", "group", "ask"] and sub["id"] in c for c in calls(ws))  # the question went too
+    shared = [
+        c[4].rsplit("/", 1)[1]
+        for c in calls(ws)
+        if c[:3] == ["relay", "group", "share"] and c[3] == sub["id"]
+    ]
+    assert ["relay", "group", "add", sub["id"], WS] == next(
+        c for c in calls(ws) if c[:4] == ["relay", "group", "add", sub["id"]]
+    )[:5]
+    assert any(
+        c[:3] == ["relay", "group", "ask"] and sub["id"] in c for c in calls(ws)
+    )  # the question went too
     card = {"title": sub["title"], "line": sub.get("summary"), "question": sub["questions"][0]["text"]}
     return card, [c["text"] for c in sub.get("checklist", [])], shared
 
@@ -388,13 +398,24 @@ def test_the_scan_tells_a_hit_from_a_picture_it_could_not_check(ws, run):
     assert "SECRET" not in json.dumps(files)  # the reason is the fixed safe one, never what matched
     (Store(ws).path(f"stops/{order}") / "after.png").unlink()
     gone = next(f for f in pageapi.scan(ws, order, 1)["items"][0]["files"] if f["name"] == "after.png")
-    assert gone == {"name": "after.png", "ok": False, "why": "is missing or too big"}  # no "found": not checked
+    assert gone == {
+        "name": "after.png",
+        "ok": False,
+        "why": "is missing or too big",
+    }  # no "found": not checked
 
 
 # read before the tests set a private HOME: the browser kit of this machine (PW_DIR, as the e2e scripts)
-_PW = __import__("os").environ.get("PW_DIR") or str(Path.home() / "orch-dev" / "e2e" / "dashboard" / "node_modules")
+_PW = __import__("os").environ.get("PW_DIR") or str(
+    Path.home() / "orch-dev" / "e2e" / "dashboard" / "node_modules"
+)
 _BROWSERS = __import__("os").environ.get("PLAYWRIGHT_BROWSERS_PATH") or next(
-    (str(p) for p in (Path.home() / "Library/Caches/ms-playwright", Path.home() / ".cache/ms-playwright") if p.is_dir()), ""
+    (
+        str(p)
+        for p in (Path.home() / "Library/Caches/ms-playwright", Path.home() / ".cache/ms-playwright")
+        if p.is_dir()
+    ),
+    "",
 )
 
 
@@ -434,7 +455,9 @@ def test_the_dialog_names_the_kept_item_and_sends_what_it_says(ws, run, tmp_path
     env = {**os.environ, "FIXTURE": str(tmp_path / "fixture.json"), "PW_DIR": pw}
     if _BROWSERS:
         env["PLAYWRIGHT_BROWSERS_PATH"] = _BROWSERS
-    out = subprocess.run(["node", str(script)], capture_output=True, text=True, env=env, timeout=180)
+    out = subprocess.run(
+        ["node", str(script)], check=False, capture_output=True, text=True, env=env, timeout=180
+    )
     assert out.returncode == 0, out.stderr[-2000:]
     seen = json.loads(out.stdout)
 
@@ -446,13 +469,21 @@ def test_the_dialog_names_the_kept_item_and_sends_what_it_says(ws, run, tmp_path
     assert good["checked"] and not good["disabled"]
     [banner] = a["banners"]
     assert banner.startswith("Password or key found · “Board layout” is not sent")
-    assert "after.png looks like it holds a password or a key." in banner and "its 2 pictures stay here" in banner
-    assert "untick it" not in a["text"].lower() and "Found in a picture" not in a["text"]  # it is already unticked
+    assert (
+        "after.png looks like it holds a password or a key." in banner
+        and "its 2 pictures stay here" in banner
+    )
+    assert (
+        "untick it" not in a["text"].lower() and "Found in a picture" not in a["text"]
+    )  # it is already unticked
     assert a["status"][-1].startswith("Still sent: “" + LONG[:40]) and "…” (1 of 2 items)" in a["status"][-1]
     assert LONG in good["label"]  # the whole name stays on its tick box
     assert a["status"][-1].endswith("plus the title, the line and the question above.")
     assert "Window poster" in kb["focused_box"]  # Tab skips the disabled box
-    assert kb["none"]["status"][-1] == "No items ticked. Send still sends the title, the line and the question above."
+    assert (
+        kb["none"]["status"][-1]
+        == "No items ticked. Send still sends the title, the line and the question above."
+    )
     assert kb["back"]["status"][-1] == a["status"][-1]
     assert kb["targets"] == [f"{order}:s1:{WS}:1"]
 
@@ -461,9 +492,14 @@ def test_the_dialog_names_the_kept_item_and_sends_what_it_says(ws, run, tmp_path
 
     u = seen["unchecked"]["seen"]
     [banner] = u["banners"]
-    assert banner.startswith("Could not check · “Board layout” is not sent") and "after.png is missing or too big." in banner
+    assert (
+        banner.startswith("Could not check · “Board layout” is not sent")
+        and "after.png is missing or too big." in banner
+    )
     assert u["boxes"][0]["label"].endswith("not sent: could not check") and "password" not in banner.lower()
-    assert seen["unchecked"]["closed_by_cancel"] and seen["unchecked"]["closed_by_escape"], {k: v for k, v in seen["unchecked"].items() if k != "seen"}
+    assert seen["unchecked"]["closed_by_cancel"] and seen["unchecked"]["closed_by_escape"], {
+        k: v for k, v in seen["unchecked"].items() if k != "seen"
+    }
     assert seen["unchecked"]["targets"] == []  # Cancel and Escape send nothing
 
     pf = seen["pending_failed"]
@@ -478,7 +514,11 @@ def test_the_dialog_names_the_kept_item_and_sends_what_it_says(ws, run, tmp_path
     assert out["items"] == 1 and out["pictures"] == 1
     card, checks, shared = received(ws, order)
     assert card == preview and checks == [fixture["scan"]["items"][1]["check"]] and shared == ["poster.png"]
-    assert not any("before.png" in " ".join(c) or "after.png" in " ".join(c) for c in calls(ws) if c[:2] == ["relay", "group"])
+    assert not any(
+        "before.png" in " ".join(c) or "after.png" in " ".join(c)
+        for c in calls(ws)
+        if c[:2] == ["relay", "group"]
+    )
 
     # no item ticked: not "nothing at all" — the title, the line and the question still arrive
     for c in live(ws, order):  # closed, so the same stop may be asked again
