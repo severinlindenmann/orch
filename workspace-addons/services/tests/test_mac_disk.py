@@ -232,3 +232,114 @@ def test_a_failed_start_reads_the_old_log_a_loaded_job_still_writes(cli, fake, w
     fake.last_exit = lambda spec: 78
     code, out = jrun(cli, "start", "web")
     assert code == 0 and "port 8000 is taken" in out["next"] and "never ran" not in out["next"]
+
+
+def test_launchd_status_reads_running_launching_and_not_loaded(monkeypatch, tmp_path):
+    from orch_services.drivers import launchd
+
+    monkeypatch.setattr(launchd, "_started", lambda pid: "2026-11-25T09:00:00Z")
+    drv, _ = _launchd(monkeypatch, {"print": (0, "\tstate = running\n\tpid = 812\n")})
+    st = drv.status(_spec(tmp_path))
+    assert (st.running, st.pid, st.since) == (True, 812, "2026-11-25T09:00:00Z")
+    drv, _ = _launchd(monkeypatch, {"print": (0, "\tstate = spawn scheduled\n")})
+    st = drv.status(_spec(tmp_path))
+    assert not st.running and st.starting
+    drv, _ = _launchd(monkeypatch, {"print": (0, "\tstate = not running\n\truns = 7\n")})
+    st = drv.status(_spec(tmp_path))
+    assert not st.running and not st.starting and drv.runs(_spec(tmp_path)) == 7
+    drv, _ = _launchd(monkeypatch, {"print": (113, "")})
+    assert drv.status(_spec(tmp_path)).running is False and drv.runs(_spec(tmp_path)) is None
+
+
+def test_launchd_without_a_login_session_says_so(monkeypatch, tmp_path):
+    from orch_services.drivers import Unavailable
+
+    drv, _ = _launchd(monkeypatch, {"print": (125, "")})
+    drv.tool = str(tmp_path / "launchctl")
+    with pytest.raises(Unavailable, match="launchctl is missing"):
+        drv.check()
+    (tmp_path / "launchctl").write_text("", encoding="utf-8")
+    with pytest.raises(Unavailable, match="log in on this Mac's screen once"):
+        drv.check()
+
+
+def test_launchd_restart_of_an_unloaded_job_starts_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    drv, calls = _launchd(monkeypatch, {"print": (113, "")})
+    drv.restart(_spec(tmp_path))
+    assert ("kickstart", "-k", "gui/501/ch.orch.svc.w.web") not in calls
+    assert any(c[0] == "bootstrap" for c in calls)
+
+
+def test_launchd_failures_name_the_tool_line(monkeypatch, tmp_path):
+    from orch_services.drivers import launchd
+    from orch_services.store import Refused
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def run(self, *args):
+        rc = 5 if args[0] in ("kickstart", "bootout") else 0
+        out = "\tstate = not running\n" if args[0] == "print" else ""
+        return subprocess.CompletedProcess(args, rc, out, "Input/output error" if rc else "")
+
+    monkeypatch.setattr(launchd.Launchd, "_run", run)
+    monkeypatch.setattr(launchd.os, "getuid", lambda: 501, raising=False)
+    drv = launchd.Launchd()
+    spec = _spec(tmp_path)
+    drv.install(spec)
+    with pytest.raises(Refused, match=r"Could not start it \(Input/output error\)"):
+        drv.start(spec)  # loaded but not running: kickstart fails
+    with pytest.raises(Refused, match=r"Could not restart it \(Input/output error\)"):
+        drv.restart(spec)
+    with pytest.raises(Refused, match=r"Could not stop it \(Input/output error\)"):
+        drv.stop(spec)  # bootout fails and the job is still loaded
+
+
+def test_launchd_leaves_an_adopted_plist_alone(monkeypatch, tmp_path):
+    from orch_services.drivers import Spec
+    from orch_services.store import Refused
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    drv, calls = _launchd(monkeypatch, {"print": (113, "")})
+    plist = tmp_path / "Library" / "LaunchAgents" / "com.jörg.web.plist"
+    spec = Spec(
+        sid="web",
+        name="Web",
+        workspace_id="w",
+        argv=["/usr/bin/true"],
+        cwd=tmp_path,
+        log=tmp_path / "x.log",
+        auto=True,
+        external="com.jorg.web",
+        external_path=plist,
+    )
+    with pytest.raises(Refused, match="orch services remove web"):
+        drv.start(spec)  # its plist is gone
+    plist.parent.mkdir(parents=True)
+    plist.write_bytes(b"<plist>mine</plist>")
+    drv.set_auto(spec)
+    drv.uninstall(spec)
+    assert plist.read_bytes() == b"<plist>mine</plist>"
+    assert not any(c[0] == "bootout" for c in calls)
+
+
+def test_launchd_plist_keeps_spaces_umlauts_and_markup_exact(tmp_path):
+    import plistlib
+
+    from orch_services.drivers import Spec, launchd
+
+    d = tmp_path / "Jörg Müller" / "web app"
+    spec = Spec(
+        sid="web",
+        name="Web",
+        workspace_id="w",
+        argv=[str(d / "run.sh"), "--title", "A & B <ü>"],
+        cwd=d,
+        log=d / "log file.log",
+        auto=False,
+        env={"GREETING": "grüezi & ciao"},
+    )
+    data = plistlib.loads(launchd.render(spec))
+    assert data["ProgramArguments"] == spec.argv and data["WorkingDirectory"] == str(d)
+    assert data["StandardErrorPath"] == str(d / "log file.log")
+    assert data["EnvironmentVariables"] == {"GREETING": "grüezi & ciao"} and data["RunAtLoad"] is False

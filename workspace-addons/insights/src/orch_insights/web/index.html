@@ -34,7 +34,7 @@
 <div id="main-view" class="area-body">
 <section id="checkup" class="stack" aria-label="Health check" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
 <p id="lost-note" class="banner attn" role="status" hidden></p>
-<section id="team" class="stack" aria-label="Time and cost" hidden><div class="stat-row" id="team-stats"></div>
+<section id="team" class="stack" aria-label="Time and cost" hidden><div class="stat-row four" id="team-stats"></div>
 <section class="card chart-card" id="week" hidden><div class="section-head roomy"><h2>This week against the budget</h2><span class="meta" id="week-label"></span></div><div class="progress" id="week-bar" role="progressbar" aria-label="This week against the budget" aria-valuemin="0" aria-valuemax="100"><span></span></div></section>
 <section class="card chart-card" id="people" hidden><div class="section-head roomy"><h2>By person</h2><span class="meta">Last 30 days</span></div>
 <div class="table-wrap"><table class="data-table"><caption class="sr-only">Tickets, helper time and cost by person</caption><thead><tr><th scope="col">Person</th><th scope="col" class="numeric">Finished</th><th scope="col" class="numeric">Open</th><th scope="col" class="numeric">Helper time</th><th scope="col" class="numeric">Cost</th></tr></thead><tbody id="people-rows"></tbody></table></div></section></section>
@@ -49,7 +49,7 @@
 <section id="needs" class="needs" aria-label="Needs a look" hidden></section>
 <div class="metric-grid" id="metrics"></div>
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta" id="period">Last 30 days</span></div>
-<div class="chart-stage" role="img" id="trend" aria-label="Daily trend unavailable."><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
+<div class="chart-stage" id="trend"><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
 <div class="axis"><span id="axis-start">30 days ago</span><span>Today</span></div></section>
 <section class="card chart-card" id="skill-chart"><div class="section-head roomy"><h2>Skills used</h2><span class="meta" id="skill-period">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
 <section id="models" class="card chart-card" aria-label="Helper strength" hidden><div class="section-head roomy"><h2>Helper strength</h2><span class="meta" id="models-note">Last 30 days</span></div>

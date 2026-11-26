@@ -110,7 +110,7 @@ def _start_lock(d: Path, wait: float):
     fd = os.open(p, os.O_RDWR | os.O_CREAT | runfiles.NOFOLLOW, 0o600)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise RuntimeError(f"{p} is not a regular file.")
+            raise RuntimeError(f"{p} is not a regular file; orch does not use it. Remove it and try again.")
         end = time.time() + wait
         while True:
             try:
@@ -171,12 +171,10 @@ def _spawn(root: Path, d: Path) -> int:
 
 
 def stop(root: Path) -> str:
-    """'stopped', 'not running', or 'not verified' (a record that is not our watcher: nothing is signalled)."""
+    """'stopped', 'not running', or 'not verified' (a record that is not our watcher: nothing is signalled).
+    RuntimeError when .orch/run/factory is a link or not a folder."""
     root = Path(root).resolve()
-    try:
-        d = _dir(root)
-    except RuntimeError:
-        return "not verified"
+    d = _dir(root)  # a linked or blocked run folder: refused with what to do (not "a process is not ours")
     rec = runfiles.read_json(d / RECORD)
     if not rec:
         return "not running"
