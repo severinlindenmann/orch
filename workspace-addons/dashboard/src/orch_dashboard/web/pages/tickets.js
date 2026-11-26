@@ -110,8 +110,9 @@ function searchKey() { const q = String(ticketSearch).trim(); return q ? JSON.st
 const searchServed = () => !!hits.key && hits.key === searchKey();
 function wantSearch() {
   const key = searchKey();
-  if (!key || !pagingOn() || hits.want === key) return;
+  if (!pagingOn() || hits.want === key) return;
   hits.want = key; clearTimeout(hits.timer);
+  if (!key) return;
   hits.timer = setTimeout(() => searchPage(key, 0), 250);
 }
 function searchPage(key, offset) {
@@ -122,7 +123,10 @@ function searchPage(key, offset) {
     if (hits.want !== key) return;
     hits.rows = offset ? [...hits.rows, ...array(out.items)] : array(out.items);
     hits.key = key; hits.next = out.next ?? null; hits.total = Number(out.total) || 0;
-  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => { hits.busy = false; render(); });
+  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => {
+    if (searchKey() !== key) return;
+    hits.busy = false; render();
+  });
 }
 // The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
 function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
@@ -285,14 +289,27 @@ function stuckLabel() {
   const n = ticketParents(tickets()).filter(isStuck).length;
   return n ? 'Stuck ' + n : 'Stuck';
 }
+// ORCH-2159: leave typing in the native input; coalesce costly page redraws after a short pause.
+// Keep the URL and server debounce current immediately, so a slow previous reply cannot win.
+let ticketSearchTimer = null;
+function changeTicketSearch(value) {
+  ticketSearch = value; searchFolds.clear(); writeTicketAddress(); wantSearch();
+  clearTimeout(ticketSearchTimer);
+  const address = typeof location === 'object' ? location.hash : '';
+  ticketSearchTimer = setTimeout(() => {
+    ticketSearchTimer = null;
+    if (typeof location === 'object' && location.hash !== address) return;
+    render();
+  }, 80);
+}
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
-  input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
+  input.addEventListener('input', event => changeTicketSearch(event.currentTarget.value));
   const people = ticketOwners(tickets()), picked = ticketPerson ? ownerKey(ticketPerson) : '';
   const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, boardShort(t.title, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
-  return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
+  return [group, person, h('span', {className:'grow'}), h('label', {className:'search-field'}, input)];
 }
 // The Person choices: one [key, name] per person (ownerKey), named as "You: ..." says when it is the person, else the
 // first spelling that starts with a capital letter.
@@ -335,7 +352,7 @@ function ticketNext(t) {
     }
     if (text) text = 'Question: ' + text;
   } else if (status === 'review') {
-    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
@@ -438,8 +455,9 @@ function whenLine(t) {
 let ticketView = 'list';
 try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
-const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+// Two steady rows at every width (as the mockup): layout, Part of, Person and search; then the view chips on their own row.
+const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'},
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters(), viewChips());
 /* ORCH-576 (owner picked draft C, 18 Nov): every status is a row of small tiles, the most urgent row first. A tile is
    the title (2 lines) and one line: tasks, ONE signal, the ticket it is part of, one add-on icon, ⋯. Kit: .status-row,
    .ticket-tile, .parts-bar, .kind-tag, .scope-bar (widgets.css). Drag, the ⋯ menu and the moves are the same as before. */
@@ -514,7 +532,7 @@ function boardSignal(t, lane, parts) {
       else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
     });
   }
-  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Check result');
+  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Test results');
   if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
   const helper = helperChip(t);
   if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
@@ -867,7 +885,7 @@ function ticketTable(visible) {
   for (const group of rel.groups) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, folded ? '› ' : '⌄ '), group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
     if (folded) continue;
@@ -882,7 +900,7 @@ function ticketTable(visible) {
     // a search shows its hits: every group opens while a search is typed; folding then lasts for that search (ORCH-58)
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
-    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
+    const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, (folded ? '› ' : '⌄ ') + icon + ' '), group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
     toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (folded) continue;
@@ -923,9 +941,9 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
-  // ORCH-1716: a result to check says Check result at every width (the computer row shows it first, the session button
+  // ORCH-1716: a result to check says Test results at every width (the computer row shows it first, the session button
   // only on hover); the phone has room for one thing, so it is that one
-  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
   if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
@@ -1105,14 +1123,21 @@ function list() {
   syncTicketAddress();
   const visible = filteredTickets();
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
-  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
+  const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
-  return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
-    h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
-    h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+  return fragment(top, !tickets().length ? ticketsEmpty() : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+}
+// No tickets at all: the master empty state with one sentence and New ticket (the page's one filled button).
+function ticketsEmpty() {
+  const text = 'Describe a job in plain words; a helper works on it and asks you only when it needs a decision.';
+  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
+  const add = typeof newButton === 'function' ? newButton() : null;
+  if (add) box.append(add);
+  box.dataset.key = 'empty';
+  return box;
 }
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.

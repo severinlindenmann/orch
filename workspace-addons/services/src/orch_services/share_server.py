@@ -66,12 +66,16 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def _allowed(self, path: str) -> bool:
-        """The file's real place lies inside the shared folder and on no private folder (.orch, .ssh, ...)."""
+        """The file's real place lies inside the shared folder and on no private folder (.orch, .ssh, ...), and
+        the name it is asked by is not private either (a link called .env to an allowed file is not served)."""
         try:
+            asked = os.path.relpath(os.path.abspath(path), self.root)
             real = os.path.realpath(path)
             if os.path.commonpath([real, self.root]) != self.root:
                 return False
         except ValueError:  # another drive on Windows
+            return False
+        if any(private(part) for part in Path(asked).parts if part not in (".", "..")):
             return False
         rel = os.path.relpath(real, self.root)
         return rel == "." or not any(private(part) for part in Path(rel).parts)
@@ -83,9 +87,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def send_head(self):
         """Only files that really lie inside the shared folder: a link that leads out of it (to the home folder,
-        say), a private folder or an index page that is such a link is answered as not found."""
-        path = self.translate_path(self.path)
-        bad = not self._allowed(path)
+        say), a private folder or name, or an index page that is such a link is answered as not found."""
+        asked = super().translate_path(self.path)
+        path = os.path.realpath(asked)
+        bad = not self._allowed(asked)
         if not bad and os.path.isdir(path):
             for index in self.index_pages:
                 page = os.path.join(path, index)

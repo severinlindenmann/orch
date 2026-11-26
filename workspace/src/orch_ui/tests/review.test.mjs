@@ -367,7 +367,7 @@ test('a held answer keeps its card out of a refreshed stack; after Undo the card
   assert.deepEqual(decks[1].items.map(i => i.id), ['a', 'b', 'c'], 'the card taken back is waiting again');
 });
 
-// ORCH-183 A3: a Check result shows its own files (a picture, a page) as tiles.
+// ORCH-183 A3: a Test results card shows its own files (a picture, a page) as tiles.
 test('mapCard: the files of a Check card become tiles with urls; unknown types are plain files; no url, no tile', () => {
   const {UI} = load();
   const c = {id: 'core:review:t_x', ticket: 'T-1', key: 'review', digest: 'd', card: {kind: 'check', title: 'Done', then: 'x',
