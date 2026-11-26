@@ -97,20 +97,20 @@ def can_import_cached() -> bool:
     return _IMPORT_OK[key]
 
 
-def tools(root: Path) -> list[tuple[str, dict]]:
+def tools(root: Path, agents: list[str] | None = None) -> list[tuple[str, dict]]:
     """(name, adapter data) of every detected tool that has reminder hooks and a local settings file."""
     from orch import adapters, skills
 
     out = []
-    for n in skills.detected_agents(root):
+    for n in skills.detected_agents(root) if agents is None else agents:
         a = adapters.load(n)
         if a.get("reminder_hooks") and (a.get("reminder") or {}).get("settings_file"):
             out.append((n, a))
     return out
 
 
-def settings_files(root: Path) -> list[str]:
-    return [a["reminder"]["settings_file"] for _, a in tools(root)]
+def settings_files(root: Path, agents: list[str] | None = None) -> list[str]:
+    return [a["reminder"]["settings_file"] for _, a in tools(root, agents)]
 
 
 def _ours(entry) -> bool:

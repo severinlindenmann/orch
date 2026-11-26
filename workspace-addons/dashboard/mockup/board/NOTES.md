@@ -189,3 +189,9 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - While rows are picked, the bar from the master (`UI.bulkBar`) stays at the foot of the screen: "3 selected", Status, Priority, Epic (menus that open upwards), Clear. One click sets it for all of them; one notice with Undo.
 - Status offers Backlog, To do, Working, Check, Done and Won't do. Waiting and Superseded ask something per ticket and stay on each ticket's Move to.
 - Wide screens only: the phone list has no checkboxes. Open `list.html?pick=2` to see two rows picked.
+
+## Tickets page polish (ORCH-2091)
+
+- `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
+  the view chips (All … Done this week) on their own row under it; the table starts one gap below.
+- An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.

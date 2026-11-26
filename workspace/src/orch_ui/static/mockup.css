@@ -207,6 +207,7 @@ body:where(.mk-home-states)[data-preview=loading] .column-heading:after{inset:8p
 :where(body.mk-board-new) #file-list li,:where(body.mk-board-new)#file-list li{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:4px 0}
 :where(body.mk-board-new) #file-list li span,:where(body.mk-board-new)#file-list li span{flex:1;overflow-wrap:anywhere}
 :where(body.mk-board-new) #file-error:empty,:where(body.mk-board-new)#file-error:empty{display:none}
+:where(body.mk-board-new) #epic-add,:where(body.mk-board-new)#epic-add{justify-self:start}
 :where(body.mk-board-new) .new-options>div,:where(body.mk-board-new).new-options>div{position:relative;display:grid;align-content:start;gap:8px}
 :where(body.mk-board-new) .new-options select,:where(body.mk-board-new).new-options select{font-size:12px;width:100%}
 :where(body.mk-board-new) .date-picker,:where(body.mk-board-new).date-picker{position:absolute;right:0;top:70px;z-index:5;width:292px;padding:12px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow);animation:page-in 100ms ease}
@@ -475,7 +476,7 @@ html:not([data-state=empty]) :where(body.mk-ticket-ticket-sections) .empty-resul
 :where(body.mk-automation-automation,body.mk-insights-insights) .subline,:where(body.mk-automation-automation,body.mk-insights-insights).subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 :where(body.mk-automation-automation,body.mk-insights-insights) .plain-link,:where(body.mk-automation-automation,body.mk-insights-insights).plain-link{text-decoration:none;font-weight:500}
 :where(body.mk-automation-automation,body.mk-insights-insights) .plain-link:hover,:where(body.mk-automation-automation,body.mk-insights-insights).plain-link:hover{text-decoration:underline}
-:where(body.mk-automation-automation,body.mk-insights-insights) .data-table td,:where(body.mk-automation-automation,body.mk-insights-insights).data-table td{padding-top:12px;padding-bottom:12px}
+:where(body.mk-automation-automation,body.mk-insights-insights) .data-table td,:where(body.mk-automation-automation,body.mk-insights-insights).data-table td{padding-top:12px;padding-bottom:12px;overflow-wrap:break-word}
 :where(body.mk-automation-automation,body.mk-insights-insights) .footnote,:where(body.mk-automation-automation,body.mk-insights-insights).footnote{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--text-faint);font-size:12px}
 :where(body.mk-automation-automation,body.mk-insights-insights) .preview-controls,:where(body.mk-automation-automation,body.mk-insights-insights).preview-controls{position:fixed;bottom:12px;right:16px;z-index:50;display:flex;align-items:center;gap:4px;padding:6px 8px;background:var(--sidebar);border:1px solid var(--border-strong);border-radius:8px;box-shadow:var(--lift-shadow)}
 :where(body.mk-automation-automation,body.mk-insights-insights) .preview-controls>span,:where(body.mk-automation-automation,body.mk-insights-insights).preview-controls>span{font-size:12px;color:var(--text-faint);padding:0 8px}
@@ -1422,7 +1423,7 @@ body.mk-focus-v4d .mw-panel[data-mode=bottom] .mw-pane[data-size=md] .mw-shelf{m
 }
 @media(min-width:1100px){
 body.mk-focus-v4d .mw-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
-body.mk-focus-v4d .mw-band{grid-column:1/-1}
+body.mk-focus-v4d .mw-band,body.mk-focus-v4d .mw-bands>.empty-state,body.mk-focus-v4d .mw-bands>.wall-tiles{grid-column:1/-1}
 body.mk-focus-v4d .mw-bands:has([data-band=pin]) .mw-band[data-band=pin]{grid-column:span 2}
 body.mk-focus-v4d .mw-bands:has([data-band=pin]) .mw-band[data-band=need]{grid-column:span 4}
 body.mk-focus-v4d .mw-bands:has([data-band=queue]) .mw-band[data-band=queue],body.mk-focus-v4d .mw-bands:has([data-band=queue]) .mw-band[data-band=idle]{grid-column:span 3}
