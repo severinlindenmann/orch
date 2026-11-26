@@ -112,7 +112,7 @@ def test_the_docs_table_says_groups_run_the_click_throughs():
     assert "ORCH-1106, owner 20 Nov): queue groups skip" not in doc
 
 
-def test_queue_groups_that_touch_orch_run_perf_against_develop_and_the_gate_needs_it():
+def test_queue_groups_that_touch_orch_run_perf_against_develop_and_the_final_check_needs_it():
     """ORCH-1609: the 10,000-ticket check runs in queue groups that touch orch and counts for the final check; there it
     fails only on more than 30% slower than develop (R8.3), never on the owner's absolute limits."""
     perf = CI_JOBS["perf"]
