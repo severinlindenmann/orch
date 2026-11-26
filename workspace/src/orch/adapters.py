@@ -133,7 +133,7 @@ def chosen(root: Path) -> str:
 # ---------------------------------------------------------------- argv
 
 
-def _split(cmd: str) -> list[str]:
+def split_command(cmd: str) -> list[str]:
     if os.name == "nt":
         return [
             t[1:-1] if len(t) > 1 and t[0] == t[-1] and t[0] in "\"'" else t
@@ -174,7 +174,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         cmd = a["command"] if tpl == "{command}" else a["interactive"]
         if not cmd:
             raise Refused(f"'{name}' has no command yet. Add it: orch config agent add {name} --command ...")
-        items = _split(cmd)
+        items = split_command(cmd)
     else:
         items = list(tpl)
     has_prompt = any("{prompt}" in i for i in items)

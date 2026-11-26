@@ -1,3 +1,19 @@
+# 25 Nov invitation opened on a paired phone (ORCH-2127)
+- An invitation link opened while the phone is already paired opens the Add workspace confirmation (Add this workspace?) over Chats. Closing it adds nothing and keeps the pairing.
+- An invitation for another server is never sent: the sheet says "This invitation is for another server" with "Use a different link". Review trigger: Add workspace › Pairing errors › Another server.
+
+# 25 Nov swipe rows and Reduce Motion (ORCH-2049)
+- Needs your OK rows (Hide) and ticket chat rows (Archive / Delete): with Reduce Motion on, the row still follows the finger, but reveal, spring back, close and hide jump to where they end instead of sliding. Buttons, Undo, long-press menu and VoiceOver actions are unchanged; with Reduce Motion off nothing changes.
+- `archive.html` now says what the phone does: a long swipe or fling on a chat only shows its buttons, it never archives or deletes on its own.
+
+# 25 Nov Earlier: search finished groups by title and Clear search (ORCH-1939)
+- The search field reads "Search earlier messages and groups". Finished groups are filtered by their title; when none match, the section says "No finished groups match “…”." and with no groups at all it still says "No finished groups yet."
+- The no-match sentence under Earlier days gets a "Clear search" button: one tap empties the search and stays in Earlier (the field's own clear button still works). New jump-list entry Earlier · search, nothing found ("zebra").
+
+# 24 Nov Earlier search in one chat (ORCH-1965)
+- New jump-list entries Earlier · one chat, Earlier · search, no match and Earlier · no history yet (visual-challenge.js): one Chat's Earlier with the search field "Search earlier messages in this chat".
+- A search with no match keeps the Earlier days heading and says "No earlier messages in this chat match “…”." Clearing uses the search field's own clear button. Finished groups stay listed below and are not searched; no history at all keeps "Nothing here yet. Past days of this chat show up here."
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 
@@ -80,3 +96,11 @@ One word, "topic", for a work thread: "Make topic", "Making topic…", "Topic ma
 ## 21 Nov team chat step 2 in the app (ORCH-1175)
 
 New page `team-chat.html`: in a ticket chat a strip under the title names who is in it (“Pilatus, Sales and Bank”) with + Add. Add opens a sheet with the Workspaces list (your workspaces on this phone that are not in the chat yet) and the line “They see this ticket and the earlier messages in this chat, including places, voice notes and file names. If you remove them later, what they already got stays with them.” Messages from another workspace carry “Helper · Sales” and its mark. The helper’s ask is a plain Add / Not now card. Chat info lists each workspace with “Added by you · 4 Nov” / “Added by Pilatus · 4 Nov”, “older orch” for a workspace on an older version, and “Adding…” until a workspace you asked for joined. An older relay: “Adding from the phone is not ready yet. Add it on the computer.”
+
+## 25 Nov fingerprint text size (ORCH-2128)
+
+The fingerprint to compare (Accept card on a workspace chat, "This phone" in Settings) is monospaced and follows the phone's text size like the words around it (15 pt at the default size). At accessibility sizes it wraps between groups of four, stays selectable as one value, and VoiceOver reads the whole value. Not mocked: the mockup has no large-text mode and no fingerprint screen.
+
+## 25 Nov voice play button says its next action (ORCH-2064)
+
+The play button on a sent voice memo and on a spoken reply is named for what a tap does and matches its symbol: “Play voice message, 0:18” or “Pause voice message, 0:18”, the length kept in every state. The state (Playing, Paused, Listened, Loading) is a separate value that changes only with the state, never with the time. Starting another message resets the earlier one to Play. The position slider is named “Voice message position”, as in the app. Unavailable audio keeps “Audio not available, try again”.

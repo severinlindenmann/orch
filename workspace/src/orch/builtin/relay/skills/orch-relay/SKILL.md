@@ -72,7 +72,7 @@ the owner; they get a linked copy.
 Share a short summary and only the items the other side needs, not a whole ticket.{{#delegate}} `delegate --ticket <id> --full`
 shares the whole ticket; use it only when the person wants that.{{/delegate}} Check what leaves this machine
 first: add `--dry-run` to `send`{{#delegate}}, `delegate`{{/delegate}}{{#start}} or `start`{{/start}}; it prints the
-message and sends nothing.
+message and sends nothing. Every real send ends with one line on what left this machine.
 {{/workspaces}}
 
 {{#workspaces}}

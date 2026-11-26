@@ -241,3 +241,9 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
 - Changes to add, empty copy (ORCH-1809): a copy that brings 0 commits and 0 files shows one quiet `.meta` line
   ("The copy has no changes to add. Nothing to apply.") instead of the card, with no Apply changes; Home says "No
   changes to apply" and links to the ticket.
+
+## ORCH-2051: Replaced by, type a key to jump (25 Nov)
+
+- `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
+  (Replaced by, Cancel, Move to Superseded). The dialog opens with focus on the choice. Typing a whole key (ORCH-97)
+  jumps to that ticket; typing never chooses, Enter or a click does. The long title and the long word wrap in full.
