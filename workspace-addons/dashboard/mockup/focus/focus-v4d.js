@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, panes: ['ORCH-238'], act: 0, pm: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, sf: {}, panes: ['ORCH-238'], act: 0, pm: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -440,8 +440,14 @@
   function line(s) {
     return '<div class="mw-line" data-tile="' + esc(s.k) + '" data-s="' + s.s + '">' + openB(s, 'mw-lopen', stat(s) + '<span class="mw-key">' + esc(s.k) + '</span><span class="mw-tt">' + esc(nm(s)) + '</span><span class="mw-lnow" data-now="' + esc(s.k) + '">' + esc(now(s)) + '</span>') + '<span class="mw-lmeta meta">' + tool(s) + '<span>' + warm(s) + '</span></span>' + tkLink(s) + (s.s === 'none' && !s.ask ? btn('btn outline sm', 'zoom', 'Start', { 'data-k': s.k }) : '') + pinBtn(s) + (live(s) ? pmBtn(s, 'tile', I.more, 'More for ' + s.k) : '') + (pmOpen(s.k, 'tile') ? sessMenu(s, 'tile') : '') + '</div>';
   }
+  /* ORCH-2063: during a search a folded band that holds a match opens by itself; a fold click then counts for this
+     search only (st.sf) and is dropped when the search is cleared. The saved choice (st.col) never changes. */
+  function folded(id, n) {
+    if (!st.f.trim()) return !!st.col[id];
+    return Object.prototype.hasOwnProperty.call(st.sf, id) ? st.sf[id] : !!st.col[id] && !n;
+  }
   function band(id, title, list, draw, cls, empty, extra) {
-    var col = !!st.col[id];
+    var col = folded(id, list.length);
     return '<section class="mw-band" data-band="' + id + '"><div class="mw-bh"><h2>' + btn('mw-bt', 'col', '<span class="mw-chev" aria-hidden="true">' + (col ? '▸' : '▾') + '</span>' + title + ' (' + list.length + ')', { 'data-id': id, 'aria-expanded': String(!col) }) + '</h2>' + (extra || '') + '</div>' + (col ? '' : (list.length ? '<div class="' + cls + '">' + list.map(draw).join('') + '</div>' : '<p class="meta mw-none">' + empty + '</p>')) + '</section>';
   }
   function bandsHTML() {
@@ -807,7 +813,7 @@
   function show(n, more) {
     var o = more ? F[n - 1][7][1] : F[n - 1][6];
     if (o.need) need(o.need);
-    st.full = false; st.ask = false; st.ren = ''; st.menu = ''; st.list = ''; st.ov = null; st.f = ''; st.mode = 'bar';
+    st.full = false; st.ask = false; st.ren = ''; st.menu = ''; st.list = ''; st.ov = null; st.f = ''; st.sf = {}; st.mode = 'bar';
     if (!!o.many !== st.many) many(!!o.many);
     Object.keys(o).forEach(function (k) { if (k !== 'need' && k !== 'many') st[k] = Array.isArray(o[k]) ? o[k].slice() : (o[k] && typeof o[k] === 'object' ? JSON.parse(JSON.stringify(o[k])) : o[k]); });
     if (!o.panes) { st.panes = [st.cur]; st.act = 0; }
@@ -869,8 +875,8 @@
     else if (a === 'menu') { st.menu = st.menu === b.dataset.m ? '' : b.dataset.m; st.list = ''; render(st.menu ? '.mw-pop .mw-opt' : '[data-act=menu][data-m=' + b.dataset.m + ']'); }
     else if (a === 'list') { st.list = st.list === b.dataset.l ? '' : b.dataset.l; st.menu = ''; st.lq = ''; render(st.list ? '#mw-lq, .mw-pop .mw-opt' : '[data-act=list][data-l=' + b.dataset.l + ']'); }
     else if (a === 'wallretry') { st.wall = ''; $('mw-bands').innerHTML = bandsHTML(); }
-    else if (a === 'wallclear') { st.f = ''; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
-    else if (a === 'col') { st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
+    else if (a === 'wallclear') { st.f = ''; st.sf = {}; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
+    else if (a === 'col') { if (st.f.trim()) st.sf[b.dataset.id] = b.getAttribute('aria-expanded') === 'true'; else st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
     else if (a === 'fold') { st.foldR = !st.foldR; render('[data-act=fold]'); }
     else if (a === 'pin') pin(k);
     else if (a === 'ren') { st.ren = k; render('.mw-ren input'); var ri = q1('.mw-ren input'); if (ri) ri.select(); }
@@ -903,7 +909,7 @@
   document.addEventListener('input', function (e) {
     var t = e.target, d = t.dataset && t.dataset.d;
     if (d) { drafts[d] = t.value; if (st.voice === 'done') st.voice = ''; }
-    else if (t.id === 'mw-filter') { st.f = t.value; $('mw-bands').innerHTML = bandsHTML(); url(); }
+    else if (t.id === 'mw-filter') { st.f = t.value; if (!st.f.trim()) st.sf = {}; $('mw-bands').innerHTML = bandsHTML(); url(); }
     else if (t.id === 'mw-lq') { st.lq = t.value; $('mw-plist').innerHTML = listRows(); }
   });
   document.addEventListener('submit', function (e) {
