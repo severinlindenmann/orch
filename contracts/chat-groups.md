@@ -33,6 +33,7 @@ Words (same on dashboard and phone, PHONE-NOTES.md): **Chat**, **Group**, **"<Wo
 | `body.day` | **NEW** | `YYYY-MM-DD`: the Chat day, by **local wall time**: the workspace's local date of `created_at`, or the date before when the local wall clock shows before 04:00 (so DST days stay right; never "minus 4 h"). The workspace sets it on every Chat text it sends; the phone groups by it and, for its own texts, uses its local date with the same 04:00 cut until the workspace's ack (which carries `day`) arrives. Never in a group message. |
 | Helper identity | **NEW** (display rule) | Never sent as text: the name is "<workspace name> helper", the avatar is the workspace look (look.md) plus a small sparkle. Agents are stored in history as `agent:<name>` as today. |
 | `body.refs` (cards) | **NEW** (display) | Not a wire field in v1: cards come from `task`, `group_event`, `shared_ticket`, `share`/`shared_files` and the existing `ticket_view` (§2–4). |
+| Day file `files` | **NEW** (local, ORCH-2171) | Not a wire field. A Chat text the person wrote on the dashboard may keep `files: [{name, size}]`: files attached to the Chat ticket's artifacts with that message (`orch chat say --file NAME`). The words may then be empty. The helper's input and the phones get the words plus one line naming the files. Older readers ignore it. |
 
 **Daily cut.** At 04:00 local the workspace starts a fresh helper context for Chat (UI: "Context cleared daily at 04:00 ·
 Details"). Past days are **History** (read only, searchable). Nothing is deleted.
@@ -383,12 +384,17 @@ workspace's chat cannot be used to add or remove there (`orch relay group add` s
 - **Add**: `member_added` (with `added_by`) to everyone including the new member, then to the new member only the
   ticket card (§4) carrying `shared_chat`. That is all it gets: the fixed card fields and the chat lines, nothing
   else.
-- **Remove / leave**: the host marks the member left and saves that first, then takes it out of every send intent
-  still pending (§5 crash replay) and deletes what still waits for it in the outbox; only the news of its own
+- **Remove / leave**: the host marks the member left and saves that in one write with the send intent of the
+  `member_left` news (§5 crash replay: a crash after it still tells everyone on the next sync), then takes it out
+  of every send intent still pending and deletes what still waits for it in the outbox; only the news of its own
   removal still goes to it. When the outbox is sent later, a copy for a workspace that is no longer a member is
-  dropped. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
+  dropped; while the host cannot read its member list, its group copies wait in the outbox (never sent
+  unchecked). The outbox keeps the order the copies were saved in, also across a restart. A person's Add on an
+  ask-to-add card is noted before the answer is saved, so a crash in between still adds on the next sync. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
   own removal still lists that member in the header of its own copy, so it accepts the news and stops. A replay
   after a crash and the leave a member sends itself follow the same rule (nothing more for a member that is gone).
+- **Member list at a member**: the header's title and member list are taken only from a copy whose `seq` is not
+  below the one already taken (a copy without `seq` only before any): a late copy never puts back an older list.
 - **Added back**: a member that left or was removed takes part again only on a `member_added` for itself with a
   `seq` above the one it left at; its order starts afresh from that `seq`. An older add never counts.
 - **Refused**: a message from a workspace that is not a current member (never added, left or removed), a forged

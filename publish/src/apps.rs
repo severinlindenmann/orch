@@ -270,9 +270,32 @@ async fn start_and_check(
     Err(util::tail(&log, 4000))
 }
 
+/// One workspace's place in `State::deploys`, given back when its deploy task ends.
+struct DeploySlot(State, String);
+
+impl DeploySlot {
+    fn take(st: &State, ws: &str) -> ApiResult<Self> {
+        if !st.deploys.lock().unwrap().insert(ws.to_string()) {
+            return Err(ApiError::new(
+                429,
+                "rate_limited",
+                "Another app deploy of this workspace is still running. Try again when it is done.",
+            ));
+        }
+        Ok(DeploySlot(st.clone(), ws.to_string()))
+    }
+}
+
+impl Drop for DeploySlot {
+    fn drop(&mut self) {
+        self.0.deploys.lock().unwrap().remove(&self.1);
+    }
+}
+
 /// Deploys in a task of its own: when the client goes away mid-deploy (the request future is dropped),
 /// the deploy still finishes or cleans up, and the old process is always stopped (its container or unit
-/// would otherwise keep running unrouted).
+/// would otherwise keep running unrouted). One deploy per workspace at a time: a client that disconnects
+/// and uploads again cannot pile up builds behind the app lock.
 pub async fn deploy(
     st: &State,
     w: &Workspace,
@@ -281,10 +304,14 @@ pub async fn deploy(
     expires_at: Option<String>,
     new_token: bool,
 ) -> ApiResult<Value> {
+    let slot = DeploySlot::take(st, &w.id)?;
     let (st, w, name) = (st.clone(), w.clone(), name.to_string());
-    tokio::spawn(async move { deploy_now(&st, &w, &name, bytes, expires_at, new_token).await })
-        .await
-        .map_err(ApiError::internal)?
+    tokio::spawn(async move {
+        let _slot = slot;
+        deploy_now(&st, &w, &name, bytes, expires_at, new_token).await
+    })
+    .await
+    .map_err(ApiError::internal)?
 }
 
 async fn deploy_now(

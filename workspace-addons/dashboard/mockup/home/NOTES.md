@@ -73,6 +73,11 @@ Home: the question is body text; answering moves the card out, the next one in, 
   tickets and start no new work: <links>" ("and start no new work" only for the main helper). `?login=several`: one
   banner "N things stopped working", the names, `See what to fix` (Settings › Helper, the list). Each thing that
   stopped counts in the title ("N things need you", manager 17 Nov), not in the Needs you badge. Nothing shows when all works or nothing was checked yet; a shared copy shows none of it.
+- `?login=approve` (#1549): a workspace check file that is new or changed waits for the person: the red banner says
+  "The <name> waits for you to approve it" and its one button is `Approve`. The window shows what the check runs in
+  full (with Copy) and Approve sends the CLI's own `orch checks approve <name> --hash <h>` with the content the page
+  showed; `?renew=approve&step=approve-done` is the success line, `?renew=approve&step=approve-changed` the file that
+  changed after the page showed it (nothing approved, the rows are read again). No terminal command on the row.
 - The `Renew` button is the renew step (ORCH-46). Until it is in the product, the same place shows `Check again`
   (word list #8; it runs every check once more and a toast says the new state), and `Try again` for a connection that
   cannot be reached; both outlined (one filled button per view).
@@ -86,3 +91,11 @@ Home: the question is body text; answering moves the card out, the next one in, 
   between two starts, when nothing waits, or in a shared copy.
 
 - ORCH-1741 (owner 23 Nov, "39 things wait on you"): a ticket in Review whose pull request waits in the merge queue (or that a helper is repairing for the queue) is no result row and no count: one quiet line "N in the merge queue, nothing to do" under the list. It comes back as a result to check when the queue gives up on the pull request. A ticket never shows two rows: an open question or "passed its checks but was not merged" takes the place of its result row; the Check card also says why the Reviewer was not sure. Merged work with nothing open and a security review with an ok close by themselves.
+
+## Polish pass (25 Nov 2026, ORCH-2086)
+
+- The product now matches this page for the first question: answer tiles share the row (each at most 400 px, so 1920
+  is not stretched) with "Suggested" beside the answer, no extra "Needs you · Choose an answer" line under the
+  Needs you badge, and the quiet button under the tiles sits on the left edge at phone width.
+- Finished: the title, result and time sit close together (8 px), as drawn; links keep their 44 px touch area
+  without stretching the line. No change to this page's markup was needed.

@@ -9,12 +9,13 @@
 .settings details summary,.addon-native summary{min-height:44px;align-content:center;cursor:pointer;color:var(--text-muted)}
 .agent-cards{display:grid;gap:16px}
 .settings .agent-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;align-items:center;gap:12px;border:1px solid var(--border)}
+.settings .agent-card .tap-box{display:grid;place-items:center}
 .settings .agent-card input,.settings .permission-choices input{width:24px;height:24px;margin:0;accent-color:var(--text)}
 .settings .agent-card .test-note{grid-column:2/-1;margin:0;color:var(--text)}
 .settings .agent-card.off{opacity:1}
 .settings .permission-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .settings [data-key=settings-permissions]>.card{border:0;background:transparent}
-.settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:wrap}
+.settings .permission-choices .agent-opt{border:1px solid var(--border);border-radius:12px;background:var(--surface);gap:12px;flex-wrap:nowrap}
 .settings .permission-choices .sel{border-color:var(--text-muted);background:var(--surface-2)}
 .settings-addon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .settings .ad-h{padding:16px;flex-wrap:wrap;gap:16px}
@@ -28,11 +29,12 @@
 @media(max-width:760px){
   .settings-nav>*{flex-shrink:0}
   .settings-addon-grid,.settings .permission-choices{grid-template-columns:minmax(0,1fr)}
-  .settings .agent-card{grid-template-columns:24px minmax(0,1fr) auto}
+  .settings .agent-card{grid-template-columns:var(--touch) minmax(0,1fr) auto}
+  .settings .agent-card .tap-box{width:var(--touch);height:var(--touch);margin:-10px}
   .settings .agent-card>.btn{grid-column:2}
 }
 /* Keep the switch track compact inside a full-height touch target. */
-.settings .switch{min-height:44px;height:auto;width:44px;margin:0;background:transparent;border-radius:8px}
+.settings .switch{min-height:44px;height:auto;width:44px;margin:0;background:transparent;border-color:transparent;border-radius:8px}
 .settings .switch::before{content:"";position:absolute;inset:auto;left:4px;top:12px;width:36px;height:20px;border-radius:99px;background:var(--surface-3)}
 .settings .switch::after{top:14px;left:4px}
 .settings .switch[aria-checked=true]::before{background:var(--brand)}
@@ -86,6 +88,7 @@
 .settings .sync-field{display:flex;flex-direction:column;gap:6px}
 .settings .sync-field-line{display:flex;gap:8px;flex-wrap:wrap}
 .settings .sync-field-line .input{flex:1 1 220px;min-width:0;width:auto}
+.card-row>.input.grow[data-key=phone-relay-line]{flex:1 1 200px;min-width:0;width:auto}
 .settings .check-res{display:inline-flex;gap:6px;align-items:center;font-size:12px}
 .settings .check-res.ok{color:var(--success)}
 .settings .check-res.bad{color:var(--danger)}
@@ -100,7 +103,7 @@
 .settings .sync-review{margin:0 16px 14px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface-2);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-review p{flex:1;min-width:180px;margin:0}
 .settings .sync-review .row{flex-wrap:wrap;gap:8px}
-.settings .sync-warn{margin:12px 16px 4px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-warn{margin:12px 16px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-warn p{flex:1;min-width:180px;margin:0}
 .settings .sync-warn .row{flex-wrap:wrap;gap:8px}
 .settings .sync-details{border-top:1px solid var(--border)}
@@ -124,7 +127,7 @@
 /* SN-1: plain folder row, add-ons list, compact shared links (no Details toggles). */
 .settings .folder-row{align-items:flex-start}
 .settings .folder-row .folder-path{margin-top:4px}
-.settings .sync-details{padding:12px 16px 14px}
+.settings .sync-details,.settings .sync-unread{padding:12px 16px 14px}
 .settings .consent-details{margin:8px 0}
 .settings .ad-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .settings .ad-row{display:flex;align-items:center;gap:16px;border:0;border-top:1px solid var(--border);padding:16px}
@@ -149,11 +152,13 @@
 .settings .addon-about{padding:0 4px;display:grid;gap:4px}
 .settings .addon-about h3{font-size:14px;font-weight:600}
 .settings .addon-about p{margin:0;overflow-wrap:anywhere}
-.settings .ad-row>.btn{flex:none}
-.sk-columns.sk-settings{grid-template-columns:156px minmax(0,1fr)}
-.sk-settings .sk-tab{height:44px;border-radius:8px}
+/* a row that starts with its label keeps its button on the left edge when it wraps at phone width */
+.settings .ad-row>.btn,.settings .card-row.name-row>.btn{flex:none;margin-left:0}
+/* tabs on top, like the page */
+.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}
+.sk-settings .sk-tab{height:44px;width:96px;border-radius:8px}
 .sk-settings .sk-short{height:88px}
-@media(max-width:760px){.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}.sk-settings .sk-side{display:none}}
+.sk-settings .sk-side{display:flex;gap:4px;overflow:hidden}
 .settings .lk-sw{width:36px;height:36px;min-height:36px}
 .settings .lk-swatches{gap:10px}
 

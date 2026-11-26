@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import adapters, brake, runs, runs_live, runwatch, tend, tickets
+from orch import adapters, brake, config, runs, runs_live, runwatch, tend, tickets
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def _since(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
 
 
-def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200):
+def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200, mode="live"):
     runs._write(
         proj,
         {
@@ -60,7 +60,7 @@ def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200
             "run": run,
             "by": "human:tester",
             "agent": "generic",
-            "mode": "live",
+            "mode": mode,
             "pid": pid,
             "started_at": _since(started),
             "renewed_at": _since(started),
@@ -183,12 +183,19 @@ def test_an_idle_helper_is_reminded_once_with_what_changed(proj, run, new_ticket
     assert tend.run(proj)["actions"] == []  # once
 
 
-def test_waiting_on_something_outside_is_reminded_not_ended(proj, run, new_ticket, child):
+def test_waiting_on_something_outside_is_quiet_neither_reminded_nor_restarted(
+    proj, run, new_ticket, child, starts
+):
+    """#1339: a Waiting ticket (orch wait --on external:...) is a quiet state (R2.6), not an idle helper."""
     tid = new_ticket()
+    run("check", "add", tid, "Ship it")  # open steps: otherwise sent on within a minute
     assert run("wait", tid, "--on", "external:release 28")[0] == 0
     _live(proj, tid, child(), idle_for=21 * 60)
-    assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
-    assert runs.read(proj, tid) is not None
+    assert tend.run(proj)["actions"] == []
+    _nudged(proj, tid)  # reminded before the wait was set: still no fresh start near the idle limit
+    _live(proj, tid, child(), idle_for=61 * 60)
+    assert tend.run(proj, now=_later(11))["actions"] == []
+    assert starts == [] and runs.read(proj, tid) is not None and _history(proj, tid) == []
 
 
 def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, new_ticket, child):
@@ -205,7 +212,9 @@ def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, n
     _live(proj, tid, child(), idle_for=21 * 60)
     queue("waiting")
     assert tend.run(proj)["actions"] == []
-    queue("out")  # the queue is done with it: the usual reminder
+    queue("out")  # out of the queue with the ticket still Waiting: still quiet (#1553)
+    assert tend.run(proj)["actions"] == []
+    run("wait", tid, "--clear")  # the wait is over: the usual reminder
     assert [a["action"] for a in tend.run(proj)["actions"]] == ["nudge"]
 
 
@@ -447,6 +456,39 @@ def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypa
     assert started == [b]
 
 
+def test_one_step_helpers_hold_places_and_a_start_at_the_limit_waits(
+    proj, run, new_ticket, child, monkeypatch
+):
+    """ORCH-1677: a live session and a one-step run fill a limit of 2; a one-step start then waits in line."""
+    a, b, c = new_ticket("a"), new_ticket("b"), new_ticket("c")
+    config.set_live_max(proj, "2")
+    _live(proj, a, child(), idle_for=5, state="working", run="r_live00001")
+    _live(proj, b, child(), idle_for=5, state="working", run="r_step00001", mode="oneshot")
+    assert runs_live._full(proj) == 2
+    monkeypatch.setattr(adapters, "chosen", lambda root: "generic")
+    code, out, err = run("run", "start", c, "--mode", "oneshot", "--agent", "codex", "--fresh", "--json")
+    assert code == 2 and json.loads(out)["pending"] is True and "2 helpers are working at once" in err
+    assert runs.read(proj, c) is None
+    (item,) = [i for i in runs.undelivered(proj, c) if i.get("via") == "slots"]
+    assert item["start"] == {"mode": "oneshot", "agent": "codex", "fresh": True}
+
+
+def test_a_start_from_the_line_keeps_its_tool_and_fresh_choice(proj, run, new_ticket, monkeypatch):
+    """ORCH-1677: `orch run start --agent X --fresh` waits in line, then starts with X, fresh, live."""
+    tid = new_ticket()
+    monkeypatch.setattr(runs_live, "_full", lambda root: 2)
+    monkeypatch.setattr(runs_live, "available", lambda adapter: True)
+    monkeypatch.setattr(adapters, "chosen", lambda root: "generic")
+    code, out, err = run("run", "start", tid, "--agent", "codex", "--fresh", "--mode", "live")
+    assert code == 2 and "waits in line" in out + err, out + err
+    calls = []
+    monkeypatch.setattr(runs, "start", lambda root, t, by, **kw: calls.append((t, kw)))
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
+    assert runs_live.start_waiting(proj) == [tid]
+    assert calls == [(tid, {"mode": "live", "agent": "codex", "fresh": True})]
+
+
 def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     monkeypatch.setattr(runs_live, "_full", lambda root: 2)
@@ -643,3 +685,25 @@ def test_the_second_stop_moves_the_ticket_up_to_opus(proj, run, new_ticket, chil
     t = tickets.load(proj, tid)
     assert t["model"]["name"] == "opus"
     assert "moved up to Opus" in " ".join(_history(proj, tid))
+
+
+def test_a_draft_pull_request_is_not_reported_as_a_failed_check(proj, run, new_ticket):
+    """#1339: a draft's red check is on purpose: the reminder says draft, not that a check failed."""
+    from orch import stuck
+
+    tid = new_ticket()
+    draft, red, old = (f"https://github.com/o/r/pull/{n}" for n in (1, 2, 3))
+    for url in (draft, red, old):
+        run("ref", "add", tid, url)
+    now = time.time()
+    base = {"state": "OPEN", "head": "a" * 40, "green": False, "at": now}
+    pulls = {
+        draft: {**base, "failed": None, "draft": True},
+        red: {**base, "failed": [["lint", "FAILURE"]], "draft": False},
+        old: {**base, "failed": None, "draft": False},
+    }
+    stuck._write(proj, {**stuck._read(proj), "pulls": pulls})
+    text = tend._what_changed(proj, tickets.load(proj, tid), None)
+    assert f"Pull request {draft}: a draft" in text
+    assert f"Pull request {red}: a check failed" in text
+    assert f"Pull request {old}: checks not finished" in text

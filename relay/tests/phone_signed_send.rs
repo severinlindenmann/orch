@@ -257,3 +257,44 @@ async fn a_phone_without_a_key_cannot_send_signed_but_may_still_send_unsigned() 
         .await;
     assert_eq!(s, 201, "until the hard cut: {v}");
 }
+
+#[tokio::test]
+async fn a_signed_send_with_a_team_choice_must_sign_the_team_choice() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let k = key(7);
+    let p = pair_with_key(&t, &a, Some(&k)).await;
+    let team = json!({"add": "ws_sales00001", "mentions": ["ws_bank000001"]});
+    let mut m = msg("m_aaaaaaaaaaaaaab1", &p.0, &a.id, "Add Sales", CID);
+    m["ticket"] = "t_7k3f9q".into();
+    m["body"]["team"] = team.clone();
+    let mut req = request(&a.id, "Add Sales", envelope(&k, &signed_bytes(&m)));
+    req["ticket"] = "t_7k3f9q".into();
+    req["team"] = team.clone();
+    let (s, v) = t
+        .phone(&p, "POST", "/v1/phone/send", Some(req.clone()))
+        .await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(v["team"], json!(true), "{v}");
+    let inbox = t.inbox(&a).await;
+    let got = inbox
+        .iter()
+        .find(|x| x["id"] == "m_aaaaaaaaaaaaaab1")
+        .expect("in the inbox");
+    assert_eq!(got["body"]["team"], team);
+
+    // The request names a team choice the signed bytes do not carry.
+    let cid2 = "3b0c3f5e-6f3a-4d2b-9c41-2f0a8e7d6c5b";
+    let mut m = msg("m_aaaaaaaaaaaaaab2", &p.0, &a.id, "Add Sales", cid2);
+    m["ticket"] = "t_7k3f9q".into();
+    let mut req = request(&a.id, "Add Sales", envelope(&k, &signed_bytes(&m)));
+    req["client_id"] = cid2.into();
+    req["ticket"] = "t_7k3f9q".into();
+    req["team"] = team;
+    let (s, v) = t.phone(&p, "POST", "/v1/phone/send", Some(req)).await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (422, Some("signed_mismatch")),
+        "{v}"
+    );
+}

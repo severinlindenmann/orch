@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from orch import (
+    cardkinds,
     dashshots,
     ghmerge,
     history,
@@ -167,31 +168,84 @@ def _when(at) -> str:
 # ------------------------------------------------------------------ cards for `orch ask`
 
 
-def _file_preview(root: Path, src: str, where: str) -> dict:
+TEXT_MAX = 64 * 1024  # a text or glance card shows at most this much of its file
+
+
+def _read_small(root: Path, tid: str | None, src: str, where: str = "file") -> bytes:
+    """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
+    and pages are), anything else a file in the workspace. The path `orch ticket artifacts-dir` prints
+    (.orch/tickets/<this ticket>/artifacts/<name>, also with backslashes) counts as artifacts/<name>
+    (ORCH-1777); any other .orch or .git path is refused. Each refusal names its cause and the next step."""
+    path = src.strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    own = f".orch/tickets/{tid}/artifacts/" if tid else None
+    if own and path.startswith(own) and len(path) > len(own):
+        path = "artifacts/" + path[len(own) :]
+    shown = src[:120]
+    parts = safefile._parts(path)
+    if parts is None:
+        raise Refused(
+            f"{where}: '{shown}' is not a plain path inside the workspace; "
+            "give it like docs/x.md or artifacts/<name>."
+        )
+    inside = next(
+        (p.rstrip(". ").lower() for p in parts if p.rstrip(". ").lower() in (".orch", ".git")), None
+    )
+    if inside:
+        raise Refused(
+            f"{where}: '{shown}' is inside a {inside} folder a card does not read; "
+            "give a file of this ticket as artifacts/<name>."
+        )
+    try:
+        if parts[0] == "artifacts" and len(parts) > 1:
+            if tid is None:
+                raise Refused(f"{where}: artifacts/<name> needs a ticket; give the ticket id to `orch ask`.")
+            checked = f".orch/tickets/{tid}/{path}"
+            data = safefile.read_ticket_file(root, tid, "artifacts", "/".join(parts[1:]), TEXT_MAX)
+        else:
+            checked = path
+            data = safefile.open_file_ref(root, path, TEXT_MAX)
+    except safefile.TooLarge:
+        raise Refused(
+            f"{where}: '{shown}' is over the {TEXT_MAX // 1024} KB limit for a text card; "
+            "shorten it or show it as a page (.html)."
+        ) from None
+    if data is None:
+        raise Refused(
+            f"{where}: '{shown}' was not found (checked {checked}); "
+            f"put the file there or check the name with `orch ticket artifacts-dir {tid or '<ticket>'}`."
+        )
+    return data
+
+
+def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> dict:
     ext = Path(src).suffix.lower()
     kind = review.FILE_TYPES.get(ext)
     if kind in ("img", "page"):
         return {"type": kind, "src": src}
     if ext in (".md", ".txt"):
-        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
-        if data is None:
-            raise Refused(f"{where}: '{src}' was not found or is too large for a text card.")
+        data = _read_small(root, tid, src, where)
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
-        return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
+        return {
+            "type": "doc",
+            "heading": re.split(r"[\\/]", src.strip())[-1],
+            "paras": [p[:2000] for p in paras],
+        }
     if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
-        data = safefile.open_file_ref(root, src, 64 * 1024) if not src.startswith("artifacts/") else None
+        data = _read_small(root, tid, src, where)
         try:
-            pv = json.loads(data.decode("utf-8")) if data is not None else None
+            pv = json.loads(data.decode("utf-8"))
         except ValueError:
             pv = None
         if not isinstance(pv, dict):
-            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+            raise Refused(f"{where}: '{src}' is not a JSON object; a card file holds one {{...}} object.")
         return {"type": "doc", **pv}
     raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
 
-def _option(root: Path, spec: str) -> dict:
+def _option(root: Path, spec: str, tid: str | None = None) -> dict:
     ident, eq, rest = spec.partition("=")
     if not eq or not ident.strip() or not rest.strip():
         raise Refused(f'An option is "ID=Title" or "ID=Title:file", got "{spec[:40]}".')
@@ -200,7 +254,7 @@ def _option(root: Path, spec: str) -> dict:
         out = {
             "id": ident.strip(),
             "title": title.strip(),
-            "preview": _file_preview(root, tail.strip(), "option"),
+            "preview": _file_preview(root, tail.strip(), "option", tid),
         }
     else:
         out = {"id": ident.strip(), "title": rest.strip()}
@@ -265,7 +319,7 @@ def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     return card, [no_label], args.suggest, title
 
 
-def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+def build_card(root: Path, args, tid: str | None = None) -> tuple[dict, list[str], str | None, str]:
     if getattr(args, "run", None) is not None:
         return build_run_card(root, args)
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
@@ -276,7 +330,7 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
             card[k] = v
     options: list[str] = []
     if kind == "choice":
-        opts = [_option(root, o) for o in args.option]
+        opts = [_option(root, o, tid) for o in args.option]
         if len(opts) < 2:
             raise Refused('A choice needs at least two --option "ID=Title[:file]".')
         if args.after or args.file:
@@ -287,7 +341,7 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
                 o["text"] = about[o["id"]]
         card["preview"] = {"type": "options", "options": opts}
         if args.before:  # how it is today, beside the options (the person compares, then picks one)
-            card["preview"]["before"] = _file_preview(root, args.before, "before")
+            card["preview"]["before"] = _file_preview(root, args.before, "before", tid)
         options = [o["id"] for o in opts]
     elif args.option:
         raise Refused("A card takes --option only with --choose.")
@@ -300,11 +354,11 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     elif args.before:
         card["preview"] = {
             "type": "compare",
-            "before": _file_preview(root, args.before, "before"),
-            "after": _file_preview(root, args.after, "after"),
+            "before": _file_preview(root, args.before, "before", tid),
+            "after": _file_preview(root, args.after, "after", tid),
         }
     elif args.file:
-        card["preview"] = _file_preview(root, args.file, "file")
+        card["preview"] = _file_preview(root, args.file, "file", tid)
     elif kind == "link":
         if not args.open:
             raise Refused("A link card needs --open URL (or --file).")
@@ -448,7 +502,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         args.file = _guard(dashshots.card_file, root, tid, args.ci_shots)
         if not args.open:
             args.open = args.ci_shots
-    card, options, suggest, _title = _guard(build_card, root, args)
+    card, options, suggest, _title = _guard(build_card, root, args, tid)
     links = _guard(links_of, getattr(args, "ref", None) or [])
     if getattr(args, "merge_workflow", None) and len(links or []) < LINKS_MAX:  # ORCH-305: the diff itself
         links = [*(links or []), {"label": "Workflow changes", "url": args.open + "/files"}]
@@ -553,10 +607,16 @@ def _list(args, root: Path) -> None:
         return
     cards = review.stack(root)
     n = len(cards)
-    lines = [
-        f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{c['kind']}]  {c['card'].get('title', '')}"
-        for c in cards
-    ]
+    lines, lane = [], None
+    for c in cards:  # grouped as on the Review page (R2 A): what holds up work first, then by what you do
+        ck = c.get("card_kind") or {}
+        if ck.get("lane") != lane:
+            lane = ck.get("lane")
+            lines.append(cardkinds.LANES.get(lane, ""))
+        name = ck.get("name") or c["kind"]
+        lines.append(
+            f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{name}]  {c['card'].get('title', '')}"
+        )
     text = (
         "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.", *lines])
         if cards

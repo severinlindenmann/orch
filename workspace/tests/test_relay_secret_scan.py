@@ -57,6 +57,14 @@ def test_send_file_binary_with_token_refused(proj, run, on):
     _clean(proj, on, code, out, err)
 
 
+def test_send_file_dry_run_refused_like_the_real_send(proj, run, on):
+    """The preview of a file says what the real send would: a planted token blocks it there too."""
+    (proj / "notes.txt").write_text(f"api note: {TOKEN}\n", encoding="utf-8")
+    code, out, err = run("relay", "send", PEER, "--file", "notes.txt", "--dry-run")
+    _clean(proj, on, code, out, err)
+    assert "The file has" in err and "would leave" not in out
+
+
 def test_send_file_clean_still_goes(proj, run, on):
     (proj / "rows.csv").write_bytes(b"a,b\n1,2\n")
     assert run("relay", "send", PEER, "--file", "rows.csv")[0] == 0 and on.sent

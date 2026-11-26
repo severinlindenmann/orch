@@ -183,6 +183,16 @@ def test_share_is_stopped_by_a_secret_in_an_added_file(proj, run, srv):
     assert code == 2 and "nothing was sent" in err and key not in err and not srv.problems and not srv.blobs
 
 
+def test_share_is_stopped_by_a_secret_hidden_behind_a_field_named_twice(proj, run, srv):
+    key = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    made = make(proj, more="fine")
+    man = Path(made["path"]) / "manifest.json"
+    text = man.read_text()
+    man.write_text('{"more": "' + key + '", ' + text.lstrip()[1:])
+    code, _, err = run("relay", "problem", "share", made["ref"])
+    assert code == 2 and key not in err and not srv.problems and not srv.blobs
+
+
 def test_share_needs_a_relay(proj, run):
     made = make(proj)
     code, _, err = run("relay", "problem", "share", made["ref"])

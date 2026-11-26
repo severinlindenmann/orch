@@ -49,15 +49,33 @@ $toolDir = Join-Path (uv tool dir) "orch-workspace"
 $record = [ordered]@{ kind = $InstallKind; root = (Resolve-Path $toolDir).Path; schema = "orch.install/1" } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
 if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
-# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+# uv's bin folder holds the orch just installed; UV_TOOL_BIN_DIR can move it away from ~\.local\bin.
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
-& (Join-Path $toolBin "orch.exe") update --after-install
+$orchExe = [IO.Path]::GetFullPath((Join-Path $toolBin "orch.exe"))
+if (-not (Test-Path -LiteralPath $orchExe -PathType Leaf)) {
+    throw "orch install stopped: uv finished, but $orchExe is missing. Next: run the install line again."
+}
+# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+& $orchExe update --after-install
 if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
 Write-Host "orch is installed."
-$bin = "$env:USERPROFILE\.local\bin"
-if (($env:Path -split ";") -notcontains $bin) {
-    Write-Host "Run this line in PowerShell, then open a new terminal:"
-    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+# Does plain `orch` in this window start the copy just installed? (Path order, an older orch, an alias ...)
+$found = Get-Command orch -ErrorAction SilentlyContinue | Select-Object -First 1
+$foundPath = if ($found -and $found.CommandType -in @("Application", "ExternalScript")) { [IO.Path]::GetFullPath($found.Path) }
+# Same folder and name; the extension is left out (orch.exe here, a plain orch file in the POSIX test stubs).
+if ($foundPath -and [IO.Path]::ChangeExtension($foundPath, $null) -ieq [IO.Path]::ChangeExtension($orchExe, $null)) {
+    $run = "orch"
+    Write-Host "Open a new terminal, go to your project folder and run one of these:"
+} else {
+    $what = if ($foundPath) { "starts another orch ($foundPath)" } elseif ($found) { "starts a PowerShell $("$($found.CommandType)".ToLower()) named orch" } else { "finds no orch" }
+    $still = if ($found) { "keeps starting the other one" } else { "finds nothing" }
+    Write-Host "Typing orch in this window $what, not the one just installed: $orchExe"
+    Write-Host "Start it by its full path, as below: that works in any PowerShell window and changes nothing on this computer."
+    Write-Host "Typing just orch $still until your Path lists $(Split-Path $orchExe) before any other orch."
+    # A single-quoted path keeps spaces, umlauts and `$ as typed; every kind of apostrophe in it is doubled.
+    $run = "& '" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($orchExe) + "'"
+    Write-Host "Go to your project folder and run one of these:"
 }
-Write-Host "Then go to your project folder and run: orch init"
+Write-Host "  $run init                  local tickets: enough to start"
+Write-Host "  $run init --recommended    the same, plus the dashboard (optional; asks first)"

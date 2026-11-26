@@ -18,6 +18,7 @@ ALLOW = {
     ("workspace/src/orch/people.py", "stamp"): "writer: names the person on a line core just made",
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
+    ("workspace/src/orch/tickets.py", "note_results"): "writer: files with a line already (text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
     ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (Quiet since, G2)",
     ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for Quiet since)",
@@ -48,6 +49,10 @@ ALLOW = {
         "_mark_missing_proofs",
     ): "file marks, no author",
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "add_artifact_marks"): "links, no author",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "_drop_addon_names",
+    ): "drops the add-on name, no author",
     (
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",

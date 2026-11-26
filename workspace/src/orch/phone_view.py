@@ -107,14 +107,19 @@ _COUNT_ALONE = re.compile(r"[ \t]*+[0-9]++[ \t]++")  # fullmatch: the count is a
 _COUNT_AFTER = re.compile(r"[(,;][ \t]*+[0-9]++[ \t]++\Z")  # (23 pass: ... / a, 5 pass: ... / x; 2 pass: ...
 _COLON_SPACE = re.compile(r":[ \t]++\Z")  # the head's separator part: a space after the colon, no line break
 _TWO_WORDS = re.compile(r"[^\s]++[ \t]++[^\s]")  # possessive: a skipped head never rescans its line
+# A count and a word of letters right AFTER `pass: ` is a test log summary too ("PASS: 20 of 20 checks
+# passed", #2047); `pass: 4711 hunter2`, `pass: 12` and `pass: correct horse battery` stay secret.
+_COUNT_THEN_WORDS = re.compile(r"[0-9]++[ \t]++[A-Za-z]{2,}+[ \t]++[^\s]")
 
 
 def _test_count(text: str, head) -> bool:
-    """Is this `pass:` head a test count (see _COUNT_ALONE, _COUNT_AFTER)?"""
+    """Is this `pass:` head a test count (see _COUNT_ALONE, _COUNT_AFTER, _COUNT_THEN_WORDS)?"""
     if head.group("sep") != ":" or head.group(1).casefold() != "pass":
         return False
     if "\n" in head.group(2) or _COLON_SPACE.search(head.group(2)) is None:
         return False
+    if _COUNT_THEN_WORDS.match(text, head.end()) is not None:
+        return True
     start = max(0, head.start() - 32)
     before = text[start : head.start()]
     nl = before.rfind("\n")
@@ -123,6 +128,41 @@ def _test_count(text: str, head) -> bool:
     if not ((at_line_start and _COUNT_ALONE.fullmatch(before)) or _COUNT_AFTER.search(before)):
         return False
     return _TWO_WORDS.match(text, head.end()) is not None
+
+
+# A `name: value` on one line that is code or prose, not a label (#963, #1874). The scan goes on right after
+# the separator, so a pair inside the value is still read.
+# - a code or text file name with a line number or words after it (token.py:3, test_secret.py: 325 passed);
+#   `token.txt: x` (one word) stays a value;
+# - three plain words (letters only) after a name that is no password word (Saved keys: run orch ...,
+#   R5 (secrets: never in logs), refuse_if_secret_in: refuses ...): keys and tokens are no plain words, only a
+#   passphrase is, and that follows a password word (password: correct horse battery, my password: ...,
+#   secret: ..., t_pw1234: ...). `token: Ab12x then words` and `api_key: /home/x then words` stay values.
+_CODE_FILE = re.compile(
+    r"(?i).\.(?:py|pyi|js|mjs|cjs|ts|tsx|jsx|md|txt|log|json|jsonl|ya?ml|toml|sh|go|rs|rb|java|kt|swift|c|h"
+    r"|cc|cpp|cs|php|html|css|sql|xml|csv)\Z"
+)
+_LINE_REF = re.compile(r"[0-9]++(?::[0-9]++)?+(?![^\s,;)])")
+_PROSE = re.compile(r"(?:[A-Za-z][a-z]*+[,.;:!?)]?+[ \t]++){2}[A-Za-z][a-z]*+(?![\w/=+-])")
+_AUTH_SCHEME = re.compile(r"(?i)(?:bearer|basic|token|digest)(?![a-z])")
+_PASSWORD_WORD = re.compile(r"(?:pass(?:word|wd|phrase|code)?|pwd|pswd|pw|pin(?:code)?|secret)\Z")
+
+
+def _last_word(name: str) -> str:
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", unicodedata.normalize("NFKC", name)).lower()
+    return re.split(r"[^a-z0-9]+", words.strip(" _-."))[-1].rstrip("0123456789")
+
+
+def _code_or_prose(text: str, head) -> bool:
+    """Is this `name: value` head code or prose rather than a label (see _CODE_FILE, _PROSE)?"""
+    if head.group("sep") != ":" or "\n" in head.group(2):
+        return False
+    pos, name = head.end(), head.group(1)
+    if _CODE_FILE.search(name) and (_LINE_REF.match(text, pos) or _TWO_WORDS.match(text, pos)):
+        return True
+    if _PROSE.match(text, pos) is None or _AUTH_SCHEME.match(text, pos) is not None:
+        return False
+    return _PASSWORD_WORD.search(_last_word(name)) is None
 
 
 # A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
@@ -188,9 +228,9 @@ class _KV:
             pos = head.end()
             if not secret_name(head.group(1)):
                 continue
-            if _test_count(text, head):
-                continue
             cookie = _TO_EOL.search(head.group(1)) is not None
+            if _test_count(text, head) or (not cookie and _code_or_prose(text, head)):
+                continue
             if head.group("sep") == ":" or cookie:
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
                 if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
@@ -425,26 +465,19 @@ def _clean_full(t: str) -> str:
 
 
 def _has_secret(data: bytes) -> bool:
-    """The file scan uses the SAME detection as redact (_scrub_text: patterns, key=value, spaced values, flag
-    values and URL userinfo): a text hides something when the scrub changes it, in its raw, NFKC and cleaned
-    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent. A PNG
-    whose compressed pixel runs are proven (secretscan.passes) gets the full scrub on its label_view and the
-    token patterns on every byte."""
+    """The file scan is the SAME function as `orch secret scan` (secretscan.find, line by line with the
+    detection of redact: patterns, key=value, spaced values, flag values and URL userinfo), so a file the
+    CLI passes reaches the phone (#2543); in its raw, NFKC and cleaned (invisible characters and comments
+    gone) form. A PNG whose compressed pixel runs are proven (secretscan.passes) gets every rule on its
+    label_view and the token patterns on every byte."""
     return any(_scrubbed(blob, labels) for blob, labels in secretscan.passes(data))
-
-
-def _tokens_only(t: str) -> str:
-    for rx in _SECRET_PATTERNS:
-        t = rx.sub(HIDDEN, t)
-    return t
 
 
 def _scrubbed(data: bytes, labels: bool) -> bool:
     text = data.decode(errors="ignore")
     cleaned = _clean_full(text)
     forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
-    scrub = _scrub_text if labels else _tokens_only
-    return any(scrub(t) != t for t in dict.fromkeys(forms))
+    return any(secretscan.find(t, labels=labels) for t in dict.fromkeys(forms))
 
 
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
@@ -570,7 +603,8 @@ _SPACED_VALUES = (
 
 # ACCEPTED GAPS: the one list of known cases that redact, the file scan (_has_secret, _scan) and the value
 # hider (phone_results) do NOT catch; tests/test_phone_results.py pins what is covered.
-# - a secret split across lines (a flag value after a `\` continuation, a key wrapped over two lines),
+# - a secret split across lines (a flag value after a `\` continuation, a key wrapped over two lines; a
+#   value on the line after a label-only line IS caught by secretscan.find, #1532),
 #   or base64, hex, URL-encoded or otherwise encoded so no pattern or label is visible (the value hider
 #   knows these forms of a STORED value, not of others);
 # - homoglyph or confusable names (Cyrillic `раssword=x`, a modifier-letter colon `password꞉x`): NFKC does
@@ -603,6 +637,11 @@ _SPACED_VALUES = (
 #   `https://bob@corp.ch:pw@h`) and scheme-less DSNs (`user:pw@tcp(h)/db`);
 # - other operators and languages: `password == "x"`, `||=`, `??=`, `->`, `<-`, Dockerfile `ENV PASSWORD x`,
 #   fish `set -x API_TOKEN x`, non-English labels (Kennwort, mot de passe), PuTTY `Private-Lines:`.
+# - three plain words after a label that is no password word (`api_key: one two three`), and a code or text
+#   file name with a line number or words after it (`token.py: two words`): read as prose (#963, #1874);
+# - in a file that is not UTF-8 text and no PNG (a JPEG, a program, a database), a label and value shorter
+#   than secretscan.TEXT_RUN between control characters (`\x01pw=1234\x01`); token patterns and stored
+#   values still read every byte (#997).
 # Over-redaction is accepted (fail safe): `--token-count 512`, `use --token to set it` hide the next word,
 # `bypass=1`, `compass: north` and the rest of a `token: ...` line are hidden.
 def _scrub_text(t: str) -> str:
@@ -682,6 +721,8 @@ def secret_name(name: str) -> bool:
         t = unicodedata.normalize("NFKC", form)
         words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower()
         words = _PASS_OK.sub(" ", words)  # test-result phrases: Pass/Fail, pass rate, pass count (not passed)
+        if words.split()[-1:] == ["store"]:
+            continue  # where secrets are kept, not one: password_store, --password-store=basic (#2261)
         if any(rx.search(words) for rx in (_NAME_SUBSTR, _NAME_WORD, _NAME_PASS, _NAME_TAIL)):
             return True
     return False
@@ -2124,7 +2165,7 @@ def sync_cards(root: Path) -> list[str]:
     digest the phone echoes (relay.send_question). Nothing goes out without a paired phone, and a question
     already sent to the phones (by `orch ask` or an earlier sync) is not sent again. A card that does not pass
     the wire check goes out without `card` (a plain question). Returns "<ticket>:<question>" sent."""
-    from orch import relay, review
+    from orch import review
 
     if not _paired(root):
         return []
@@ -2141,70 +2182,89 @@ def sync_cards(root: Path) -> list[str]:
             continue
         if not isinstance(q.get("card"), dict) or q.get("answer") is not None:
             continue  # a plain question is asked with `orch ask`
-        digest = tickets.question_digest(q)
-        if relay.asked_to_phones(root, tid, qid):
-            continue
-        claimed: list[bool] = []
+        if _send_card(root, ticket, q):
+            sent.append(key)
+    return sent
 
-        def claim(st, key=key, digest=digest, claimed=claimed):
-            rec = st.setdefault("cards", {}).get(key)
-            if rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
-                return  # sent (a changed card is re-sent later, M4) or given up
-            st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
-            claimed.append(True)
 
-        update_state(root, claim)
-        if not claimed:
-            continue
-        state = load_state(root)
+def send_card_again(root: Path, ticket: dict, q: dict) -> bool:
+    """A refused phone answer used up the relay's one answer to this card's message (#2285): the open card
+    goes to the phones again as a new message, the same way sync_cards sends it, so a phone that may decide
+    can still answer. True when sent."""
+    if not _paired(root) or not isinstance(q.get("card"), dict) or q.get("answer") is not None:
+        return False
+    return _send_card(root, ticket, q, again=True)
+
+
+def _send_card(root: Path, ticket: dict, q: dict, again: bool = False) -> bool:
+    """Send one open card question (sync_cards); `again` sends it even when it went out before."""
+    from orch import relay, review
+
+    tid, qid = ticket["id"], q["id"]
+    key = f"{tid}:{qid}"
+    digest = tickets.question_digest(q)
+    if not again and relay.asked_to_phones(root, tid, qid):
+        return False
+    claimed: list[bool] = []
+
+    def claim(st, key=key, digest=digest, claimed=claimed):
+        rec = st.setdefault("cards", {}).get(key)
+        if not again and rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
+            return  # sent (a changed card is re-sent later, M4) or given up
+        st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
+        claimed.append(True)
+
+    update_state(root, claim)
+    if not claimed:
+        return False
+    state = load_state(root)
+    try:
+        refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
+        h = phone_results.value_hider(root)
+        if h is None or not wire_card_clean([q["text"], q["options"]], h):
+            raise Refused("held back: the question text would be hidden or cannot be checked")
         try:
-            refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
-            h = phone_results.value_hider(root)
-            if h is None or not wire_card_clean([q["text"], q["options"]], h):
-                raise Refused("held back: the question text would be hidden or cannot be checked")
-            try:
-                wire: dict | None = review.wire_card(q["card"], refs)
-                if not wire_card_clean(wire, h):
-                    wire = None  # a card text with a key or value in it: the question goes without the card
-            except Refused:
-                wire = None  # the contract: send the question without the card
-            if wire is None:
-                files = []
-            relay.send_question(
-                root,
-                ticket,
-                q,
-                card=wire,
-                card_files=files or None,
-                digest=digest if wire else None,
-            )
-        except (Refused, OSError):
+            wire: dict | None = review.wire_card(q["card"], refs)
+            if not wire_card_clean(wire, h):
+                wire = None  # a card text with a key or value in it: the question goes without the card
+        except Refused:
+            wire = None  # the contract: send the question without the card
+        if wire is None:
+            files = []
+        relay.send_question(
+            root,
+            ticket,
+            q,
+            card=wire,
+            card_files=files or None,
+            digest=digest if wire else None,
+        )
+    except (Refused, OSError):
 
-            def undo(st, key=key, digest=digest):
-                rec = st.get("cards", {}).get(key)
-                if rec and rec.get("digest") == digest and not rec.get("done"):
-                    rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
+        def undo(st, key=key, digest=digest):
+            rec = st.get("cards", {}).get(key)
+            if rec and rec.get("digest") == digest and not rec.get("done"):
+                rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
 
-            with contextlib.suppress(Refused):
-                update_state(root, undo)
-            continue
-        finally:
+        with contextlib.suppress(Refused):
+            update_state(root, undo)
+        return False
+    finally:
 
-            def merge(st, state=state):
-                st["blobs"].update(state["blobs"])
-                if state.get("secret_skipped") is not None:
-                    st["secret_skipped"] = state["secret_skipped"]
-
-            with contextlib.suppress(Refused, OSError):
-                update_state(root, merge)
-
-        def done(st, key=key):
-            st["cards"][key]["done"] = True
+        def merge(st, state=state):
+            st["blobs"].update(state["blobs"])
+            if state.get("secret_skipped") is not None:
+                st["secret_skipped"] = state["secret_skipped"]
 
         with contextlib.suppress(Refused, OSError):
-            update_state(root, done)
-        sent.append(key)
-    return sent
+            update_state(root, merge)
+
+    def done(st, key=key):
+        st["cards"][key]["done"] = True
+
+    with contextlib.suppress(Refused, OSError):
+        update_state(root, done)
+    return True
 
 
 def close_rounds(root: Path, tid: str) -> None:

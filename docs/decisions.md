@@ -75,6 +75,13 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-19 (ORCH-649, owner): No separate notebook app and no notebook device on the relay. A person's workspace
   runs on their own notebook, so Personal runs its ways in directly in the workspace there; a team server getting one
   person's private data is out of scope. The bridge from 18 Nov was removed before any release.
+- 2026-11-24 (ORCH-950, q10): The hourly live check of relay and publish is on again. Its schedule is the orch
+  automation repeat on ORCH-950 (a program, honours `orch pause`, at most 30 runs a day), which also starts the
+  outside GitHub job when GitHub dropped its own hourly cron (issue #2657); the cron stays only as a fallback.
 - 2026-11-24 (ORCH-1676, owner): No dev relay. relay.dev.severin.io is dropped (it failed every secure connection
   since the server move and no code uses it); the demo workspaces and the demo phone use the production relay as one
   more pair set by the admin. One relay is simpler.
+- 2026-11-25 (review overhaul, owner's picks R1 A, R2 A, R3 B, R5 A): Review cards are twelve kinds in four
+  families (Decide, Look at the result, Only you can press it, Needs you in person), picked by orch from what a card
+  carries; the list shows what holds up work first. `orch ask` refuses a question over 40 words and a report of a
+  state. "Nothing closes by itself" is the Reviewer mode `workflow.reviewer_mode = propose`; the default stays accept.

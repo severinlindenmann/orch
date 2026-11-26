@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from orch import history, ownerpick, safefile, tickets
+from orch import cardkinds, history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
 KINDS = ("draft", "check", "link", "choice", "plan", "run")
@@ -823,7 +823,9 @@ def summary(decision: dict, card: dict | None = None) -> str:
     """One plain line for a decision, e.g. "Use C with 2 changes: questions on top; month in the heading."."""
     card = card or {}
     act, picked = decision.get("action"), decision.get("picked")
-    changes = [_clip(c, 80).rstrip(".") for c in decision.get("changes") or []]
+    # the person's own words in full (each change is at most 500 characters): the answer and the run input
+    # are what a helper reads, so a cut-off change loses what was asked (#1174, #1775)
+    changes = [" ".join(str(c).split()).rstrip(".") for c in decision.get("changes") or []]
     tail = "; ".join(changes)
     if act == "approve":
         line = card.get("ok_label") or "Approved"
@@ -840,7 +842,7 @@ def summary(decision: dict, card: dict | None = None) -> str:
         line = "None of these"
     else:
         raise Refused(f"Unknown decision action {act!r}.")
-    line = _clip(line, 400).rstrip(".")
+    line = (line if tail else _clip(line, 400)).rstrip(".")
     return line + ("." if act in ("use_with_changes", "send_back") and tail else "")
 
 
@@ -976,8 +978,8 @@ def _find(ticket: dict, qid: str) -> dict:
 
 
 def check_digest(ticket: dict, root: Path | None = None) -> str:
-    """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
-    won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
+    """What a person is shown of a Test results card: exactly check_card(ticket) (title, steps with their done
+    and won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
     shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
@@ -1100,7 +1102,7 @@ def _checks_chips(ticket: dict) -> list[dict]:
 
 
 def accept_blocked(ticket: dict) -> str:
-    """Why Looks good is off on this Check result, with what to press (ORCH-548, owner 18 Nov: open steps and
+    """Why Looks good is off on this Test results, with what to press (ORCH-548, owner 18 Nov: open steps and
     an open question stop it, like the ticket page's Looks good since ORCH-250); "" when nothing stops it."""
     steps = sum(
         1
@@ -1209,7 +1211,7 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
-    """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
+    """A Test results card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
     and the parent. No preview when there is nothing to show (an empty box)."""
     rows, done, total = [], 0, 0
@@ -1308,7 +1310,7 @@ def decide(
     ticket = tickets.load(root, tid)
     if key == "review":
         if picked is not None:
-            raise BadVerdict("A Check result has no options to pick.")
+            raise BadVerdict("A Test results card has no options to pick.")
         return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid, person)
     q = _find(ticket, key)
     tickets.refuse_if_taken_back(q)
@@ -1528,8 +1530,8 @@ _LEFT_REVIEW = re.compile(
 
 
 def not_in_review(root: Path, ticket: dict) -> str:
-    """Why a Check result cannot be answered any more (ORCH-548), in one line with what to do: who moved the
-    ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
+    """Why a Test results card cannot be answered any more (ORCH-548), in one line with what to do: who moved
+    the ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
     decided
     then says what happened, never only "not waiting for your review"."""
     from orch.net import when
@@ -1606,7 +1608,7 @@ def _decide_check(
     person: bool = False,
 ) -> dict:
     tid = ticket["id"]
-    if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
+    if not by.startswith("human:"):  # a verdict on a Test results card is a person's (label check)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
     ownerpick.refuse_ticket(ticket, person)  # ORCH-582: a ticket with a draft is accepted only by a person
     if verdict not in VERDICTS:
@@ -1661,7 +1663,7 @@ def change(
     if old.get("answer") is None:
         raise Refused(f"{qid} is not answered yet. Answer it first.")
     if (old.get("card") or {}).get("kind") == "check":
-        raise Refused("A Check result is final. Reopen the ticket to look at it again.")
+        raise Refused("A Test results card is final. Reopen the ticket to look at it again.")
     if digest is not None and tickets.question_digest(old) != digest:
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)
@@ -1758,7 +1760,10 @@ def stack(root: Path) -> list[dict]:
     also has `one_tap`: answered with one tap on its named answer, ORCH-1847) and, when the
     question belongs to a task, `about` (its text, one line) and `task` (its id). Neither is part of the card
     or its digest."""
-    from orch import needs  # needs imports tickets; no cycle back
+    from orch import (
+        needs,  # needs imports tickets; no cycle back
+        reviewer,  # reviewer reads review's facts; imported here, no cycle at load
+    )
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
@@ -1807,6 +1812,11 @@ def stack(root: Path) -> list[dict]:
                         "recommended": q.get("recommended"),
                         "text": q.get("text") or "",
                         "one_tap": one_tap(t, q),
+                        "card_kind": cardkinds.look(
+                            card,
+                            question_kind=q.get("kind") if isinstance(q.get("kind"), str) else None,
+                            merge=isinstance(q.get("action"), dict) and "merge" in q["action"],
+                        ),
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                         **run_last(t, q, card, root),
@@ -1814,17 +1824,23 @@ def stack(root: Path) -> list[dict]:
                 )
         if t.get("status") == "review" and t["id"] not in skip:
             hist = [h for h in history.lines(root, t) if isinstance(h, dict) and h.get("at")]
+            card = check_card(t, root)
+            proposal = reviewer.proposal(
+                hist
+            )  # Reviewer mode "propose" (owner, 25 Nov): its verdict, one click
             out.append(
                 {
                     **base,
                     "id": f"core:review:{t['id']}",
                     "key": "review",
                     "kind": "check",
-                    "card": check_card(t, root),
+                    "card": card,
                     "digest": check_digest(t, root),
                     "since": hist[-1]["at"] if hist else t.get("updated_at") or t.get("created_at"),
                     "options": [],
-                    "recommended": None,
+                    "recommended": {"accept": "ok", "back": "no"}[proposal["verdict"]] if proposal else None,
+                    "card_kind": cardkinds.look(card, proposed=proposal is not None),
+                    **({"proposal": proposal} if proposal else {}),
                 }
             )
     # grouped: the ticket (round) with the longest-waiting card first, then its tasks in checklist order,
@@ -1834,6 +1850,7 @@ def stack(root: Path) -> list[dict]:
         oldest[r["ticket"]] = min(oldest.get(r["ticket"], r["since"] or ""), r["since"] or "")
     out.sort(
         key=lambda r: (
+            cardkinds.lane_rank(r),  # R2 A (owner, 25 Nov): what holds up work first, then by what you do
             oldest[r["ticket"]],
             r["ticket"],
             order[r["ticket"]].get(r["task"], 1 << 20) if r.get("task") else 1 << 30,
