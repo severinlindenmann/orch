@@ -64,15 +64,16 @@ def _key(args) -> str:
     return _name(t, tid) if t else tid
 
 
-def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
-    """The one most useful next command for a ticket, from what it holds now."""
+def work_on(t: dict | None, fallback: str = "<ticket>", root=None) -> str:
+    """The one most useful next command for a ticket, from what it holds now. root: the workspace, so the last
+    step says Review, or Done where helpers may finish (`workflow.agents_may_finish`)."""
     if not t:
         return f"orch ticket show {fallback}"
     n = _name(t, fallback)
     if t.get("status") in ("done", "dropped"):
         return "orch ticket list"
     if t.get("status") == "review":
-        return "a person looks at it and marks it Done: orch review list"
+        return "nothing more for you on this ticket. The person finds it with: orch review list"
     checks = t.get("checklist") or []
     if not checks:
         return f'add one task per step: orch check add {n} "<step>"'
@@ -82,11 +83,15 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
         return f'do {c}, then record its evidence: orch check done {n} {c} --note "<evidence>"'
     if not t.get("summary"):
         return f'orch ticket summary {n} "<where things stand>"'
-    return f"orch ticket status {n} done"
+    from orch import config, ownerpick
+
+    if config.agents_may_finish(root) and not ownerpick.carries_draft(t):
+        return f"orch ticket status {n} done"
+    return f"hand it to the person: orch ticket status {n} review"
 
 
 def _on_ticket(data, args) -> str:
-    return work_on(_load(args), _tid(args))
+    return work_on(_load(args), _tid(args), getattr(args, "orch_root", None))
 
 
 def _new(data, args) -> str:
@@ -161,7 +166,9 @@ def _status(data, args) -> str:
     if (data or {}).get("next_step"):
         return data["next_step"]
     t = _load(args)
-    return work_on(t, _tid(args)) if t and t.get("status") != "done" else "orch ticket list"
+    if t and t.get("status") != "done":
+        return work_on(t, _tid(args), getattr(args, "orch_root", None))
+    return "orch ticket list"
 
 
 def _list(data, args) -> str:
@@ -174,7 +181,8 @@ def _list(data, args) -> str:
         if broken:
             return f"{tickets.BROKEN_FIX}: .orch/tickets/{broken[0]}"
         return 'create one: orch ticket new "<title>"'
-    return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
+    first = rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"])
+    return work_on(first, rows[0]["id"], getattr(args, "orch_root", None))
 
 
 def _list_picked(data, args, words: str) -> str:
@@ -200,13 +208,21 @@ def _ask(data, args) -> str:
 
 
 def _needs(data, args) -> str:
-    q = next((r for r in data or [] if r.get("answer") and r.get("ticket")), None)
-    if q:
-        t = _load(args, q["ticket"])
-        a = q["answer"]
-        pick = a.get("recommended") or (a.get("options") or ["<answer>"])[0]
-        return f"answer it: orch answer {_name(t, q['ticket']) if t else q['ticket']} {a['question']} {pick}"
+    """ORCH-2140: the rows wait for a person; a Next line never fills in the person's answer."""
+    d = data if isinstance(data, dict) else {"rows": data or [], "more": 0}
+    n = len(d.get("rows") or []) + int(d.get("more") or 0)
+    if n == 1:
+        return "this one waits for a person, not for a helper."
+    if n:
+        return f"these {n} wait for a person, not for a helper."
     return "keep working on what does not wait: orch ticket list"
+
+
+def _counts(data, args) -> str:
+    n = ((data or {}).get("needs_you") or {}).get("count") or 0
+    if n:
+        return f"see the {n} {'thing' if n == 1 else 'things'}: orch review list"
+    return "orch ticket list"
 
 
 def _update(data, args) -> str | None:
@@ -408,7 +424,7 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": _needs,
-    "counts": "what waits for you: orch review list",
+    "counts": _counts,
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",

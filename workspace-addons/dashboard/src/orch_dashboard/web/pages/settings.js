@@ -168,7 +168,7 @@ function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
-        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
+        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to review first.'),
         settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
       h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.agents_may_finish ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
@@ -404,7 +404,7 @@ function settingsReviewText(id, settings) {
     ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
     : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
   if (id === 'workflow') return settings.agents_may_finish
-    ? {verb:'Turn off', what:'Helpers will ask you to check finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
+    ? {verb:'Turn off', what:'Helpers will ask you to review finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
     : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting for your check stay there.'};
   if (id === 'copies-switch') return copiesModeOf(settings) !== 'off'
     ? {verb:'Turn off', what:'Helpers will all work in your own folder, also when they work at the same time.', affects:'Copies that already exist stay until their ticket is done. Your own files are not touched.'}

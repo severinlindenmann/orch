@@ -316,7 +316,7 @@ test('ORCH-1716: the Needs you button counts tickets like its group, even when o
   const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
   assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
   assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
-  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
+  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Review 1 result');
 });
 test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});

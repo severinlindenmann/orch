@@ -181,7 +181,7 @@ function activity(t, where = '') {
   const text = full;
   const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
   const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
     note ? h('p', {className:'meta'}, note) : null,
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }

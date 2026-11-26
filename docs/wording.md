@@ -12,6 +12,8 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | a ticket made with tickets inside it (owner, ORCH-14) | Epic | `ticket new --epic`, `epic` | Subtask |
 | status of a ticket not started | Backlog (status chip; the button that shows a ticket stays "Open") | `open` | Open (as a status) |
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
+| a person looking at a helper's finished result (owner, ORCH-2140) | Review (status, lane, page); "Result to review" (row), "Test results" (button, ORCH-2172), "I review the result" (switch) | `review` status, `orch needs` | Check (for this step), Check result, Result to check, Human review needed |
+| open tickets that need nobody (Home, `orch counts`; owner, ORCH-2140) | In progress (started: a task done, a helper on it, or worked on before) / Not started (saved, nobody on it yet) | `in_progress`, `not_started` | Quiet, Idle, Pending |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
 | a click that decides for the person (a sync address, which version to keep) | Confirm / Needs your OK / Confirmed | `sign` (the click), `seen` | Sign, Signed, Signature, signed, signature ("Sign in" for the page login stays) |
 | a question the helper withdrew | Taken back: <reason> | `--take-back`, `taken_back` | Cancelled, Deleted, Withdrawn |

@@ -69,7 +69,7 @@ function reviewStuckStep(t) {
 }
 function reviewStuckHint(row) {
   if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
-  if (row.kind === 'reviewer:unsure') return 'Open the ticket to check the result yourself.';
+  if (row.kind === 'reviewer:unsure') return 'Open the ticket to review the result yourself.';
   if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
   return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
 }
@@ -485,10 +485,10 @@ function reviewExtraRows() {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
     if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
-    if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
+    if (!it.question && n.fromCore) add(t, 'result', 'A result to review.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
-  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to check.'));
+  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to review.'));
   return out;
 }
 // ORCH-1643: a question with two or three choices (a helper's on its screen too, when its ticket carries it) is answered in its row with one click: the same question card as the
@@ -505,7 +505,7 @@ function reviewExtraCard() {
   const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
   const act = r => r.what === 'screen' && live
     ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
-    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : r.what === 'failed' ? 'Open' : 'Answer');
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Review' : r.what === 'failed' ? 'Open' : 'Answer');
   return card('review-extra', 'Also waiting for you', '',
     rows.map(r => reviewOneClick(r)
       ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
