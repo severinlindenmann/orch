@@ -2091,7 +2091,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
     tickets, skipped = got[0], got[1]
     counts = got[2] if len(got) > 2 else ticket_counts(tickets)
     raw = f_raw.result()
-    addons = hide_unset_sharing(load_addons(root, orch_bin, raw), root, orch_bin) if with_addons else []
+    addons = load_addons(root, orch_bin, raw) if with_addons else []
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
@@ -2259,23 +2259,6 @@ def _update_check() -> dict | None:
     from . import update
 
     return update.check_card()
-
-
-def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
-    """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
-    tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_set_up(root):
-        return addons
-    return [{**a, "dashboard": None} if a in tabs else a for a in addons]
-
-
-def publish_set_up(root: Path) -> bool:
-    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
-    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
-    cfg = _load(root / ".orch" / "secrets" / "publish.json")
-    return isinstance(cfg, dict) and all(
-        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
-    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

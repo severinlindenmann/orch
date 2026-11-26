@@ -663,7 +663,10 @@ def _ticket_label(root: Path, tid) -> str | None:
 
 
 CANT_REACH = "Publish can't be reached. People may not be able to open your links until it is back."
-LINK_NOTE_WORDS = "Stopping sharing closes the link and keeps your original file. orch checks each file for passwords and keys first and stops if it finds one."
+LINK_NOTE_WORDS = (
+    "Stopping sharing closes the link and keeps your original file. "
+    "orch checks each file for passwords and keys first and stops if it finds one."
+)
 
 
 def view(root: Path) -> dict:
@@ -681,7 +684,11 @@ def view(root: Path) -> dict:
         return {
             "schema": "orch.addon-view/1",
             "generated_at": stamp,
-            "header": {"status": {"label": "Not connected yet", "tone": "neutral"}},
+            # the dashboard draws the paste box for this button (op link.connect: `publish connect --paste`)
+            "header": {
+                "status": {"label": "Not connected yet", "tone": "neutral"},
+                "button": {"label": "Connect", "action": {"op": "link.connect"}},
+            },
             "blocks": [
                 {
                     "type": "list",
@@ -691,7 +698,9 @@ def view(root: Path) -> dict:
                     "more": 0,
                     "empty": {
                         "title": "Publish isn't connected yet",
-                        "text": "Your admin gives you a short text. Paste it here to connect, then share a file.",
+                        "text": (
+                            "Your admin gives you a short text. Paste it here to connect, then share a file."
+                        ),
                     },
                 }
             ],
@@ -750,7 +759,9 @@ def view(root: Path) -> dict:
         count = None
         empty = {
             "title": "Nothing recorded on this computer",
-            "text": "orch can only list what it knows when publish can't be reached. Try again in a few minutes.",
+            "text": (
+                "orch can only list what it knows when publish can't be reached. Try again in a few minutes."
+            ),
         }
     else:
         count = f"{len(files)} link{'s' if len(files) != 1 else ''} \u00b7 anyone with the link can open them"
@@ -779,7 +790,8 @@ def view(root: Path) -> dict:
     blocks.append(
         {
             "type": "footnote",
-            "text": LINK_NOTE_WORDS + (" To stop, restart or delete an app, ask a helper on a ticket." if apps else ""),
+            "text": LINK_NOTE_WORDS
+            + (" To stop, restart or delete an app, ask a helper on a ticket." if apps else ""),
             "link": {"label": "Publish settings", "to": "app:settings/addons"},
         }
     )

@@ -9,7 +9,8 @@ def test_view_without_a_publish_server_is_the_plain_empty_page(proj, run):
     assert run("init")[0] == 0
     v = publish.view(proj)
     assert v["schema"] == "orch.addon-view/1"
-    assert "button" not in v.get("header", {})  # "Share a file" would only fail without a server
+    # no "Share a file" (it would only fail without a server): the button connects, drawn as the paste box
+    assert v["header"]["button"] == {"label": "Connect", "action": {"op": "link.connect"}}
     assert v["header"]["status"]["label"] == "Not connected yet"
     first = v["blocks"][0]
     assert first["type"] == "list" and first["items"] == []
