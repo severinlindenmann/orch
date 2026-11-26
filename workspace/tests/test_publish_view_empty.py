@@ -14,6 +14,9 @@ def test_view_without_a_publish_server_is_the_plain_empty_page(proj, run):
     assert first["type"] == "list" and first["items"] == []
     assert first["empty"]["title"] == "No shared links yet"
     assert "publish server" in first["empty"]["text"]
+    assert "agent" not in first["empty"]["text"]  # SX-18: the helper
+    # R7.2: no dead end
+    assert first["empty"]["link"] == {"label": "Shared link settings", "to": "app:settings/addons"}
     json.dumps(v)
 
 
