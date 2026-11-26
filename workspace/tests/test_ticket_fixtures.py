@@ -333,6 +333,7 @@ OLD_SHAPES = {
     "no_optional_fields": _drop("key", "ext", "note", "revision", "parent", "waiting_on", "done_when", "due"),
     "no_schema_or_times": _drop("schema", "created_at", "updated_at"),
     "no_core_lists": _drop("checklist", "refs", "questions", "history"),
+    "no_title_or_status": _drop("title", "status"),
     "items_without_by_at": _drop_item("by", "at"),
     "unknown_ext_keys": _unknown_ext,
     "empty_checklist": _set("checklist", []),
@@ -381,8 +382,7 @@ def test_old_shapes_load_list_and_save(name, one_ticket, proj, run):
 
 
 UNSUPPORTED = {
-    "no_title": _drop("title"),
-    "no_status": _drop("status"),
+    "status_number": _set("status", 3),
     "history_numbers": _set("history", ["line"]),
     "refs_text": _set("refs", "x"),
     "questions_null": _set("questions", None),

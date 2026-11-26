@@ -183,7 +183,7 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     if (m and int(m.group(1)) > 1) or tickets.shape_problem(t):
         return None, sync, False
     try:
-        return _row(t), sync, False
+        return _row(tickets.fill_missing(t)), sync, False
     except (TypeError, AttributeError, ValueError, KeyError):
         return None, sync, False  # odd field shapes (a list that is no list): no row, never a broken listing
 

@@ -350,12 +350,13 @@ _LISTS = ("checklist", "refs", "questions", "history")
 
 
 def shape_problem(data: dict) -> str | None:
-    """What makes a ticket file a shape this orch can't work on (no title or status text, a core list of
-    another type, a step, question or history line that is no object), or None. A missing list reads as
-    empty (fill_missing); unknown fields and add-on data under `ext` are never a problem (R8.2)."""
+    """What makes a ticket file a shape this orch can't work on (a title or status that is not text, a core
+    list of another type, a step, question or history line that is no object), or None. A missing title,
+    status or list reads as a default (fill_missing); unknown fields and add-on data under `ext` are never a
+    problem (R8.2)."""
     for key in ("title", "status"):
-        if not isinstance(data.get(key), str):
-            return f"`{key}` is missing or not text"
+        if key in data and not isinstance(data[key], str):
+            return f"`{key}` is not text"
     for key in _LISTS:
         if key in data and not isinstance(data[key], list):
             return f"`{key}` is not a list"
@@ -368,7 +369,10 @@ def shape_problem(data: dict) -> str | None:
 
 
 def fill_missing(data: dict) -> dict:
-    """A core list an older or hand-written file left out reads as empty; a save then writes it (additive)."""
+    """A title, status or core list an older or hand-written file left out reads as empty text, open or an
+    empty list; a save then writes it (additive)."""
+    data.setdefault("title", "")
+    data.setdefault("status", "open")
     for key in _LISTS:
         data.setdefault(key, [])
     return data
