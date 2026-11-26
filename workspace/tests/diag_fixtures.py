@@ -33,10 +33,11 @@ def tree_hash(root: Path, skip=()) -> str:
 def stuck(proj: Path, minutes_ago: float = 30, title: str = "Write the invoice export") -> str:
     """A ticket that is Working, old, and has no run: what `settle_orphan` would flip to Ready."""
     (proj / ".orch").mkdir(exist_ok=True)
-    t = tickets.create(proj, title, "human:t")
+    t = tickets.create(proj, "Write the invoice export", "human:t")
     tid = t["id"]
     tickets.set_status(proj, tid, "active", "human:t")
     raw = tickets.load(proj, tid)
+    raw["title"] = title  # written raw: a ticket from before the scan may already hold a secret
     raw["updated_at"] = runs._iso(time.time() - minutes_ago * 60)
     tickets._write(proj, raw)
     return tid

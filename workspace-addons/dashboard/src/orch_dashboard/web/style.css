@@ -165,7 +165,7 @@ iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-he
 .status-menu .menu-pop{min-width:140px}
 .menu-item.sel{color:var(--brand)}
 .add-task{gap:8px}.add-task .input{flex:1;min-width:0}
-.set-sec .set-sub{font-size:14px;font-weight:500;color:var(--text-muted);margin:0}
+.set-sec .set-sub{font-size:14px;font-weight:600;color:var(--text);margin:0}
 .set-sec>p.meta{margin-bottom:-12px}
 
 .card:has(.status-menu[open]){overflow:visible}
