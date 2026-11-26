@@ -297,6 +297,13 @@ const handoverCtx = st => { const c = ctx({...results, state:{settings:{agents:[
 const keyed = (all, k) => all.find(n => n.attrs?.['data-key'] === k);
 const order = (all, ...keys) => keys.map(k => all.findIndex(n => n.attrs?.['data-key'] === k));
 
+test('helper bar without a run appears on active tickets, never Review or Done', () => {
+  for (const status of ['active', 'review', 'done']) {
+    const all = nodes(handoverCtx({}).detail({...lunch, status}));
+    assert.equal(Boolean(keyed(all, 'agent-bar')), status === 'active', status);
+  }
+});
+
 test('ORCH-1850: active task and no run: the bar names the last marked step and who marked it, never a helper that is not running', () => {
   const all = nodes(handoverCtx({}).detail(lunch));
   assert.equal(text(keyed(all, 'ticket-sentence')), 'No helper is working on it right now.');
