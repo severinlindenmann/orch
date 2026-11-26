@@ -631,6 +631,65 @@ const liveAskSaid = new Map();
 // question is hidden in every pane. Leaving the page sends it at once, so it is not lost.
 const LIVE_ASK_UNDO_MS = 5200, liveAskPending = new Map();  // ticket/question → send now
 addEventListener('pagehide', () => { for (const now of [...liveAskPending.values()]) now(); });
+// ORCH-2197 (owner pick C a, 26 Nov): a helper that waits for an OK on its screen gets an OK card in its pane, in
+// Chat and in Terminal view: what it wants to run, shown (owner's comment), and Allow once / Don't allow / Open terminal.
+// The two answers come only with a prompt the server recognised on the screen just now (GET /api/term/confirm); the
+// answer names that prompt (its digest), so a screen that changed meanwhile is never answered. Nothing without a click.
+const liveOk = new Map();  // session → {at, prompt, loading, busy}
+const LIVE_OK_MS = 2500;  // the prompt is read again at most this often while the card shows
+const LIVE_OK_LEAD = 'Your OK on the screen';
+function liveOkWaits(live) { return live?.status === 'needs-you' && String(live.detail || '').startsWith(LIVE_OK_LEAD); }
+async function liveOkLoad(id) {
+  const o = liveOk.get(id) || {};
+  if (o.loading || o.busy || (o.at && Date.now() - o.at < LIVE_OK_MS)) return;
+  liveOk.set(id, {...o, loading:true});
+  let prompt = null;
+  try {
+    const r = await fetch('/api/term/confirm?ticket=' + encodeURIComponent(id), {headers:{Accept:'application/json'}});
+    if (r.ok) prompt = (await r.json())?.prompt || null;
+  } catch { /* offline for a moment: the card keeps Open terminal */ }
+  liveOk.set(id, {...liveOk.get(id), loading:false, at:Date.now(), prompt});
+  liveLayerFill();
+}
+async function liveOkAnswer(id, prompt, choice) {
+  const o = liveOk.get(id) || {};
+  if (o.busy) return;
+  liveOk.set(id, {...o, busy:true});
+  liveLayerFill();
+  const post = typeof liveTermPost === 'function' ? liveTermPost : async () => ({ok:false, status:0, text:''});
+  const r = await post('/api/term/confirm', {ticket:id, answer:choice, digest:prompt.digest});
+  liveOk.set(id, {at:0, prompt:null, busy:false});  // read the screen again on the next round
+  if (r.ok) window.orch?.toast?.(choice === 'yes' ? 'Allowed once.' : 'Not allowed. The helper goes on without it.', 'ok');
+  else window.orch?.toast?.(r.text || 'That did not reach the helper. Open the terminal and answer there.', 'error');
+  liveLayerFill();
+}
+function liveOkFill(box, id, live) {
+  liveOkLoad(id);
+  const o = liveOk.get(id) || {}, p = o.prompt, term = typeof liveViewOf === 'function' && liveViewOf(id) === 'term';
+  const asks = String(live.detail || '').slice(LIVE_OK_LEAD.length).replace(/^:\s*/, '');
+  const cmd = p ? (p.command || '') : asks;
+  const sig = ['ok', p?.digest || '', cmd, p?.reason || '', o.busy ? 1 : 0, term ? 1 : 0].join('\u0001');
+  if (box.dataset.sig === sig && !box.hidden) return;
+  box.dataset.sig = sig; box.textContent = ''; box.hidden = false;
+  box.setAttribute('aria-label', 'Your OK for the helper');
+  const title = cmd ? 'Helper asks to run a command' : 'Helper asks for your OK';
+  box.append(h('p', {className:'live-ask-q live-ok-t', 'data-key':'live-ok-title'}, window.UI?.statusIcon ? window.UI.statusIcon('needs') : null, title));
+  const why = p?.reason || (p && !cmd ? p.question : '');
+  if (why) box.append(h('p', {className:'meta live-ask-why', 'data-key':'live-ok-why'}, why));
+  if (cmd) box.append(h('pre', {className:'code-block live-ok-cmd', 'data-key':'live-ok-command', tabindex:'0', 'aria-label':'The command'}, cmd));
+  const btns = [];
+  if (p) {
+    const yes = h('button', {type:'button', className:'btn primary sm', 'data-key':'live-ok-allow', disabled:o.busy || null}, 'Allow once');
+    const no = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-ok-deny', disabled:o.busy || null}, 'Don\u2019t allow');
+    yes.addEventListener('click', () => liveOkAnswer(id, p, 'yes'));
+    no.addEventListener('click', () => liveOkAnswer(id, p, 'no'));
+    btns.push(yes, no);
+  } else if (term) {
+    box.append(h('p', {className:'meta', 'data-key':'live-ok-here'}, 'Answer it in the terminal.'));
+  }
+  if (!term) btns.push(h('button', {type:'button', className:'btn ghost sm', 'data-live-view':'term', 'data-session':id, 'data-key':'live-ok-term'}, 'Open terminal'));
+  if (btns.length) box.append(h('div', {className:'live-ask-opts'}, ...btns));
+}
 function liveAskFill(box, id) {
   // a session that waits on a question its ticket does not carry here (yet) still shows the card, with the way to answer
   // it on the ticket (ORCH-1328: a split pane or the phone sheet showed only the bold words, nothing to press)
@@ -646,6 +705,7 @@ function liveAskFill(box, id) {
   // the design system's suggested look (as on Home); ORCH-1643: only the recommended one, and only with its reason
   // an answer still in its Undo window is not shown again (ORCH-1359)
   const found = snapshot ? null : liveAskModel(t) || (lone && liveAskSaid.get(id) !== lone.text ? lone : null), q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
+  if (!q && liveOkWaits(live)) { liveOkFill(box, id, live); return; }  // ORCH-2197: the helper waits for an OK on its screen
   const sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig; box.textContent = ''; box.hidden = !q;

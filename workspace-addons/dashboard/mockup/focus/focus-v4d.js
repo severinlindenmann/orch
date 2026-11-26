@@ -24,6 +24,11 @@
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
       chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
+    { k: 'ORCH-240', t: 'Run the sandbox heal job', kind: 'ticket', s: 'wait', tool: 't1', model: 'Opus', up: 51, step: [3, 4], now: 'Waits for your OK.', qn: 6,
+      q: { ok: true, t: 'Helper asks to run a command', why: 'Guard: `databricks jobs run-now` starts a job run. Confirm it is wanted.', cmd: 'databricks jobs run-now 588496183906654 --no-wait --profile sandbox -o json', a: ['Allow once', 'Don\u2019t allow'] },
+      lines: ['⏺ Case 3 passed with a repeat heal. Starting the sandbox run.', ' Bash command', '   databricks jobs run-now 588496183906654 --no-wait --profile sandbox -o json', ' Hook PreToolUse:Bash requires confirmation for this command:', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No'],
+      chat: [['e', 'Step 2 done: the heal works on a copy', '14:58'], ['h', 'Case 3 passed with a repeat heal. Starting the sandbox run.', '15:06', 1]],
+      files: [] },
     { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 't1', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
       feed: ['  ⎿ pull request 1318 opened as a draft', '⏺ Linking the pull request to the ticket.', '  ⎿ linked', '⏺ Waiting for the checks: 3 of 12 green.', '⏺ Waiting for the checks: 7 of 12 green.', '⏺ Waiting for the checks: 11 of 12 green.'],
@@ -276,6 +281,8 @@
   }
   function peekText(s) { return shown(s).filter(function (x) { return x.trim(); }).slice(-3).join('\n'); }
   function qHTML(s, quiet) {
+    /* ORCH-2197 (owner pick C a): a helper that waits for an OK on its screen: the OK card, the command shown, in Chat and Terminal view */
+    if (s.q.ok) return '<div class="mw-q" role="group" aria-label="Your OK for the helper"><p class="mw-qt live-ok-t">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><pre class="code-block live-ok-cmd" tabindex="0" aria-label="The command">' + esc(s.q.cmd) + '</pre><div class="mw-ans">' + btn('btn primary', 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + (st.term ? '' : btn('btn ghost', 'view', 'Open terminal', { 'data-v': 'term' })) + '</div></div>';
     return '<div class="mw-q" role="group" aria-label="Question from the helper"><p class="mw-qt">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><div class="mw-ans">' + btn('btn ' + (quiet ? 'outline' : 'primary'), 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + '</div></div>';
   }
   function chatMsgs(s) {

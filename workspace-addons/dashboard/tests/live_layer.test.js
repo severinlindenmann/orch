@@ -549,3 +549,65 @@ test('the bottom panel keeps a card and its answers in reach while the page has 
   assert.equal(cap(1080, true), 486, 'tall windows keep the usual 45 %');
   assert.equal(cap(600, true), 340, 'never so small that a question card and the message box do not fit');
 });
+
+// ORCH-2197 (owner pick C a): a helper that waits for an OK on its screen gets the OK card in its pane, Chat and
+// Terminal view alike; the command shows by default (owner's comment); the answers only for a prompt the server read.
+function okCard({prompt = null, view = 'chat', detail = 'Your OK on the screen: databricks jobs run-now 5884'} = {}) {
+  const node = (tag, attrs = {}, ...kids) => {
+    const n = {tag, attrs, kids:[], text:'', listeners:{}, hidden:!!attrs.hidden, disabled:!!attrs.disabled,
+      dataset:{}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(k, f) { this.listeners[k] = f; },
+      append(...xs) { for (const x of xs) if (x != null) this.kids.push(typeof x === 'string' ? {text:x, kids:[]} : x); }};
+    Object.defineProperty(n, 'textContent', {get() { return [n.text, ...n.kids.map(k => k.textContent ?? k.text)].join(''); }, set(v) { n.text = v; n.kids = []; }});
+    n.append(...kids);
+    return n;
+  };
+  const posts = [], toasts = [];
+  const ctx = {h:node, window:{orch:{toast:(t, k) => toasts.push([t, k])}}, Date, encodeURIComponent, console,
+    liveViewOf:() => view, liveLayerFill() {}, fetch:async () => ({ok:true, json:async () => ({prompt})}),
+    liveTermPost:async (p, b) => { posts.push([p, b]); return {ok:true, status:200, text:''}; }};
+  vm.createContext(ctx);
+  const page = source.slice(source.indexOf('const liveOk = new Map()'), source.indexOf('function liveAskFill'));
+  vm.runInContext(page + '\nthis.api = {liveOkFill, liveOkWaits, liveOk};', ctx);
+  const box = node('div', {hidden:true});
+  const live = {status:'needs-you', detail};
+  return {ctx, box, live, posts, toasts, fill: () => ctx.api.liveOkFill(box, 't_1', live)};
+}
+const findKey = (n, key) => n.attrs?.['data-key'] === key ? n : (n.kids || []).map(k => findKey(k, key)).find(Boolean) || null;
+
+test('a helper waiting for an OK on its screen gets the OK card with its command shown (ORCH-2197)', async () => {
+  const c = okCard();
+  assert.equal(c.ctx.api.liveOkWaits({status:'needs-you', detail:'Your OK on the screen'}), true);
+  assert.equal(c.ctx.api.liveOkWaits({status:'needs-you', detail:'Your answer'}), false, 'a ticket question has its own card');
+  assert.equal(c.ctx.api.liveOkWaits({status:'working', detail:''}), false);
+  c.fill();
+  assert.equal(c.box.hidden, false);
+  assert.equal(findKey(c.box, 'live-ok-title').textContent, 'Helper asks to run a command');
+  assert.equal(findKey(c.box, 'live-ok-command').textContent, 'databricks jobs run-now 5884', 'shown by default, no Show command');
+  assert.equal(findKey(c.box, 'live-ok-allow'), null, 'no answer buttons before the server read the prompt');
+  assert.ok(findKey(c.box, 'live-ok-term'), 'Open terminal');
+});
+
+test('Allow once and Don\'t allow answer the prompt the server read, by its digest; never by themselves', async () => {
+  const prompt = {question:'Do you want to proceed?', options:['Yes', 'No'], yes:'1', no:'2', digest:'abc123',
+    command:'databricks jobs run-now 588496183906654 --profile pilatus_hub_sbox', reason:'Guard: starts a job run. Confirm it is wanted'};
+  const c = okCard({prompt});
+  c.fill();
+  await new Promise(r => setImmediate(r));  // the prompt arrives
+  c.fill();
+  assert.equal(findKey(c.box, 'live-ok-command').textContent, prompt.command);
+  assert.equal(findKey(c.box, 'live-ok-why').textContent, prompt.reason);
+  assert.equal(findKey(c.box, 'live-ok-allow').textContent, 'Allow once');
+  assert.equal(findKey(c.box, 'live-ok-deny').textContent, 'Don’t allow');
+  assert.equal(c.posts.length, 0, 'nothing is answered without a click');
+  await findKey(c.box, 'live-ok-allow').listeners.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(c.posts)), [['/api/term/confirm', {ticket:'t_1', answer:'yes', digest:'abc123'}]]);
+  assert.deepEqual(c.toasts.at(-1), ['Allowed once.', 'ok']);
+});
+
+test('in the Terminal view the card stays, without Open terminal (ORCH-2197)', async () => {
+  const c = okCard({view:'term', detail:'Your OK on the screen'});
+  c.fill();
+  assert.equal(findKey(c.box, 'live-ok-title').textContent, 'Helper asks for your OK');
+  assert.equal(findKey(c.box, 'live-ok-term'), null);
+  assert.equal(findKey(c.box, 'live-ok-here').textContent, 'Answer it in the terminal.');
+});

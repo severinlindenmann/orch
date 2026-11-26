@@ -161,3 +161,11 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## The OK card: a helper waits for your OK on its screen (ORCH-2197, 26 Nov)
+
+Owner pick C a on ORCH-2188, with the owner's comment "should show the command by default". ORCH-240 in the demo waits
+at a hook confirm: its pane shows the OK card (Helper asks to run a command, the reason, the command shown, Allow once /
+Don't allow / Open terminal) in Chat and in Terminal view (there beside the terminal, no Open terminal). The product
+draws the two answers only for a prompt it recognised on the screen and answers exactly that prompt; any other wait
+shows the card with Open terminal only. Master: `.live-ok-t`, `.live-ok-cmd` (with `.code-block`) in widgets.css.

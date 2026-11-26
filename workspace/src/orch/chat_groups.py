@@ -467,7 +467,7 @@ def _ref_key(ref) -> tuple[str, str] | None:
 def card_kind(
     q: dict, shown_in: dict | None = None, sender: str | None = None, members: list | None = None
 ) -> str:
-    """The phone's approval card: buttons only for a marked question with exactly the wire options, and, when
+    """The phone's OK card: buttons only for a marked question with exactly the wire options, and, when
     the card is shown in a group (`shown_in` = {host, id}), only if the question's group_ref is that group and
     the question's sender (`sender`) is a member of it (`members` = the shown group's workspace ids)."""
     if not (q.get("allow_question") is True and q.get("options") == ALLOW_OPTIONS):
