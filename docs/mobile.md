@@ -25,6 +25,7 @@ mobile/
 | Questions: cards with options, recommended marked, one tap | `GET /v1/phone/questions`, `POST /v1/phone/answer` |
 | Send: pick workspace, type or hold the mic, send | `POST /v1/phone/send` |
 | Settings: relay, workspaces, sign out (deletes the token) | – |
+| Add workspace (paired phone: Settings, or an `orch://pair?…` link opened from outside → the same "Add this workspace?" confirmation; nothing is sent before Add, closing keeps the pairing; an invitation for another server (scheme, host, port) is shown, never sent) | `POST /v1/phone/invitations/redeem` |
 
 Push tap opens the question. Pull to refresh; no background polling.
 
@@ -34,6 +35,13 @@ On `503 transcription_off`, `502`, `429` or no network, fall back to on-device s
 
 ## Data storage
 Token and phone id in the Keychain. Nothing else is stored; lists come from the relay.
+The Keychain item is this device only (no backup, no iCloud Keychain) and is updated in place. The token goes only to an
+`https` relay (plain `http` just to this device's own loopback, for the Simulator e2e), and a redirect that leaves the relay
+is not followed. An invitation link taken from the clipboard is removed from it (the code works once).
+Only a Keychain answer of "no such item" counts as signed out (queue and last rows are cleared). Any other failed read
+(e.g. the phone is still locked after a restart) keeps the queue and the last rows, shows "orch can't read this phone's
+sign-in right now", and reads again on the next refresh or return to the app. Pairing finishes only after the token is
+saved; a failed save stops setup and asks for a new invitation.
 
 ## Tests
 - T0: `xcodebuild test -scheme OrchMobile -only-testing:OrchMobileTests/RelayClientTests -destination 'platform=iOS Simulator,name=iPhone 16'`.
