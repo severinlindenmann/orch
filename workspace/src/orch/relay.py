@@ -2203,7 +2203,7 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
     want = asked.get("question_sha256")
     if msg.get("type") == "answer" and isinstance(sig, dict) and isinstance(want, str) and want:
         if sig.get("question_id") != asked["question_id"] or sig.get("question_sha256") != want:
-            return None, "refused: the signed answer names another question"
+            return None, "refused: the answer names another question"
     if asked.get("group"):  # a question we asked a group member: only a current member of an open group
         from orch import chat_groups
 
