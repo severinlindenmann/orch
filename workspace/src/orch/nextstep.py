@@ -515,6 +515,7 @@ HINTS = {
     "relay whoami": "orch relay status",
     "relay key": "orch relay status",
     "relay view": "orch relay inbox",
+    "relay needs": "orch relay inbox",
     "relay profile": "orch relay status",
     "relay mobile *": "orch relay mobile status",
     "relay contacts list": _relay_send_line,
