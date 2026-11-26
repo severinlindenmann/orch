@@ -15,9 +15,9 @@ test('open time and the idle close read right', () => {
   assert.equal(ls.liveDur(120 * 60), '2 h');
   const idle = {status:'idle', tool:'Helper', model:'Opus', open_seconds:96 * 60, closes_in_seconds:42 * 60};
   assert.deepEqual(ls.liveMeta(idle), ['Helper · Opus', 'open 1 h 36 min', 'closes in 42 min if left idle']);
-  assert.deepEqual(ls.liveMeta({status:'closed', model:'Sonnet'}), ['Sonnet', 'closed, the conversation is kept']);
+  assert.deepEqual(ls.liveMeta({status:'closed', model:'Sonnet'}), ['Sonnet', 'closed, you can continue it later']);
   assert.equal(ls.liveWarm({status:'in-line'}), 'starts when a place is free');
-  assert.equal(ls.liveWarm({status:'needs-you'}), 'stays warm while it waits for you');
+  assert.equal(ls.liveWarm({status:'needs-you'}), 'stays open while it waits for you');
 });
 
 test('what a session does now: the question, the detail, what it waits on', () => {
