@@ -33,6 +33,7 @@ Words (same on dashboard and phone, PHONE-NOTES.md): **Chat**, **Group**, **"<Wo
 | `body.day` | **NEW** | `YYYY-MM-DD`: the Chat day, by **local wall time**: the workspace's local date of `created_at`, or the date before when the local wall clock shows before 04:00 (so DST days stay right; never "minus 4 h"). The workspace sets it on every Chat text it sends; the phone groups by it and, for its own texts, uses its local date with the same 04:00 cut until the workspace's ack (which carries `day`) arrives. Never in a group message. |
 | Helper identity | **NEW** (display rule) | Never sent as text: the name is "<workspace name> helper", the avatar is the workspace look (look.md) plus a small sparkle. Agents are stored in history as `agent:<name>` as today. |
 | `body.refs` (cards) | **NEW** (display) | Not a wire field in v1: cards come from `task`, `group_event`, `shared_ticket`, `share`/`shared_files` and the existing `ticket_view` (§2–4). |
+| Day file `files` | **NEW** (local, ORCH-2171) | Not a wire field. A Chat text the person wrote on the dashboard may keep `files: [{name, size}]`: files attached to the Chat ticket's artifacts with that message (`orch chat say --file NAME`). The words may then be empty. The helper's input and the phones get the words plus one line naming the files. Older readers ignore it. |
 
 **Daily cut.** At 04:00 local the workspace starts a fresh helper context for Chat (UI: "Context cleared daily at 04:00 ·
 Details"). Past days are **History** (read only, searchable). Nothing is deleted.

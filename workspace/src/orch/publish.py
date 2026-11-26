@@ -202,9 +202,39 @@ CHUNK = secretscan.MAX_BYTES // 2
 OVERLAP = 16384  # longer than any token pattern; a PEM block over this is still caught by its header line
 
 
-def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
-    """Refuse the upload when any text file holds a secret (secretscan, the one scanner). Runs on the plain
-    bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
+def scan_names(root: Path | None, names: list[str], outer: str | None = None, what: str = "file") -> None:
+    """R5.2: the names a recipient sees (the shared file, folder or app name and every path inside) go through
+    the one scanner before upload. A hit names the kind and where, never the name itself."""
+    texts = ([outer] if outer is not None else []) + list(names)
+    if not texts:
+        return
+    starts, lines = [], 1
+    for t in texts:
+        starts.append(lines)
+        lines += t.count("\n") + 1
+    try:
+        found = secretscan.find("\n".join(texts), root, strict=False)
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            "orch could not check the names for secrets, so nothing was shared. Try again."
+        ) from None
+    if not found:
+        return
+    first = found[0]
+    idx = max(i for i, s in enumerate(starts) if s <= first["line"])
+    kind = secretscan.WORDS.get(first["kind"], "a secret")
+    more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
+    where = f"The {what}'s name" if outer is not None and idx == 0 else f"A file or folder name in the {what}"
+    raise Refused(f"Nothing was shared: {where} has {kind}{more}. Rename it and share again.")
+
+
+def scan_files(
+    root: Path | None, items: list[tuple[str, bytes]], outer: str | None = None, what: str = "file"
+) -> None:
+    """Refuse the upload when any name or text file holds a secret (secretscan, the one scanner). Runs on the
+    names and plain bytes that are about to be encrypted and sent. Names are checked first, so a content
+    refusal only ever quotes a clean name; it names the kind, the file and the line, never the value."""
+    scan_names(root, [n for n, _ in items], outer, what)
     hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
         for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
@@ -245,8 +275,11 @@ def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -
             if SECRET_NAMES.match(f):
                 skipped.append(rel)
                 continue
-            files.append((_bundle_path(rel), p))
-    files.sort()
+            files.append((rel, p))
+    # the names first: a refusal below quotes a name, and the folder's own name goes into the file header
+    outer = folder.resolve().name
+    scan_names(root, [r for r, _ in files], outer, "folder")
+    files = sorted((_bundle_path(r), p) for r, p in files)
     if report is not None:
         report["files"], report["skipped"] = [r for r, _ in files], sorted(skipped)
     pages = [r for r, _ in files if r.lower().endswith((".html", ".htm"))]
@@ -257,7 +290,7 @@ def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -
     if sum(p.stat().st_size for _, p in files) > MAX_FILE:
         raise Refused("The folder is bigger than 100 MB.")
     datas = [p.read_bytes() for _, p in files]
-    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)])
+    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)], outer, "folder")
     index = {
         "v": 1,
         "entry": "index.html" if "index.html" in pages else pages[0],
@@ -317,7 +350,7 @@ def share_file(
         raise Refused("The file is bigger than 100 MB.")
     else:
         content = path.read_bytes()
-        scan_files(root, [(path.name, content)])
+        scan_files(root, [(path.name, content)], path.name)
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     name = path.resolve().name if path.is_dir() else path.name
     if replace:
@@ -586,8 +619,15 @@ _MANIFEST_FLAGS = re.compile(
 )
 
 
-def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root: Path | None = None) -> bytes:
-    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it)."""
+def pack(
+    folder: Path,
+    reach: str | None = None,
+    auth: bool | None = None,
+    root: Path | None = None,
+    name: str | None = None,
+) -> bytes:
+    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it).
+    `name`: the app name, scanned with the paths inside."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
@@ -609,7 +649,7 @@ def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root:
                 info.size = len(raw)
                 scanned.append((rel, _MANIFEST_FLAGS.sub(b"", raw) if rel == "app.toml" else raw))
                 tar.addfile(info, io.BytesIO(raw))
-    scan_files(root, scanned)
+    scan_files(root, scanned, name, "app")
     data = buf.getvalue()
     if len(data) > MAX_APP:
         raise Refused("The app folder is bigger than 100 MB.")
@@ -662,7 +702,7 @@ def deploy(
         root,
         "PUT",
         f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""),
-        pack(folder, reach, auth, root),
+        pack(folder, reach, auth, root, m["name"]),
     )
     needs_link = auth if auth is not None else manifest_auth(m)
     res.setdefault("reach", reach or m.get("reach", "public"))

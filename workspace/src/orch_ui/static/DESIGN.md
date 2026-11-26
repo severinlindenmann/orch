@@ -165,7 +165,7 @@ the first rows without any extra work.
 - SX-17 Motion tokens: hover/press 100 ms, open/close 150 ms (QA-09), page change 200 ms, panels 240 ms, enter
   ease-out / exit ease-in (BP-70), reduced-motion = instant; used by: route change, tab switch, dialog, list
   insert/remove (Home answered card), status pill change (one pulse), skeleton → content cross-fade.
-- SX-18 Words: helper / step / result / ticket / schedule / phone / Check (status) / Check result (action) / Looks good
+- SX-18 Words: helper / step / result / ticket / schedule / phone / Check (status) / Test results (action) / Looks good
   · Send back; the person = chosen name (fb13); "agent", "artifact", "autopilot", "relay", "copy" (worktree), "Exact
   text", "Reference" are banned on level 1 (BP-78, F2, F3).
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
@@ -267,7 +267,7 @@ For ticket lists use `.page.list-page`, a one-line header, one 32 px toolbar, 8 
 - **Progress:** known steps use a labelled count and 4 px bar, or the four-stage stepper. Do not invent percentages for open-ended work. Announce meaningful stage changes, not every tick. Long jobs show elapsed time, current action and Leave running / Cancel (BP-63).
 - **Side panel:** editable owner, due and definition of done. Keep extra properties under one Details disclosure. Production edits save immediately, with rollback on failure and Undo where appropriate (BP-28).
 - **Menus / tooltips:** native details for simple menu disclosures; normal links/buttons retain natural keyboard navigation. These are not ARIA application menus. Close on Escape as shown; application click-away handling may be added. Tooltips only reinforce shortcuts, never explain a primary label.
-- **Dialog / sheet:** native `showModal()` supplies focus containment, Escape dismissal and focus restoration; safe action gets autofocus. Do not nest dialogs. Use one sheet over the current ticket for preview; retain underlying scroll. Close immediately so dismissal never feels blocked.
+- **Dialog / sheet:** native `showModal()` supplies focus containment, Escape dismissal and focus restoration; safe action gets autofocus. Do not nest dialogs. Use one sheet over the current ticket for preview; retain underlying scroll. Closing starts at once (120 ms exit, nothing to wait for) and focus goes back to the opener when it is really closed.
 - **Toast:** one visible at a time, 5 seconds for success, with Undo or Open for meaningful changes. Queue in the application; the reference replay replaces the previous demo toast. Error toasts persist until dismissed; blocking errors also stay by their source. Never disappear a focused toast action in the application: pause the timer while hovered/focused (BP-58).
 - **Fingerprint and contact trust (ORCH-1203):** `.fingerprint` is always 8 groups of 4 in two rows of four, the same pattern on both sides (`.lg` to compare, `.sm` in a table). A contact that needs an Accept is a `.card.trust-ask` (`data-tone` warn or bad): state badge with icon and word, one line why, the check line right above the fingerprint, the name field and Accept right below. A new key without the old one gets the careful Accept (outline, empty name, one warning line). `.trust-layout` puts this workspace's own fingerprint beside them and the rest in a table; under 1280 px it stacks asks, own, others. Gallery: Fingerprint and contact trust.
 
@@ -338,6 +338,10 @@ the bands sit side by side. A tile opens its session in the layer; nothing is an
 The filter finds a session by its key, name, title and the words on its tile ("Check", "Idle"); one that sits in Needs
 you is also found by "Needs you" (ORCH-2045). The summary keeps counting the whole workspace, and with a filter a band
 without a match is left out. Typing only filters: nothing is sent or started.
+A search opens a folded band that holds a match for as long as the search runs (`aria-expanded` says what is on
+screen); a fold click during a search counts for that search only, and clearing it brings back the saved folds
+(ORCH-2063). The filter sits between the summary and the bands in the page order too, so Tab goes from it to the first
+match. A one-line title that is too long ends in an ellipsis.
 
 ### Pin and rename (ORCH-361)
 Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
@@ -460,7 +464,7 @@ Production targets: local feedback <100 ms; warm route <300 ms; cold data route 
 | Explicit first-page entry | 150 ms | Enter, 4 px travel + fade. Opt-in `.page-enter`, never on refresh. |
 | Add / remove a row | 120 / 100 ms | Enter / exit; no stagger. Apply actual removal after exit; reduced motion removes instantly. |
 | Tab switch | 0 ms | Immediate, preserve panel geometry. |
-| Dialog / side panel | 200 / 240 ms | Enter; 8 / 24 px travel. Dismiss instantly. |
+| Dialog / side panel | 200 / 240 ms enter, 120 ms exit | Enter; 8 / 24 px travel. Exit with `--dur-exit`; focus goes back after the close. |
 | Toast | 200 ms enter / 120 ms exit | Enter / `--ease-exit: cubic-bezier(.6,0,.8,.6)`. |
 | Progress | 150 ms | Move; label changes immediately. |
 | Status | 200 ms once | Subtle border pulse; no persistent movement. |
@@ -516,7 +520,7 @@ Static validation covers HTML structure/local references, JS syntax, CSS token r
 
 Load `interaction.css` after page styles and load `overlay.js`, `select.js`, `date.js`, and `components.js` before page scripts. Keep `preview-controls.js` at the end of each shell page.
 
-- Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, backdrop, focus containment and restoration, scroll lock, 150 ms entry / 100 ms exit. Reduced motion is instant. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
+- Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, backdrop, focus containment and restoration, scroll lock, 150 ms entry / `--dur-exit` (120 ms) exit. Reduced motion is instant. `await orch.close(dialog)` (= `UI.overlay.close`, = `dialog.close()`) settles only after the native close, the stack pop, the scroll unlock and the focus return, so the next line can open another dialog or read `document.activeElement`. Repeated closes share one promise; reopening during the exit cancels it. Tab pressed during the exit is replayed on the page, never inside the fading dialog. Focus goes to the opener; if it left the page, to the control with the same `data-key`/`id`, else the control that was next to it, else the nearest container. Never add page delays around a close. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
 - Native selects are enhanced automatically, including dynamic controls. They retain their form values and change events. Use `data-prefix="Sort"` for labels inside the trigger and `UI.select.sync()` after programmatic value changes outside click/change/reset handlers. Type to jump works like a native select (ORCH-2051): keys typed within 1 s form one prefix (a whole key such as SALES-097), one letter again cycles, Escape closes without choosing; typing only moves focus, Enter, Space or a click chooses. Focus given to the hidden native select goes to the trigger. Open choices wrap to show their whole text; the trigger edge is `--input`.
 - `UI.toast(message, undo)` and `UI.copy(url)` provide one notification pattern. Details menus with `.menu` and ARIA tablists get shared keyboard behaviour. Page handlers may update domain content, but should not add separate keyboard or overlay lifecycles.
 - `UI.date(valueInput, trigger, oldCalendar)` provides the shared calendar. `UI.question.render(host, config)` provides recommended choices, custom input, answered state and Undo. `UI.phone()` opens demo pairing and the same question component in a phone frame.
