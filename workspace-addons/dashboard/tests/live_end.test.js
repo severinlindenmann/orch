@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const web = path.join(__dirname, '../src/orch_dashboard/web');
 const source = fs.readFileSync(path.join(web, 'pages/live-end.js'), 'utf8');
-const {liveEndModel, liveEndWords, liveEndIdleText, liveEndLogin, liveFailText, LIVE_END_IDLE_STOP} = require(path.join(web, 'pages/live-end.js'));
+const {liveEndModel, liveEndWords, liveEndIdleText, liveQuietWord, liveEndLogin, liveFailText, LIVE_END_IDLE_STOP} = require(path.join(web, 'pages/live-end.js'));
 const plain = x => JSON.parse(JSON.stringify(x));
 
 test('a ticket helper: Stop is run.interrupt, End is run.stop, Start again is run.start', () => {
@@ -58,10 +58,22 @@ test('the one question before End, in plain words; the terminal keeps nothing', 
   assert.equal(liveEndWords('', '').ask, 'End this session?');
 });
 
-test('the idle note says what is going on and what to type', () => {
-  assert.deepEqual(liveEndIdleText({login:false}, 'Nothing running for 3 min'), {head:'Nothing running for 3 min.', tail:'Type a message below to give it work. If it hangs, start it again.'});
-  assert.match(liveEndIdleText({login:true}, 'x').head, /login changed/);
-  assert.equal(liveEndIdleText({login:false}, '').head, 'Idle. Nothing is running.');
+test('ORCH-2201: a quiet session has no notice; only a helper that looks stuck (or lost its login) gets the slim line', () => {
+  const quiet = liveEndModel({id:'t_abc123', kind:'', status:'idle', word:'Idle', lines:[]});
+  assert.equal(quiet.hung, true); assert.equal(quiet.stuck, false);  // Restart stays reachable, but no line shows
+  assert.equal(liveEndModel({id:'t_abc123', kind:'', status:'working', word:'Stuck', lines:[]}).stuck, true);
+  assert.equal(liveEndModel({id:'t_man', kind:'manager', status:'idle', word:'Idle', lines:[]}).stuck, false);
+  assert.equal(liveEndModel({id:'t_abc123', kind:'', status:'working', word:'Working', lines:['Please run /login']}).stuck, true);
+  assert.deepEqual(liveEndIdleText({login:false}), {head:'Looks stuck', tail:''});
+  assert.match(liveEndIdleText({login:true}).head, /login changed/);
+  assert.match(source, /box\.hidden = !m\.stuck/);
+  assert.match(source, /'data-live-end':'restart'[^\n]*'Restart'\)/);
+  assert.doesNotMatch(source, /Type a message below to give it work\. If it hangs/);
+});
+
+test('ORCH-2201: the pill says Quiet with the time', () => {
+  assert.equal(liveQuietWord(null), 'Quiet'); assert.equal(liveQuietWord(30), 'Quiet');
+  assert.equal(liveQuietWord(1200), 'Quiet 20 min'); assert.equal(liveQuietWord(7200), 'Quiet 2 h'); assert.equal(liveQuietWord(2 * 86400 + 5), 'Quiet 2 d');
 });
 
 test('End asks once; Start again ends then starts; a closed terminal pane goes away', () => {
