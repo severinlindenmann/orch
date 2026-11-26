@@ -132,7 +132,8 @@ def test_run_dir_refuses_a_linked_or_wrong_run_folder(ws, tmp_path):
     with pytest.raises(RuntimeError, match="symbolic link"):
         runfiles.run_dir(ws, "factory")
     assert service.running_pid(ws) is None  # the view never crashes on it
-    assert service.stop(ws) == "not verified"
+    with pytest.raises(RuntimeError, match="symbolic link"):  # refused with what to do, nothing signalled
+        service.stop(ws)
     assert list(outside.iterdir()) == []
     (ws / ".orch" / "run").unlink()
     (ws / ".orch" / "run").mkdir()
