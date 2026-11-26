@@ -266,10 +266,6 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:4px 10px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--text-muted);font:inherit;font-size:14px;cursor:pointer}
 .mm-toggle[hidden]{display:none}
 .mm-toggle[aria-checked=true]{color:var(--text);border-color:var(--brand)}
-.mm-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);flex:none}
-.mm-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform .15s}
-.mm-toggle[aria-checked=true] .mm-sw{background:var(--brand)}
-.mm-toggle[aria-checked=true] .mm-sw:after{transform:translateX(12px);background:var(--on-brand)}
 .topbar>.mm-toggle:not([hidden])+.btn.primary{margin-left:0}
 /* Open helper and New ticket are one group (fb9): side by side on one row at any width, pushed right */
 .topbar>.topbar-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:8px;align-items:center;margin-left:auto}

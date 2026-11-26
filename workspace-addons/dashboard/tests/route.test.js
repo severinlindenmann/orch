@@ -130,7 +130,7 @@ test('skeletonLines: master lines that show late, busy, one status text, shapes 
 });
 test('the sidebar: Review has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');
-  const foot = html.slice(html.indexOf('<div class="side-foot">'));
+  const foot = html.slice(html.indexOf('<div class="side-foot person-row">'));
   assert.ok(foot.indexOf('id="mm-toggle"') < foot.indexOf('id="side-settings"'));
   assert.ok(html.indexOf('id="side-settings"') > html.indexOf('id="side-nav"') && html.indexOf('id="side-settings"') > html.indexOf('id="side-addons"'));
   // ORCH-63: the needs-you number sits on the Review entry, right after Tickets; Home has no badge

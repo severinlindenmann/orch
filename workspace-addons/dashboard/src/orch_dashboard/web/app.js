@@ -546,7 +546,8 @@ function render(arrived = new Set()) {
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
   // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
-  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null,
+  // icons in the one-row person block (ORCH-1880), their words on hover
+  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? h('a', {className:'nav-item nav-icon-only', href:'#settings', 'aria-label':'Settings', title:'Settings', 'aria-current':here === '#settings' ? 'page' : null}, navIcon('settings')) : null,
     snapshot ? null : h('a', {className:'nav-item nav-icon-only', href:'#docs', 'aria-label':'Documentation', title:'Documentation', 'aria-current':here === '#docs' ? 'page' : null}, navIcon('book'))));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
