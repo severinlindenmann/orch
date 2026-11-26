@@ -108,6 +108,22 @@ def forget_static() -> None:
     _STATIC.clear()
 
 
+def _addon_files_mark(root: Path) -> tuple:
+    """The add-on files' state: `orch addon add|remove|uninstall` in the terminal misses the kept answer at once,
+    else a rebuild right after it stored the old add-on list under the new revision until the 120 s safety rebuild."""
+    mark = []
+    with contextlib.suppress(Exception):
+        from orch import addons
+
+        for path in (addons.activation_path(root), addons.registry_path()):
+            try:
+                st = os.stat(path)
+                mark.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                mark.append(None)
+    return tuple(mark)
+
+
 def _argv0(orch_bin):
     try:
         from orch.pagesession import argv0
@@ -156,13 +172,13 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
         return None
     if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
         # the cache comes first even for a read answered here: the add-on list costs a look at every add-on
-        key = (orch_bin, str(root), tuple(args))
+        key, mark = (orch_bin, str(root), tuple(args)), _addon_files_mark(root)
         hit = _STATIC.get(key)
-        if hit and time.monotonic() - hit[0] < STATIC_TTL:
+        if hit and time.monotonic() - hit[0] < STATIC_TTL and hit[2] == mark:
             return hit[1]
         out = _read(orch_bin, args, root, timeout)
         if out is not None:
-            _STATIC[key] = (time.monotonic(), out)
+            _STATIC[key] = (time.monotonic(), out, mark)
         return out
     return _read(orch_bin, args, root, timeout)
 
@@ -896,11 +912,14 @@ def add_stuck(tickets: list[dict]) -> None:
             t["stuck"] = why
 
 
-def load_counts(tickets: list[dict], runs: dict, root: Path | None = None) -> dict | None:
+def load_counts(
+    tickets: list[dict], runs: dict, root: Path | None = None, needs: list | None = None
+) -> dict | None:
     """ORCH-476: the core's one count of everything a page shows (needs you, working, stuck, step x of y,
     won't do), over the same tickets and runs the page draws. None with an older core: the page counts as before.
     ORCH-1741: with root, a ticket the merge queue holds and a Check card that gives way to the ticket's other
-    card are left out, as the Review page's cards are."""
+    card are left out, as the Review page's cards are. #2385: needs = the needs rows the page draws (`orch
+    needs`); its rows of work that stopped count in the number, so Home adds nothing of its own."""
     try:
         from orch import counts as core
     except ImportError:
@@ -911,8 +930,11 @@ def load_counts(tickets: list[dict], runs: dict, root: Path | None = None) -> di
             hidden = core.quiet(root, tickets)
         except Exception:  # noqa: BLE001 - counted as before
             hidden = None
+    kw: dict = {"hidden": hidden} if hidden else {}
+    if isinstance(needs, list) and hasattr(core, "stopped_rows"):
+        kw["stopped"] = needs
     try:
-        return core.summary(tickets, runs, hidden=hidden) if hidden else core.summary(tickets, runs)
+        return core.summary(tickets, runs, **kw)
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
 
@@ -2012,7 +2034,7 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
     add_warmth(root, [t], out["runs"])
     out["review"] = review
     out["counts"] = load_counts(
-        tickets, out["runs"], root
+        tickets, out["runs"], root, out["needs"]
     )  # the clicked ticket changes the numbers at once too
     out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out["rev"] = state_rev(out)
@@ -2116,7 +2138,9 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
-        "counts": load_counts(tickets, runs, root),  # ORCH-476: the one source of every number the pages show
+        "counts": load_counts(
+            tickets, runs, root, needs if isinstance(needs, list) else None
+        ),  # ORCH-476: the one source of every number the pages show
         # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
         "sessions": shape_sessions(sessions, runs),
         # ORCH-818: the permission row of the Start choice and the pane header's mode; live page only
@@ -2175,7 +2199,7 @@ def load_logins(root: Path) -> dict | None:
         if not isinstance(r, dict) or r.get("state") not in health.STATES:
             continue
         row = {k: r.get(k) for k in keep}
-        row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key") else "login"
+        row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key", "tool") else "login"
         # the renew step (ORCH-46) adds these two: orch can start the tool's own sign-in / the key's name to replace
         if r.get("renew") is True:
             row["renew"] = True
@@ -2188,6 +2212,18 @@ def load_logins(root: Path) -> dict | None:
         sign_in = r.get("sign_in")
         if isinstance(sign_in, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}", sign_in):
             row["sign_in"] = sign_in
+        # #1549: a workspace check file that waits for the person: what it runs and the content hash Approve sends
+        if r.get("approve") in ("new", "changed", "broken"):
+            row["approve"] = r["approve"]
+            runs, short = r.get("runs"), r.get("hash")
+            if (
+                r["approve"] != "broken"
+                and isinstance(runs, str)
+                and re.fullmatch(r"[^\x00-\x1f\x7f]{1,400}", runs)
+                and isinstance(short, str)
+                and re.fullmatch(r"[0-9a-f]{32}", short)
+            ):
+                row["runs"], row["hash"] = runs, short
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

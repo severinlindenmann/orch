@@ -134,9 +134,8 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       await shot('chat-day');
       report[`chat-day-${w}`].banner = await page.textContent('.chat-archive-banner');
       await page.goto(BASE + '/#settings');
-      // Several helpers at once sits in the closed "More" fold: open it first.
+      // The technical switches sit under "More settings", shown plainly (ORCH-1693: no fold).
       await page.waitForSelector('[data-key="settings-more-general"]');
-      if (!(await page.$eval('[data-key="settings-more-general"]', d => d.open))) await page.click('[data-key="settings-more-general"] > summary');
       await page.waitForSelector('[data-key="settings-copies"]');
       await shot('settings', true, true);
       report[`text-settings-${w}`] = await page.evaluate(() => [...document.querySelectorAll('[data-key=settings-copies],[data-key=settings-workspace],[data-key=settings-workflow],[data-key=settings-mobile-mode],.settings-nav')]

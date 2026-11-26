@@ -123,3 +123,39 @@ def test_a_failed_start_needs_you_once_and_is_no_result():
     n = counts.needs_you(ts)
     assert (n["count"], n["questions"], n["results"], n["failed"]) == (3, 1, 1, 1)
     assert {"ticket": "t_a", "question": None, "start": True} in n["items"]
+
+
+def test_work_that_stopped_is_in_the_number_once():
+    """#2385: Home counted stuck tickets and idle helpers; the core number (Focus, Insights, orch counts)
+    did not."""
+    ts = [
+        _t("t_idle"),
+        _t("t_unsure", status="review"),
+        _t("t_check", status="review"),
+        _t("t_done", status="done"),
+    ]
+    row = lambda kind, tid: {"id": f"core:{kind}:{tid}", "source": "core", "kind": kind, "ticket": tid}  # noqa: E731
+    rows = [
+        row("helper:idle", "t_idle"),
+        row("helper:idle", "t_idle"),  # the same row twice counts once
+        row("reviewer:unsure", "t_unsure"),
+        row("helper:failing", "t_done"),  # a finished ticket never counts
+        {"id": "core:wait:t_idle", "source": "core", "kind": "overdue-wait", "ticket": "t_idle"},
+    ]
+    n = counts.needs_you(ts, stopped=rows)
+    assert (n["count"], n["stopped"], n["results"], n["questions"]) == (3, 2, 1, 0)
+    assert {"ticket": "t_unsure", "question": None} not in n["items"]  # its unsure row is its Check card
+    assert counts.summary(ts, stopped=rows)["needs_you"] == n
+    assert counts.needs_you(ts)["count"] == 2  # without the rows: the two results
+
+
+def test_orch_counts_counts_a_stuck_ticket(proj, run):
+    """#2385: `orch counts` reads the same stopped rows as `orch needs` (stuck.rows)."""
+    assert run("init")[0] == 0
+    a = json.loads(run("ticket", "new", "Keeps failing", "--json")[1])["id"]
+    assert run("check", "add", a, "Build it")[0] == 0
+    for _ in range(2):
+        assert run("check", "record", a, "c1", "--cmd", "make", "--exit", "1")[0] == 0
+    c = json.loads(run("counts", "--json")[1])
+    assert c["needs_you"]["count"] == 1 and c["needs_you"]["stopped"] == 1
+    assert "1 stopped short" in run("counts")[1]
