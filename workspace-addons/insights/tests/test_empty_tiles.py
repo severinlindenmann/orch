@@ -144,3 +144,13 @@ def test_tile_says_runs_orch_started_are_not_measured():
     )
     tile = out["tiles"][0]
     assert "orch started 4 runs" in tile and "not measured" in tile and "No helper runs" not in tile
+
+
+def test_first_day_tiles_do_not_wait_for_the_models_read():
+    # ORCH-2288: /api/models runs `orch tokens` over every ticket of 30 days, seconds at 10,000 tickets; the first-day
+    # tiles show at once and the helper-time note follows when the models answer
+    src = JS.read_text(encoding="utf-8")
+    block = src[src.index("if (overview.first_day) {") :]
+    block = block[: block.index("\n    }\n")]
+    assert block.index("showView('empty')") < block.index("await loadModels(models)")
+    assert block.index("paint(null)") < block.index("await loadModels(models)")

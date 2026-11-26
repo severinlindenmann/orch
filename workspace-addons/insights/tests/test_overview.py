@@ -16,6 +16,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from orch_insights import server
 from orch_insights.lists import build_list
 from orch_insights.overview import ERROR, PARTIAL, build_overview
 from orch_insights.server import read_counts
@@ -305,6 +306,7 @@ def test_own_interpreter_and_timeout(ws, monkeypatch):
 
     monkeypatch.setenv("ORCH_BIN", "/never/use/this")
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(server, "_by_worker", lambda *a: server._MISS)  # the read worker could not answer
     assert read_counts(ws) is None
 
 

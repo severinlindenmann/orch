@@ -37,15 +37,17 @@ const PAGES = [
 ];
 
 function meter(cdp) {
-  const m = { enc: 0, dec: 0, reqs: 0, byPath: {} };
-  const urls = new Map();
-  cdp.on('Network.requestWillBeSent', e => { urls.set(e.requestId, e.request.url); m.reqs++; });
+  const m = { enc: 0, dec: 0, reqs: 0, byPath: {}, reads: [] };
+  const urls = new Map(), began = new Map();
+  cdp.on('Network.requestWillBeSent', e => { urls.set(e.requestId, e.request.url); began.set(e.requestId, Date.now()); m.reqs++; });
   cdp.on('Network.dataReceived', e => { m.dec += e.dataLength; });
   cdp.on('Network.loadingFinished', e => {
     m.enc += e.encodedDataLength;
     const u = urls.get(e.requestId) || '';
     let p = u; try { p = new URL(u).pathname; } catch (_) { /* data: urls */ }
     m.byPath[p] = (m.byPath[p] || 0) + e.encodedDataLength;
+    // when each read and page began and ended, so a slow page shows what it waited for (ORCH-2288)
+    if (/^\/(api|addon)\//.test(p)) m.reads.push([p, began.get(e.requestId), Date.now()]);
   });
   cdp.on('Network.webSocketFrameReceived', e => { m.enc += (e.response.payloadData || '').length; m.dec += (e.response.payloadData || '').length; });
   // an event stream never finishes loading, so loadingFinished never counts it: count each message as it arrives
@@ -54,6 +56,8 @@ function meter(cdp) {
     m.dec += n; m.enc += n;
     let p = urls.get(e.requestId) || ''; try { p = new URL(p).pathname; } catch (_) { /* keep */ }
     m.byPath[p] = (m.byPath[p] || 0) + n;
+    const t = Date.now();
+    m.reads.push(['event ' + (e.eventName || '') + ' ' + (e.data || '').slice(0, 120), t, t]);  // what the page was told
   });
   return m;
 }
@@ -126,7 +130,8 @@ async function heapMb(cdp) {
       ms = Date.now() - t0;
     } catch (e) { err = String(e.message || e).split('\n')[0]; }
     await page.waitForTimeout(500);
-    rows.push({ page: name, ms, err, ...diff(s0, snap(m)), heapMb: await heapMb(cdp) });
+    const reads = m.reads.filter(r => r[1] >= t0).map(([p, a, b]) => [p, a - t0, b - t0]);
+    rows.push({ page: name, ms, err, ...diff(s0, snap(m)), reads, heapMb: await heapMb(cdp) });
   }
   // an idle minute on Home: nothing clicked, the tab shown
   await page.goto(base + '/#home');
