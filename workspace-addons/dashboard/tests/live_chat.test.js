@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(web, 'pages/livechat.js'), 'utf8');
 const model = source.slice(0, source.indexOf('// --- the page ---'));
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(model + '\nthis.api = {liveChatModel, liveTalkReal, liveChatSplit, liveChatMine, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
+vm.runInContext(model + '\nthis.api = {liveChatModel, liveTalkReal, liveChatSplit, liveChatMine, liveViewRead, liveViewWrite, liveChatParts, liveCmdTyped, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
 const C = ctx.api;
 const plain = x => JSON.parse(JSON.stringify(x));
 
@@ -189,4 +189,22 @@ test('without a readable conversation the chat is the ticket summary', () => {
     assert.ok(!rows.some(r => r.talk));
   }
   assert.equal(C.liveTalkReal({available: true, turns: [{w: 'h', text: 'a', at: '2026-11-19T14:10:00Z'}]}), true);
+});
+
+test('ORCH-2203: one-line code blocks, code lines and !commands become commands; several lines stay text', () => {
+  const p = x => plain(C.liveChatParts(x));
+  assert.deepEqual(p('Start it with:\n```\ndatabricks jobs run-now 5 --profile x\n```\nThen wait.'),
+    [{t: 'text', text: 'Start it with:'}, {t: 'cmd', text: 'databricks jobs run-now 5 --profile x'}, {t: 'text', text: 'Then wait.'}]);
+  assert.deepEqual(p('Run\n`npm test`'), [{t: 'text', text: 'Run'}, {t: 'cmd', text: 'npm test'}]);
+  assert.deepEqual(p('!git status'), [{t: 'cmd', text: '!git status'}]);
+  assert.deepEqual(p('Use `npm test` here'), [{t: 'text', text: 'Use `npm test` here'}]);
+  assert.deepEqual(p('```\na\nb\n```'), [{t: 'text', text: 'a\nb'}]);
+  assert.deepEqual(p('plain words'), [{t: 'text', text: 'plain words'}]);
+  assert.deepEqual(p('```\nunclosed'), [{t: 'text', text: '```\nunclosed'}]);
+});
+
+test('ORCH-2203: a !command loses its ! in a plain terminal and keeps it for the helper; Enter is never added', () => {
+  assert.equal(C.liveCmdTyped('!git status', true), 'git status');
+  assert.equal(C.liveCmdTyped('!git status', false), '!git status');
+  assert.equal(C.liveCmdTyped('ls -la', true), 'ls -la');
 });
