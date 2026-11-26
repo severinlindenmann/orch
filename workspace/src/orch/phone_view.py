@@ -663,9 +663,9 @@ _NAME_WORD = re.compile(
     r"(?<![a-z])(" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
 )  # letters only: key2, pin1
 _NAME_PASS = re.compile(r"pass(?![a-z])")  # a word that ends in pass: SSHPASS, DBPASS, smtppass
-# a word that ends in pwd or pswd, or pw (ROOTPWD, ADMINPW, pswd; pw only as a word start or at the end of a
-# letters-only word, so a random id like r_2wkgpw2e does not count), or in key after a known key kind (MASTERKEY,
-# privkey, HMACKEY): a bare key suffix would take Monkey, Hotkey and Turkey too
+# a word that ends in pwd or pswd, or pw (ROOTPWD, ADMINPW, pswd; pw only as a word start or at the end of
+# a letters-only word, so a random id like r_2wkgpw2e does not count), or in key after a known key kind
+# (MASTERKEY, privkey, HMACKEY): a bare key suffix would take Monkey, Hotkey and Turkey too
 _NAME_TAIL = re.compile(
     r"(?:pwd|pswd)(?![a-z])|(?<![a-z0-9])pw(?![a-z])|(?<![a-z0-9])[a-z]+pw(?![a-z0-9])|(?:master|encryption|enc|signing|sign|hmac|jwt|license|licence|app|db|crypt"
     r"|priv|aes|rsa|ssh|gpg|pgp)keys?(?![a-z])"
