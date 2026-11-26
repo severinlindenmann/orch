@@ -137,13 +137,14 @@ test('ORCH-415: next to Reopen the Continue is plain, with no cost line or cheap
   assert.ok(!sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
 });
 
-test('ORCH-415: the cost line is read with the start choice for screen readers', () => {
+test('ORCH-415/2155: the cost is a line under the title, named by the start button for screen readers', () => {
   const c = ctx({state:{runs:{}}});
   const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
   const cost = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost');
-  const pick = all.find(n => n.attrs?.['data-key'] === 'ticket-start-pick');
-  assert.equal(pick.attrs.role, 'group');
-  assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
+  assert.equal(cost.attrs.id, 'start-cost-t_one');
+  const text_ = all.find(n => /ticket-strip-text/.test(n.attrs?.className || ''));
+  assert.ok(nodes(text_).includes(cost), 'under the title, not in the bar');
+  assert.match(source, /querySelector\?\.\('\[data-start="main"\]'\)\?\.setAttribute\('aria-describedby', 'start-cost-' \+ t\.id\)/);
 });
 
 test('ORCH-2140 W3: Needs you shows the question once (in its card); the strip says since when it waits', () => {
@@ -204,10 +205,41 @@ test('Reopen puts a Done ticket back in To do, not Working', () => {
   nodes(stripOf(c, {status:'done'})).find(n => n.tag === 'button' && text(n) === 'Reopen').onclick();
   assert.equal(moved, 'ready');
 });
-test('the ticket page menu offers Waiting and Superseded and leaves out the lane it is in', () => {
+test('ORCH-2155: Actions > Move to offers every place, Waiting and Superseded ask more (…), the lane it is in is ticked', () => {
   const c = ctx({MOVE_CHOICES:helpers.MOVE_CHOICES});
-  const keys = nodes(c.detail({...base, status:'ready'})).map(n => n.attrs['data-key']).filter(k => /^ticket-move-/.test(k || ''));
-  assert.deepEqual(keys, ['open', 'active', 'blocked', 'review', 'done', 'dropped', 'superseded'].map(l => 'ticket-move-' + l));
+  const all = nodes(c.detail({...base, status:'ready'}));
+  const menu = all.find(n => n.attrs['data-key'] === 'ticket-menu-t_one');
+  const moves = nodes(menu).filter(n => /^ticket-move-/.test(n.attrs['data-key'] || ''));
+  assert.deepEqual(moves.map(n => n.attrs['data-key']), ['open', 'ready', 'active', 'blocked', 'review', 'done', 'dropped', 'superseded'].map(l => 'ticket-move-' + l));
+  assert.deepEqual(moves.filter(n => n.attrs['aria-checked'] === 'true').map(n => n.attrs['data-key']), ['ticket-move-ready']);
+  assert.ok(moves.every(n => n.attrs.role === 'menuitemradio'));
+  assert.deepEqual(moves.map(text), ['Backlog', 'checkTo do', 'Working', 'Waiting…', 'Check', 'Done', "Won't do", 'Superseded…']);
+  // the state word above the title opens the same list (a second way in)
+  const pill = all.find(n => n.attrs['data-key'] === 'ticket-pill-menu-t_one');
+  assert.equal(pill.tag, 'details');
+  assert.equal(nodes(pill).filter(n => /^pill-move-/.test(n.attrs['data-key'] || '')).length, 8);
+});
+test('ORCH-2155: This ticket holds Copy link, Make a copy, Add a sub-ticket, Repeat… and (small screens) Properties', () => {
+  const c = ctx({MOVE_CHOICES:helpers.MOVE_CHOICES, repeatsAddon:() => ({name:'automation'})});
+  const menu = nodes(c.detail({...base, status:'done'})).find(n => n.attrs['data-key'] === 'ticket-menu-t_one');
+  assert.ok(menu, 'a Done ticket keeps its Actions');
+  const group = nodes(menu).find(n => n.attrs['aria-label'] === 'This ticket');
+  const items = nodes(group).filter(n => n.attrs.role === 'menuitem');
+  assert.deepEqual(items.map(n => n.attrs['data-key']), ['ticket-copy-link', 'ticket-make-copy', 'ticket-add-sub', 'ticket-repeat', 'props-open-t_one']);
+  assert.deepEqual(items.map(text), ['linkCopy link', 'copyMake a copy', 'plusAdd a sub-ticket', 'refreshRepeat…', 'cardsProperties']);
+  assert.match(items[4].attrs.className, /narrow-only/);
+  assert.equal(text(nodes(menu).find(n => n.tag === 'summary')), 'Actionschevron-down');
+});
+test('ORCH-2155: Make a copy writes a new ticket with the same words and open tasks, then opens it', async () => {
+  const sent = [];
+  const src = {...base, status:'review', note:'Saturday too', done_when:'The site shows it', due:'2026-11-30', checklist:[{id:'c1', text:'Read the page', done:true}, {id:'c2', text:'Change the hours'}]};
+  const c = ctx({act:async (op, args) => { sent.push([op, args]); return op === 'ticket.new' ? {ok:true, state:{created:{id:'t_new'}}} : {ok:true}; }, ticketOf:() => src, changeError:() => 'x'});
+  c.location = {hash:'', href:'http://x/'};
+  c.window.orch.toast = () => {};
+  await c.ticketMakeCopy(src);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['ticket.new', {title:'Update the opening hours (copy)', note:'Saturday too', done_when:'The site shows it', owner:'human:Anna', due:'2026-11-30'}],
+    ['check.add', {ticket:'t_new', text:'Read the page'}], ['check.add', {ticket:'t_new', text:'Change the hours'}]]);
+  assert.equal(c.location.hash, '#ticket/t_new');
 });
 test('waitWords: a date with a reason, another ticket, the outside, nothing', () => {
   const w = (waiting_on, all) => helpers.waitWords({waiting_on}, all || [], v => 'at ' + v);
@@ -275,16 +307,21 @@ test('What I found: folded line with counts, sources with web links only, Could 
   assert.equal(nodes(c.detail({...base, status:'open', found:{sources:[], facts:[]}})).find(n => n.attrs['data-key'] === 'found'), undefined);
 });
 
-test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {
+test('one start button (ORCH-1466), owner draft A (ORCH-2155): Open in Live first in the bar, then the start, Ticket chat, Actions', () => {
   const focus = t => h('button', {'data-key':'live-session-btn'}, 'Start in Focus');
-  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Focus'}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
-  const actions = all.find(n => /ticket-strip-actions/.test(n.attrs?.className || ''));
-  assert.ok(!nodes(actions).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
-  assert.equal(nodes(actions).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
-  const menu = all.find(n => n.attrs?.['data-key'] === 'ticket-menu-t_one');
-  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
+  const chat = () => h('a', {'data-key':'ticket-open-chat'}, 'Ticket chat');
+  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Live', ticketChatButton:chat}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const bar = all.find(n => n.attrs?.['data-key'] === 'ticket-actions');
+  assert.match(bar.attrs.className, /\bbtn-bar\b/, 'the master bar: one grid');
+  assert.ok(!nodes(bar).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
+  assert.equal(nodes(bar).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
+  const cells = bar.children.map(n => n.attrs['data-key']);
+  assert.deepEqual(cells, ['ticket-open-layer', 'ticket-start', 'ticket-open-chat', 'ticket-menu-t_one']);
+  assert.equal(text(bar.children[0]), 'targetOpen in Live');
+  assert.match(bar.children[0].attrs.className, /\bprimary\b/, 'Open in Live is the one filled button');
   const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
-  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
+  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Live button while the live layer is off');
+  assert.ok(!off.some(n => n.attrs?.['aria-label'] === 'More ticket actions'), 'no "⋯" anywhere');
 });
 
 // ORCH-1850: "Is anyone doing this now, and where did they stop?" A marked task is a handover, not a process.

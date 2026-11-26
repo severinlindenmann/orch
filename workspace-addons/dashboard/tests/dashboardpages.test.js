@@ -670,11 +670,11 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  // ORCH-70: a running helper has its Focus button in the header (ORCH-816: never a link to an old Focus page) and Stop
-  // in the ⋯ menu; the helper bar (with its own pair) shows only when the header does not hold them
-  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
-  assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
-  assert.match(ticket, /function ticketWorkingStrip[\s\S]*?liveFocusButton\(t, true\)[\s\S]*?const actions = \[focusBtn, typeof ticketChatButton === 'function' \? ticketChatButton\(t\) : null, railButton\(t\), menu\]/);
+  // ORCH-70: a running helper has its Focus button in the header (ORCH-816: never a link to an old Focus page). ORCH-2155
+  // (draft A): Stop takes Continue's place in the bar; the helper bar (with its own pair) shows only when the header does not
+  assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 1);
+  assert.match(ticket, /function ticketWorkingStrip[\s\S]*?ticketButton\(\[iconEl\('stop'\), idle \? 'Stop idle helper' : 'Stop'\], 'outline sm'[\s\S]*?ticketBar\(t, run, \[stop\], menu, false\)/);
+  assert.match(ticket, /function ticketBar[\s\S]*?if \(live\) \{\s*first = typeof liveFocusButton === 'function' \? liveFocusButton\(t, true\)/);
   assert.match(ticket, /working && !helperLive( && [^?\n]+)? \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
