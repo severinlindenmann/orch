@@ -332,6 +332,10 @@ says "Already open: go to it". The same four are buttons at the top of Focus. A 
 has no peek. A working tile shows a peek of its last three lines (`.wall-peek`). In line and idle are one line each
 (`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
 the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
+A search opens a folded band that holds a match for as long as the search runs (`aria-expanded` says what is on
+screen); a fold click during a search counts for that search only, and clearing it brings back the saved folds
+(ORCH-2063). The filter sits between the summary and the bands in the page order too, so Tab goes from it to the first
+match. A one-line title that is too long ends in an ellipsis.
 
 ### Pin and rename (ORCH-361)
 Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
