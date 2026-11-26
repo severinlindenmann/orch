@@ -20,7 +20,7 @@ test('a list row shows the whole title on hover and wraps to two lines instead o
 // ORCH-246 named the ticket key on every row; round 2 (owner sent back, 18 Nov) moves the ticket to the group header
 // (its name) and the card's meta line (its key), so a row is the card's own title.
 test('a list row is grouped under its ticket and the card names its key in its meta line', () => {
-  assert.match(kit, /const groupOf=it=>it\.group\|\|it\.ticketTitle\|\|it\.ticket\|\|''/);
+  assert.match(kit, /const groupOf=it=>it\.laneName\|\|it\.group\|\|it\.ticketTitle\|\|it\.ticket\|\|''/);  // a lane (Review, 25 Nov) first
   assert.match(kit, /if\(it\.ticket\)m\.append\(el\('span','swipe-key',it\.ticket\)\)/);
 });
 test("Home's card row shows the ticket key and, for one card, what it asks", () => {
