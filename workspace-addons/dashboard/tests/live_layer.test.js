@@ -462,7 +462,7 @@ test('the bar, the panel, the side tab and the message box keep toasts clear (OR
 test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
   assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
   assert.match(L.liveBesideNote(1, 0), /^No other session is live\. Start one/);
-  assert.match(L.liveBesideNote(4, 2), /^Four sessions show at once, the most\. Close one/);
+  assert.match(L.liveBesideNote(4, 2), /^Up to four sessions show at once\. Close one/);
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The body of a pane'));
   const split = pane.slice(pane.indexOf("['right', 'down'].map"), pane.indexOf("livePaneBtn('pin'"));
   assert.doesNotMatch(split, /disabled/, 'Split is never greyed');

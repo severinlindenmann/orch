@@ -354,7 +354,7 @@ function liveLayerHelper(live, own) {
 // ORCH-1362 (UX checklist D5): Add beside is never greyed. When nothing can go beside, its menu says why and what to
 // do instead; '' when there are sessions to pick.
 function liveBesideNote(total, others) {
-  if (total >= LIVE_MAX) return 'Four sessions show at once, the most. Close one to show another here.';
+  if (total >= LIVE_MAX) return 'Up to four sessions show at once. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
 }
 // ORCH-1659: a pane added beside that leaves another without room (two fit at 1280, three at 1920) says so once, with

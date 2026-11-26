@@ -1626,7 +1626,7 @@ async function split(page, dash, width) {
     if (await page.$eval(inPane(list[0].key, 'live-split-right'), b => b.disabled)) throw new Error('split is greyed with four panes');
     await openSplit(page, inPane(list[0].key, 'live-split-right'));
     const none = (await page.textContent('[data-key="live-split-menu"] [data-key="live-split-none"]', { timeout: 5000 }).catch(() => '')).trim();
-    if (!/^Four sessions show at once/.test(none)) throw new Error(`split with four panes does not say why (it says "${none}")`);
+    if (!/^Up to four sessions show at once/.test(none)) throw new Error(`split with four panes does not say why (it says "${none}")`);
     if (await page.$('[data-key="live-split-menu"] [data-key="live-split-pick"]')) throw new Error('split offers a fifth session');
     await page.keyboard.press('Escape');
     await page.waitForSelector('[data-key="live-split-menu"]', { state: 'detached', timeout: 5000 });
