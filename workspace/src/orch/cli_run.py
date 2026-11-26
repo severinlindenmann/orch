@@ -51,14 +51,30 @@ SUBCOMMANDS = (
     *cli_screen.SUBCOMMANDS,
 )
 
+HELP = {  # the subcommands a person uses; the rest are for tools and hooks and stay out of help
+    "start": "start your helper on a ticket",
+    "status": "what the run on a ticket is doing",
+    "list": "every run at once",
+    "attach": "open the live session of a ticket",
+    "screen": "the last lines of a live session (read-only)",
+    "send": "send the helper a message",
+    "take-back": "take back a message that still waits",
+    "interrupt": "stop what the helper is doing now; the session stays",
+    "stop": "stop the run on a ticket",
+    "history": "the earlier sessions of a ticket",
+    "tend": "look after every run in one pass",
+}
+
 
 def add_parsers(sub, common) -> None:
-    r = sub.add_parser("run", help=argparse.SUPPRESS).add_subparsers(dest="sub")
+    r = sub.add_parser("run", help="start your helper on a ticket, watch it, stop it").add_subparsers(
+        dest="sub", metavar="<command>"
+    )
     cli_screen.add_run_parsers(r, common)
     for name in SUBCOMMANDS:
         if name in cli_screen.SUBCOMMANDS:
             continue
-        x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
+        x = r.add_parser(name, parents=[common], help=HELP.get(name, argparse.SUPPRESS))
         if name == "list":
             continue  # every run; no ticket
         if name == "tend":  # every live run; no ticket
@@ -77,7 +93,11 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--mode", choices=("oneshot", "live"), help="default: live in tmux when possible")
         if name == "send":
-            x.add_argument("text", nargs="?", help="what to tell the agent")
+            x.add_argument(
+                "text",
+                nargs="?",
+                help="new information for a running or idle helper (the one way to reach it)",
+            )
             x.add_argument("--file", help="read the text from this file")
             x.add_argument("--kind", choices=runs.PENDING_KINDS, default="message")
         if name == "take-back":
@@ -115,7 +135,9 @@ def add_parsers(sub, common) -> None:
                 metavar="ID",
                 help="continue this earlier session of the ticket (a person only; see orch run history)",
             )
-            x.add_argument("--text", help="what to queue when the ticket is busy")
+            x.add_argument(
+                "--text", help="the first brief of this start; a helper already at work gets orch run send"
+            )
             x.add_argument(
                 "--priority",
                 choices=runs_live.PRIORITIES,
@@ -287,7 +309,7 @@ def _status(args, root: Path) -> None:
 
 
 def status_of(root: Path, tid: str) -> tuple[dict, str]:
-    tickets.load(root, tid)
+    n = tickets.load(root, tid).get("key") or tid  # how a person names it in the commands below
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
     runs.check_start_timeout(root, tid)  # a start that never got an agent says why
     rec = runs.read(root, tid)
@@ -304,10 +326,10 @@ def status_of(root: Path, tid: str) -> tuple[dict, str]:
         if waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "
-                f"Start it: orch run start {tid}"
+                f"Start it: orch run start {n}"
             )
         else:
-            text = f"No run is active for this ticket. Start one: orch run start {tid}"
+            text = f"No run is active for this ticket. Start one: orch run start {n}"
         return data, text
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
@@ -322,13 +344,13 @@ def status_of(root: Path, tid: str) -> tuple[dict, str]:
     if st == "dead":
         text = (
             f"The earlier run on {_name(root, tid)} ended without finishing. "
-            f"Start it again: orch run start {tid}"
+            f"Start it again: orch run start {n}"
         )
     elif st == "maybe-stale":
         text = (
             f"{_holder_line(rec, tid, root)} Nobody has written to the ticket for a while, "
             "so it may be stuck. "
-            f"Take it over: orch run start {tid} --take-over"
+            f"Take it over: orch run start {n} --take-over"
         )
     else:
         text = _holder_line(rec, tid, root) + (
@@ -455,7 +477,7 @@ def _history(args, root: Path, tid: str) -> None:
     if rec is None:
         raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
     if args.resume:
-        session_history.reopen(root, tid, args.session, str(args.by or tickets.current_actor()))
+        session_history.reopen(root, tid, args.session, tickets.acting_by(args))
         _out(args, {"continued": args.session}, "The next run continues that conversation.")
         return
     h = session_history.read(rec["agent"], args.session, root=root)
@@ -621,7 +643,7 @@ def dispatch(args, root: Path) -> bool:
         if args.reopen:
             if args.fresh:
                 raise Refused("Pick one: --fresh starts without a conversation, --session continues one.")
-            rec = session_history.reopen(root, tid, args.reopen, by)
+            rec = session_history.reopen(root, tid, args.reopen, tickets.acting_by(args))
             if agent and agent != rec["agent"]:
                 raise Refused(f"That session belongs to {rec['label']}; it can only be continued there.")
             agent = rec["agent"]

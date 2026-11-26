@@ -233,6 +233,31 @@ def test_notes_list_pages_newest_first(cli, ws, vault):
     assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants
 
 
+def test_helper_attaches_only_to_its_own_ticket(cli, ws, vault, monkeypatch):
+    setup_notes(cli, vault, read="all")
+    as_helper(monkeypatch)
+    monkeypatch.setenv("ORCH_TICKET", "t_abc123")
+    (ws / ".orch" / "tickets" / "t_other1.json").write_text(
+        json.dumps({"id": "t_other1", "key": "DM1-13", "title": "Other", "status": "active"}),
+        encoding="utf-8",
+    )
+    code, d = jrun(cli, "use", "t_other1", "notes", "Helvetia Logistik")
+    assert code == 2 and "own ticket" in d["error"]
+
+
+def test_helper_change_looks_titles_up_only_among_allowed_notes(cli, vault, monkeypatch):
+    setup_notes(cli, vault, read="attached", write="change")
+    as_helper(monkeypatch)
+    jrun(cli, "notes", "write", "Mine", "--text", "a")
+    seen = jrun(cli, "notes", "write", "Helvetia Logistik", "--text", "x", "--change")
+    none = jrun(cli, "notes", "write", "No such note anywhere", "--text", "x", "--change")
+    assert seen[0] == none[0] == 2
+    assert (
+        "not attached to your ticket" in seen[1]["error"]
+        and "not attached to your ticket" in none[1]["error"]
+    )
+
+
 def test_run_card_commands_run_for_the_person(cli, vault, ws, monkeypatch):
     """ORCH-1749: the commands Personal offers to run cards parse as orch's manifest wants, and each one runs
     as a run card runs it (`orch personal <args> --by human:<who>`) for the person."""
@@ -260,3 +285,39 @@ def test_a_helper_is_told_to_ask_with_a_run_card(cli, monkeypatch):
     as_helper(monkeypatch)
     code, d = jrun(cli, "add", "notes")
     assert code == 2 and 'orch ask <ticket> "..." --run "orch personal add notes"' in d["error"]
+
+
+def test_parts_that_cannot_be_added_say_why(cli):
+    code, d = jrun(cli, "add", "files")
+    assert code == 2 and "not ready yet" in d["error"] and "Notes" in d["error"]
+    code, d = jrun(cli, "add", "nonsense")
+    assert code == 2 and "no part called nonsense" in d["error"]
+    assert jrun(cli, "remove", "notes")[0] == 0  # never added: nothing to turn off, no error
+
+
+@pytest.mark.parametrize("body", ["{broken", "[]", '"text"', '{"parts": []}', '{"parts": {"notes": 5}}'])
+def test_a_hand_edited_settings_file_never_crashes(cli, ws, body):
+    """settings.json is a plain file a person may edit (R1.3): a damaged one gets one plain sentence."""
+    f = ws / ".orch" / "addons" / "personal" / "settings.json"
+    f.parent.mkdir(parents=True)
+    f.write_text(body, encoding="utf-8")
+    code, d = jrun(cli, "parts")
+    if code == 0:
+        assert not any(p["on"] for p in d["parts"])
+    else:
+        assert code == 2 and "settings.json could not be read" in d["error"]
+
+
+@pytest.mark.parametrize("what", ["file", "link"])
+def test_data_folder_that_is_a_file_or_link_is_refused(cli, ws, tmp_path, what):
+    d = ws / ".orch" / "addons" / "personal"
+    d.parent.mkdir(parents=True)
+    if what == "file":
+        d.write_text("x")
+    else:
+        (tmp_path / "elsewhere").mkdir()
+        d.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    code, out = jrun(cli, "add", "notes")
+    assert code == 2 and "Make it a plain folder" in out["error"]
+    if what == "link":
+        assert list((tmp_path / "elsewhere").iterdir()) == []

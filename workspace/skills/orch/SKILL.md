@@ -42,6 +42,8 @@ ask; its list replaces the one above.
 **Start or resume work**
 
     orch ticket list                      # pick the ticket that fits
+    orch ticket list --search "<words>"   # find one by words in its title, tasks or note, or its number (--all: finished too)
+    orch ticket list --waiting            # waiting on a person (a question); --blocked: on a time, a ticket or the outside
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
@@ -73,6 +75,7 @@ Started by hand (not by orch)? Tell orch which ticket you work on so nobody star
 `orch run claim <id> --session <your session id>`. Finishing a piece of work in a live session: `orch run done <id>`.
 When you see `New input on orch ticket <id>` or `Your task for orch ticket <id> is ready` (at your prompt in a live session, or after a tool step in a one-step run), run `orch run input <id>` and act on what it prints (orch never types a person's words into your session).
 See what a run is doing with `orch run status <id>`; a person can send you a message with `orch run send <id> "<text>"`.
+New information for a running or idle helper always goes with `orch run send <id> "<text>"`; `orch run start <id> --text` is only the first brief of a new start.
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, sends on a helper that stopped with open steps within a minute (the second time the ticket moves up to Opus), reminds any other helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
 The dispatcher (only when the owner turned on `workflow.dispatcher`): the same pass starts more helpers up to a target that follows the weekly budget pace and the computer's load (`workflow.dispatcher_helpers` while on pace), high priority tickets first and low last, then Factory run work, Ready, then Backlog tickets; tickets with a question, a wait, a schedule or a person as owner are left alone.
@@ -80,7 +83,7 @@ The Reviewer (for a script that repeats, only when the person turned on `workflo
 Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 The Auto Reviewer and Away mode (only when the person turned on `workflow.auto_reviewer` or `workflow.away`, on the Review page): the same pass checks finished work by its kind (screen, campaign, data, code), writes the points in the history and accepts it or sends it back once; Away also answers plain questions and choice or plan cards with your recommendation at once. Both leave every ticket with Human review needed on alone, and never answer words, names, money, deploy, delete or keys: so put pictures at 1280, 1920 and 390 px, the campaign file or the data file on the ticket as evidence, and recommend the option you would pick. The person undoes any of it: `orch review undo <ticket> [q3]`.
 Drafts are the person's alone: a `--draft` card, a `--choose` card whose options show files, and the ticket that carries one are answered and accepted only by the person themselves, signed in, never by a program or a helper. The Reviewer, its second look, its routine answers and `orch answer` / `orch review answer` from a script or your shell are refused for them; `orch review accepted` lists them under "Waiting for your pick".
-Prepare (Save without starting, `orch run start <id> --prepare`): orch skips it with no helper when every field is filled, the ticket was prepared already, a helper made the sub-ticket, `workflow.prepare_on_save` is off or the daily limit (`workflow.prepare_daily_limit`) is reached. A prepare helper never changes the status (`orch ticket status`, `orch wait` are refused); its one question keeps the ticket in Backlog.
+Prepare (Save ticket, `orch run start <id> --prepare`): orch skips it with no helper when every field is filled, the ticket was prepared already, a helper made the sub-ticket, `workflow.prepare_on_save` is off or the daily limit (`workflow.prepare_daily_limit`) is reached. A prepare helper never changes the status (`orch ticket status`, `orch wait` are refused); its one question keeps the ticket in Backlog.
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 Security review (you were started as one by the release keeper, ticket "Security review: pull request #N"): read only, follow the ticket's note, then record exactly one verdict: `orch review security <N> ok "<one line>" --sha <commit>` (nothing High or Medium left) or `orch review security <N> problems "<the worst finding>" --sha <commit>`, with the commit the note names. Releases wait for it. A later pull request M fixes a problems finding of N: `orch review security <N> fixed-by <M>` (only a person or N's review helper; anyone else asks the person); the release then waits only until M is merged with its own security OK.
 
@@ -159,7 +162,7 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens`.
 
 Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
 ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
@@ -232,7 +235,7 @@ waits for a person with `orch needs`.
 orch only records the wait. An add-on may wake the ticket when it is due; if none does, tell the user when to come back.
 Waiting on another ticket or a pull request costs nothing: the helper watcher looks without a helper and starts you
 only once it is finished, merged or closed (a merge-queue throw-out wakes you too, and a red check when the
-pull-requests add-on is set to act on failed checks). Never wait for a
+add-on is set to act on failed checks). Never wait for a
 time just to look whether a pull request merged or a ticket finished: every such wake-up is a whole helper run.
 
 **Sub-tickets**
@@ -300,6 +303,7 @@ by itself. It is not your ticket's work: do not stop to wait for it, and do not 
     orch checks init                                   # the folder .orch/checks with a documented template
     orch checks run [<name>]                           # check now
     orch checks remove <name>
+    orch checks show <name>                            # the check file, its script and hash, and the approve line
     orch checks approve <name> --hash <h>              # the PERSON only, in their own terminal
 
 Only what the workspace added is checked, plus the login of the helper it uses: a tool that is merely set up on
@@ -307,8 +311,8 @@ this computer is not checked. Add a tool only when the person said the helpers u
 
 Your own check (any command or a small script, for example an API call with a key) goes in
 `.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
-approved it; you cannot approve it. Tell them to look at the file and run the approve command that
-`orch checks list` prints (it carries the file's short hash; a file changed after they looked is refused).
+approved it; you cannot approve it. Tell them to look at the file (`orch checks show <name>`) and run the approve
+command that `orch checks list` prints (it carries the file's short hash; a file changed after they looked is refused).
 
 Updates of these tools: `orch tools list` (installed and newest version) and `orch tools notes <name>`. Only the
 person updates a tool (Settings > About & updates); a check file may add an `update` block for its tool.

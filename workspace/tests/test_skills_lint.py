@@ -48,6 +48,8 @@ HUMAN_ONLY = {
     "workspace companion",  # only orch Companion (the Mac menu bar app) runs it; JSON for the app (ORCH-1722)
     "uninstall",  # a person takes orch out of a folder
     "workspace move-here",  # a person keeps a moved folder's saved keys (helpers are refused)
+    "relay invite",  # the admin adds a workspace (needs the admin token, typed)
+    "publish invite",  # the same for the publish server
     "people",  # a person sets up people and their rights (Settings > People; helpers are refused)
     "start",
     "stop",
@@ -386,6 +388,80 @@ def test_orch_block_is_five_numbered_rules():
     assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
     assert "orch ticket summary" in numbered[4]
     assert "There are no signing or planning gates" in block
+
+
+# R2: each key statement of AGENTS.md section 2 (left) must be said by the shipped block (right).
+R2_STATEMENTS = [
+    (
+        "Priority order: **task-based → evidence-based → context-based**",
+        "task-based first, then evidence-based, then context-based",
+    ),
+    ("happens on a ticket with a checklist", "Every change belongs to a ticket"),
+    (
+        "Questions and read-only looking around need no ticket",
+        "Questions and read-only looking around need no ticket",
+    ),
+    ("only when it has at least one evidence entry", "A task is done only with evidence"),
+    ("the ticket holds a short handover and links", "short handover with links"),
+    ("enough for a fresh agent to continue", "lets a fresh agent go on"),
+    ("no copies of whole files and no secrets", "no copies of whole files, no secrets"),
+    ('It never asks "may I do this step"', 'never ask "may I do this step"'),
+    ("Every question carries options and a recommended answer", "--option A --option B --recommend A"),
+    ("The user can adjust the list in one file the skill reads", "`.orch/ask-when.md`"),
+    (
+        "**R2.5 One way to ask:** the ticket question (`orch ask`)",
+        "Every question for the person goes through `orch ask`",
+    ),
+    (
+        "keeps working on items that don't depend on the answer",
+        "keep working on the steps that do not depend on the answer",
+    ),
+]
+
+
+@pytest.mark.parametrize(("rule", "said"), R2_STATEMENTS, ids=[s for s, _ in R2_STATEMENTS])
+def test_orch_block_says_what_agents_md_r2_says(rule, said):
+    """R2: the shipped AGENTS block says the same as AGENTS.md section 2, in the same priority order."""
+    rules = " ".join((ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
+    section = rules[rules.index("## 2. How agents work") : rules.index("## 3. ")]
+    block = " ".join((SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8").split())
+    assert rule in section, f"AGENTS.md R2 changed ('{rule}'): update R2_STATEMENTS and the AGENTS block"
+    assert said in block, f"the AGENTS block drifted from AGENTS.md R2: it must say '{said}'"
+
+
+def test_orch_block_keeps_the_r2_priority_order():
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    order = [block.index(x) for x in ("orch check add", "orch check done", "orch ticket summary")]
+    assert order == sorted(order), "task (check add), then evidence (check done), then context (summary)"
+
+
+def addon_manifests() -> list[Path]:
+    return sorted(
+        [*(ROOT / "workspace-addons").glob("*/src/*/orch-addon.toml"), *BUILTIN.glob("*/orch-addon.toml")]
+    )
+
+
+def test_every_addon_package_has_a_manifest():
+    """R1.2: every add-on with code plugs in through orch-addon.toml (placeholders without src/ excepted)."""
+    for src in sorted((ROOT / "workspace-addons").glob("*/src")):
+        assert list(src.glob("*/orch-addon.toml")), f"{src.parent.name}: no orch-addon.toml"
+
+
+@pytest.mark.parametrize("manifest", addon_manifests(), ids=lambda p: p.parent.name)
+def test_every_addon_ships_its_own_agents_block(manifest):
+    """R1.2: every add-on ships its own skill and AGENTS block; none reuses the core block."""
+    m = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    skill = manifest.parent / m["skill"]
+    block = manifest.parent / m.get("agents_block", f"{m['skill']}/AGENTS-block.md")
+    assert (skill / "SKILL.md").is_file(), f"{m['name']}: no SKILL.md"
+    assert block.is_file(), f"{m['name']}: no AGENTS block at {block}"
+    lines = [
+        x for x in block.read_text(encoding="utf-8").splitlines() if x.strip() and not x.startswith("<!--")
+    ]
+    assert lines and lines[0].startswith("## "), (
+        f"{m['name']}: the AGENTS block starts with its own '## ' heading"
+    )
+    assert lines[0] != "## orch workspace", f"{m['name']}: ships a copy of the core block, not its own"
 
 
 def test_asking_keeps_the_agent_working():

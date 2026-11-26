@@ -53,3 +53,11 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## ORCH-1860 (keep the last good reading, ORCH-1855 draft 1)
 
 - insights.html: new preview state "Failed refresh" (`?state=error`). A refresh of one section failed: every number, the chosen tab and the rows read before stay; the master error banner sits by that section's table with "Couldn’t refresh the skills", the time of the last good reading, Try again and the actual error. With nothing read before, the product shows "Couldn’t read …" and no rows (never zeros or the first-day tiles). Master design system: no change (gallery "banner error").
+
+## ORCH-2102 (visual polish)
+
+- insights.html: the four time-and-cost tiles use the master `stat-row four` (values on one line however long a tile's
+  small text is; two columns on a phone). "Work over time" is plain text with its button, no longer an image that hid
+  the button from screen readers; its sentence is plainer ("Not enough days of work yet to draw a chart."). Table
+  cells wrap between words only (no "workspac/e" on a phone). Master design system: no new rule (`mockup.css` cell rule
+  gains `overflow-wrap:break-word`).

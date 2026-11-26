@@ -47,12 +47,16 @@ def test_doctor_in_a_folder_without_orch(proj, run):
     assert code == 0 and "not set up" in out and "Run: orch init" in out
 
 
-def test_doctor_json(proj, run):
+def test_doctor_json(proj, run, monkeypatch):
     assert run("init")[0] == 0
+    calls = []
+    detect = adapters.detect
+    monkeypatch.setattr(adapters, "detect", lambda: calls.append(1) or detect())
     code, out, _ = run("doctor", "--json")
     d = json.loads(out)
     assert code == 0 and d["ok"] and d["problems"] == 0, [r for r in d["checks"] if not r["ok"]]
     assert cli_leave.TOOL
+    assert len(calls) == 1
 
 
 # ORCH-1970: the top real failure modes, each one problem with a one-sentence fix

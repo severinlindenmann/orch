@@ -469,6 +469,7 @@ final class AppModel {
                 answers[qid] = ""; markAnsweredElsewhere(qid)
             }
             await reloadMessages()
+            guard credentials != nil else { return }   // a 401 on /messages logged the phone out: keep that message, load nothing more
             applyTakenBack()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
@@ -1076,7 +1077,12 @@ final class AppModel {
 
     private func handle(_ error: Error) {
         if Self.isOffline(error) { transportDown = true }
-        if case RelayError.unauthorized = error { Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset(); message = error.localizedDescription }
+        if case RelayError.unauthorized = error {
+            if credentials == nil && phase == .onboarding { return }   // already signed out by an earlier 401: keep its message
+            let lost = SignOutWording.notSent(outbox.items)   // the reset wipes them: say so instead of losing them silently
+            Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset()
+            message = SignOutWording.revoked(notSent: lost)
+        }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }
         else { message = "Something went wrong. Try again in a moment." }
