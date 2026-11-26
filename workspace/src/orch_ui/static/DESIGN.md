@@ -334,6 +334,9 @@ says "Already open: go to it". The same four are buttons at the top of Focus. A 
 has no peek. A working tile shows a peek of its last three lines (`.wall-peek`). In line and idle are one line each
 (`.wall-line`). From 12 sessions the bands carry `data-many` and a long list scrolls inside itself; at 1100 px and wider
 the bands sit side by side. A tile opens its session in the layer; nothing is answered on the wall itself.
+The filter finds a session by its key, name, title and the words on its tile ("Check", "Idle"); one that sits in Needs
+you is also found by "Needs you" (ORCH-2045). The summary keeps counting the whole workspace, and with a filter a band
+without a match is left out. Typing only filters: nothing is sent or started.
 
 ### Pin and rename (ORCH-361)
 Every wall tile and line has a pin button (`btn icon sm ghost`, the `pinned` icon, `aria-pressed`); a pinned session
