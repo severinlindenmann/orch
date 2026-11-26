@@ -81,6 +81,21 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
     assert re.search(r"orch ticket status \S+ done", seen[5])  # summary written
 
 
+def test_review_ticket_next_step_names_a_list_that_holds_it(proj, run):
+    """ORCH-2110: a ticket in Review is not an `orch needs` row: its Next lines and the one of `orch counts`
+    name `orch review list`, which lists it."""
+    run("init", "--yes")
+    key = json.loads(run("ticket", "new", "A", "--json")[1])["key"]
+    run("check", "add", key, "x")
+    run("check", "done", key, "c1", "--note", "ok")
+    _, out, _ = run("ticket", "status", key, "done", "--by", "agent:copilot")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("counts")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("review", "list")
+    assert key in out, out
+
+
 def test_lines_a_person_reads_name_the_key_not_the_id(proj, run):
     """ORCH-1876: Next lines, `orch needs` rows and `orch run status` say MPU-2, never t_xxxxxx."""
     run("init", "--yes")
