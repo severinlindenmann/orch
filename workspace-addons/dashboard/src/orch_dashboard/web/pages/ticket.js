@@ -2059,9 +2059,11 @@ function ticketWidgets(t) {
 }
 function ticketWidgetsCard(t) {
   const notes = t.status === 'review' ? [] : completionNotes(t);
-  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+  // a completion note is a result: no "Nothing yet" under it (mockup ticket-done: "Results · 1 note")
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'),
+    notes.length ? h('span', {className:'meta'}, notes.length + (notes.length === 1 ? ' note' : ' notes')) : null),
     notes.map(n => ticketCompletionNote(n, t)),
-    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:notes.length ? '' : 'Nothing yet. Pictures, pages and tables show up here.'}));
 }
 // A change you asked for: what you asked, and that new changes wait for your OK.
 function ticketRequestCard(t) {
@@ -2299,12 +2301,20 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
   if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
-  return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
+  // the same unboxed header as while a helper runs (mockup ticket-idle): number and state above the title
+  const pill = m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word);
+  return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
+      h('div', {className:'grow ticket-strip-text'}, stripKicker(t, pill, [], 'ticket-line'), h('h1', {className:'t-title title-clamp'}, inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
+}
+// The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
+function stripKicker(t, pill, extra, dataKey) {
+  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, ...extra].filter(Boolean);
+  return h('p', {className:'t-meta strip-kicker', 'data-key':dataKey}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
 }
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
 // cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
@@ -2332,11 +2342,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
   const minutes = window.DashHelpers.ageWords(run?.age_seconds);  // '18 h', not '1107 min' (ORCH-1836)
-  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
-  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
-  const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+  const kicker = stripKicker(t, pill, [agent ? name(agent) : null, minutes], 'ticket-kicker');
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
