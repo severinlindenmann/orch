@@ -246,3 +246,26 @@ async fn an_answer_to_an_unsigned_question_cannot_be_signed_but_still_goes_unsig
         "unsigned: the relay's name as before"
     );
 }
+
+#[tokio::test]
+async fn signed_only_refuses_an_unsigned_phone_answer() {
+    let s = setup().await;
+    let (qmid, _) = ask(&s, "q1", true).await;
+    let (st, _) =
+        s.t.admin_json(
+            "PUT",
+            "/admin/api/signing-keys/settings",
+            Some(json!({"require_signed": true})),
+        )
+        .await;
+    assert_eq!(st, 200);
+    let (st, v) =
+        s.t.phone(
+            &s.phone,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": qmid, "answer": "no", "client_id": CID})),
+        )
+        .await;
+    assert_eq!((st, code(&v)), (422, "missing_signature"), "{v}");
+}
