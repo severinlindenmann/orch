@@ -174,7 +174,7 @@ switches when its turn ends.
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A
-    orch ask <id> "<question>" --check <c>        # tie it to a step
+    orch ask <id> "<question>" --option A --option B --recommend A --check <c>  # tie it to a step
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
     orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 
@@ -182,7 +182,7 @@ Every question for the person goes on the ticket this way, never only in your re
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
-- Offer short answer options a person can click. Keep the question to one sentence or two.
+- Offer at least two short answer options a person can click and recommend one with `--recommend` (`orch ask` refuses a question without them; the person can still answer in their own words). Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - When the person must run one command (a setting only a person may change, an install), make it a run card: `orch ask <id> "Turn on release walks?" --run "orch config set github.release_walks install,services" --option "Leave it off for now"` (the other answer is one of: Not now, Leave it off for now, Leave it as it is, Skip it, Do it later). The card shows the command with Copy and Run it now; one click runs it for the person and answers I ran it, with what it printed. orch writes what it changes and how to undo it, never you. Only some orch settings, the commands an add-on that is on offers for cards (its skill names them) and `brew install|uninstall|upgrade <plain names>` get Run it now; any other command (and a sign-in such as `codex login`) still gets the card, with Copy only, and the person runs it in their own terminal. You never answer a run card yourself.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.

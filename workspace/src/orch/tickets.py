@@ -2940,7 +2940,7 @@ def _put_kind(ticket: dict, name: str, by: str) -> bool:
     person = _is_person(by)
     ask = (
         f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
-        "--option yes --option no"
+        "--option yes --option no --recommend yes"
     )
     if not person:
         if kind_by_person(ticket):
@@ -3286,7 +3286,7 @@ def set_model(root: Path, tid: str, name: str, by: str) -> dict:
     if not _is_person(by):
         raise Refused(
             f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
-            "--option yes --option no"
+            "--option yes --option no --recommend yes"
         )
 
     def op(ticket):
@@ -3365,7 +3365,8 @@ def move_up(root: Path, tid: str, why: str, by: str) -> tuple[dict, bool]:
                 return
             raise Refused(
                 f"A person chose {modelpick.LABELS[cur['name']]} for this ticket. Ask instead: "
-                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" --option yes --option no'
+                f'orch ask {tid} "Move this ticket up to Opus? {why[:80]}" '
+                "--option yes --option no --recommend yes"
             )
         if cur and cur["name"] in modelpick.STRONG:
             return
@@ -4448,6 +4449,26 @@ def _asks_for_secret(text: str) -> bool:
     )
 
 
+MIN_OPTIONS = 2
+
+
+def require_choice(
+    tid: str, by: str, options: list[str], recommended: str | None, kind: str | None = None
+) -> None:
+    """R2.4: every question a helper asks the person carries options and a recommended answer. A plain
+    question (no add-on kind) from anyone but a person is refused without at least two options and a
+    --recommend; the person can still answer in their own words. A person asking is not held to it."""
+    if _is_person(by) or kind not in (None, "plain"):
+        return
+    picks = [o for o in options if o.strip()]
+    if len(picks) >= MIN_OPTIONS and recommended is not None and recommended.strip():
+        return
+    raise Refused(
+        "A question needs at least two answers to pick from and the one you suggest: "
+        f'orch ask {tid} "<question>" --option <A> --option <B> --recommend <A>.'
+    )
+
+
 def ask(
     root: Path,
     tid: str,
@@ -4464,8 +4485,12 @@ def ask(
     links: list[dict] | None = None,
     add_workspace: str | None = None,
     because: str | None = None,
+    choice_needed: bool = False,
 ) -> tuple[dict, dict]:
-    """because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
+    """choice_needed: `orch ask` sets it (R2.4): a helper's plain question needs options and a recommended
+    answer (require_choice). orch's own questions (allow, add to a chat, add-on kinds, cards) word their
+    answers themselves.
+    because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
     when it has one.
     card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
@@ -4512,6 +4537,8 @@ def ask(
 
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
+    if choice_needed:
+        require_choice(tid, by, options, recommended, kind)
     _guard_question(root, text, options, recommended, check)
     no_secret(
         root,

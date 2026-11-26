@@ -184,7 +184,22 @@ def test_an_ok_held_by_an_open_question_is_written_once(proj, run, new_ticket, o
     tid = _review_ticket(proj, run, new_ticket)
     _keeper(proj, tid)
     _verdict(proj, "ok", "nothing High or Medium")
-    assert run("ask", tid, "Ship it?", "--option", "yes", "--option", "no", "--by", "agent:claude")[0] == 0
+    assert (
+        run(
+            "ask",
+            tid,
+            "Ship it?",
+            "--option",
+            "yes",
+            "--option",
+            "no",
+            "--recommend",
+            "yes",
+            "--by",
+            "agent:claude",
+        )[0]
+        == 0
+    )
     tickets.set_status(proj, tid, "review", "human:tester")  # asking moved it to Waiting
     reviewer.run(proj)
     reviewer.run(proj)

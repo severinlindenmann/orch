@@ -452,13 +452,55 @@ def test_cli_ask_sends_phone_ticket_questions_to_the_phone(on_state, run, monkey
     plain = tickets.create(on_state, "Dashboard ticket", "human:sev")["id"]
     other = tickets.create(on_state, "Second", "human:sev")["id"]
     assert (
-        run("ask", phone, "Which colour?", "--option", "Blue", "--option", "Red", "--by", "agent:claude")[0]
+        run(
+            "ask",
+            phone,
+            "Which colour?",
+            "--option",
+            "Blue",
+            "--option",
+            "Red",
+            "--recommend",
+            "Blue",
+            "--by",
+            "agent:claude",
+        )[0]
         == 0
     )
-    assert run("ask", plain, "Which day?", "--option", "Mon", "--by", "agent:claude")[0] == 0
+    assert (
+        run(
+            "ask",
+            plain,
+            "Which day?",
+            "--option",
+            "Mon",
+            "--option",
+            "Tue",
+            "--recommend",
+            "Mon",
+            "--by",
+            "agent:claude",
+        )[0]
+        == 0
+    )
     assert [s[0] for s in sent] == [phone]
     monkeypatch.setenv("ORCH_TICKET", phone)  # the phone ticket's agent asks on a ticket it made
-    assert run("ask", other, "Which size?", "--option", "S", "--by", "agent:claude")[0] == 0
+    assert (
+        run(
+            "ask",
+            other,
+            "Which size?",
+            "--option",
+            "S",
+            "--option",
+            "M",
+            "--recommend",
+            "S",
+            "--by",
+            "agent:claude",
+        )[0]
+        == 0
+    )
     assert [s[0] for s in sent] == [phone, other]
 
 
