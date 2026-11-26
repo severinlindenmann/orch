@@ -199,3 +199,35 @@ def test_windows_stop_checks_record_before_taskkill(ws, monkeypatch, matches):
         assert run.call_args.args[0] == ["taskkill", "/PID", "4242", "/T", "/F"]
     else:
         run.assert_not_called()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a shell script stands in for a Python that cannot start")
+def test_a_scheduler_that_cannot_start_says_where_to_look(ws, tmp_path, monkeypatch):
+    import stat
+    import sys
+
+    broken = tmp_path / "kaputt python"
+    broken.write_text("#!/bin/sh\necho 'no module named orch_automation'\nexit 1\n")
+    broken.chmod(broken.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(sys, "executable", str(broken))
+    with pytest.raises(RuntimeError, match=r"did not start\. See \.orch/run/automation/automation\.log"):
+        service.start(ws)
+    assert "no module named" in (ws / ".orch/run/automation/automation.log").read_text()
+    assert service.running_pid(ws) is None
+
+
+def test_the_record_is_written_only_with_a_nonce_and_removed_only_by_its_owner(ws, monkeypatch):
+    rec = ws / ".orch/run/automation/automation.json"
+    monkeypatch.delenv(service.NONCE_ENV, raising=False)
+    assert service.announce(ws) is None and not rec.exists()
+    monkeypatch.setenv(service.NONCE_ENV, "not-hex")
+    assert service.announce(ws) is None and not rec.exists()
+    nonce = "ab" * 16
+    monkeypatch.setenv(service.NONCE_ENV, nonce)
+    assert service.announce(ws) == nonce
+    assert json.loads(rec.read_text())["pid"] == os.getpid()
+    service.forget(ws, None)
+    service.forget(ws, "cd" * 16)
+    assert rec.exists()  # not ours: kept
+    service.forget(ws, nonce)
+    assert not rec.exists()

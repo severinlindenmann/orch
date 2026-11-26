@@ -213,6 +213,19 @@ def test_session_folders_are_remembered_and_misses_retried_later(proj, env, monk
     assert usage.spend(proj, [t], env)[t["id"]]["cost"] == pytest.approx(4.1), "new helper files still count"
 
 
+def test_spend_finds_cold_sessions_in_one_pass(proj, env, monkeypatch):
+    a, b = make(proj, "A", [SID]), make(proj, "B", [SID2])
+    p = projects(env)
+    for folder, sid in [("one", SID), ("two", SID), ("two", SID2)]:
+        write(p / folder / f"{sid}.jsonl", line("claude-opus-5-5", "m", 1_000_000, 0))
+    listed = []
+    real = type(p).iterdir
+    monkeypatch.setattr(type(p), "iterdir", lambda folder: listed.append(folder) or real(folder))
+    spend = usage.spend(proj, [a, b], env)
+    assert spend[a["id"]]["cost"] == 8 and spend[b["id"]]["cost"] == 4
+    assert listed.count(p) == 1
+
+
 def test_team_finished_open_and_stuck(proj, env):
     """ORCH-189: per owner finished (in the window), open, helper time and money; stuck counts open ones."""
     a = make(proj, "Anna works", [SID])

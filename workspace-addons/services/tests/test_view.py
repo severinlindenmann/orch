@@ -329,7 +329,10 @@ def test_a_plain_program_in_found_has_no_manage_button(ws):
     (group,) = view["blocks"][0]["groups"]
     plain, entry = group["items"]
     assert "buttons" not in plain["panel"] and plain["panel"]["facts"]
+    # no button, so no "until you say so" either: it says why orch cannot take it over
+    assert "cannot manage it" in plain["panel"]["note"] and "say so" not in plain["panel"]["note"]
     assert entry["panel"]["buttons"][0]["label"] == "Manage with orch"
+    assert entry["panel"]["note"] == "orch leaves it alone until you say so."
 
 
 def test_stop_on_a_job_marked_important_asks_once_everywhere(ws):

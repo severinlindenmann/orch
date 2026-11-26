@@ -15,7 +15,7 @@
 .needs .banner{align-items:center}
 .needs .banner .grow{display:grid;gap:2px}
 /* Names the dashboard also uses (.blk-table, .ticket-table): kept here so they never leak into other pages. */
-.data-table td{padding-top:12px;padding-bottom:12px}
+.data-table td{padding-top:12px;padding-bottom:12px;overflow-wrap:break-word}
 .data-table td .subline{margin-top:2px}
 .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 .ticket-line{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 24px;border-top:1px solid var(--border)}

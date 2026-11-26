@@ -210,8 +210,8 @@ window.DOCS_SAMPLE = {
      "decision": true,
      "branch": [
       {
-       "if": "Save without starting",
-       "then": "It stays in Backlog; nothing runs",
+       "if": "Save ticket",
+       "then": "It stays in Backlog; a helper may prepare it, but no work starts",
        "stop": true
       },
       {
