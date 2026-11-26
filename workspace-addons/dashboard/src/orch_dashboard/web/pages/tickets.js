@@ -1247,11 +1247,13 @@ function list() {
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
   return fragment(top, !tickets().length ? ticketsEmpty() : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
 }
-// No tickets at all: the master empty state with one sentence and New ticket (the page's one filled button).
+// No tickets at all: the master's one empty page (D4, UI.pageEmpty) with one sentence and New ticket (the page's one
+// filled button).
 function ticketsEmpty() {
   const text = 'Describe a job in plain words; a helper works on it and asks you only when it needs a decision.';
-  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
   const add = typeof newButton === 'function' ? newButton() : null;
+  if (window.UI?.pageEmpty) return window.UI.pageEmpty({title:'No tickets yet', text, step:add, dataKey:'empty'});
+  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
   if (add) box.append(add);
   box.dataset.key = 'empty';
   return box;

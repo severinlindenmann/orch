@@ -24,10 +24,12 @@ function liveNewButtons() {
     }));
 }
 function liveNextPage(r) {
-  const label = addonLabel(livePageOf(r.id));
-  if (!liveFocusOn()) return fragment(heading(label, ''), h('p', {className:'meta', 'data-key':'live-next-copy'}, 'Live sessions show only on the computer the helpers work on.'));
+  const a = livePageOf(r.id), label = addonLabel(a);
+  // One top (D1) with its one sentence and the add-on's Settings button (D6).
+  const top = () => heading(label, a?.dashboard?.subtitle || 'Watch your helpers work and step in when one needs you.', {settings:typeof addonSettingsHref === 'function' ? addonSettingsHref(a?.name) : null});
+  if (!liveFocusOn()) return fragment(top(), h('p', {className:'meta', 'data-key':'live-next-copy'}, 'Live sessions show only on the computer the helpers work on.'));
   window.LiveSessions?.sync();
-  return fragment(heading(label, ''),
+  return fragment(top(),
     h('section', {'data-key':'live-next', 'data-path':r.path || '', 'aria-label':'Sessions'}, liveWall()));
 }
 // One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it): the page

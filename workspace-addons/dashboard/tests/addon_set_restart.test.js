@@ -223,7 +223,7 @@ function stoppedPage(services, snap = false) {
     array: v => Array.isArray(v) ? v : [],
     addons: () => [{name: 'factory', dashboard: {label: 'Factory'}}],
     addonLabel: a => a?.dashboard?.label || a?.name,
-    addonTitle: a => a?.dashboard?.label || a?.name, window: {},
+    addonTitle: a => a?.dashboard?.label || a?.name, window: {}, addonSettingsHref: id => '#settings/addons/' + id,
     heading: (title, sub, o = {}) => el('header', {'data-key': 'heading'}, el('h1', {}, title), o.actions || null),
   });
   vm.runInContext(ssrc.slice(ps, pe) + '\nthis.f = pageStopped;', c);

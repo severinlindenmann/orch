@@ -880,8 +880,9 @@ function addonDetailPage(addon) {
     ? item('Remove ' + label, label + ' is part of orch. You can turn it off, but not remove it.', null, 'addon-detail-core')
     : item('Remove ' + label, 'Your tickets stay as they are. You can add it again any time.', h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove'), 'addon-detail-remove-row'));
   const back = settingsBack || {hash:'#settings/addons', label:'Add-ons'};
-  const backLink = window.UI?.pageBack ? window.UI.pageBack({label:'Back to ' + back.label, href:back.hash}) : h('a', {className:'page-back', href:back.hash}, '← Back to ' + back.label);
-  backLink.dataset.key = 'addon-detail-back';
+  const master = typeof window !== 'undefined' && window.UI?.pageBack ? window.UI.pageBack({label:'Back to ' + back.label, href:back.hash}) : null;
+  if (master) master.dataset.key = 'addon-detail-back';
+  const backLink = master || h('a', {className:'page-back', href:back.hash, 'data-key':'addon-detail-back'}, '← Back to ' + back.label);
   // Drawn in the Add-ons tab of Settings (the draft: Settings' tabs stay, the add-on's list sits in its tab).
   return h('div', {className:'stack', 'data-key':'settings-addon-detail'}, backLink,
     settingsText('h2', {className:'set-sub addon-detail-name'}, label),

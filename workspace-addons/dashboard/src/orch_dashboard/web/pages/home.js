@@ -860,7 +860,8 @@ function home() {
     return fragment(head, banner, logins.stopped.length ? null : window.UI?.pageEmpty ? window.UI.pageEmpty({title:'All clear', text:'Questions and results to check show up here.', step, dataKey:'empty'})
       : h('section', {className:'card page-empty', 'data-key':'empty'}, h('h2', {}, 'All clear'), h('p', {}, 'Questions and results to check show up here.'), step),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
-      card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)), changedCard);
+      // D4: a workspace where nothing finished yet is the empty page alone (no "Finished · Nothing finished yet" card)
+      finished.length || all.some(t => t.status === 'done') ? card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)) : null, changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));

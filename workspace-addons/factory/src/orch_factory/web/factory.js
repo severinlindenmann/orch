@@ -124,6 +124,9 @@
     if (actions.length) top.append(group('page-heading-actions', ...actions));
     return top;
   }
+  // D6 (ORCH-2315): Factory's one Settings button, the master's (kit widgets.js UI.settingsButton), first on the right of
+  // its own top. It moves the dashboard (target _top) to Settings › Add-ons › Factory.
+  const settingsButton = () => window.UI?.settingsButton ? [window.UI.settingsButton({href: '/#settings/addons/factory', top: true})] : [];
   function inner(top, label, href) {
     const a = node('a', null, 'page-back'); a.href = href; a.dataset.key = 'page-back';
     const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
@@ -490,7 +493,7 @@
     // D3 B (ORCH-2284): one name, Factory, and the words every page uses: Needs you
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'thing in Factory needs you', 'things in Factory need you') + '.' + (minutes ? ' About ' + minutes + ' min of your time.' : '')
-      : 'Turn an idea into finished work, step by step.'));
+      : 'Turn an idea into finished work, step by step.', ...settingsButton()));
     // What waits for you comes first, in one block; a kind with nothing in it gets no section of its own (owner
     // 16 Nov, ORCH-72): the missing kinds are named once in a quiet line at the end, not as a wall of empty sections.
     const kinds = [
@@ -973,7 +976,7 @@
       const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
       if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
         // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-        view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+        view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
       } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
     }
     try {
