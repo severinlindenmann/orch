@@ -219,9 +219,13 @@ def write_json(p: Path, data: dict) -> None:
         fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     except PermissionError as e:
         raise _denied(p.parent, e) from e
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    os.replace(tmp, p)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, p)
+    except BaseException:
+        remove(Path(tmp))
+        raise
 
 
 def open_append(p: Path):
