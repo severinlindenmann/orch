@@ -162,6 +162,16 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
  if(o.count!=null)b.append(el('span','count',String(o.count)));b.append(UI.chevron());if(o.onToggle)b.addEventListener('click',o.onToggle);h.append(b);sec.append(h);
  if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
  return sec};
+/* Pick several (25 Nov, ORCH-2034): UI.bulkBar({count, busy, actions, clear, label, key}) -> <div class="bulk-bar">, the bar under a
+   list while rows are picked. "N selected", then the actions (nodes, usually details.menu; their menus open upwards), then
+   Clear ({label, onClick} or a node). busy: a short line ("Saving 2 of 5…") with a spinner while the change is saved; the
+   actions wait. role=region with a label; the count is a live status. The page draws the row checkboxes (.row-pick). */
+UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','region');bar.setAttribute('aria-label',o.label||'Selected');bar.setAttribute('data-toast-clear','');if(o.key)bar.dataset.key=o.key;
+ const c=el('span','bulk-count');c.setAttribute('role','status');
+ if(o.busy){bar.setAttribute('aria-busy','true');const s=el('span','spinner');s.setAttribute('aria-hidden','true');c.append(s,document.createTextNode(o.busy))}else c.textContent=(o.count||0)+' selected';
+ const a=el('div','bulk-actions');(o.actions||[]).forEach(n=>{if(n)a.append(n)});bar.append(c,a);
+ let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
+ if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
