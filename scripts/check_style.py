@@ -49,7 +49,8 @@ def count(text: str) -> dict:
 
 
 def scan(root: Path = ROOT) -> dict:
-    files = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+    listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True)
+    files = listed.stdout.decode("utf-8", "surrogateescape").split("\0")
     out = {}
     for f in files:
         if not f or Path(f).suffix not in EXTS or f.startswith(EXEMPT_PREFIX) or f in EXEMPT_FILES or EXEMPT_TESTS.search(f):
@@ -57,7 +58,7 @@ def scan(root: Path = ROOT) -> dict:
         p = root / f
         if not p.is_file():
             continue
-        c = count(p.read_text(errors="ignore"))
+        c = count(p.read_text(encoding="utf-8", errors="ignore"))
         if c["hex"] or c["style"] or f.endswith(".css"):
             out[f] = c
     return out

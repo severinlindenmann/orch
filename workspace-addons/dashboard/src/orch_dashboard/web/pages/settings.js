@@ -486,7 +486,7 @@ function copiesCard(settings) {
 const SYNC = 'sync';
 // Each choice says what it does in one line below it (bug hunt 17 Nov: three bare choices).
 const SYNC_WHERE = [['off', 'Off', 'No copy is kept.'],
-  ['local', 'On this computer only', 'A spare copy here, updated when something changes. Nothing leaves this computer.'],
+  ['local', 'On this computer only', 'Saves earlier versions in the workspace folder every 5 minutes. Nothing is sent to another device.'],
   ['remote', 'Another computer or your own storage', 'A copy in a private place you own, such as a GitHub repository. You give its address next.']];
 const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
@@ -589,16 +589,10 @@ function syncPausedHelp(card) {
 }
 // ---- The Sync page (fb18): where, what and when, the last 5 syncs, one plain error with one button. ----
 const syncSize = n => n >= 1e6 ? Math.round(n / 1e6) + ' MB' : n > 0 ? Math.max(1, Math.round(n / 1e3)) + ' KB' : '0 KB';
-function syncWhen(value) {
-  const d = new Date(value);
-  if (!value || Number.isNaN(d.getTime())) return '';
-  const hhmm = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
-  return (d.toDateString() === now().toDateString() ? 'today' : d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'})) + ' ' + hhmm;
-}
+const syncWhen = value => time(value);
 function syncInfo(card) {
   if (!card || card.mode === 'off') return null;
   const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
-  const count = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
   const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'card-row sync-info-body'}, h('div', {className:'stack'}, ...body)));
   const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
   const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
@@ -608,12 +602,17 @@ function syncInfo(card) {
   const history = array(card.history).slice(0, 5);
   return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
     h('div', {className:'grid-3'},
-      box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
-        remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
-      box('sync-what-info', 'What', h('strong', {}, count(c.tickets, 'ticket') + ' · ' + count(c.files, 'file') + ' · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
-      box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
-        h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
-        h('p', {className:'meta', 'data-key':'sync-service'}, card.running ? 'Sync is running.' : 'Sync is stopped on this computer.'))),
+      box('sync-where-info', 'Backup destination',
+        h('strong', {}, remote ? 'Your storage repository' : card.mode === 'remote' ? 'Choose a storage address below' : 'Workspace folder only'),
+        remote ? h('div', {className:'more-text'}, h('p', {className:'meta'}, card.remote)) : null,
+        h('div', {className:'more-text'}, h('p', {className:'meta'}, 'Local history: ' + (card.folder_path || (card.folder ? card.folder + '/.orch' : 'the workspace’s .orch folder')))),
+        !remote ? h('p', {className:'meta'}, 'No backup on another device.') : null),
+      box('sync-what-info', 'What is backed up', h('strong', {}, 'Tickets and their attached files'),
+        h('p', {className:'meta'}, 'Saved locally: ' + c.tickets + (c.tickets === 1 ? ' ticket · ' : ' tickets · ') + c.files + (c.files === 1 ? ' file · ' : ' files · ') + syncSize(c.bytes)),
+        h('p', {className:'meta'}, 'Other workspace files, settings, passwords and keys are not included.' + (array(card.not_synced).length ? ' Skipped files are listed below.' : ''))),
+      box('sync-when-info', 'When', h('strong', {}, 'Every ' + (card.interval || (card.mode === 'local' ? 5 : 15)) + ' minutes while running'),
+        h('p', {className:'meta'}, 'Last successful sync: ' + (syncWhen(card.last_ok) || 'not yet')),
+        h('p', {className:'meta', 'data-key':'sync-service'}, card.shown === 'paused' ? 'Paused. Review what needs you below.' : !card.running ? 'Sync is stopped. Turn backup off and on to restart.' : card.shown === 'offline' ? 'Waiting for a connection. Sync retries automatically.' : 'Next: ' + (syncWhen(card.next_run) || 'waiting for the first run')))),
     history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
       history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, capitalise(e.text || ''))))) : null);
 }
@@ -800,8 +799,8 @@ function phonePanel(phoneAddon, settings) {
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
     connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
       h('li', {}, 'Open the admin page of your phone link and add this workspace. It gives you one line to copy.'),
-      h('li', {}, 'Paste that line below and press Connect.')),
-      snapshot ? null : relayPaste()),
+      h('li', {}, 'Paste that line below and press Connect.'))),
+    connected || snapshot ? null : relayPaste(),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your phone link.')));
   // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
   const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
@@ -888,7 +887,7 @@ function settingsPage() {
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
     const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' : 'Not found on this computer. Install it, then it shows up here.';
-    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
+    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, h('label', {className:'tap-box'}, radio),
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
   }).map(row => row);
@@ -1886,7 +1885,7 @@ function repeatsDialog(only = null, addonName = null) {
   const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket), replaces,
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
-  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
+  if (!ticket.options.length) fields.append(stateNote('No open tickets yet', 'A repeat needs a ticket to start from. Make one first.', 'empty', {label:'New ticket', onClick:async () => { await window.orch.close(d); location.hash = '#new'; }}));
   const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});

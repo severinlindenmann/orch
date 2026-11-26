@@ -81,6 +81,21 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
     assert re.search(r"orch ticket status \S+ done", seen[5])  # summary written
 
 
+def test_review_ticket_next_step_names_a_list_that_holds_it(proj, run):
+    """ORCH-2110: a ticket in Review is not an `orch needs` row: its Next lines and the one of `orch counts`
+    name `orch review list`, which lists it."""
+    run("init", "--yes")
+    key = json.loads(run("ticket", "new", "A", "--json")[1])["key"]
+    run("check", "add", key, "x")
+    run("check", "done", key, "c1", "--note", "ok")
+    _, out, _ = run("ticket", "status", key, "done", "--by", "agent:copilot")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("counts")
+    assert _last(out).endswith("orch review list"), out
+    _, out, _ = run("review", "list")
+    assert key in out, out
+
+
 def test_lines_a_person_reads_name_the_key_not_the_id(proj, run):
     """ORCH-1876: Next lines, `orch needs` rows and `orch run status` say MPU-2, never t_xxxxxx."""
     run("init", "--yes")
@@ -123,6 +138,25 @@ def test_fresh_init_core_next_lines_name_no_part(proj, run):
             t1 = re.search(r"Created (\S+)", out).group(1)
         nxt = [x for x in out.splitlines() if x.startswith("Next:")]
         assert not any(bad.search(x) for x in nxt), (argv, nxt)
+
+
+def test_diag_says_what_looks_saves_and_deletes(proj, run, capsys):
+    run("init", "--yes")
+    code, out, _ = run("diag", "query")
+    nxt = _last(out)
+    # the report is offered as optional and local before the copyable line, which stays last
+    assert code == 0 and "optional" in nxt and "this workspace" in nxt and nxt.endswith(": orch diag report")
+    code, out, _ = run("diag", "query", "--json")
+    assert code == 0 and "Next:" not in out and set(json.loads(out)) >= {"total", "items", "window", "next"}
+    try:
+        cli.main(["diag", "--help"])
+    except SystemExit as e:
+        assert e.code == 0
+    out = capsys.readouterr().out
+    assert "read-only" not in out
+    for word in ("look:", "save:", "delete:", "inspect and query look", "for good"):
+        assert word in out, word
+    assert not re.search(r"relay|publish|share", out, re.I)  # off add-ons stay unnamed (R1.1)
 
 
 def _a(dry=False):

@@ -72,7 +72,7 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     if t.get("status") in ("done", "dropped"):
         return "orch ticket list"
     if t.get("status") == "review":
-        return "a person looks at it and marks it Done: orch needs"
+        return "a person looks at it and marks it Done: orch review list"
     checks = t.get("checklist") or []
     if not checks:
         return f'add one task per step: orch check add {n} "<step>"'
@@ -327,7 +327,7 @@ HINTS = {
     "config agent": "start it on a ticket: orch run start <ticket>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
-    "diag query": "orch diag report",
+    "diag query": "if you need help, save a report (optional; it stays in this workspace): orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
     "diag tickets": "orch ticket list",
@@ -408,7 +408,7 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": _needs,
-    "counts": "what each number stands for: orch needs",
+    "counts": "what waits for you: orch review list",
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
