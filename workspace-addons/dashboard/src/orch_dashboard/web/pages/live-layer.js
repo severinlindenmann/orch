@@ -53,7 +53,7 @@ function liveTreeMap(t, f) { return typeof t === 'string' ? f(t) : t && {...t, k
 // The pane `at` shows another session in the same place.
 function liveTreeSwap(t, at, key) { return liveTreeMap(t, x => x === at ? key : x); }
 // Split the pane `at` right (side by side) or down (stacked) with `key`: in a node of that direction it goes in next to
-// `at` and the two share `at`'s room; else `at` becomes a node of the two.
+// `at` and every pane of the node gives it an equal slice; else `at` becomes a node of the two.
 function liveTreeSplit(t, at, key, dir) {
   const d = dir === 'down' ? 'col' : 'row';
   if (!t) return key;
@@ -61,8 +61,8 @@ function liveTreeSplit(t, at, key, dir) {
   if (typeof t === 'string') return t;
   const i = t.k.indexOf(at);
   if (i >= 0 && t.d === d) {
-    const k = [...t.k], z = [...t.z], half = z[i] / 2;
-    k.splice(i + 1, 0, key); z.splice(i, 1, half, half);
+    const k = [...t.k], n = k.length, z = t.z.map(v => v * n / (n + 1));  // the new pane takes 1/(n+1) from all, not half of one (four in a row stay readable)
+    k.splice(i + 1, 0, key); z.splice(i + 1, 0, 1 / (n + 1));
     return {d, k, z:liveTreeShares(z)};
   }
   return {...t, k:t.k.map(c => liveTreeSplit(c, at, key, dir))};

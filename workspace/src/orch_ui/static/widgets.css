@@ -1171,6 +1171,12 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
   .live-pop [data-fold-item]{display:flex}
   .live-term-tools .term-say{display:none}
 }
+@container live-pane (max-width:299px){  /* four panes at 1280: the header keeps Close and More in view, the key and Full screen wait in the popover */
+  .live-ph .key,.live-ctl [data-key="live-full"]{display:none}
+  .live-stat{flex:0 1 auto;min-width:0;overflow:hidden}
+  .live-stat .pill{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .live-ph[data-compact]>.live-pt{min-width:0}
+}
 @container live-pane (max-width:639px){.live-term-tools .term-copy-w{display:none}}
 @container live-pane (max-width:479px){.live-term-tools .term-copy{display:none}}  /* a selection still copies with Ctrl+C or Cmd+C */
 .live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}

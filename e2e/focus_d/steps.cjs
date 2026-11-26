@@ -1643,7 +1643,8 @@ async function split(page, dash, width) {
   if ((await panes()).length !== list.length) throw new Error('the split lost a pane when the page changed');
   // pin one pane
   const one = list[0].key;
-  if (await page.$(inPane(one, 'live-pin'))) await page.click(inPane(one, 'live-pin'));
+  if (phone) await page.evaluate(k => window.LiveSessions.pin(k, true), one);  // a phone pane has no Pin button (ORCH-2199)
+  else if (await page.isVisible(inPane(one, 'live-pin'))) await page.click(inPane(one, 'live-pin'));
   else {
     await page.click(inPane(one, 'live-pane-more'));
     await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
@@ -1697,7 +1698,9 @@ async function split(page, dash, width) {
     if (Math.abs(now - room) > 3) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
     // the picture: four panes again
     await addBeside(inPane(left[0].key, 'live-split-right'));
-    await count(list.length);
+    // four sessions are in the layout; a quiet one may sit in the bar while the page has cards to answer (ORCH-261)
+    await page.waitForFunction(n => window.LiveLayer.panes.length === n, list.length, { timeout: 5000 });
+    await page.waitForFunction(n => document.querySelectorAll('#live-dock .live-pane').length >= n, list.length - 1, { timeout: 5000 });
   } else {
     await page.click(inPane(list[0].key, 'live-close'));
     await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });

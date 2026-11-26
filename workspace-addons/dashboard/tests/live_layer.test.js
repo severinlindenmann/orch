@@ -179,6 +179,14 @@ test('ORCH-2200: split any pane right or down; dividers share the room; closing 
   assert.equal(L.liveTreeOk({d:'diag', k:['a', 'b']}), null);
 });
 
+test('ORCH-2200: splitting right again in a row gives the new pane an equal slice (four panes stay readable)', () => {
+  const s = run(L.liveLayerFresh(), [{type:'open', key:'a'}, ...['b', 'c', 'd'].map((k, i) => ({type:'split', at:['a', 'b', 'c'][i], dir:'right', key:k}))]);
+  assert.deepEqual([...s.panes], ['a', 'b', 'c', 'd']);
+  assert.deepEqual([...s.tree.z], [0.25, 0.25, 0.25, 0.25]);
+  const t = L.liveLayerStep(s, {type:'close', key:'b'});
+  assert.deepEqual([...L.liveLayerStep(t, {type:'split', at:'a', dir:'right', key:'b'}).tree.z], [0.25, 0.25, 0.25, 0.25]);
+});
+
 test('ORCH-2200: panes stay where the person put them when a status or a pin changes (no sorting by the bar)', () => {
   assert.doesNotMatch(source.slice(source.indexOf('function liveLayerDo('), source.indexOf('// After Add beside')), /liveLayerSort\(/);
   assert.doesNotMatch(source.slice(source.indexOf("window.addEventListener('orch:live-pins'"), source.indexOf('// Renaming a session')), /liveLayerSort\(/);
