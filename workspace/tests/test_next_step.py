@@ -1,8 +1,11 @@
 """AGENTS.md R2.7: every orch command ends with a `Next:` line (one table: orch/nextstep.py)."""
 
 import argparse
+import io
 import json
 import re
+
+import pytest
 
 from orch import addons, cli, nextstep
 
@@ -196,6 +199,39 @@ def test_keeper_off_cli_has_no_red_run_next_line(proj, run):
         assert code == 0, (argv, out, err)
         line = _last(out)
         assert line.startswith("Next: ") and "red run" not in line and "ticket list" not in line, (argv, out)
+
+
+NEXT = [
+    (["ticket", "new", " "], "Give it a title"),
+    (["ticket", "new", "x" * 201], "Give it a title"),
+    (["check", "add", "{t}", " "], "orch check add"),
+    (["check", "done", "{t}", "c1"], "orch check done"),
+    (["ask", "{t}", " "], "orch ask"),
+    (
+        ["ask", "{t}", "Which?", "--option", "a", "--option", "b", "--recommend", "c"],
+        "Pick one of the options",
+    ),
+    (["answer", "{t}", "q9", "yes"], "orch ticket show"),
+    (["answer", "{t}", "{q}", " "], "orch answer"),
+    (["answer", "{t}", "{a}", "yes"], "orch ticket show"),
+    (["check", "done", "{t}", "c1", "--file", "nope.txt"], "Check the path"),
+    (["ticket", "attach", "{t}", "--name", "a.txt"], "Pick a file with content"),
+    (["ref", "add", "{t}", "not a thing"], "Check it and try again"),
+]
+
+
+@pytest.mark.parametrize("argv,hint", NEXT, ids=[" ".join(a[:3]) + f"-{i}" for i, (a, _) in enumerate(NEXT)])
+def test_refusals_say_what_to_do_next(proj, run, monkeypatch, argv, hint):
+    run("init", "--yes")
+    t = json.loads(run("ticket", "new", "Do it", "--json")[1])["key"]
+    run("check", "add", t, "One step")
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b"")))
+    q = json.loads(run("ask", t, "Which?", "--json")[1])["id"]
+    a = json.loads(run("ask", t, "Done?", "--json")[1])["id"]
+    run("answer", t, a, "ok")
+    code, out, err = run(*[a.replace("{t}", t).replace("{q}", q).replace("{a}", a) for a in argv])
+    assert code != 0
+    assert hint in out + err
 
 
 def test_run_config_agents_are_in_help_all_and_run_help_names_no_internal_command(proj, capsys):

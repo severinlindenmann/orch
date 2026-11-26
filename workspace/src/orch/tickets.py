@@ -1186,7 +1186,7 @@ def create(
         ticket_path(root, tid)  # validate before using the id in a lock path
     title = title.strip()
     if not title or len(title) > 200:
-        raise Refused("A title needs 1 to 200 characters.")
+        raise Refused("A title needs 1 to 200 characters. Give it a title in that range and try again.")
     parent_ticket = None
     if parent is not None:
         # the parent must exist (a new ticket has no children, so no loop; set_parent checks loops later)
@@ -1388,10 +1388,16 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
 def _check_can_finish(ticket: dict) -> None:
     open_ = [c["id"] for c in ticket["checklist"] if not c.get("done") and not c.get("wont_do")]
     if open_:
-        raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
+        raise Refused(
+            f"Not done: {', '.join(open_)} is not checked yet. "
+            f"Finish it, then run: orch check done <ticket> <step> --note '<what you did>'"
+        )
     bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence") and not c.get("wont_do")]
     if bad:
-        raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
+        raise Refused(
+            f"Not done: {', '.join(bad)} is checked without evidence. "
+            f"Add it with: orch check done <ticket> <step> --note '<what you did>'"
+        )
 
 
 def _open_questions(ticket: dict) -> list[str]:
@@ -1558,7 +1564,9 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", *, person: 
         if hidden_kind(ticket):
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
-            raise Refused("This ticket is not waiting for your review.")
+            raise Refused(
+                "This ticket is not waiting for your review. See what is: orch ticket list --status review"
+            )
         ownerpick.refuse_ticket(ticket, person)
         ticket["status"] = "done"
         ticket["waiting_on"] = None
@@ -1650,7 +1658,7 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
             raise Refused(
-                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+                f"Ticket {tid} has no question {qid}. See its questions with: orch ticket show {tid}"
             )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
@@ -1791,7 +1799,7 @@ def merged_for_owner(root: Path, tid: str, qid: str, url: str, head: str, line: 
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
             raise Refused(
-                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+                f"Ticket {tid} has no question {qid}. See its questions with: orch ticket show {tid}"
             )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
@@ -2024,7 +2032,7 @@ def set_status(
     root: Path, tid: str, status: str, by: str, superseded_by: str | None = None, *, person: bool = False
 ) -> dict:
     if status not in STATUSES:
-        raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+        raise Refused(f"Status must be one of: {', '.join(STATUSES)}. Pick one of them and try again.")
     if superseded_by is not None and status != "dropped":
         raise Refused("--superseded-by goes with the status dropped (Won't do).")
     other = superseded_value(root, tid, superseded_by) if superseded_by is not None else None
@@ -2287,7 +2295,7 @@ def edit(
     if title is not None:
         title = title.strip()
         if not title or len(title) > 200:
-            raise Refused("A title needs 1 to 200 characters.")
+            raise Refused("A title needs 1 to 200 characters. Give it a title in that range and try again.")
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
@@ -2556,7 +2564,7 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
     overwritten."""
     title = title.strip()
     if not title or len(title) > 200:
-        raise Refused("A title needs 1 to 200 characters.")
+        raise Refused("A title needs 1 to 200 characters. Give it a title in that range and try again.")
     if description is not None:
         clean_field("note", description)  # the same plain-text rules and 2000 characters
 
@@ -2983,7 +2991,7 @@ def tidy(
     title = title.strip()
     est = _estimate((estimate or {}).get("minutes"), (estimate or {}).get("cost"))
     if not title or len(title) > 200:
-        raise Refused("A title needs 1 to 200 characters.")
+        raise Refused("A title needs 1 to 200 characters. Give it a title in that range and try again.")
     description = (description or "").strip() or None
     if description is not None:
         clean_field("note", description)  # the same plain-text rules and 2000 characters
@@ -3490,7 +3498,7 @@ def _clean_covers(covers: str | None) -> str | None:
 
 def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
-        raise Refused("A checklist item needs text.")
+        raise Refused("A checklist item needs text. Say what to do: orch check add <ticket> '<text>'")
     covers = _clean_covers(covers)
     no_secret(root, {"text": text}, "task")
 
@@ -3513,7 +3521,9 @@ def parse_evidence(raw: str) -> dict:
     if not isinstance(ev, dict) or ev.get("type") not in EVIDENCE_TYPES:
         raise Refused(f"Evidence type must be one of: {', '.join(EVIDENCE_TYPES)}.")
     if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
-        raise Refused("Evidence needs a ref (PR, commit, file, URL, command or note text).")
+        raise Refused(
+            "Evidence needs a ref (PR, commit, file, URL, command or note text). Add one and run it again."
+        )
     if "role" in ev and ev["role"] not in ROLES:
         raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
@@ -3898,7 +3908,7 @@ def check_edit(
     if text is None and covers is None:
         raise Refused("Say the new text or --covers.")
     if text is not None and not text.strip():
-        raise Refused("A checklist item needs text.")
+        raise Refused("A checklist item needs text. Say what to do: orch check add <ticket> '<text>'")
     covers = _clean_covers(covers)
 
     def op(t):
@@ -4030,7 +4040,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
-        raise Refused("A history entry needs text.")
+        raise Refused("A history entry needs text. Write a short note and try again.")
     no_secret(root, {"text": text}, "history entry")
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
@@ -4463,7 +4473,7 @@ def ask(
     add_workspace: only from chat_groups.ask_to_add (the Add / Not now card it words itself); a caller's own
     --action can never carry it, so a person's Add never adds a workspace under other words."""
     if not text.strip():
-        raise Refused("A question needs text.")
+        raise Refused("A question needs text. Write it: orch ask <ticket> '<question>'")
     if group is not None:
         group = " ".join(group.split())
         if card is None or not group or len(group) > GROUP_MAX or any(ord(ch) < 32 for ch in group):
@@ -4471,7 +4481,10 @@ def ask(
     if links is not None and card is None:
         raise Refused("Links go with a card.")
     if recommended is not None and options and recommended not in options:
-        raise Refused("The recommended answer must be one of the options.")
+        raise Refused(
+            "The recommended answer must be one of the options. "
+            "Pick one of the options you gave, or leave it out."
+        )
     if because is not None:
         because = " ".join(because.split())
         if not because or recommended is None:
@@ -4698,7 +4711,7 @@ def answered_in_conversation(root: Path, tid: str, qid: str, words: str, by: str
             raise Refused(f"Ticket {tid} has no question {qid}. See the open ones: orch needs.")
         refuse_if_taken_back(q)
         if q["answer"] is not None:
-            raise Refused(f"{qid} is already answered.")
+            raise Refused(f"{qid} is already answered. See the ticket for the answer: orch ticket show {tid}")
         if q.get("action") or q.get("kind") not in (None, "plain"):
             raise Refused(f"{qid} does something when it is answered: the person answers it on the card.")
         at = now()
@@ -4740,7 +4753,7 @@ def answer(
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not text.strip():
-        raise Refused("An answer needs text.")
+        raise Refused("An answer needs text. Write it: orch answer <ticket> <question> '<answer>'")
     text = text.strip()
     no_secret(root, {"answer": text}, "answer")
 
@@ -4750,7 +4763,7 @@ def answer(
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
             raise Refused(
-                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+                f"Ticket {tid} has no question {qid}. See its questions with: orch ticket show {tid}"
             )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
@@ -4867,7 +4880,7 @@ def record_answered(
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
-        raise Refused("An answer needs text.")
+        raise Refused("An answer needs text. Write it: orch answer <ticket> <question> '<answer>'")
     if isinstance(entry.get("card"), dict) and not str(by).startswith("human:"):
         raise Refused(
             "This card waits for the owner. Ask with orch review add and wait with orch review wait."
@@ -5037,7 +5050,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person:
     if "title" in obj:
         t = obj["title"]
         if not isinstance(t, str) or not t.strip() or len(t.strip()) > 200:
-            raise Refused("A title needs 1 to 200 characters.")
+            raise Refused("A title needs 1 to 200 characters. Give it a title in that range and try again.")
     for k in ("owner", "due", "note", "done_when", "summary"):
         if k in obj:
             clean_field(k, obj[k])
@@ -5059,7 +5072,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, *, person:
             ticket["title"] = obj["title"].strip()
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:
-            raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+            raise Refused(f"Status must be one of: {', '.join(STATUSES)}. Pick one of them and try again.")
         actor = by
         if "status" in obj:
             status, actor = _finish_status(root, ticket, status, by, person)
