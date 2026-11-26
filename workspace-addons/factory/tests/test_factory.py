@@ -555,3 +555,21 @@ def test_list_show_next_print_plain_lines_unless_json(ws, run, proposal):
     assert f"order: {order}" in plain("next", order) and "step: " in plain("next", order)
     assert run("list")[0]["order"] == order
     assert run("show", order)["order"] == order
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a script with a #! line")
+def test_a_title_with_spaces_quotes_and_umlauts_reaches_orch_as_one_word(tmp_path, monkeypatch):
+    """R1.6: the command is an argument list, never a shell line, so the text arrives as it was written."""
+    from orch_factory import orchcli
+
+    folder = tmp_path / "Mein Ordner – Grüße 'x'"
+    folder.mkdir()
+    fake = folder / "orch"
+    echo = "import json, os, sys\nprint(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}))\n"
+    fake.write_text(f"#!{sys.executable}\n{echo}")
+    fake.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(fake))
+    title = "Angebot \"Müller & Söhne\" – 'Q4'; $HOME %PATH% `x`"
+    got = orchcli.call(folder, "ticket", "new", title, write=True)
+    assert got["argv"] == ["ticket", "new", title, "--json", "--by", "agent:factory"]
+    assert os.path.samefile(got["cwd"], folder)
