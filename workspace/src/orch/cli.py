@@ -585,6 +585,7 @@ def build_parser(
     on: frozenset[str] = frozenset(),
     *,
     command: str | None = None,
+    helps: bool = True,
 ) -> argparse.ArgumentParser:
     """`on`: the built-in add-ons (relay, publish) that are on here; help names the others nowhere (R1.1).
     Help, examples and next steps are only built for a help request (`command` is None)."""
@@ -628,7 +629,8 @@ def build_parser(
         a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
     _drop_hidden(p)
-    helptext.apply(p, on)
+    if helps:
+        helptext.apply(p, on)
     return p
 
 
