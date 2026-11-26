@@ -641,12 +641,14 @@ function chatSayRequest(e) {
   const text = data.text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 500);
   return text ? {text} : null;
 }
-window.addEventListener('message', e => {
+// Opens Chat only: never sends. A draft already in the composer wins over the suggestion (Factory's Pauses row, ORCH-2065).
+function chatSayOpen(e) {
   const req = chatSayRequest(e); if (!req) return;
   if (!(chatUi.drafts.chat || '').trim()) chatUi.drafts.chat = req.text;
   chatUi.open = 'chat'; chatUi.listOpen = false; chatUi.filter = 'all';
   location.hash = '#chat';
-});
+}
+window.addEventListener('message', chatSayOpen);
 function chatDmRoute() {
   const ws = location.hash.slice(6);
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }

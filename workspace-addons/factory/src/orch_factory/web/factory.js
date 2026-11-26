@@ -318,7 +318,7 @@
       ...(b.warn ? [meta('The time limit is nearly used up. Open the order to decide what happens next.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
-  // The page never writes by itself. "Ask me at every pause" goes to your helper in Chat as typed text (you press Send
+  // The page never writes by itself. "Change in Chat" (Pauses) opens Chat with a suggestion in the draft (you press Send
   // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
   // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
@@ -444,15 +444,25 @@
   // stays when the list arrives.
   let idea = null;
   const theIdea = () => idea || (idea = ideaBox());
+  // Pauses (ORCH-2065): the row says what the record says today and saves nothing. Change in Chat only opens Chat with
+  // a suggestion; the dashboard keeps a draft you already typed there (then the suggestion is not added) and never sends.
+  // An active Autopilot has limits (routine pauses only, its own orders and end date; never putting it live or
+  // anything that can't be undone), so the row never says an order runs without pauses.
   function askRow(auto) {
-    const asks = !auto?.on, row = group('setting-row f-ask');
-    const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every pause');
-    const word = node('span', asks ? 'On' : 'Off', 'meta');
-    input.addEventListener('change', () => { input.checked = asks; toChat(asks ? 'Factory: run to the end with Autopilot' : 'Factory: ask me at every stop again'); });
-    const label = node('label', null, 'row'); label.append(word, input);
-    row.append(node('div', 'Ask me at every pause', 'row-label'),
-      group('row-value', document.createTextNode('Factory waits for your OK after each step'), meta('Turn off to let it run to the end.')),
-      group('row-action', label));
+    const on = !!auto?.on, row = group('setting-row f-pauses');
+    const hint = meta('Opens Chat. Nothing is sent until you press Send.'); hint.id = 'f-pauses-hint';
+    const value = on
+      ? group('row-value', p('Autopilot may answer routine pauses until ' + when(auto.until) + '.'),
+        meta("Putting it live, and anything that can't be undone, still waits for your OK."), hint)
+      : group('row-value', p('Factory waits for your OK at every pause.'), hint);
+    let change;
+    if (embedded()) {
+      change = node('button', 'Change in Chat', 'btn outline sm f-btn'); change.type = 'button';
+      change.addEventListener('click', () => toChat(on ? 'Factory: I would like to be asked at every pause again.'
+        : 'Factory: I would like Autopilot to answer routine pauses. What would it cover?'));
+    } else change = link('Change in Chat', '/#chat');
+    change.setAttribute('aria-describedby', hint.id);
+    row.append(node('div', 'Pauses', 'row-label'), value, group('row-action', change));
     return group('card', row);
   }
   // Every card of one order on home carries its id, so a background update can find your place again, and its
@@ -506,7 +516,6 @@
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
         meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
-        meta('Your helper answers routine pauses. Putting it live still asks you.'),
         tail(link('What it decided', '#/autopilot')));
       autoCard.classList.add('f-autopilot'); view.append(autoCard);
     } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
@@ -775,10 +784,29 @@
     const ticks = items.map((item, i) => {
       const n = picturesOf(item).length;
       const box = node('input'); box.type = 'checkbox'; box.checked = true;
-      const label = node('label', null, 'check-label'); label.append(box, document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
-      return {box, label, i, text: label.lastChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : ''};
+      // one text block, so a "not sent" note added later flows with the item's words instead of a column of its own
+      const words = node('span'); words.append(document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
+      const label = node('label', null, 'check-label'); label.append(box, words);
+      return {box, label, words, i, name: text(item.title), text: words.firstChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '', pictures: n};
     });
     const checked = meta('Checking for passwords and keys…');
+    const excluded = group('stack');
+    const selected = meta('');
+    // one status region: the check's result, the items it kept here and what is still ticked, read out when it changes
+    const status = group('stack', checked, excluded, selected); status.setAttribute('role', 'status');
+    // a long item name is shown whole on its tick box; the summary lines keep it short
+    const short = name => '“' + (name.length > 60 ? name.slice(0, 59).trimEnd() + '…' : name) + '”';
+    const quoted = items => items.map(t => short(text(t)));
+    const names = list => list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+    const showSelected = () => {
+      const on = ticks.filter(t => t.box.checked);
+      // zero items is not zero content: the card title, the line and the question still go
+      selected.textContent = on.length
+        ? 'Still sent: ' + (on.length <= 3 ? names(quoted(on.map(t => t.name))) + ' (' + on.length + ' of ' + plural(ticks.length, 'item', 'items') + ')' : on.length + ' of ' + plural(ticks.length, 'item', 'items')) + ', plus the title, the line and the question above.'
+        : 'No items ticked. Send still sends the title, the line and the question above.';
+    };
+    for (const t of ticks) t.box.addEventListener('change', showSelected);
+    showSelected();
     const preview = group('stack', meta('Reading what will be sent…'));
     const problem = p(''); problem.hidden = true; problem.setAttribute('role', 'alert');
     const cancel = node('button', 'Cancel', 'btn'); cancel.type = 'button'; cancel.addEventListener('click', () => d.close());
@@ -786,20 +814,28 @@
     const close = node('div', null, 'row between'); close.append(node('h2', 'Ask another workspace'));
     close.firstChild.id = 'ask-title';
     d.append(close, who, node('h3', 'What leaves this computer'), preview, ...ticks.map(t => t.label),
-      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), checked, problem, group('actions actions-end', cancel, send));
-    // the check runs when the dialog opens, before Send: a file with a hit is shown unticked and disabled with its reason
+      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), status, problem, group('actions actions-end', cancel, send));
+    // the check runs when the dialog opens, before Send: an item with a picture that has a hit, or that could not be
+    // checked, is unticked and disabled; the status says which item stays here, why, and what is still ticked
     read('/api/order/' + order.id + '/stop/' + stop.n + '/scan').then(scan => {
-      const hits = [];
+      let kept = 0;
       // exactly what the add-on sends, built by the one function that sends it: card title, line, question, item texts
       preview.replaceChildren(node('strong', text(scan.title)), p('“' + text(scan.line) + '”'), meta('Question: ' + text(scan.question)));
-      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) t.text.nodeValue = ' ' + text(row.check) + t.suffix; }
+      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) { t.name = text(row.check); t.text.nodeValue = ' ' + t.name + t.suffix; } }
       for (const row of array(scan.items)) {
         const t = ticks[row.i]; const bad = array(row.files).filter(f => f.ok === false);
         if (!t || !bad.length) continue;
+        kept += 1;
         t.box.checked = false; t.box.disabled = true;
-        for (const f of bad) { hits.push(f.name); t.label.append(node('strong', ' · not sent: ' + text(f.name) + ' ' + text(f.why || 'could not be checked'))); }
+        // a known hit (the scan found something) reads differently from a picture that could not be checked at all
+        const found = bad.some(f => f.found === true);
+        t.words.append(node('strong', found ? ' · not sent: password or key found' : ' · not sent: could not check'));
+        const why = bad.map(f => text(f.name) + ' ' + (f.why ? text(f.why) : 'could not be checked') + '.');
+        const rest = t.pictures > 1 ? 'The item and its ' + plural(t.pictures, 'picture', 'pictures') + ' stay here.' : 'The item and its picture stay here.';
+        excluded.append(group('banner attn', group('grow', node('strong', (found ? 'Password or key found' : 'Could not check') + ' · ' + short(t.name) + ' is not sent'), p(why.join(' ') + ' ' + rest))));
       }
-      checked.textContent = hits.length ? 'Found in a picture: untick it or remove the password first.' : 'Checked for passwords and keys: nothing found.';
+      checked.textContent = 'Checked for passwords and keys: nothing found.'; checked.hidden = kept > 0;
+      showSelected();
       send.disabled = false;
     }).catch(() => { checked.textContent = 'Could not check for passwords and keys now. Send checks again before anything leaves.'; send.disabled = false; });
     send.addEventListener('click', async () => {

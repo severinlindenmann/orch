@@ -364,6 +364,31 @@ test('orch.say from the shown add-on frame fills the draft; a URL does not; a ty
   assert.equal(c.chatSayRequest(msg('hi', {source:{}})), null);
 });
 
+// ORCH-2065: Factory's Change in Chat only opens Chat. An empty composer gets the suggestion; a draft you typed stays
+// and the suggestion is not added; nothing is ever sent.
+test('Change in Chat from Factory opens Chat, keeps a typed draft and never sends', () => {
+  const c = context(), frameWin = {}, sent = [];
+  c.location = {hash:'#addon/factory', origin:'http://x'};
+  c.route = () => ({kind:'page', id:'factory'});
+  c.state.addons = [{name:'factory', shipped:true}];
+  c.document.querySelector = () => ({contentWindow:frameWin});
+  c.fetch = (...a) => { sent.push(a); return Promise.resolve({ok:true, json:async () => ({})}); };
+  const ask = 'Factory: I would like Autopilot to answer routine pauses. What would it cover?';
+  const msg = {data:{type:'orch.say', text:ask}, origin:'http://x', source:frameWin};
+  c.chatSayOpen(msg);
+  assert.equal(vm.runInContext('chatUi.drafts.chat', c), ask);
+  assert.equal(c.location.hash, '#chat');
+  vm.runInContext("chatUi.drafts.chat = 'Milk, eggs, bread'", c);
+  c.location.hash = '#addon/factory';
+  c.chatSayOpen(msg);
+  assert.equal(vm.runInContext('chatUi.drafts.chat', c), 'Milk, eggs, bread');
+  assert.equal(c.location.hash, '#chat');
+  c.location.hash = '#addon/factory';
+  c.chatSayOpen({...msg, origin:'http://evil'});
+  assert.equal(c.location.hash, '#addon/factory', 'a foreign message opens nothing');
+  assert.deepEqual(sent, []);
+});
+
 test('the heading counts helpers like Home: the same helper rows and words, not the raw run count', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{running:15}, messages:[]};
