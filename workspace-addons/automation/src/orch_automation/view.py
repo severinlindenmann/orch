@@ -497,7 +497,9 @@ def _schedules(
                     "cells": {
                         "schedule": _name(t),
                         "repeats": "Once",
-                        "next": "Paused" if not running else clean(f"{_day(at)}, {at:%H:%M} {_basis(at)}", 40),
+                        "next": "Paused"
+                        if not running
+                        else clean(f"{_day(at)}, {at:%H:%M} {_basis(at)}", 40),
                         "last": "Not yet",
                     },
                     "link": t["id"],
