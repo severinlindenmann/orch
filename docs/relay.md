@@ -22,6 +22,20 @@ $ orch relay profile --description "Builds and tests the customer website" --tag
 
 The profile is a proposal; the admin approves it. Until then the old text stays.
 
+### Add another workspace on the same computer
+
+The admin can add a second workspace from a workspace that is already connected, in one line, over the private
+network:
+
+```sh
+$ orch relay invite "Finance" --folder ~/Finance --group Team --admin-url https://relay-admin.example  # skip
+```
+
+It asks for the relay's admin token (not shown, not saved; or set `ORCH_RELAY_ADMIN_TOKEN`), adds the workspace on
+the relay, turns the relay on in that folder and connects it. The new workspace's token goes straight into the folder;
+nothing secret is printed. `--group` takes a group's name or id. If the folder cannot be connected, the new workspace
+is taken back. The admin token never follows a redirect. `orch publish invite` does the same for publish.
+
 Connecting also makes the workspace's own signing key. The private key stays on this computer in orch's protected
 folder; it is never shown or sent. The relay keeps only the public key. `orch relay key` shows the fingerprint, eight
 groups of four characters, so another workspace or your phone can check they have the right one.
@@ -158,6 +172,27 @@ sudo -u orch-relay orch-relay admin groups list
 sudo -u orch-relay orch-relay admin groups remove <id> [--dry-run]     # its workspaces stay, outside any group
 sudo -u orch-relay orch-relay admin cleanup --dry-run                  # back up relay.db first, then without --dry-run
 ```
+
+## When the private network is down (break-glass)
+The admin page and the admin port stay on the private network, also in an emergency: there is no second open port and
+no switch that opens them. When the private network itself is down (19 Nov: its signal service was out for over an
+hour), the admin reaches the admin listener through ssh to the server instead:
+
+```
+ssh <server> ip -4 -brief addr show wt0          # the server's private address, e.g. 100.64.0.5
+ssh -N -L 8412:<private address>:8412 <server>   # leave it open
+```
+
+Then open `http://127.0.0.1:8412/admin` on the same computer and sign in with the admin token as usual. The forward
+ends when the ssh command stops. Admin commands also work straight on the server
+(`sudo -u orch-relay orch-relay admin …`, see Command line).
+
+- Only the admin, with their own ssh login to the server. Nothing changes on the server; the admin token is still needed.
+- If the private address is gone too (the interface is down), the admin listener is gone with it: start the private
+  network on the server again, then restart `orch-relay` (it takes the address at start).
+- Never open the admin port in the firewall, never point the public site at it.
+
+Publish is the same with port 8411 (`docs/publish.md`).
 
 ## Deploy
 Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
