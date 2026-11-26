@@ -169,3 +169,18 @@ test('home: with every result from today Finished keeps the Done tickets link; m
   const none = draw(ws), fin0 = text(nodes(none).find(n => n.attrs?.['data-key'] === 'finished-today'));
   assert.match(fin0, /Nothing finished yet\./); assert.doesNotMatch(fin0, /Done tickets/);
 });
+// ORCH-2023: Home names the agent stored on the question (asked with --by agent:copilot), never the chosen agent.
+test('Needs you names who asked the question; unknown is Helper, not the chosen agent', () => {
+  const settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
+  const row = {id:'n1', ticket:'t1', since:'2026-11-14T09:00:00Z', title:'Which logo?', answer:{question:'q1', digest:'d', options:['Blue', 'Green']}};
+  const asked = (q, runs = {}) => {
+    const tickets = [{id:'t1', key:'KP-2', title:'Newsletter', status:'waiting', questions:[{id:'q1', text:'Which logo?', ...q}]}];
+    const c = ctx({state:{settings, runs, services:[]}, needsList:() => [row], tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id)});
+    return text(nodes(c.needRow(row, 'n1')).find(n => /question-context/.test(n.attrs.className || '')));
+  };
+  assert.match(asked({asked_by:'agent:copilot'}), /^Copilot asked/);
+  assert.match(asked({asked_by:'agent:copilot'}, {t1:{claim:{agent:'claude'}}}), /^Copilot asked/, 'the question beats the run');
+  assert.match(asked({}, {t1:{claim:{agent:'codex'}}}), /^Codex asked/, 'an older question: the agent of the run');
+  assert.match(asked({}), /^Helper asked/, 'nothing known: never the chosen agent');
+  assert.match(asked({asked_by:'human:anna'}), /^Helper asked/);
+});

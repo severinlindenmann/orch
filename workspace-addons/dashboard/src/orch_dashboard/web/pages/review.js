@@ -437,6 +437,7 @@ function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
   return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
     h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
+    h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'),
     h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':where + '-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
 }
 // One set of rows for both places (R4.3): the Review card and Settings > General.

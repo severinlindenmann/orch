@@ -32,6 +32,9 @@ q('#w-table').append(UI.table([{key:'t',label:'Ticket',sort:true},{key:'o',label
 q('#w-empty').append(UI.state({kind:'empty',title:'Nothing here yet',text:'Finished work shows up here.',action:{label:'Create a ticket'}}));
 q('#w-error').append(UI.state({kind:'error',title:'Could not reach your storage',text:'Check the address or your connection.',action:{label:'Try again'}}));
 q('#w-loading').append(UI.state({kind:'loading'}));
+q('#w-table-empty').append(UI.table([{key:'t',label:'Ticket'},{key:'s',label:'Status'}],[],{empty:'No tickets match',emptyText:'Clear the filter to see all tickets.',emptyAction:{label:'Clear filter'}}));
+q('#w-helpers-empty').append(UI.helperList([],{}));
+q('#w-preview-fail').append(UI.state({kind:'error',title:'The preview did not load',text:'Open the card to see it, or try again.',action:{label:'Try again'}}));
 {const run=()=>{const l=UI.launch({title:'Starting…',sub:'Plan the autumn newsletter',steps:['Creating the ticket','Starting your helper','Opening it']});q('#w-launch').replaceChildren(l.el);setTimeout(()=>l.step(1),600);setTimeout(()=>l.step(2),1300);setTimeout(()=>{l.finish('Started');setTimeout(()=>{l.el.classList.remove('launch-out')},900)},2000)};run();q('#w-launch-replay').onclick=run}
 {const w=UI.launch({title:'Saving…',sub:'Plan the autumn newsletter',steps:['Creating the ticket','Starting your helper','Opening it']});w.step(1);w.warn(1,'Helper not started. Your ticket is saved.');q('#w-launch-warn').append(w.el)}
 {const pg=(h,t)=>({type:'doc',heading:h,paras:[t]}),items=[
