@@ -441,7 +441,7 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
         raise
     if (atid := _allow_ticket(root, mid)) is not None:  # allowed from any surface: the question is settled
         who = by if by else "someone"
-        word = "Allow once" if mode == "once" else "Always"
+        word = allow_options(_shown_name(root, msg["from"], "this workspace"))[0 if mode == "once" else 1]
 
         def settle(tk):
             q = next((x for x in tk["questions"] if x.get("kind") == "relay:allow"), None)
@@ -2586,7 +2586,29 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
 
 # ---- phone texts and the allow question (SA-01, SA-12, UX-02) -----------------------------------
 
-ALLOW_OPTIONS = ("Allow once", "Always", "Ignore")
+# RP4 A (owner, 25 Nov 2026): three buttons that each say what they do. The middle one names the sender,
+# so the options are made per question (allow_options); old answers (Allow once, Always, Ignore, No) count.
+ALLOW_OPTIONS = ("Allow this task", "Always allow tasks from {peer}", "Decline")
+_ALWAYS_PREFIX = "always allow tasks from "
+
+
+def allow_options(peer: str) -> list[str]:
+    """The buttons of a 1:1 allow question; the name is cut so an option stays within 80 characters."""
+    return [o.format(peer=clean_untrusted(peer, 50) or "this workspace") for o in ALLOW_OPTIONS]
+
+
+def allow_choice(answer) -> str | None:
+    """once | always | no for an allow answer in today's words or the old ones; None when it is not one."""
+    from orch import chat_groups
+
+    text = " ".join(str(answer or "").split()).casefold()
+    if text == "allow this task":
+        return "once"
+    if text.startswith(_ALWAYS_PREFIX) and len(text) > len(_ALWAYS_PREFIX):
+        return "always"
+    if text == "decline":
+        return "no"
+    return chat_groups.parse_allow_answer(answer)
 
 
 def _by_relay(frm: str) -> str:
@@ -3178,9 +3200,18 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
         "kind": msg["type"],
         "key": b.get("key") if msg["type"] == "start" else None,
     }
-    text = f"{peer} wants {me or 'this workspace'} to: {task}. Allow it?"
     grouped = msg_group(msg) and msg["type"] == "delegate"
-    options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
+    if grouped:  # a group's question keeps its words: the phone's card reads them (chat-groups.md)
+        text = f"{peer} wants {me or 'this workspace'} to: {task}. Allow it?"
+    else:  # RP4 A: who it is from, the task, their own words, and what allowing it does
+        said = clean_untrusted(str(b.get("text") or b.get("note") or ""), 300)
+        text = (
+            f"Task from {peer}: {task}"
+            + (f'\n\n"{said}"' if said and said != task else "")
+            + "\n\nIf you allow it, a helper here works on it as a new ticket, with this workspace's files "
+            f"and tools. It may send results, including files, back to {peer}."
+        )
+    options = ["once", "always", "no"] if grouped else allow_options(peer)  # G11 wire words for a group
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
     # the binding (guarded home) of this question to this message: ext.relay is synced, a peer can change it.
     # Sync-free: nothing is written (no peer; allow_message decides, as before; enabling sync adopts it, see
@@ -3296,11 +3327,8 @@ def apply_allow_answers(root: Path) -> list[str]:
                     f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} to ignore it"
                 )
                 continue
-            from orch import chat_groups
 
-            choice = {"once": "once", "always": "permanent", "no": "ignore"}.get(
-                chat_groups.parse_allow_answer(q["answer"])
-            )
+            choice = {"once": "once", "always": "permanent", "no": "ignore"}.get(allow_choice(q["answer"]))
             if choice is None:
                 if r.get("allow_note") != q["id"]:
                     ans = clean_untrusted(str(q["answer"]), 100)
