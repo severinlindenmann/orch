@@ -89,6 +89,18 @@ final class ArchiveUITests: XCTestCase {
         XCTAssertTrue(el(app, "archived-t:ws_pilatus001|t_q3sum1").waitForNonExistence(timeout: 10))
     }
 
+    /// A long swipe across a chat row (also a fling) only shows Archive and Delete: it never archives or deletes on its own.
+    func testLongSwipeOnAChatOnlyShowsItsButtons() {
+        let app = launch()
+        let chat = el(app, row)
+        chat.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: chat.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)), withVelocity: .fast, thenHoldForDuration: 0)
+        ready(app.buttons["Archive"], "Archive action")
+        XCTAssertTrue(app.buttons["Delete"].exists, "Delete action shows")
+        XCTAssertFalse(el(app, "archive-toast").waitForExistence(timeout: 2), "nothing was archived or deleted")
+        XCTAssertTrue(el(app, row).exists, "the chat stays in the list")
+    }
+
     /// Product check: Undo always brings the chat back, also when archive and Undo follow each other quickly.
     /// Long: local or nightly only (`TEST_RUNNER_ORCH_UITEST_LONG=1`). The CI run has the single archive/Undo test for the same path.
     func testArchiveThenUndoFiveTimesInARowAlwaysBringsTheChatBack() throws {

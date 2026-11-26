@@ -277,12 +277,12 @@ struct Composer: View {
                 if reply?.answering?.id == q.id { reply = nil; restoreDraft() }
             } else {
                 let sent = text
-                let replyTo = reply?.messageId
+                let replyTo = reply?.messageId, quoted = reply
                 text = ""; Self.drafts[draftKey(target)] = nil; reply = nil
                 do { try await dispatch(MessageDraft(text: sent, replyTo: replyTo), to: target) }
                 catch {
-                    // Never overwrite what was typed meanwhile.
-                    if text.isEmpty { text = sent; Self.drafts[draftKey(target)] = sent }
+                    // Never overwrite what was typed meanwhile. The quote comes back too, so Send again is the same message.
+                    if text.isEmpty { text = sent; Self.drafts[draftKey(target)] = sent; if reply == nil { reply = quoted } }
                     throw error
                 }
             }
