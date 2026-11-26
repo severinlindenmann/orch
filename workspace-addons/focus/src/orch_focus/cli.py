@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
+KEY_RE = re.compile(r"[A-Za-z0-9]{2,4}-[1-9][0-9]{0,8}")  # the shape of a core ticket key (DM1-12, any case)
 
 
 def find_workspace(start: Path) -> Path | None:
@@ -19,15 +20,41 @@ def find_workspace(start: Path) -> Path | None:
     return None
 
 
-def _ticket_id(root: Path, ref: str) -> str | None:
-    """A ticket id, or the id of a ticket key (DM1-12, any case); None when there is no such ticket."""
+def _ticket_id(root: Path, ref: str) -> tuple[str | None, str | None]:
+    """(the ticket id, None) for a ticket id or key (DM1-12, any case) of this workspace; else (None, why).
+    Only a well-formed reference with no ticket file is "no such ticket"; a file that is there but cannot be read
+    is never called missing. The why names nothing but the checked reference (no path, no exception text)."""
     from orch import tickets
     from orch.errors import Refused
 
+    ref = ref.strip()
+    if TID_RE.fullmatch(ref):
+        name = ref
+    elif KEY_RE.fullmatch(ref):
+        name = ref.upper()
+    else:
+        return None, "Give a ticket id like t_ab12cd or its key like DM1-12."
+    missing = f"There is no ticket {name} in this workspace. Run `orch ticket list` to see your tickets."
+    unread = (
+        f"Ticket {name} could not be read, so Focus can't open it. Run `orch ticket show {name}` to see why."
+    )
     try:
-        return tickets.load(root, tickets.resolve(root, ref.strip()))["id"]
-    except (Refused, OSError, ValueError, KeyError):
-        return None
+        tid = tickets.resolve(root, ref)  # a key the index doesn't know: Refused, it is not here
+    except Refused:
+        return None, missing
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, unread
+    try:
+        tickets.ticket_path(root, tid).stat()
+    except FileNotFoundError:
+        return None, missing
+    except (Refused, OSError, ValueError):
+        return None, unread
+    try:
+        found = tickets.load(root, tid).get("id")
+    except (Refused, OSError, ValueError, KeyError, AttributeError):
+        return None, unread
+    return (found, None) if found == tid and TID_RE.fullmatch(str(found)) else (None, unread)
 
 
 def _dashboard_url(root: Path) -> tuple[str | None, str | None]:
@@ -64,9 +91,9 @@ def _open(args, root: Path) -> int:
         )
         return 2
 
-    tid = _ticket_id(root, args.ticket)
-    if tid is None or not TID_RE.fullmatch(tid):
-        return refuse("Give a ticket id like t_ab12cd or its key like DM1-12.")
+    tid, why = _ticket_id(root, args.ticket)
+    if tid is None:
+        return refuse(why)
     base, why = _dashboard_url(root)
     if base is None:
         return refuse(why)
