@@ -822,7 +822,8 @@
    "icon": "book",
    "label": "Lessons",
    "order": 50,
-   "place": "settings"
+   "place": "settings",
+   "subtitle": "What your helpers learned. Each new helper reads these when it starts."
   },
   "description": "Helpers remember what they learned here; you see, edit or delete it in one list.",
   "docs": "docs.json",

@@ -130,6 +130,9 @@ def test_crlf_file_and_unreadable_skipped(cli, ws):
     assert [x["text"] for x in data["lessons"]] == ["CRLF lesson."] and data[
         "unreadable"
     ] == 2  # notes.txt is no lesson file
+    _, view = jrun(cli, "view")
+    validator(VIEW).validate(view)
+    assert view["notice"].startswith("2 lesson files could not be read") and view["notice_tone"] == "warn"
     jrun(cli, "edit", "l_aaaaaa", "Edited.")
     body = (d / "l_aaaaaa.md").read_text(encoding="utf-8")
     assert "flavour: kept" in body and "changed_at:" in body and "\r" not in body
@@ -137,6 +140,9 @@ def test_crlf_file_and_unreadable_skipped(cli, ws):
 
 
 def test_view_validates(cli, ws):
+    (ws / ".orch" / "tickets" / "t_abc123.json").write_text(
+        json.dumps({"id": "t_abc123", "key": "DM1-12", "title": "Fix the <web> tests"}), encoding="utf-8"
+    )
     _, a = jrun(
         cli, "add", "Run tests with npm run test:web.", "--ticket", "t_abc123", "--by", "agent:claude"
     )
@@ -146,6 +152,10 @@ def test_view_validates(cli, ws):
     assert (
         item["link"] == "t_abc123" and "from DM1-12" in item["subtitle"] and "by Claude" in item["subtitle"]
     )
+    # the source ticket is a real link in the opened row (the accordion ignores `link`); plain text only
+    assert item["tickets"] == [{"id": "t_abc123", "key": "DM1-12", "title": "Fix the web tests"}]
+    assert view["blocks"][0]["title"] != "Lessons"  # the page heading already says Lessons
+    assert view["header"]["link"]["to"] == "app:settings/addons"  # no dead end: the way back to the add-ons
     assert item["actions"][0]["action"]["op"] == "addon.prompt"
     jrun(cli, "rm", a["lesson"]["id"])
     _, empty = jrun(cli, "view")
@@ -202,4 +212,4 @@ def test_view_notices_unreadable_and_hidden(cli, ws):
     _, view = jrun(cli, "view")
     validator(VIEW).validate(view)
     assert len(view["blocks"][0]["items"]) == 50
-    assert "2 older are hidden" in view["notice"] and "1 lesson file is unreadable" in view["notice"]
+    assert "2 older are hidden" in view["notice"] and "1 lesson file could not be read" in view["notice"]
