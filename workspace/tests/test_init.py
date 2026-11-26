@@ -1144,6 +1144,24 @@ def test_reminder_settings_refreshes_an_old_path(proj, run):
     assert h["command"] == reminder_settings.hook_command("claude")
 
 
+def test_reminder_settings_saved_by_a_windows_editor_are_merged_and_seen_by_doctor(proj, run):
+    """R1.6: a settings file with a UTF-8 BOM and CRLF (PowerShell 5, Notepad) is merged, not "left as it
+    is", and `orch doctor` sees the reminder (it used to say "Run: orch init" forever)."""
+    from orch import cli_leave, reminder_settings
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_bytes(b'\xef\xbb\xbf{\r\n  "env": {"A": "\xc3\xa4"}\r\n}\r\n')
+    code, out, _ = run("init")
+    assert code == 0 and "left it as it is" not in out, out
+    doc = cli_leave._json_quiet(f)
+    assert doc["env"] == {"A": "ä"} and reminder_settings.has_ours(doc)
+    assert len(_ours(doc, "UserPromptSubmit")) == 1
+    f.write_bytes(b"\xef\xbb\xbf" + f.read_bytes())  # the editor saved it again with a BOM
+    assert reminder_settings.has_ours(cli_leave._json_quiet(f))
+    assert reminder_settings.remove_one(proj, ".claude/settings.local.json") == "removed"
+
+
 @pytest.mark.parametrize(
     "text", ["{not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"Stop": 1, "UserPromptSubmit": "x"}}']
 )

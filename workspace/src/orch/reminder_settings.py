@@ -178,7 +178,7 @@ def _ensure_one(root: Path, rel: str, tool: str, events: list[str]) -> str | Non
     for attempt in (0, 1):
         try:
             before = _sig(path) if path.is_file() else None
-            raw = path.read_bytes().decode("utf-8") if path.is_file() else ""
+            raw = path.read_bytes().decode("utf-8-sig") if path.is_file() else ""  # BOM: Windows editors
         except (OSError, UnicodeDecodeError):
             return f"{rel} cannot be read: {left}"
         try:
@@ -276,7 +276,7 @@ def remove_one(root: Path, rel: str) -> str | None:
     for attempt in (0, 1):
         try:
             before = _sig(path)
-            doc = json.loads(path.read_bytes().decode("utf-8"))
+            doc = json.loads(path.read_bytes().decode("utf-8-sig"))
         except (OSError, ValueError, UnicodeDecodeError):
             return None
         if not has_ours(doc):

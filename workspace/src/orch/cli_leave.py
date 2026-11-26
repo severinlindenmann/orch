@@ -161,7 +161,7 @@ def _read_quiet(p: Path) -> str:
 
 def _json_quiet(p: Path):
     try:
-        return json.loads(_read_quiet(p))
+        return json.loads(_read_quiet(p).removeprefix("\ufeff"))  # a BOM from a Windows editor
     except ValueError:
         return None
 
