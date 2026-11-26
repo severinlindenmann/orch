@@ -842,6 +842,7 @@ def test_what_is_delivered_is_what_was_signed(ws, person):
 
 @pytest.mark.parametrize("typ", ["start", "delegate"])
 def test_a_held_start_or_delegate_is_dropped_on_accept(ws, run, rel, person, typ):
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")  # RP3 A: a paired first contact is not held
     m = signed_msg(SEED_PEER, type_=typ, body={"text": "Run it"}, origin="person")
     rel.inbox.append(m)
     inbox(run)
@@ -852,6 +853,7 @@ def test_a_held_start_or_delegate_is_dropped_on_accept(ws, run, rel, person, typ
 
 
 def test_a_held_message_of_any_body_shape_never_breaks_accept(ws, run, rel, person):
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")  # RP3 A: a paired first contact is not held
     odd = signed_msg(SEED_OTHER, frm=OTHER, body={"origin": "x", "text": "hi"})
     mine = signed_msg(SEED_PEER)
     rel.inbox += [odd, mine]
