@@ -77,7 +77,8 @@ for apps without auth. In apps with auth use relative links (`style.css`, not `/
     orch publish restart <app>
     orch publish delete <f_id or app> # gone for everyone
 
-Record every link on its ticket: `orch ref add <id> "<link>" --title "<what it is>"`.
+Record every link on its ticket: `orch ref add <id> "<link>" --title "<what it is>"`. The ticket keeps a file link
+without its key (`#k=…`): only the people you gave the whole link can open the file.
 
 **Describe this workspace (once, after connecting)**
 

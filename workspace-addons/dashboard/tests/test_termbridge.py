@@ -524,9 +524,23 @@ def test_typing_stays_on_the_pane_the_page_shows(helper, server, tmp_path):
     s = Stream(port)
     s.next("screen")
     first = termbridge.watching(TID).pane
-    tm("split-window", "-t", f"={TID}:", "--", "sh", "-c", "cat")  # a second pane, now the active one
+    # Keep the shown pane active. An active split is followed (ORCH-865), so typing immediately after it races
+    # the control client's pane-change notice and can correctly reach either pane.
+    split = tm("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", f"={TID}:", "--", "sh", "-c", "cat")
+    assert split.returncode == 0, split.stderr
+    second = split.stdout.strip()
     assert post(port, "/api/term/input", {"ticket": TID, "data": "pinned\r"}) == (200, b"{}")
     assert wait(lambda: "pinned" in tm("capture-pane", "-p", "-t", first).stdout)
+    assert "pinned" not in tm("capture-pane", "-p", "-t", second).stdout
+
+    # Once the page shows the other pane, typing follows that pane, never the one it used to show.
+    selected = tm("select-pane", "-t", second)
+    assert selected.returncode == 0, selected.stderr
+    s.next("screen")
+    assert termbridge.watching(TID).pane == second
+    assert post(port, "/api/term/input", {"ticket": TID, "data": "followed\r"}) == (200, b"{}")
+    assert wait(lambda: "followed" in tm("capture-pane", "-p", "-t", second).stdout)
+    assert "followed" not in tm("capture-pane", "-p", "-t", first).stdout
     s.close()
 
 

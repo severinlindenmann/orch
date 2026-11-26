@@ -10,10 +10,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+import agent_guard
 import ci_parts
 import pytest
 
 from orch import adapters, addons, cli, winfinish
+
+# never the real claude/codex/copilot, from collection on (a real copilot unpacks ~350 MB into a test's home)
+agent_guard.hide_process_wide()
+agent_guard.wrap_find_binary(adapters)
 
 
 def _own_new_files_as_this_user() -> None:
@@ -287,6 +292,12 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
     # children and Path.home()/expanduser fallbacks must not find the real home through $HOME either
     monkeypatch.setenv("HOME", str(fake))
     monkeypatch.setenv("USERPROFILE", str(fake))
+    # never the real claude/codex/copilot: a real copilot unpacks ~350 MB into this fake home on every start
+    agent_guard.apply(monkeypatch, fake)
+    yield
+    bad = agent_guard.check(fake)
+    if bad:
+        pytest.fail(f"this test reached a real agent tool: {bad}. Stub it (a fake program on PATH).")
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -296,6 +307,11 @@ def pytest_sessionfinish(session, exitstatus):
     warn when a foreign process wrote them."""
     if hasattr(session.config, "workerinput"):
         return
+    factory = getattr(session.config, "_tmp_path_factory", None)
+    left = agent_guard.sweep(factory.getbasetemp()) if factory else []
+    if left:  # a child process ran a real copilot with a test's home (removed now)
+        print(f"\nREAL agent tool ran in the tests, removed what it unpacked: {left}", file=sys.stderr)
+        session.exitstatus = 1
     stray = stray_tmux(str(_REAL_HOME_FN() / ".orch-test" / "pytest-page-"))
     if stray:  # a page test left an agent session behind: fail the run (hard), name the sockets
         print(f"\nSTRAY orch tmux servers from this suite: {stray}", file=sys.stderr)
@@ -407,6 +423,20 @@ def run(capsys):
         return code, cap.out, cap.err
 
     return _run
+
+
+@pytest.fixture
+def plant_raw(proj):
+    """Put text straight into a ticket, past the scan: a ticket from before the scan (or one edited by hand)
+    may hold a secret, and the views that go out must still hide it."""
+    from orch import tickets
+
+    def _plant(tid, **fields):
+        t = tickets.load(proj, tid)
+        t.update(fields)
+        tickets._write(proj, t)
+
+    return _plant
 
 
 @pytest.fixture
