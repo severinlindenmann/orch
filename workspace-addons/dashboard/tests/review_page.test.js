@@ -31,7 +31,7 @@ test('the page reads cards and decisions from state.review and counts the cards'
   return Promise.all([api.stack(), api.answered()]).then(([s, a]) => { assert.equal(s.length, 2); assert.equal(a.length, 1); assert.equal(api.workspace, 'Demo'); });
 });
 test('one card and none: plain words', () => {
-  assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing waits on you/);
+  assert.equal(ctx({review:{cards:[CARD]}}).reviewSubtitle(), '1 thing waits on you.');
   assert.equal(ctx({}).reviewSubtitle(), 'Nothing waits for you.');
   assert.equal(ctx({}).reviewCount(), 0);
 });
