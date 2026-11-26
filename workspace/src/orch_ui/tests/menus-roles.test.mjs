@@ -28,6 +28,7 @@ class N {
   matches(sel) { return this.one(sel); }
   querySelectorAll(sel) { const out = []; const walk = n => n.children.forEach(c => { if (c.one(sel)) out.push(c); walk(c); }); walk(this); return out; }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  contains(n) { for (; n; n = n.parent) if (n === this) return true; return false; }
 }
 
 function load() {
@@ -80,4 +81,20 @@ test('a dialog pop keeps its buttons and its trigger says dialog', () => {
   redraw();
   assert.equal(d.children[1].children[0].getAttribute('role'), null);
   assert.equal(d.children[0].getAttribute('aria-haspopup'), 'dialog');
+});
+
+test('focus that leaves an open menu (Tab) closes it; focus moving inside keeps it open', () => {
+  const {body, redraw} = load();
+  const d = details(pop('menu-pop', {}, 'Stop', 'Move'));
+  const outside = new N('button');
+  body.append(d, outside);
+  redraw();
+  const leave = to => d.listeners.focusout.forEach(f => f({relatedTarget: to}));
+  d.open = true;
+  leave(d.children[1].children[1]);
+  assert.equal(d.open, true);
+  leave(null); // the window lost focus: the menu stays as it was
+  assert.equal(d.open, true);
+  leave(outside);
+  assert.equal(d.open, false);
 });

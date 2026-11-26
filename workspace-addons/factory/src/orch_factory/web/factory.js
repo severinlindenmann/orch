@@ -4,6 +4,7 @@
   const prefix = document.documentElement.dataset.prefix || '';
   const view = document.getElementById('factory-view');
   const notices = document.getElementById('notices');
+  const said = document.getElementById('factory-said');  // says once where an update moved you (ORCH-2046)
   const validId = id => typeof id === 'string' && /^t_[a-z0-9]{6,16}$/.test(id);
   const validVersion = value => /^[1-9][0-9]*$/.test(String(value)) && Number.isSafeInteger(Number(value));
   const array = value => Array.isArray(value) ? value : [];
@@ -57,11 +58,12 @@
     return [h ? h + ' h' : '', m || !h ? m + ' min' : ''].filter(Boolean).join(' ');
   }
   const capital = value => { const t = text(value).replace(/[-_]/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
-  const tagWord = tag => tag === 'cant-undo' ? "can't undo" : text(tag).replace(/[-_]/g, ' ');
+  // the same words as the question text the core shows (render.TAG_WORDS)
+  const tagWord = tag => ({taste: 'your call', 'cant-undo': "can't be undone"})[tag] || text(tag).replace(/[-_]/g, ' ');
   // The proposal's own label when it gave one, else the capitalized stage name; the ship stage is always a question.
   const stageLabel = item => item.label || (item.stage === 'ship' ? 'Put it live?' : capital(item.stage));
   const stageName = (order, stage) => stageLabel(array(order?.line).find(x => x.stage === stage) || {stage});
-  const yourTime = min => Number.isFinite(Number(min)) && min !== null ? "you're needed ~" + min + ' min' : '';
+  const yourTime = min => Number.isFinite(Number(min)) && min !== null ? 'about ' + min + ' min of your time' : '';
   function link(label, href, primary = false) {
     const el = node('a', label, primary ? 'btn primary' : 'btn outline sm');
     el.classList.add('f-btn');
@@ -77,7 +79,7 @@
     const el = link('Open the preview', url.href); el.target = '_blank'; el.rel = 'noopener noreferrer'; return el;
   }
   function ticket(id, label = 'Answer in the ticket', primary = true) {
-    return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('Ticket reference unavailable.');
+    return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('This ticket cannot be opened.');
   }
   const validQuestion = q => typeof q === 'string' && /^q[A-Za-z0-9_-]{0,31}$/.test(q);
   const embedded = () => { try { return window.top !== window; } catch (_) { return true; } };
@@ -100,7 +102,7 @@
     render();
   });
   function orderLink(order, label = 'Open order', suffix = '') {
-    return validId(order.id) ? link(label, '#/order/' + order.id + suffix) : meta('Order reference unavailable.');
+    return validId(order.id) ? link(label, '#/order/' + order.id + suffix) : meta('This order cannot be opened.');
   }
   function card(title, ...children) {
     const el = node('section', null, 'card f-card');
@@ -275,7 +277,7 @@
     const need = yourTime(order.owner_min);
     return meta('Next pause: ' + stageLabel(stop) + (need ? ' · ' + need : ''));
   }
-  // Plain title for an open question, from the structured stop/change data. The raw core text stays behind Details.
+  // Plain title for an open question, from the structured stop/change data.
   function openTitle(order, open) {
     const data = open.data || {};
     if (open.kind === 'stop') return data.stage === 'ship' ? 'Put it live?' : 'Check at ' + stageName(order, data.stage);
@@ -289,10 +291,8 @@
       const items = array(data.items);
       if (items.length) parts.push(list(items.map(i => text(i.title) + ' (' + tagWord(i.tag) + ')')));
       const checked = array(data.checked).length, not = array(data.not_checked).length;
-      parts.push(meta('Checked: ' + checked + ' · Not checked: ' + not));
-      if (full) {
-        if (not) parts.push(meta('Not checked: ' + array(data.not_checked).join(', ')));
-      }
+      if (checked || not) parts.push(meta('Your helper checked ' + plural(checked, 'thing', 'things') + ' · ' + not + ' not checked'));
+      if (full && not) parts.push(meta('Not checked: ' + array(data.not_checked).join(', ')));
     } else if (open.kind === 'change') {
       parts.push(meta('+' + text(data.adds_min) + ' min' + (data.new_eta ? ' · new ETA ' + when(data.new_eta) : '')));
       if (data.what) parts.push(p(data.what));
@@ -302,22 +302,19 @@
     }
     return parts;
   }
-  function rawDetails(open) {
-    const el = node('details', null, 'f-details');
-    el.append(node('summary', 'Details'), meta(open.text), ...(array(open.options).length ? [meta('Options: ' + open.options.join(' · '))] : []));
-    return el;
-  }
+  // The answers you can give, shown plainly under the question (no Details toggle; the items are listed above it).
+  const choices = open => array(open.options).length ? [meta('You can answer: ' + listWords(open.options.map(text)))] : [];
   function budget(order) {
     const b = order.budget || {};
     const used = Number(b.used), cap = Number(b.cap);
-    if (b.used == null || b.cap == null || !Number.isFinite(used) || !Number.isFinite(cap) || cap <= 0) return meta('Budget health · not available yet.');
+    if (b.used == null || b.cap == null || !Number.isFinite(used) || !Number.isFinite(cap) || cap <= 0) return meta('Budget health: not known yet.');
     const percent = Math.max(0, Math.round(used / cap * 100));
     const bar = node('progress'); bar.max = 100; bar.value = Math.min(100, percent);
     bar.setAttribute('aria-label', 'Active time budget used');
     bar.setAttribute('aria-valuetext', percent + '% · ' + used + ' of ' + cap + ' minutes');
-    return group('f-budget', group('row between', meta('Budget health'), meta(percent + ' % · time is the tightest')), bar,
-      meta(used + ' / ' + cap + ' active min · waiting for you never counts'),
-      ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
+    return group('f-budget', group('row between', meta('Budget health'), meta(percent + ' % used')), bar,
+      meta(used + ' of ' + cap + ' min of helper time used · time waiting for you does not count'),
+      ...(b.warn ? [meta('The time limit is nearly used up. Open the order to decide what happens next.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
   // The page never writes by itself. "Ask me at every pause" goes to your helper in Chat as typed text (you press Send
@@ -457,6 +454,18 @@
       group('row-action', label));
     return group('card', row);
   }
+  // Every card of one order on home carries its id, so a background update can find your place again, and its
+  // actions say which order they are for ("Open order: Online booking page"), not only "Open order" (ORCH-2046).
+  function of(o, el) {
+    if (!validId(o.id)) return el;
+    el.dataset.order = o.id;
+    const title = text(o.title).trim();
+    for (const x of el.querySelectorAll('a.btn, button.btn')) {
+      const words = x.textContent.trim();
+      if (words && !x.hasAttribute('aria-label') && !words.includes(title)) x.setAttribute('aria-label', words + ': ' + title);
+    }
+    return el;
+  }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
@@ -470,19 +479,20 @@
       ['drafts', orders.filter(draftWaiting), o => {
         const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
           tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['proposals', orders.filter(o => o.phase === 'proposed'), o => {
         const need = yourTime(o.owner_min);
-        const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
-        c.classList.add('f-attention'); return c;
+        const c = card(o.title, meta('Your helper planned the run. Read it, then start it or say not now.'),
+          ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
-        const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
+        const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false),
           tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
-      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
+      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))],
     ];
     const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
@@ -502,11 +512,11 @@
     const primary = group('stack'), secondary = group('stack');
     const section = (parent, title, rows, paint) => {
       if (!rows.length) return;
-      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(paint)); parent.append(el);
+      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(o => of(o, paint(o)))); parent.append(el);
     };
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
-      ? card(o.title, meta('Autopilot order'), p('Routine pauses answered by your helper · Putting it live still asks you'), tail(link('What it decided', '#/autopilot')))
+      ? card(o.title, meta('Autopilot order'), p('Your helper answers routine pauses. Putting it live still asks you.'), tail(link('What it decided', '#/autopilot')))
       : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
@@ -571,7 +581,7 @@
   function proposal(order) {
     const data = order.proposal;
     view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
-    if (!data) { view.append(card('No frozen proposal yet', p('Your helper is still planning this order.'), answer(order))); return; }
+    if (!data) { view.append(card('No plan yet', p('Your helper is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
       const parts = [];
@@ -588,7 +598,7 @@
     const summary = [];
     if (time.active_min != null) summary.push('~' + duration(time.active_min));
     if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
-    if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
+    if (time.owner_min != null) summary.push(yourTime(time.owner_min));
     if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
     if (summary.length) view.append(node('p', summary.join(' · '), 'f-summary'));
     view.append(group('f-three', card('Stages', line(data.line)),
@@ -606,12 +616,11 @@
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
     view.append(assumptions, answer(order));
-    const details = node('details', null, 'f-details');
-    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Team'), crewPlan(data.crew),
-      node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
-      node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
-      node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
-    view.append(details);
+    // The whole plan, shown plainly lower down (no Details toggle); stages and team are in the cards above.
+    const plan = card('The whole plan', node('h3', 'Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage)), 'No tasks planned yet.'));
+    if (array(data.skipped).length) plan.append(node('h3', 'Skipped stages'), list(data.skipped.map(s => capital(s.stage) + ' — ' + text(s.why))));
+    if (array(data.handovers).length) plan.append(node('h3', 'Handed to other workspaces'), list(data.handovers.map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why))));
+    view.append(plan);
   }
   // A task handed to another workspace that nobody has picked up for a day: one click asks your helper to propose "Do it here instead".
   const DAY = 24 * 3600 * 1000, handoverOpen = ['waiting_start', 'waiting_allow', 'queued'];
@@ -627,13 +636,13 @@
     });
     return group('actions', button, status);
   }
-  function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
+  function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'Nothing changed during the run.')); }
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
     view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
-      view.append(card('Autopilot order', p('Routine pauses answered by your helper · Putting it live still asks you'),
+      view.append(card('Autopilot order', p('Your helper answers routine pauses. Putting it live still asks you.'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
     const lineCard = card('Stages', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
@@ -641,7 +650,7 @@
     const main = group('stack', lineCard, ...reviews(order).map(r => reviewCard(order, r, false)), card('Time + budget', budget(order), ...(order.due ? [meta('Due ' + when(order.due))] : [])));
     const crew = card('Team now');
     for (const c of array(order.crew)) {
-      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent ? toolName(c.agent) : '', statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');
       if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
       row.append(meta(c.title));
@@ -664,11 +673,11 @@
     }
     if (order.phase === 'parked') aside.append(parkedCard(order));
     if (order.open) {
-      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
+      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), ...choices(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
     aside.append(...questionCards(order));
-    if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
+    if (order.problem) aside.append(card('Something is wrong with this order', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
     for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', decide(order))] : [])));
     if (!array(order.changes).length) changes.append(meta('No changes proposed.'));
@@ -801,14 +810,14 @@
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
-    view.append(heading('Autopilot', 'Bounded permission for your helper. Putting it live still asks you.'));
+    view.append(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
       node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
     if (!array(data.grants).length) grants.append(meta('No grants recorded.'));
     const decisions = card('What it decided');
     for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your helper · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open order ticket', false))));
-    if (!array(data.decisions).length) decisions.append(meta('No helper decisions recorded.'));
+    if (!array(data.decisions).length) decisions.append(meta('Your helper has not decided anything on its own yet.'));
     view.append(group('grid-2', grants, card('Always asks you', list(alwaysAsks))), decisions);
   }
   function draftTabs(order, selected) {
@@ -840,44 +849,101 @@
     box.dataset.key = 'factory-stopped';
     return box;
   }
+  // The notices are a live region: they are replaced only when their words change, so an update never says them again.
   function showNotices(homeData, ...data) {
-    notices.replaceChildren();
-    if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
-    if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
-    if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
+    const next = [];
+    if (homeData.day_limit?.warning) next.push(node('p', homeData.day_limit.warning, 'f-banner'));
+    if (homeData.watcher === false) next.push(stopped(homeData.workspace));
+    if ([homeData, ...data].some(d => d?.stale === true)) next.push(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
+    if (next.map(n => n.textContent).join('\n') !== [...notices.children].map(n => n.textContent).join('\n')) notices.replaceChildren(...next);
   }
-  async function render() {
+  // Your place on the page (ORCH-2046): the focused action, the order card and part of the page it is in, and where it
+  // sits on screen. A background update draws the page anew and puts you back on the same action, where it was.
+  const partOf = el => { const s = el.closest('section.f-section'); return s ? s.getAttribute('aria-label') || s.querySelector('h2')?.textContent || '' : ''; };
+  const orderOf = el => el.closest('[data-order]')?.dataset.order || '';
+  const actionOf = el => [el.tagName, el.getAttribute('aria-label') || '', el.textContent.trim()].join('\n');
+  const sameAction = (a, b) => actionOf(a) === actionOf(b) && (a.getAttribute('href') || '') === (b.getAttribute('href') || '');
+  const FOCUSABLE = 'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea';
+  function placeNow() {
+    const el = document.activeElement, y = window.scrollY;
+    if (!el || !view.contains(el) || el === view || el.tagName === 'H1') return {y};
+    const boxes = [...view.querySelectorAll('[data-order]')], box = el.closest('[data-order]');
+    const twins = [...view.querySelectorAll(el.tagName)].filter(x => sameAction(x, el) && orderOf(x) === orderOf(el) && partOf(x) === partOf(el));
+    const r = el.getBoundingClientRect();
+    return {y, el, nth: twins.indexOf(el), order: orderOf(el), part: partOf(el), at: boxes.indexOf(box), orders: boxes.map(b => b.dataset.order),
+      top: r.bottom > 0 && r.top < window.innerHeight ? r.top : null};
+  }
+  function putBack(place, before) {
+    window.scrollTo(0, place.y);
+    if (!place.el) return;
+    const old = place.el, all = sel => [...view.querySelectorAll(sel)];
+    const usable = x => x && !x.matches(':disabled') && !x.closest('[hidden]');
+    // 1 the same action of the same order in the same part, 2 the same action of that order anywhere on the page
+    const same = all(old.tagName).filter(x => sameAction(x, old) && orderOf(x) === place.order);
+    const here = same.filter(x => partOf(x) === place.part);
+    let target = [here[Math.min(place.nth, here.length - 1)], ...here, ...same].find(usable), words = '';
+    if (!target && place.order) {
+      // 3 it is gone: the order that came after it (or else before it), on the same action when it has one
+      const near = [...place.orders.slice(place.at + 1), ...place.orders.slice(0, Math.max(place.at, 0)).reverse()].filter(id => id !== place.order);
+      for (const id of near) {
+        const box = view.querySelector('[data-order="' + CSS.escape(id) + '"]');
+        if (!box) continue;
+        const links = [...box.querySelectorAll(FOCUSABLE)].filter(usable);
+        target = links.find(x => x.tagName === old.tagName && x.textContent.trim() === old.textContent.trim()) || links[0];
+        if (target) { words = '“' + text(before.get(place.order)) + '” is no longer here. You are on “' + text(titles.get(id)) + '”.'; break; }
+      }
+      if (!target) words = '“' + text(before.get(place.order)) + '” is no longer here. You are at the top of the page.';
+    } else if (!target) words = 'This part of the page changed. You are at the top of the page.';
+    target = target || view.querySelector('h1');
+    if (!target) return;
+    target.focus({preventScroll: true});
+    if (target.tagName === 'H1') target.scrollIntoView({block: 'nearest'});
+    else if (place.top !== null) window.scrollBy(0, target.getBoundingClientRect().top - place.top);
+    if (words) said.textContent = words;  // said once; an update that keeps your place says nothing
+  }
+  let titles = new Map(), following = false;
+  // render() is a deliberate visit (a link, Back, Try again): the loading frame, the motion, focus on the heading.
+  // render(true) is a background update: the page stays as it is while it reads, then changes in place (ORCH-2046).
+  async function render(quiet) {
+    quiet = quiet === true;
     const serial = ++request;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
-    view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
-    const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
-    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
-      // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
-    } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
+    following = quiet;
+    if (!quiet) {
+      view.setAttribute('aria-busy', 'true'); notices.replaceChildren(); said.textContent = '';
+      const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
+      if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+        // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
+        view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
+    }
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
       if (serial !== request) return;
-      lastHome = JSON.stringify({...homeData, generated_at: null});
-      showNotices(homeData);
+      const seen = JSON.stringify({...homeData, generated_at: null});
+      // a visit shows the notices at once; an update shows them with the page, when it really draws
+      let noticeData = [homeData];
+      const showNoticesNow = (...d) => { noticeData = d; if (!quiet) showNotices(...d); };
+      if (!quiet) lastHome = seen;
+      showNoticesNow(homeData);
       const hash = location.hash || '#/';
       let draw;
       if (hash === '#/' || hash === '#content') draw = () => home(homeData);
       else if (hash === '#/autopilot') {
         const data = await read('/api/autopilot', signal);
         if (serial !== request) return;
-        showNotices(homeData, data); draw = () => autopilot(data);
+        showNoticesNow(homeData, data); draw = () => autopilot(data);
       } else {
         const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop)\/([1-9][0-9]*)|\/(draft)(?:\/([1-9][0-9]*))?)?$/.exec(hash);
         if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4])) || (match[6] && !validVersion(match[6]))) throw new Error('Unknown route');
         const order = await read('/api/order/' + match[1], signal);
         if (serial !== request) return;
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
-        showNotices(homeData, order);
+        showNoticesNow(homeData, order);
         if (match[2]) draw = () => proposal(order);
         else if (match[3] === 'stop') {
           const reach = await read('/api/reach', signal).catch(() => []);  // empty when the relay is off: no button then
@@ -890,23 +956,34 @@
           const version = match[6] || String(newest || 1);
           const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
-          showNotices(homeData, order, draft);
+          showNoticesNow(homeData, order, draft);
           // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
           const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
-          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;
-      view.replaceChildren(); draw(); view.classList.add('page-enter');
-      if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+      const before = titles;
+      titles = new Map(array(homeData.orders).filter(o => validId(o?.id)).map(o => [o.id, o.title]));
+      if (!quiet) {
+        view.replaceChildren(); draw(); view.classList.add('page-enter');
+        if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+        return;
+      }
+      // an update waits while you type, write or have a dialog open (you may have started while it read): next tick
+      if (busy()) { titles = before; return; }
+      const place = placeNow();
+      lastHome = seen; showNotices(...noticeData);
+      view.replaceChildren(); draw();  // no loading frame, no entry motion, no focus on the heading
+      putBack(place, before);
     } catch (error) {
-      if (serial !== request) return;
+      if (serial !== request || quiet) return;  // an update that could not read keeps the page as it is; the next tick tries again
       const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', render);
-      const box = card('Factory could not read this page', p('The record may be unavailable, or this page may no longer exist.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
+      const box = card('Factory could not load this page', p('Factory did not answer in time, or this page no longer exists. Try again, or go back to Factory.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
       view.replaceChildren(box);
     } finally {
       clearTimeout(timeout);
-      if (serial === request) view.setAttribute('aria-busy','false');
+      if (serial === request) { view.setAttribute('aria-busy','false'); following = false; }
     }
   }
   document.querySelector('.skip-link').addEventListener('click', event => {
@@ -919,10 +996,11 @@
   const busy = () => asked.size > 0 || ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)
     || [...view.querySelectorAll('textarea')].some(t => t.value.trim()) || !!document.querySelector('dialog[open]');
   async function follow() {
-    if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
+    if (document.visibilityState !== 'visible' || busy() || following || view.getAttribute('aria-busy') === 'true') return;
     try {
       const data = await read('/api/home');
-      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+      // a link or button with focus never holds an update back: the update keeps you on it (ORCH-2046)
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy() && !following && view.getAttribute('aria-busy') !== 'true') render(true);
     } catch (_) { /* the next tick tries again */ }
   }
   setInterval(follow, 15000);

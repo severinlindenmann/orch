@@ -51,6 +51,23 @@ test('Tickets toolbar: search and a Person choice when there is more than one ow
   assert.ok(parts.some(n => n.attrs['data-key'] === 'ticket-person'), 'a Person choice');
   assert.ok(!parts.some(n => n.attrs.className === 'btn ghost seg'), 'no All / Mine toggle');
 });
+test('ORCH-2091: the toolbar is layout, filters, search, then the view chips on their own row', () => {
+  const c = listCtx({URLSearchParams, iconEl:() => null, tickets:() => [{id:'a', owner:'anna'}, {id:'b', owner:'ben'}]});
+  const bar = vm.runInContext('viewToggle()', c);
+  assert.deepEqual(bar.children.map(n => n.attrs['data-key'] || n.attrs.className), ['view-toggle', 'ticket-person', 'grow', 'search-field', 'view-chips']);
+});
+test('ORCH-2091: no tickets at all shows the master empty state with one sentence and New ticket, no toolbar', () => {
+  const made = [];
+  const state = o => { made.push(o); const b = h('div', {className:'state'}); b.append = k => b.children.push(k); return b; };
+  const c = listCtx({newButton:() => h('button', {className:'btn primary', 'data-action':'new'}, 'New ticket')});
+  c.window.UI.state = state;
+  const box = c.ticketsEmpty();
+  assert.equal(made[0].title, 'No tickets yet');
+  assert.equal(made[0].text.split(/[.!?](\s|$)/).filter(s => s && s.trim()).length, 1, 'one sentence');
+  assert.equal(box.dataset.key, 'empty');
+  assert.equal(text(box.children.at(-1)), 'New ticket');
+  assert.match(listSrc, /tickets\(\)\.length \? viewToggle\(\) : null/);
+});
 test('Dash 02: rows, board cards and step names carry no ticket key', () => {
   assert.doesNotMatch(listSrc, /t\.key \+ ' '|mono key|part\.key/);
   const c = {clean:String}; vm.createContext(c);
@@ -301,11 +318,11 @@ test('ORCH-1716: the Needs you button counts tickets like its group, even when o
   assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
   assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
 });
-test('ORCH-1716: a result to check says Check result on the phone too, not the session Start', () => {
+test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});
-  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Check result');
+  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Test results');
   assert.equal(text(c.shortSide({id:'o', status:'open'}, {}, 'open')), 'Start', 'other rows keep the session button');
-  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Check result', 'the computer row says the same');
+  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Test results', 'the computer row says the same');
 });
 test('ORCH-1716: the Person choice lists each person once; picking one keeps every spelling of them', () => {
   const rows = [{id:'a', owner:'Severin'}, {id:'b', owner:'severin'}, {id:'c', owner:'lume'}, {id:'d', owner:'owner'}, {id:'e', owner:'human:Anna'}, {id:'f', owner:'agent:claude'}];
