@@ -138,13 +138,13 @@ def dispatch(args, root: Path) -> bool:
             command = []
         doc = {"label": args.label, "command": command, "works": args.works, "ends": args.ends}
         doc |= {"kind": args.kind, "key": args.key, "how": args.how, "sign_in": args.sign_in}
-        r = health.add_recipe(root, args.name, doc)
+        r = health.add_recipe(root, args.name, doc, by=tickets.acting_by(args))
         _out(
             args, {"added": r["name"], "label": r["label"]}, f"orch now checks {r['label']} with the others."
         )
         return True
     if action == "remove":
-        gone = health.remove_recipe(root, args.name)
+        gone = health.remove_recipe(root, args.name, by=tickets.acting_by(args))
         text = f"orch no longer checks {args.name}." if gone else f"There is no own check called {args.name}."
         _out(args, {"removed": args.name if gone else None}, text)
         return True

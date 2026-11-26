@@ -123,9 +123,15 @@ def _bytes(path: Path) -> bytes | None:
 def _load(root: Path, name: str) -> tuple[object, str | None, bytes | None]:
     """(file content, content hash, script bytes) of one check, each file read once, so what is hashed is
     exactly what is parsed and run. The hash covers the file and its script (when it names one)."""
+    doc, dg, body, _ = _read(root, name)
+    return doc, dg, body
+
+
+def _read(root: Path, name: str) -> tuple[object, str | None, bytes | None, bytes | None]:
+    """_load plus the raw file bytes: what `orch checks show` prints is what the hash was made from."""
     raw = _bytes(folder(root) / f"{name}.json")
     if raw is None:
-        return None, None, None
+        return None, None, None, None
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -133,7 +139,42 @@ def _load(root: Path, name: str) -> tuple[object, str | None, bytes | None]:
     script = doc.get("script") if isinstance(doc, dict) else None
     named = isinstance(script, str) and bool(_SCRIPT.fullmatch(script))
     body = _bytes(folder(root) / script) if named else None
-    return doc, _hash(raw, body, named), body
+    return doc, _hash(raw, body, named), body, raw
+
+
+def _plain(data: bytes | None) -> str:
+    """Text for the person's terminal: control characters (an escape code could repaint the screen) are shown
+    as a dot, so what is read is what is there."""
+    text = (data or b"").decode("utf-8", "replace")
+    return "".join(c if c in "\n\t" or c >= " " and c != "\x7f" else "." for c in text.replace("\r", ""))
+
+
+def show(root: Path, name: str) -> dict:
+    """The check file and its script as one read, with the short hash of exactly those bytes: what the person
+    reads and what `orch checks approve --hash` binds to come from the same read."""
+    if not health._NAME.fullmatch(name or ""):
+        raise Refused(f"There is no check called {name}. See them with: orch checks list")
+    doc, dg, body, raw = _read(root, name)
+    if raw is None:
+        raise Refused(f"There is no check called {name}. See them with: orch checks list")
+    script = doc.get("script") if isinstance(doc, dict) else None
+    named = isinstance(script, str) and bool(_SCRIPT.fullmatch(script))
+    return {
+        "name": name,
+        "file": _plain(raw),
+        "script": script if named else None,
+        "script_text": _plain(body) if body is not None else None,
+        "digest": short(dg),
+    }
+
+
+def skipped(root: Path) -> list[str]:
+    """Check files that are ignored because their name is not small letters, digits and dashes."""
+    try:
+        files = sorted(folder(root).glob("*.json"))
+    except OSError:
+        return []
+    return [f.name for f in files if not health._NAME.fullmatch(f.stem) and f.is_file()][:20]
 
 
 def _hash(raw: bytes, body: bytes | None = None, script: bool = False) -> str:
@@ -233,7 +274,7 @@ def _how_to_approve(e: dict) -> str:
     what = "changed" if e["status"] == "changed" else "new"
     return (
         f"This check is {what} and runs only after you approve it. It runs {runs(e['recipe'])} "
-        f"(content {short(e['digest'])}). Look at .orch/checks/{e['name']}.json, then run:"
+        f"(content {short(e['digest'])}). Read it with `orch checks show {e['name']}`, then run:"
     )
 
 
@@ -397,7 +438,7 @@ def approve(root: Path, name: str, by: str | None = None, seen: str | None = Non
         )
         raise Refused(
             head + f"It now runs {runs(e['recipe'])} (content {short(e['digest'])}). "
-            f"Look at .orch/checks/{name}.json, then run: {approve_command(name, e['digest'])}"
+            f"Read it with `orch checks show {name}`, then run: {approve_command(name, e['digest'])}"
         )
     _remember(root, name, e["digest"])  # the digest of the bytes just read, which matched what was seen
     return e["recipe"]

@@ -522,16 +522,22 @@ def lock(store, ws, in_run, monkeypatch):
 def _as_person(run, monkeypatch, ws, op_args, target, *rest):
     """A person's proven op, with the agent marker out of the environment for the call."""
     monkeypatch.delenv("CLAUDECODE", raising=False)
+    for mark in ("ORCH_RUN", "ORCH_TICKET"):
+        monkeypatch.delenv(mark, raising=False)
     try:
         return _cli(
             run, monkeypatch, _proof(ws, "secret.profile", target), "secret", "profile", *op_args, *rest
         )
     finally:
         monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.setenv("ORCH_RUN", RUN)
+        monkeypatch.setenv("ORCH_TICKET", TICKET)
 
 
 def _enable_agents(run, monkeypatch, ws, profile="lock"):
     monkeypatch.delenv("CLAUDECODE", raising=False)
+    for mark in ("ORCH_RUN", "ORCH_TICKET"):
+        monkeypatch.delenv(mark, raising=False)
     code, out, err = _cli(
         run,
         monkeypatch,
@@ -542,6 +548,8 @@ def _enable_agents(run, monkeypatch, ws, profile="lock"):
         profile,
     )
     monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
     assert code == 0, out + err
 
 
@@ -1961,3 +1969,12 @@ def test_set_agents_switches_the_profile_flag_and_records_it(store, events):
     ]
     with pytest.raises(Refused, match="no profile named nope"):
         cli_secret.set_agents(store, "nope", True, "human:anna")
+
+
+@pytest.mark.parametrize("env", [{"ORCH_RUN": "r_abcdefgh"}, {"ORCH_TICKET": "t_abcdef"}])
+def test_a_helper_cannot_add_or_remove_a_key(ws, run, monkeypatch, env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert run("secret", "add", "NAME", "--type", "token")[0] == 2
+    assert run("secret", "remove", "NAME")[0] == 2
+    assert run("secret", "add", "NAME", "--type", "token", unproven=True)[0] == 2
