@@ -9,6 +9,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CORE = [*sorted((ROOT / "workspace/src/orch").rglob("*.py")), ROOT / "workspace/src/orch_entry.py"]
 ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "src").is_dir())
+ADDON_MODULES = {
+    package.name
+    for name in ADDONS
+    for package in (ROOT / "workspace-addons" / name / "src").iterdir()
+    if (package / "__init__.py").is_file()
+}
 
 # file (relative to workspace/src) -> {literal: reason / issue}. Everything else must be clean.
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
@@ -110,12 +116,12 @@ def test_core_imports_no_addon_package():
             mods = [a.name for a in node.names] if isinstance(node, ast.Import) else []
             if isinstance(node, ast.ImportFrom) and node.module:
                 mods.append(node.module)
-            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in {f"orch_{n}" for n in ADDONS}]
+            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in ADDON_MODULES]
     assert not bad, bad
 
 
 def test_core_has_no_addon_name_literals():
-    names = set(ADDONS) | {f"orch_{n}" for n in ADDONS}
+    names = set(ADDONS) | ADDON_MODULES
     bad = []
     for f in CORE:
         rel = f.relative_to(ROOT / "workspace/src").as_posix()
@@ -171,3 +177,16 @@ def test_fresh_init_has_no_relay_or_publish_trace(proj, run, capsys):
         assert not re.search(r"relay|publish", _help(capsys, flag), re.I), flag
     assert run("addon", "add", "relay", "--yes")[0] == 0
     assert re.search(r"\brelay\b", _help(capsys, "--help-all"))
+
+
+def test_core_skills_name_no_addon():
+    # ordinary words that are also an add-on name; the Factory run state is a core ticket term
+    plain = set(EVERYWHERE) | {"services", "usage", "personal", "automation", "factory"}
+    words = {n for n in ADDONS if n not in plain}
+    bad = []
+    for f in sorted((ROOT / "workspace/skills").rglob("*.md")):
+        text = f.read_text(encoding="utf-8")
+        for n in words:
+            if re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", text, re.I):
+                bad.append(f"{f.relative_to(ROOT)}: {n}")
+    assert not bad, "a core skill names an add-on (R1.1/R1.2, #877):\n" + "\n".join(bad)

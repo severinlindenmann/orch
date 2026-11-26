@@ -271,6 +271,35 @@ def test_a_program_in_a_mac_protected_folder_is_refused(cli, fake, ws, tmp_path,
     assert code == 2 and "The program ~/Desktop/serve is in Desktop" in out["error"]
 
 
+def test_other_casing_of_a_protected_folder_is_refused(tmp_path, monkeypatch):
+    # ORCH-1867: ~/documents/work is ~/Documents/work on a case-insensitive Mac; nothing is installed or started
+    from orch import macfolders
+
+    from orch_services import cli as services_cli
+    from orch_services import drivers
+
+    home = tmp_path / "home"
+    (home / "Documents" / "work").mkdir(parents=True)
+    (home / "code").mkdir()
+    other = home / "documents" / "work"
+    if not (other.exists() and other.samefile(home / "Documents" / "work")):
+        pytest.skip("this disk tells folder names apart by case")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+
+    class Launchd:
+        name = "launchd"
+
+    def spec(cwd):
+        return drivers.Spec("web", "Web", WID, ["/bin/echo"], cwd, tmp_path / "web.log", False)
+
+    for cwd in (home / "Documents" / "work", other):
+        with pytest.raises(services_cli.Refused, match="in Documents"):
+            services_cli._refuse_protected(Launchd(), spec(cwd))
+    services_cli._refuse_protected(Launchd(), spec(home / "CODE"))  # a distinct folder is fine
+
+
 def test_start_is_refused_too_and_other_computers_are_not_asked(cli, fake, ws, mac_documents):
     code, out = _add(cli)  # the fake driver is no launchd: Linux and Windows have no such folders
     assert code == 0
@@ -655,3 +684,143 @@ def test_important_marks_the_record_only_and_the_act_verbs_take_it(cli, ws, fake
     assert _record(ws, "fwd")["important"] is False
     code, out = jrun(cli, "list")
     assert out["services"][0]["important"] is False
+
+
+def test_important_works_without_a_working_service_tool(cli, ws, fake, monkeypatch):
+    # #2301: only the record changes, yet it saved the change and then reported the tool's refusal
+    from orch_services.store import Refused
+
+    assert jrun(cli, "add", "Forwarder", "--id", "fwd", "--", "python3", "-V")[0] == 0
+
+    def broken():
+        raise Refused("The service tool of this computer does not answer.")
+
+    monkeypatch.setattr(fake, "check", broken)
+    code, out = jrun(cli, "important", "fwd", "on")
+    assert code == 0, out
+    assert out["service"]["important"] is True and "asks once" in out["next"]
+    assert _record(ws, "fwd")["important"] is True
+
+
+# ---- edges found by the coverage run (ORCH: services test coverage)
+
+
+def test_an_unreadable_record_is_skipped_in_list_and_named_on_get(cli, ws, fake):
+    _add(cli)
+    d = ws / ".orch/addons/services/services"
+    (d / "broken.json").write_text("{not json", encoding="utf-8")
+    (d / "other.json").write_text(
+        json.dumps({"schema": "orch.services.service/1", "id": "wrong"}), encoding="utf-8"
+    )
+    code, out, _err = cli("list")
+    assert code == 0 and "web  Web preview" in out
+    assert "2 file(s) in .orch/addons/services/services could not be read and are skipped." in out
+    code, out = jrun(cli, "start", "broken")
+    assert code == 2 and "Fix or delete .orch/addons/services/services/broken.json" in out["error"]
+
+
+def test_an_empty_workspace_lists_no_services(cli):
+    code, out, _err = cli("list")
+    assert code == 0 and out.splitlines()[0] == "No services yet."
+
+
+def test_outside_a_workspace_says_how_to_start(tmp_path, fake, capsys, monkeypatch):
+    from orch_services.cli import main
+
+    empty = tmp_path / "kein Ordner ä"
+    empty.mkdir()
+    monkeypatch.setenv("ORCH_ROOT", str(empty))
+    assert main(["list", "--json"]) == 2
+    assert "Run orch init first" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_a_workspace_without_an_id_says_how_to_get_one(cli, ws):
+    (ws / ".orch" / ".local-id").write_text("x\n", encoding="utf-8")
+    code, out = _add(cli)
+    assert code == 2 and "orch addon add services" in out["error"]
+
+
+def test_cwd_given_as_a_full_path_inside_the_workspace_is_kept_relative(cli, ws):
+    sub = ws / "web app" / "Jörg"
+    sub.mkdir(parents=True)
+    code, out = _add(cli, "web", "--cwd", str(sub))
+    assert code == 0, out
+    assert _record(ws, "web")["cwd"] == "web app/Jörg"
+
+
+def test_cwd_as_a_full_path_outside_the_workspace_is_refused(cli, ws, tmp_path):
+    code, out = _add(cli, "web", "--cwd", str(tmp_path))
+    assert code == 2 and "inside this workspace" in out["error"]
+
+
+@pytest.mark.skipif(__import__("sys").platform == "win32", reason="a backslash is a folder separator there")
+def test_a_backslash_in_a_folder_name_is_refused_elsewhere(cli, ws):
+    (ws / "a\\b").mkdir()
+    code, out = _add(cli, "web", "--cwd", "a\\b")
+    assert code == 2 and "inside this workspace" in out["error"]
+
+
+@pytest.mark.skipif(__import__("sys").platform != "win32", reason="Windows paths")
+def test_windows_folders_with_backslashes_are_taken(cli, ws):
+    # a person on Windows writes C:\Users\Jörg\work space\web app or web app\src (both were refused before)
+    (ws / "web app" / "src").mkdir(parents=True)
+    code, out = _add(cli, "web", "--cwd", str(ws / "web app"))
+    assert code == 0, out
+    assert _record(ws, "web")["cwd"] == "web app"
+    code, out = _add(cli, "api", "--cwd", "web app\\src")
+    assert code == 0, out
+    assert _record(ws, "api")["cwd"] == "web app/src"
+
+
+def test_state_files_that_are_not_an_object_or_a_time_read_as_empty(ws):
+    from orch_services import store
+
+    p = store.state_path(ws, "web")
+    p.parent.mkdir(parents=True)
+    p.write_text("[1, 2]", encoding="utf-8")
+    assert store.read_state(ws, "web") == {}
+    store.update_state(ws, "web", since="yesterday")
+    assert store.last_change(ws, "web") is None
+    store.mark(ws, "web", running=True)
+    assert store.read_state(ws, "web")["running"] is True and store.last_change(ws, "web")
+
+
+def test_a_platform_tool_that_is_missing_or_hangs_is_one_sentence(monkeypatch):
+    import subprocess
+
+    from orch_services import drivers
+    from orch_services.store import Refused
+
+    with pytest.raises(drivers.Unavailable, match="no-such-tool-zz is missing"):
+        drivers.run_tool(["/nowhere/no-such-tool-zz"])
+
+    def hang(*a, **k):
+        raise subprocess.TimeoutExpired(a[0], 5)
+
+    monkeypatch.setattr(drivers.subprocess, "run", hang)
+    with pytest.raises(Refused, match=r"launchctl did not answer within 5 seconds\. Try again"):
+        drivers.run_tool(["/bin/launchctl", "print"], timeout=5)
+
+
+def test_a_failed_tool_names_its_last_line_and_the_next_step():
+    import subprocess
+
+    from orch_services import drivers
+
+    cp = subprocess.CompletedProcess([], 1, "", "warning: x\nAccess is denied.\n")
+    assert str(drivers.tool_failed("start it", cp)) == (
+        "Could not start it (Access is denied.). Run orch services list and try again."
+    )
+    quiet = subprocess.CompletedProcess([], 1, "", "")
+    assert (
+        str(drivers.tool_failed("stop it", quiet))
+        == "Could not stop it. Run orch services list and try again."
+    )
+
+
+def test_an_unknown_computer_says_it_is_not_supported(monkeypatch):
+    from orch_services import drivers
+
+    monkeypatch.setattr(drivers.sys, "platform", "freebsd14")
+    with pytest.raises(drivers.Unavailable, match="only macOS, Linux and Windows"):
+        drivers.get()

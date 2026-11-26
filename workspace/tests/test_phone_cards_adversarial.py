@@ -344,7 +344,7 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
 
 
 def test_check_card_names_the_results_pictures_pages_and_pdfs(proj, new_ticket, run):
-    """ORCH-183 A3: a Check result with a cover photo or a result page shows them on its card."""
+    """ORCH-183 A3: a Test results card with a cover photo or a result page shows them on its card."""
     tid = new_ticket("Spring catalogue")
     ev_dir = proj / ".orch" / "tickets" / tid / "evidence"
     art = proj / ".orch" / "tickets" / tid / "artifacts"

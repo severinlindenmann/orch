@@ -129,10 +129,20 @@ def test_no_snapshot_for_quiet_kinds_or_workspaces(proj, run, new_ticket, conn):
     assert len(views(conn)) == 1
 
 
-def test_secrets_are_hidden_everywhere(proj, run, new_ticket, conn):
-    tid = new_ticket("Deploy with token ghp_" + "a" * 36)
-    run("check", "add", tid, "set password=hunter2 on the box")
-    run("log", tid, "used key sk-proj-" + "Z" * 30 + " and Bearer abcdefghijklmnopqrstuvwxyz")
+def test_secrets_are_hidden_everywhere(proj, run, new_ticket, conn, plant_raw):
+    tid = new_ticket("Deploy")
+    run("check", "add", tid, "set it on the box")
+    plant_raw(tid, title="Deploy with token ghp_" + "a" * 36)
+    t = tickets.load(proj, tid)
+    t["checklist"][0]["text"] = "set password=hunter2 on the box"
+    t["history"].append(
+        {
+            "at": t["history"][-1]["at"],
+            "by": "human:tester",
+            "text": "used key sk-proj-" + "Z" * 30 + " and Bearer abcdefghijklmnopqrstuvwxyz",
+        }
+    )
+    tickets._write(proj, t)
     run("relay", "send", "phones", "x", "--ticket", tid, "--update", "stopped")
     raw = json.dumps(views(conn)[0]["body"]["ticket_view"])
     for leak in ("ghp_aaaa", "hunter2", "sk-proj-ZZZ", "abcdefghijklmnopqrstuvwxyz"):
@@ -599,8 +609,9 @@ def _bump(proj, tid, **kw):
     tickets.apply_op(proj, tid, lambda t: t.update(**kw), by=tickets.SYSTEM)
 
 
-def test_light_title_is_redacted(proj, run, new_ticket, conn):
-    tid = new_ticket("Deploy with ghp_abcdefghijklmnopqrstuvwxyz0123")
+def test_light_title_is_redacted(proj, run, new_ticket, conn, plant_raw):
+    tid = new_ticket("Deploy")
+    plant_raw(tid, title="Deploy with ghp_abcdefghijklmnopqrstuvwxyz0123")
     tv = phone_view.light_view(proj, tickets.load(proj, tid))
     assert "ghp_" not in tv["title"] and phone_view.HIDDEN in tv["title"]
 
