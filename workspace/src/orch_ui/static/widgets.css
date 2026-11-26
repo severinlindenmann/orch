@@ -1278,6 +1278,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .live-link{display:inline-flex;align-items:center;min-height:24px;overflow-wrap:anywhere}  /* a 24 px tap target (WCAG 2.5.8) now the chat fits its pane and the links show (ORCH-1328) */
 .live-chat-empty{margin:auto 0}
+/* a chat that is the ticket's summary, not the helper's conversation, says so in one small line that stays at the top
+   while it scrolls, with Open terminal for the real screen (ORCH-2204) */
+.live-chat-src{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin:0;padding-bottom:var(--s1);background:var(--surface)}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
 .live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;cursor:pointer}

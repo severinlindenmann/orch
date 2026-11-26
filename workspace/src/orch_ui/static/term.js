@@ -2,6 +2,9 @@
    A real terminal: xterm.js 5.5.0 with its WebGL renderer, vendored next to this file (xterm.js,
    xterm-addon-webgl.js, xterm-addon-fit.js; licence and checksums in LICENSE-xterm.txt). The WebGL renderer is loaded
    before the terminal opens, so xterm adds no <style> element and the page's style-src 'self' stays as it is.
+   Without WebGL (switched off, no graphics card, the context lost) xterm's normal renderer draws it (ORCH-2204): the
+   rules it writes into its own <style> elements, which the page's policy blocks, are copied into a style sheet made
+   with CSSOM (adoptedStyleSheets), which the policy allows; they are scoped to that one terminal.
    ORCH-2199 (owner pick B a, M a): no switch. A click into the screen (or Enter on it) sends the keys there, Esc twice or
    a click outside stops, Shift+Tab goes to the helper like every other key; dragging still selects and copies. The
    server decides again (the workspace setting, so watch-only stays a setting, and the sign-in). Copy says what it
@@ -26,9 +29,9 @@
        handle.show('loading'|'error')     while (re)connecting
        handle.setTyping(on) / handle.typing()
        handle.back()                      put the keyboard back after the page drew the pane again
-       handle.dispose()                   free the terminal (its WebGL context)
+       handle.dispose()                   free the terminal (its WebGL context or its copied style sheet)
    Pure parts for tests: UI.term.pasteText, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
-   UI.term.followTop, UI.term.plainText, UI.term.fitFont.
+   UI.term.followTop, UI.term.plainText, UI.term.fitFont, UI.term.domSheet.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -135,6 +138,29 @@
     } catch (e) { return false; }
   };
 
+  /* The normal renderer's rules into a CSSOM sheet of the page (the policy drops its <style> elements): its style
+     elements are watched, and the sheet follows each change (a new size, a new font). Returns stop(). */
+  function domSheet(hostEl, doc) {
+    const d = doc || (typeof document === 'object' ? document : null);
+    const Sheet = typeof CSSStyleSheet === 'function' ? CSSStyleSheet : null;
+    if (!d || !Sheet || !Array.isArray(d.adoptedStyleSheets) || !hostEl || typeof hostEl.querySelectorAll !== 'function') return () => {};
+    let sheet;
+    try { sheet = new Sheet(); } catch (e) { return () => {}; }
+    d.adoptedStyleSheets = [...d.adoptedStyleSheets, sheet];
+    const seen = new Set();
+    const sync = () => {
+      const els = [...hostEl.querySelectorAll('style')];
+      for (const x of els) if (!seen.has(x)) { seen.add(x); if (obs) obs.observe(x, {childList: true, characterData: true, subtree: true}); }
+      try { sheet.replaceSync(els.map(x => x.textContent || '').join('\n')); } catch (e) { /* a rule the browser cannot read is left out */ }
+    };
+    const obs = typeof MutationObserver === 'function' ? new MutationObserver(sync) : null;
+    sync();
+    return () => {
+      if (obs) obs.disconnect();
+      d.adoptedStyleSheets = d.adoptedStyleSheets.filter(x => x !== sheet);
+    };
+  }
+
   function term(opts) {
     const o = opts || {};
     const label = o.label || 'the helper';
@@ -163,32 +189,50 @@
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
     let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null, baseFont = 13;
     let fresh = false, sizeNo = false, baseCell = null;  // fresh: the first screen after a hello sizes the window; sizeNo: refused (403)
+    let noGL = false, unsheet = null;  // noGL: draw with the normal renderer (WebGL failed or its context was lost)
 
     /* xterm is made with the first screen (it measures its font in the page) */
     function make() {
       if (xt || tried) return !!xt;
       tried = true;
       const T = window.Terminal, GL = window.WebglAddon && window.WebglAddon.WebglAddon, Fit = window.FitAddon && window.FitAddon.FitAddon;
-      if (typeof T !== 'function' || typeof GL !== 'function' || !hasGL()) { state = 'nogl'; words(); return false; }
+      if (typeof T !== 'function') { state = 'nogl'; words(); return false; }
+      if (typeof GL !== 'function' || !hasGL()) noGL = true;  // no WebGL here: the normal renderer draws it
       const cs = typeof getComputedStyle === 'function' ? getComputedStyle(screen) : null;
       baseFont = Math.round(parseFloat(cs && cs.fontSize) || 13);
       xt = new T({cols, rows, disableStdin: true, cursorBlink: false, scrollback: 2000,
         fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: baseFont, lineHeight: 1.2,
         theme: theme(root), screenReaderMode: false,
         linkHandler: {allowNonHttpProtocols: false, activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer'); }}});
-      const gl = new GL();
-      try { xt.loadAddon(gl); } catch (e) { xt.dispose(); xt = null; state = 'nogl'; words(); return false; }
-      gl.onContextLoss(() => {  // the graphics card took the drawing back: stop typing, draw again with the next screen
-        setTyping(false);
-        if (xt) { xt.dispose(); xt = null; }
-        host.textContent = ''; tried = false; live = false; state = 'loading'; words();
-      });
+      if (!noGL) {
+        const gl = new GL();
+        try {
+          xt.loadAddon(gl);
+          gl.onContextLoss(() => {  // the graphics card took the drawing back: stop typing, draw again with the next screen, now without WebGL
+            setTyping(false);
+            noGL = true;
+            unmake();
+            state = 'loading'; words();
+          });
+        } catch (e) { noGL = true; xt.dispose(); xt = null; tried = false; return make(); }
+      }
       if (typeof Fit === 'function') { fit = new Fit(); xt.loadAddon(fit); }
-      try { xt.open(host); } catch (e) { xt.dispose(); xt = null; state = 'nogl'; words(); return false; }
+      try { xt.open(host); } catch (e) {
+        unmake();
+        if (noGL) { state = 'nogl'; words(); return false; }
+        noGL = true; return make();  // WebGL failed while it opened: once more with the normal renderer
+      }
+      if (noGL) { unsheet = domSheet(host); root.dataset.renderer = 'dom'; }
       xt.onData(d => { if (typing) { out += d; schedule(); } });  // watching: xterm takes no input at all (disableStdin)
       xt.attachCustomKeyEventHandler(keyFilter);
       if (typeof xt.onSelectionChange === 'function') xt.onSelectionChange(copyWord);
       return true;
+    }
+    /* free the terminal and its copied style sheet; the next screen makes it again */
+    function unmake() {
+      if (xt) { try { xt.dispose(); } catch (e) { /* already gone */ } xt = null; }
+      if (unsheet) { unsheet(); unsheet = null; }
+      fit = null; host.textContent = ''; tried = false; live = false;
     }
     /* keys xterm must leave alone: Esc twice stops typing (a single Esc goes to the helper a moment later); Enter on the
        screen while not typing starts it; Ctrl+C or Cmd+C with a selection copies it; other Cmd keys. Shift+Tab is the
@@ -441,11 +485,11 @@
         setTyping(false);
         if (typeof document === 'object' && typeof document.removeEventListener === 'function') document.removeEventListener('pointerdown', outside, true);
         if (watcher) watcher.disconnect();
-        if (xt) { xt.dispose(); xt = null; }
+        unmake();
       }
     };
   }
-  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont;
+  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont; term.domSheet = domSheet;
   term.pasteText = pasteText; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;

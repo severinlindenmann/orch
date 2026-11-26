@@ -188,3 +188,10 @@ Where Focus sits with Bar only). No meta row, no Watching bar, no Let me type sw
 (brand edge), Esc twice or a click outside stops. Split right / down asks Chat with… / Terminal / Plain terminal. The
 mockup keeps its panes side by side; the built layer also nests them (helper left, terminal and Manager stacked right)
 with 1 px dividers to drag, and folds the side menu to its rail beside a ticket at 1280.
+## Chat shows the real talk or says it is a summary (ORCH-2204, 26 Nov)
+
+The Chat view shows the helper's real conversation (the newest turns of the session in use, read from the tool's own
+saved conversation) with the ticket's steps, questions and your messages around it. Where orch cannot read the
+conversation (a tool that keeps none, or the file is not on this computer), the chat is the ticket's summary and one
+small line at its top says so: "Summary from the ticket" with Open terminal (`.live-chat-src`). Here ORCH-232 shows it.
+The terminal opens without WebGL too: xterm's normal renderer draws it.
