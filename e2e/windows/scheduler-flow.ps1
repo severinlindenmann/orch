@@ -38,8 +38,9 @@ L ""
 L "=== scheduler (automation add-on)"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:ORCH_AGENT = ""
-$p = "$env:USERPROFILE\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
-O init | Out-Null
+$p = "$env:USERPROFILE\.orch-test\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+L (O init | Out-String)
+if ($LASTEXITCODE -ne 0) { L "RESULT fail: scheduler workspace init"; return }
 $before = Get-Date; $out = O addon add automation --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add automation"
 Check (WaitFinish $out $before) "automation install finished"
@@ -51,12 +52,20 @@ L (cmd /c "orch config agent add fake --command `"$py $agent`" < NUL 2>&1" | Out
 L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
-$rep = ((O ticket new '"Scheduled smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$created = O ticket new '"Scheduled smoke"' --json --by human:owner | Out-String
+L $created
+if ($LASTEXITCODE -ne 0) { L "RESULT fail: create Scheduled smoke"; return }
+$rep = ($created | ConvertFrom-Json).id
+if (-not $rep) { L "RESULT fail: Scheduled smoke has no ticket id"; return }
 O check add $rep '"Say hello"' --by human:owner | Out-Null
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
-$one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$created = O ticket new '"Wake-up smoke"' --json --by human:owner | Out-String
+L $created
+if ($LASTEXITCODE -ne 0) { L "RESULT fail: create Wake-up smoke"; return }
+$one = ($created | ConvertFrom-Json).id
+if (-not $one) { L "RESULT fail: Wake-up smoke has no ticket id"; return }
 O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
