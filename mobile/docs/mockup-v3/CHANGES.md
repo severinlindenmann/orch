@@ -1,3 +1,7 @@
+# 25 Nov invitation opened on a paired phone (ORCH-2127)
+- An invitation link opened while the phone is already paired opens the Add workspace confirmation (Add this workspace?) over Chats. Closing it adds nothing and keeps the pairing.
+- An invitation for another server is never sent: the sheet says "This invitation is for another server" with "Use a different link". Review trigger: Add workspace › Pairing errors › Another server.
+
 # 25 Nov swipe rows and Reduce Motion (ORCH-2049)
 - Needs your OK rows (Hide) and ticket chat rows (Archive / Delete): with Reduce Motion on, the row still follows the finger, but reveal, spring back, close and hide jump to where they end instead of sliding. Buttons, Undo, long-press menu and VoiceOver actions are unchanged; with Reduce Motion off nothing changes.
 - `archive.html` now says what the phone does: a long swipe or fling on a chat only shows its buttons, it never archives or deletes on its own.
