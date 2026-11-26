@@ -144,6 +144,9 @@ h1 .inline-host{display:block}
 /* Add-on pages draw their own gutter (24 px, 16 px on a phone), so the frame bleeds out of the page padding and the content sits on the same edges as dashboard pages (SX-1). */
 iframe.embed{--embed-bleed:24px;display:block;width:calc(100% + 2*var(--embed-bleed));margin:-32px calc(-1*var(--embed-bleed)) 0;height:calc(100vh - var(--topbar-height));min-height:480px;border:0}
 @media(max-width:899px){iframe.embed{--embed-bleed:var(--page-gutter)}}
+/* D1 (ORCH-2315): a framed add-on page scrolls inside its frame and keeps its own gutter, so the dashboard keeps none
+   around it: its Settings button then ends at the same right edge as on every dashboard-drawn page. */
+html:has(iframe.embed:not(.embed-loading)){scrollbar-gutter:auto}
 /* A page that is the dashboard shell itself (three columns, fb17) fills the page like the board: no page padding around it */
 .page:has(>iframe.embed-shell){max-width:none;padding:0}
 iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-height))}

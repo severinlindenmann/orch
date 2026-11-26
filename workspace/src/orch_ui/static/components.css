@@ -184,6 +184,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .page-heading h1{margin:0}
 .page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
 .page-heading-actions>.btn.ghost:last-child{padding-right:0}
+/* A slot an add-on fills later (its header link) takes no gap while empty: the right edge stays the same (D1, ORCH-2315). */
+.page-heading-actions>:empty:not(.btn){display:none}
 /* One top for every page (D1, ORCH-2282): '← parent' above the name on a page inside another page; Settings first in the
    actions, the one filled button last (UI.pageTop). On a phone the buttons go under the sentence, left-aligned. */
 .page-back{display:inline-flex;align-items:center;gap:6px;min-height:24px;width:max-content;max-width:100%;margin:0 0 4px;font-size:13px;line-height:18px;color:var(--text-muted);text-decoration:none;border-radius:6px}

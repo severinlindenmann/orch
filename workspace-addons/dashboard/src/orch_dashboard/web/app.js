@@ -556,6 +556,7 @@ function render(arrived = new Set()) {
   const pages = menuPages();  // Contacts is above; a place=settings page waits under More
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
+  showMarkedRow();
   // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null,
     snapshot ? null : h('a', {className:'nav-item nav-icon-only', href:'#docs', 'aria-label':'Documentation', title:'Documentation', 'aria-current':here === '#docs' ? 'page' : null}, navIcon('book'))));
@@ -986,6 +987,17 @@ if (sideScroll && window.ResizeObserver) {
   const watch = new ResizeObserver(fit);
   watch.observe(sideScroll);
   for (const part of sideScroll.children) watch.observe(part);
+}
+// D2 (ORCH-2315): the open page always shows in the menu, marked. When the list scrolls (a short window, 1280x772), the
+// marked row is moved into its view once per page, never hidden under the foot. Only the list scrolls, not the page.
+var sideShownFor = '';
+function showMarkedRow() {
+  const list = document.querySelector('.sidebar-scroll'), row = list?.querySelector('[aria-current="page"]');
+  if (!row || sideShownFor === location.hash) return;
+  sideShownFor = location.hash;
+  const box = list.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (r.bottom > box.bottom) list.scrollTop += r.bottom - box.bottom + 8;
+  else if (r.top < box.top) list.scrollTop -= box.top - r.top + 8;
 }
 // Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
 // Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
