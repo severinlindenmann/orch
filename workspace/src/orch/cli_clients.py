@@ -963,17 +963,21 @@ def run_relay(args, root: Path, out) -> None:
         out(args, _preview_dict(m), _preview_text(m))
     elif sub == "send":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Message sent to {}."))
+        out(args, m, _sent_line(root, m, "Message sent to {}.") + "\n" + _left_line(m))
         _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
+        out(
+            args,
+            m,
+            _sent_line(root, m, "Task handed to {}. It starts once they allow it.") + "\n" + _left_line(m),
+        )
     elif sub == "start":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Start request sent to {}."))
+        out(args, m, _sent_line(root, m, "Start request sent to {}.") + "\n" + _left_line(m))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
         # who gave it goes along: only then is a person's allow at a terminal marked as a person's, and the
@@ -1083,6 +1087,46 @@ def _card_lines(c: dict) -> list[str]:
     out.append(f"  checklist: {c.get('done', 0)} of {c.get('total', 0)} done")
     out.extend(f"    [{'x' if i['done'] else ' '}] {i['text']}" for i in c.get("checklist", []))
     return out
+
+
+def _left_line(m: dict) -> str:
+    """R3.3: after every real send, one line on what left this machine (no prompt). Built from the message as
+    it went, so it never says more than was sent; the body is already scanned (R5.2)."""
+    b = m.get("body") if isinstance(m.get("body"), dict) else {}
+    kind = m.get("type")
+    parts = []
+    if kind == "delegate":
+        parts.append(f'the task "{_one(b.get("title"))}"')
+    elif kind == "start":
+        parts.append(f'start "{_one(b.get("key"))}"')
+    elif kind == "file":
+        parts.append(f"the file {_one(b.get('name'))} ({_size(int(b.get('size') or 0))})")
+    if b.get("text"):
+        what = "the text" if kind in ("text", "file") else "its details"
+        parts.append(f"{what} ({_count(len(b['text']), 'character')})")
+    if isinstance(b.get("speak"), dict) and b["speak"].get("summary"):
+        parts.append("a spoken summary")
+    if b.get("checklist"):
+        parts.append(_count(len(b["checklist"]), "checklist item"))
+    if b.get("refs"):
+        parts.append(_count(len(b["refs"]), "card"))
+    word = m.get("key") or m.get("ticket")
+    if isinstance(b.get("ticket_card"), dict):
+        parts.append(f"the whole ticket {word} (--full)")
+    elif b.get("group"):
+        parts.append(f"the group card of ticket {word}")
+    elif word:
+        parts.append(f"a link to ticket {word}, not its content")
+    head = "Goes out once sent: " if m.get("sent") is False else "What left this machine: "
+    return head + (", ".join(parts) or "an empty message") + ". To check first next time, add --dry-run."
+
+
+def _count(n: int, one: str) -> str:
+    return f"{n} {one}" + ("" if n == 1 else "s")
+
+
+def _one(v) -> str:
+    return " ".join(str(v or "").split())[:80]
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:
