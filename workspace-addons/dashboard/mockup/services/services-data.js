@@ -43,7 +43,9 @@ const found=[
  {id:'old-test-page',name:'Old test page on port 8794',what:'A page somebody started by hand',since:'running since 12 Nov',
   health:{ok:true,how:'answers on its address',text:'Answers on its address'},depends:['Nothing we know of'],log:['12 Nov 14:02:55 started by hand','today 16:12:30 page opened']},
  {id:'test-network-helper',name:'Test network helper',what:'3 parts that belong together',since:'running since 10 Nov',
-  health:{ok:true,how:'process alive',text:'Process alive, all 3 parts'},depends:['Nothing we know of'],log:['10 Nov 09:40:00 part 1 of 3 started','10 Nov 09:40:02 part 2 of 3 started','10 Nov 09:40:05 part 3 of 3 started (key ••••••)']}
+  health:{ok:true,how:'process alive',text:'Process alive, all 3 parts'},depends:['Nothing we know of'],log:['10 Nov 09:40:00 part 1 of 3 started','10 Nov 09:40:02 part 2 of 3 started','10 Nov 09:40:05 part 3 of 3 started (key ••••••)']},
+ {id:'hand-web-server',name:'Python web server',what:'A program started by hand',since:'running since today 11:05',byHand:true,
+  health:{ok:true,how:'process alive',text:'Process alive'},depends:['Nothing we know of'],log:[]}
 ];
 const data={today:'Tue 17 Nov',services,found};
 const WORD={running:'Running',stopped:'Stopped',failing:'Failing'};
@@ -134,8 +136,9 @@ const removeRow=(s,after)=>h('div',{class:'row between quiet-note'},h('span',{cl
 const about=(s,o)=>{o=o||{};
  if(!s.state)return h('div',{class:'stack-lg','data-about':s.id},
   h('dl',null,h('div',null,h('dt',null,'Found'),h('dd',null,s.since.replace(/^r/,'R')+', not made by orch')),h('div',null,h('dt',null,'What it is'),h('dd',null,s.what))),
-  h('p',{class:'muted'},'orch leaves it alone until you say so.'),
-  h('div',{class:'row'},h('button',{class:'btn outline sm',type:'button','data-k':s.id+':manage','aria-label':'Manage '+s.name+' with orch',onclick:()=>act.manage(s.id)},'Manage with orch')));
+  /* ORCH-2105: a program started by hand (no background job entry) cannot be managed: no button, and the note says why */
+  s.byHand?h('p',{class:'muted'},'It was started by hand, so orch cannot manage it. orch leaves it alone.'):h('p',{class:'muted'},'orch leaves it alone until you say so.'),
+  s.byHand?null:h('div',{class:'row'},h('button',{class:'btn outline sm',type:'button','data-k':s.id+':manage','aria-label':'Manage '+s.name+' with orch',onclick:()=>act.manage(s.id)},'Manage with orch')));
  return h('div',{class:'stack-lg','data-about':s.id},
   h('dl',null,
    h('div',null,h('dt',null,'State'),h('dd',null,stateLine(s))),
@@ -177,7 +180,7 @@ const keep=draw=>{const k=document.activeElement?.dataset?.k;draw();if(k){const 
 const param=(k,v)=>{const u=new URL(location.href);if(v==null)u.searchParams.delete(k);else u.searchParams.set(k,v);history.replaceState(null,'',u)};
 /* the Empty and Error views, from the master state component */
 const fillStates=()=>{const e=document.querySelector('[data-view="empty"]'),x=document.querySelector('[data-view="error"]');
- if(e){const a=h('a',{class:'btn outline sm',href:'../chat/chat.html'},'Chat');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
+ if(e){const a=h('a',{class:'btn primary sm',href:'../chat/chat.html'},'Ask the helper');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
  if(x)x.replaceChildren(window.UI.state({kind:'error',title:'Could not read the services on this computer',text:'Nothing was changed. Your services keep running as they were.',action:{label:'Try again',onClick:()=>{const u=new URL(location.href);u.searchParams.set('state','loaded');location.href=u.href}}}))};
 window.servicesDemo={data,recoveredLine,WORD,hung,listWord,importantSwitch,importantWords,askStop,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
 })();

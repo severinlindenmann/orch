@@ -371,3 +371,48 @@ def p10(e):
     bad += [f"{x['name']}@{x['width']}: {x['errors'][:2]}" for x in got if x["errors"]]
     check(not bad, "; ".join(bad))
     return "file page, cut and wrong key, gone link and paused app at 1440 and 390"
+
+
+def key_forms(key: bytes) -> list[bytes]:
+    import base64
+    return [base64.urlsafe_b64encode(key).rstrip(b"="), base64.b64encode(key), key.hex().encode(), key]
+
+
+def files_holding(root: Path, forms: list[bytes], skip=()) -> list[str]:
+    hits = []
+    for p in root.rglob("*"):
+        if p.is_file() and not any(s in p.parts for s in skip):
+            data = p.read_bytes()
+            if any(f in data for f in forms):
+                hits.append(str(p.relative_to(root)))
+    return hits
+
+
+@scenario("P11", local_only=True)
+def p11(e):
+    """R5.1: the link key lives only in the fragment. After share + download (page, blob, meta, with the whole
+    link as Referer) no form of the key is in the server log, the server data folder, or the workspace outside
+    .orch/secrets, even after the agent records the link on its ticket (ref, summary, evidence)."""
+    e.connect_publish("Pilatus")
+    r, data = share(e, "Pilatus", name="p11.bin", size=4000)
+    link = r["link"]
+    base, fid, key = link_parts(link)
+    for path in (f"/f/{fid}", f"/f/{fid}/blob", f"/f/{fid}/meta"):
+        g = http("GET", f"{e.pub.url}{path}", {"Referer": link})
+        check(g.status == 200, f"GET {path} -> {g.status}")
+    check(opf1_decrypt(http("GET", f"{e.pub.url}/f/{fid}/blob").body, key)[1] == data, "round trip differs")
+    t = e.orchj("Pilatus", "ticket", "new", "P11 share the report")["id"]
+    e.orch("Pilatus", "check", "add", t, "Share the report")
+    e.orch("Pilatus", "ref", "add", t, link)
+    e.orch("Pilatus", "ticket", "summary", t, f"Shared at {link}")
+    _, out, _ = e.orch("Pilatus", "check", "done", t, "c1", "--url", link)
+    forms = key_forms(key)
+    check(not any(f in out.encode() for f in forms), "the CLI echoed the key after recording the link")
+    log = e.tmp / "publish.log"
+    check(not any(f in log.read_bytes() for f in forms), "the server log holds the key")
+    data_hits = files_holding(e.pub.data, forms)
+    check(not data_hits, f"server data holds the key: {data_hits}")
+    ws_hits = files_holding(e.ws("Pilatus"), forms, skip=("secrets",))
+    check(not ws_hits, f"workspace files outside .orch/secrets hold the key: {ws_hits}")
+    tj = "".join(p.read_text("utf-8") for p in (e.ws("Pilatus") / ".orch" / "tickets").glob("t_*.json"))
+    check(f"/f/{fid}#k=\u2026" in tj, "the ticket lost the link without its key")

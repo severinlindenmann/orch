@@ -203,3 +203,13 @@ def test_commit_at_asks_github_for_the_ref_at_that_time(proj, monkeypatch):
     assert urls == [
         "https://api.github.com/repos/o/orch/commits?sha=main&until=2023-11-14T22:13:20Z&per_page=1"
     ]
+
+
+def test_install_that_could_not_record_its_commit_looks_it_up_later(proj, monkeypatch):
+    """ORCH-1399: GitHub did not answer at install; installed.json keeps a pending lookup."""
+    monkeypatch.setattr(addons, "_source_sha", lambda: None)
+    monkeypatch.setattr(updateinfo, "origin_sha", lambda: None)
+    monkeypatch.setattr(addons, "_current_registry", lambda: [])
+    addons.update(proj, after_install=True)
+    rec = json.loads((addons.home() / "installed.json").read_text())
+    assert rec["sha"] is None and rec["pending"]["ref"] == addons.ref()
