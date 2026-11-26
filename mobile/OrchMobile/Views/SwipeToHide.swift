@@ -3,6 +3,7 @@ import SwiftUI
 /// Swipe a row to the left: a short swipe reveals a "Hide" button, a long swipe hides at once, letting go early springs back.
 /// The rows sit in a VStack (no List), so this does the work of `.swipeActions` with a horizontal-dominant drag that
 /// keeps the row's tap and the vertical scroll working. Also a context-menu item and an accessibility action.
+/// Reduce Motion: the row still follows the finger, but reveal, spring back, close and hide jump instead of animating.
 enum SwipeToHideRules {
     static let reveal: CGFloat = 40        // pt: past this, the button stays open
     static let buttonWidth: CGFloat = 96
@@ -17,8 +18,25 @@ enum SwipeToHideRules {
         if width > 0, let predicted, moved > reveal, -predicted > width { return .hide }
         return moved > reveal ? .reveal : .springBack
     }
+    /// Chat rows have no full swipe: a long swipe or a fling only shows the buttons, it never archives or deletes.
+    static func actionsOutcome(offset: CGFloat, predicted: CGFloat? = nil, width: CGFloat) -> Outcome {
+        outcome(offset: offset, predicted: predicted, width: width) == .springBack ? .springBack : .reveal
+    }
     /// Horizontal drags only: more sideways than up/down.
     static func isHorizontal(_ size: CGSize) -> Bool { abs(size.width) > abs(size.height) * 1.5 }
+
+    /// The moves a row makes on its own once the finger lifts: `spring` = reveal, spring back, close; `commit` = Hide or a
+    /// button runs. The drag itself always follows the finger, unanimated.
+    enum Settle { case spring, commit }
+    /// With Reduce Motion on there is no settle motion: the row jumps to where it ends (as ChatScreens scrolls without
+    /// animation). Read on every move, so changing the setting while the app is open takes effect on the next swipe.
+    static func settle(_ kind: Settle, reduceMotion: Bool) -> Transaction {
+        guard !reduceMotion else { var none = Transaction(); none.disablesAnimations = true; return none }
+        switch kind {
+        case .spring: return Transaction(animation: .spring(duration: 0.25))
+        case .commit: return Transaction(animation: .easeOut(duration: 0.2))
+        }
+    }
 }
 
 private struct SwipeToHide: ViewModifier {
@@ -31,6 +49,7 @@ private struct SwipeToHide: ViewModifier {
     /// True from the first sideways move until shortly after the finger lifts: the row's own tap (NavigationLink) must not
     /// fire at the end of a swipe, else a swipe that hides the question also opens its chat.
     @State private var swiping = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
@@ -70,15 +89,15 @@ private struct SwipeToHide: ViewModifier {
                 let base: CGFloat = open ? -SwipeToHideRules.buttonWidth : 0
                 switch SwipeToHideRules.outcome(offset: base + value.translation.width, predicted: base + value.predictedEndTranslation.width, width: width) {
                 case .hide: commit()
-                case .reveal: withAnimation(.spring(duration: 0.25)) { offset = -SwipeToHideRules.buttonWidth; open = true }
+                case .reveal: withTransaction(SwipeToHideRules.settle(.spring, reduceMotion: reduceMotion)) { offset = -SwipeToHideRules.buttonWidth; open = true }
                 case .springBack: close()
                 }
             }
     }
 
-    private func close() { withAnimation(.spring(duration: 0.25)) { offset = 0; open = false } }
+    private func close() { withTransaction(SwipeToHideRules.settle(.spring, reduceMotion: reduceMotion)) { offset = 0; open = false } }
     private func commit() {
-        withAnimation(.easeOut(duration: 0.2)) { offset = 0; open = false }
+        withTransaction(SwipeToHideRules.settle(.commit, reduceMotion: reduceMotion)) { offset = 0; open = false }
         hide()
     }
 }
@@ -106,6 +125,7 @@ private struct SwipeRowActions: ViewModifier {
     @State private var width: CGFloat = 0
     @State private var dragging = false
     @State private var swiping = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var buttonsWidth: CGFloat { SwipeToHideRules.buttonWidth * CGFloat(actions.count) }
 
     func body(content: Content) -> some View {
@@ -152,17 +172,17 @@ private struct SwipeRowActions: ViewModifier {
                 dragging = false
                 Task { try? await Task.sleep(for: .milliseconds(350)); swiping = false }
                 let start: CGFloat = open ? -buttonsWidth : 0
-                switch SwipeToHideRules.outcome(offset: start + value.translation.width, predicted: start + value.predictedEndTranslation.width, width: width) {
                 // No full swipe: a chat is archived or deleted only by a tap on its button, never by a fling.
-                case .hide, .reveal: withAnimation(.spring(duration: 0.25)) { offset = -buttonsWidth; open = true }
+                switch SwipeToHideRules.actionsOutcome(offset: start + value.translation.width, predicted: start + value.predictedEndTranslation.width, width: width) {
+                case .hide, .reveal: withTransaction(SwipeToHideRules.settle(.spring, reduceMotion: reduceMotion)) { offset = -buttonsWidth; open = true }
                 case .springBack: close()
                 }
             }
     }
 
-    private func close() { withAnimation(.spring(duration: 0.25)) { offset = 0; open = false } }
+    private func close() { withTransaction(SwipeToHideRules.settle(.spring, reduceMotion: reduceMotion)) { offset = 0; open = false } }
     private func run(_ action: SwipeRowAction) {
-        withAnimation(.easeOut(duration: 0.2)) { offset = 0; open = false }
+        withTransaction(SwipeToHideRules.settle(.commit, reduceMotion: reduceMotion)) { offset = 0; open = false }
         action.run()
     }
 }

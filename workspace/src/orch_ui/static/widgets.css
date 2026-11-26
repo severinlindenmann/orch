@@ -440,6 +440,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .swipe-ov-state.later{background:var(--surface-3);color:var(--text)}
 .preview-wait{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--text-muted)}
 iframe.loading{opacity:0}
+.preview-fail{position:absolute;inset:0;align-content:center;max-height:none;background:var(--surface)}
 .swipe-compare[data-view=slide] .cmp-line{pointer-events:none}
 .swipe-compare[data-view=slide] .cmp-line::after{display:none}
 .cmp-handle{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:999px;background:var(--brand);box-shadow:var(--lift-shadow);pointer-events:auto;cursor:ew-resize;touch-action:none}
@@ -541,10 +542,11 @@ body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
-/* ORCH-2024: nothing to review and nothing else in the rail: no empty left column, so the Waiting / Answered switch
-   lines up with the page heading; the empty state sits in the card's reading column under it */
-.review-layout:has(>.review-main #deck>.empty-state)>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
-.review-layout:not(.with-ticket):has(>.review-main #deck>.empty-state):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
+/* ORCH-2024, ORCH-2113: nothing else in the rail and an empty All cards list (nothing to review, or one card alone):
+   no empty left column, so the Waiting / Answered switch lines up with the page heading; the empty state or the card
+   sits in the card's reading column under it */
+.review-layout>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
+.review-layout:not(.with-ticket):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
 .review-main :is(#deck,#answered)>.empty-state{max-width:var(--review-card-w)}
 
 /* Report a problem (checks list in the dialog) */
@@ -979,7 +981,7 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
-.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
+.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center;flex:none;white-space:nowrap}
 /* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
 @media(max-width:720px){
 .blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}

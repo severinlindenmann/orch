@@ -10,7 +10,7 @@ from orch import history
 from test_step import NOW, TICKET, configure, save, success, ticket
 from test_two_machines import both, load, machines
 
-from orch_sync import repo
+from orch_sync import cli, repo
 
 __all__ = ["machines"]
 
@@ -115,3 +115,21 @@ def test_own_lines_written_after_enabling_stay_the_persons(root):
     assert history.lines(root, load(root))[-1]["by"] == "human:lindenmann"
     assert os.path.exists(root / ".orch/run/own-lines/t_abc123.json")
     assert TICKET in {f"tickets/{p.name}" for p in (root / ".orch/tickets").iterdir()}
+
+
+def test_sync_left_off_changes_no_shown_history_and_turning_it_on_adopts(root):
+    # ORCH-2114: `orch addon add sync` runs `orch sync start`; left off, it only marks "off here" (run/sync/idle)
+    answered = {"id": "q1", "text": "Which?", "answer": "A", "answered_by": "human:lindenmann"}
+    said = {"at": NOW, "by": "human:lindenmann", "text": "Answered q1: A"}
+    doc = ticket() | {"history": [LOCAL_LINE, said], "questions": [answered]}
+    save(root, value=doc)
+    assert cli.main(["--dir", str(root), "start"]) == 0
+    assert (root / ".orch/run/sync/idle").exists()
+    history._ENABLED.clear()  # as in a fresh `orch ticket show`
+    assert not history.sync_enabled(root)
+    assert history.shown_ticket(root, load(root)) == doc
+    configure(root)  # the person turns sync on later: earlier person actions are adopted first
+    success(root)
+    shown = history.shown_ticket(root, load(root))
+    assert shown["history"] == [LOCAL_LINE, said]
+    assert shown["questions"][0]["answered_by"] == "human:lindenmann"
