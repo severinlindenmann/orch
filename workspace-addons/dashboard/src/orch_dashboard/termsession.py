@@ -198,7 +198,7 @@ def answer(root: Path, orch_bin: str | None, tid: str, choice, digest) -> tuple[
     if r is None:
         return 409, "There is no live session to answer."
     prompt = runs_live.confirm_prompt(screen) if screen is not None else None
-    if prompt is None or prompt["digest"] != digest:
+    if prompt is None or prompt["digest"] != digest or prompt.get("unclear"):
         return 409, "The helper no longer asks this. Open the terminal to see what it shows now."
     sock, sess = r
     try:

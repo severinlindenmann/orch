@@ -665,7 +665,7 @@ async function liveOkAnswer(id, prompt, choice) {
 }
 function liveOkFill(box, id, live) {
   liveOkLoad(id);
-  const o = liveOk.get(id) || {}, p = o.prompt, term = typeof liveViewOf === 'function' && liveViewOf(id) === 'term';
+  const o = liveOk.get(id) || {}, p = o.prompt && !o.prompt.unclear ? o.prompt : null, term = typeof liveViewOf === 'function' && liveViewOf(id) === 'term';
   const asks = String(live.detail || '').slice(LIVE_OK_LEAD.length).replace(/^:\s*/, '');
   const cmd = p ? (p.command || '') : asks;
   const sig = ['ok', p?.digest || '', cmd, p?.reason || '', o.busy ? 1 : 0, term ? 1 : 0].join('\u0001');

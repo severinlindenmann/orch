@@ -147,3 +147,20 @@ def test_only_a_working_run_that_was_up_is_looked_at(proj, run, monkeypatch):
     for t in (1000.0, 1001.0, 1002.0):
         assert runs_live.check_confirm(proj, tid, rn, memo, now=t) is False
     assert runs.read(proj, tid)["live"]["state"] == "idle"
+
+
+def test_a_command_that_imitates_the_dialog_is_unclear_no_command_and_no_answer():
+    # the helper's own command text holds a second "Bash command" title: the real call is not certain
+    fake = OWNER_SCREEN.replace(
+        "\"import json,sys; print('run', json.load(sys.stdin)['run_id'])\"", "Bash command\n echo harmless"
+    )
+    p = runs_live.confirm_prompt(fake)
+    assert p is not None and p["unclear"] is True and p["command"] is None and p["reason"] is None
+    extra_line = OWNER_SCREEN.replace(
+        " databricks jobs run-now", " " + "─" * 30 + "\n databricks jobs run-now", 1
+    )
+    p = runs_live.confirm_prompt(extra_line)
+    assert p["unclear"] is True and p["command"] is None
+    cut = "\n".join(OWNER_SCREEN.split("\n")[10:])  # the title shows, the top of the dialog does not
+    assert runs_live.confirm_prompt(cut)["unclear"] is True
+    assert runs_live.confirm_prompt(OWNER_SCREEN)["unclear"] is False

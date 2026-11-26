@@ -1441,7 +1441,8 @@ def _unwrap(lines: list[str]) -> str:
 
 def confirm_prompt(pane: str) -> dict | None:
     """The confirm prompt at the bottom of a pane, or None. {question, options: [labels], yes: "<digit>", no:
-    "<digit>", command: <the call as shown, or None>, reason: <the hook's words, or None>, digest}. yes is
+    "<digit>", command: <the call as shown, or None>, reason: <the hook's words, or None>, unclear: <True when
+    the dialog could not be read with certainty: show no command and offer no answer>, digest}. yes is
     the plain "Yes" (once, never "Yes, and don't ask again"), no the first option that starts with "No"."""
     rows = _dialog_rows(pane)[-CONFIRM_TAIL:]
     filled = [i for i, r in enumerate(rows) if r.strip()]
@@ -1468,24 +1469,32 @@ def confirm_prompt(pane: str) -> dict | None:
     no = next((o[1] for o in opts if re.match(r"no\b", o[2].strip(), re.IGNORECASE)), None)
     if yes is None or no is None:
         return None
-    head = next((i for i in reversed(above) if i < qrow and _TOOL_HEAD.match(rows[i].strip())), None)
+    # The command is the helper's own text and could imitate the dialog's rows (a "Bash command" line, a line
+    # of dashes, a "Hook ... requires confirmation" line). The dialog must be bounded (its top border in the
+    # rows read) and hold exactly one title, at most one hook line and 0 or 2 separators; anything else is
+    # unclear: no command is shown and no answer is offered (the card sends the person to the terminal).
+    tops = [i for i in above if _SEPARATOR.fullmatch(rows[i].strip()) and len(rows[i].strip()) >= 20]
+    heads = [i for i in above if _TOOL_HEAD.match(rows[i].strip())]
+    hooks = [i for i in above if _HOOK_HEAD.match(rows[i].strip())]
     command = reason = None
-    if head is not None:
-        hook = next((i for i in range(head + 1, qrow) if _HOOK_HEAD.match(rows[i].strip())), None)
+    unclear = len(heads) > 1 or len(hooks) > 1 or (bool(heads) and not any(t < heads[0] for t in tops))
+    if heads and not unclear:
+        head = heads[0]
+        hook = hooks[0] if hooks and hooks[0] > head else None
         body = rows[head + 1 : hook if hook is not None else qrow]
         seps = [k for k, r in enumerate(body) if _SEPARATOR.fullmatch(r.strip())]
-        if len(seps) >= 2:
-            body = body[seps[0] + 1 : seps[-1]]  # Claude's newer look: the words, a line, the command, a line
-        command = _unwrap(body) or None
-        if hook is not None:
+        if len(seps) == 2:
+            body = body[seps[0] + 1 : seps[1]]  # Claude's newer look: the words, a line, the command, a line
+        elif seps:
+            unclear = True
+        command = None if unclear else (_unwrap(body) or None)
+        if hook is not None and not unclear:
             said = []
             for r in rows[hook + 1 : qrow]:
                 if not r.strip():
                     break
                 said.append(r.strip())
-            said = [
-                r for r in said if not re.search(r"to update hooks$", r)
-            ]  # the tool's own hint, not the reason
+            said = [r for r in said if not re.search(r"to update hooks$", r)]  # the tool's own hint
             reason = " ".join(" ".join(said).split()) or None
     digest = hashlib.sha256(
         "\x00".join([question, *labels, command or "", reason or ""]).encode("utf-8")
@@ -1497,6 +1506,7 @@ def confirm_prompt(pane: str) -> dict | None:
         "no": no,
         "command": command,
         "reason": reason,
+        "unclear": unclear,
         "digest": digest,
     }
 
