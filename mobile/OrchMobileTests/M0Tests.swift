@@ -779,6 +779,51 @@ final class AppModelV3Tests: XCTestCase {
         XCTAssertTrue(m.outbox.items.isEmpty)
         XCTAssertEqual(m.messages.filter { $0.message.body.text == "later" && $0.clientId == item.clientId }.count, 1)
     }
+    /// ORCH-2125: a message is promised as waiting only once its index write landed; a failed write keeps the composer's copy.
+    func testFailedIndexWriteOfflineIsNotPromisedAndTheRetrySurvivesARelaunchOnce() async throws {
+        var m: AppModel? = await paired()
+        await m!.mock!.setOffline(true)
+        let scratch = dir.appendingPathComponent("scratch"); try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let target = SendTarget.general(workspace: MockRelay.pilatus)
+        let draft = MessageDraft(text: "the plan", files: [DraftFile(url: file(scratch, "plan.pdf", bytes: 300), kind: .file, name: "plan.pdf", mime: "application/pdf")])
+        func folders() -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.count == 36 }   // item folders are client ids
+        }
+        m!.outbox.failIndexWrites = true
+        do { _ = try await m!.send(draft, to: target); XCTFail("a message that is not saved is not reported as queued") }
+        catch { XCTAssertEqual(error as? Outbox.SaveProblem, .notSaved); XCTAssertTrue(error.localizedDescription.contains("Send again")) }
+        XCTAssertTrue(m!.outbox.items.isEmpty, "not shown as waiting")
+        XCTAssertNotEqual(m!.announcement, "No connection. The message waits on this phone.")
+        XCTAssertNotNil(m!.outbox.lastSaveError)
+        let original = folders(); XCTAssertEqual(original.count, 1, "the copied attachment is kept for the retry")
+
+        m!.outbox.failIndexWrites = false                                   // space freed: Send again with the same draft
+        let item = try await m!.send(draft, to: target)
+        XCTAssertEqual([item.clientId], original, "the retry keeps the original client id and files")
+        XCTAssertNil(item.sentMessageId); XCTAssertEqual(m!.outbox.items.map(\.clientId), [item.clientId])
+        XCTAssertNil(m!.outbox.lastSaveError)
+
+        m!.persistForBackground(); Outbox.flushAllWrites(); m = nil        // killed while offline
+        let again = AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: dir, speechCache: dir.appendingPathComponent("sp"), systemAudioControls: false)
+        XCTAssertEqual(again.outbox.items.map(\.clientId), [item.clientId], "exactly one item, with its original id")
+        let restored = try XCTUnwrap(again.outbox.items.first)
+        XCTAssertEqual(restored.files.map(\.name), ["plan.pdf"])
+        XCTAssertEqual(try Data(contentsOf: again.outbox.fileURL(restored, restored.files[0])).count, 300, "the attachment is intact")
+        await again.refresh()
+        let sent = await again.mock!.requests
+        XCTAssertEqual(sent.map(\.clientId), [item.clientId])
+    }
+    func testAChangedDraftAfterAFailedWriteReplacesTheHeldCopy() async throws {
+        let m = await paired()
+        await m.mock!.setOffline(true)
+        let target = SendTarget.general(workspace: MockRelay.pilatus)
+        m.outbox.failIndexWrites = true
+        do { _ = try await m.send(MessageDraft(text: "frist"), to: target); XCTFail("not saved") } catch {}
+        m.outbox.failIndexWrites = false
+        let item = try await m.send(MessageDraft(text: "first"), to: target)
+        XCTAssertEqual(m.outbox.items.map(\.text), ["first"], "only the newest copy from the composer is queued")
+        let saved = await m.outbox.waitUntilSaved(item.clientId); XCTAssertTrue(saved)
+    }
     func testSettingsMuteRemoveAndInvitation() async throws {
         let m = await paired()
         XCTAssertEqual(m.settings, PhoneSettings())
