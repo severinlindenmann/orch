@@ -38,7 +38,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import subprocess
 import sys
@@ -1188,7 +1187,7 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
     if not cmd:
         return []
     try:
-        argv = shlex.split(cmd, posix=os.name != "nt")
+        argv = adapters.split_command(cmd)
     except ValueError:
         return [f"The copy setup command could not be read ({cmd}). The copy is used as it is."]
     work = work_dir(entry)
