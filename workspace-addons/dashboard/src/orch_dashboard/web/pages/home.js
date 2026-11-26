@@ -105,14 +105,13 @@ function needRow(row, newest, questionCount = 1, same = []) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
   // An add-on's own row (no ticket) is named by the add-on's display name, never its id ("sync").
-  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t);
+  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t, needQuestionOf(row));
   const question = (window.DashHelpers.questionWords || String)(needQuestion(row)), when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
       t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ' + (window.DashHelpers.ticketKey(t) ? window.DashHelpers.ticketKey(t) + ' ' : '') + '‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     questionCommandRows(needQuestion(row), key),
-    actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
@@ -131,7 +130,7 @@ function factoryStartRow(row, key, t, p, buttons) {
     h('h2', {className:'question-title'}, 'Start “' + clean(p.title) + '”?'),
     h('p', {className:'muted'}, clean(p.goal)),
     h('p', {className:'meta'}, p.meta),
-    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : '') + ' · ',
+    h('p', {className:'meta question-context'}, whoAsked(t, needQuestionOf(row)) + ' asked' + (when ? ' ' + when : '') + ' · ',
       h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal')),
     buttons.length ? h('div', {className:'actions'}, buttons) : null);
 }
@@ -194,9 +193,9 @@ function needNoticeRow(row, key) {
     h('div', {className:'grow'}, h('p', {}, clean(row.text || row.title)), h('p', {className:'meta'}, typeof capitalise === 'function' ? capitalise(row.source || 'orch') : 'orch')),
     h('div', {className:'acts'}, later));
 }
-// Who asked: the helper working on the ticket (the product's name for it), else "Helper".
-function whoAsked(t) {
-  return window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state?.settings, state?.runs?.[t?.id]?.claim) : 'Helper';
+// Who asked: the agent stored on the question (orch ask), else the agent of the run on the ticket, else "Helper" (ORCH-2023).
+function whoAsked(t, q) {
+  return window.DashHelpers.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, state?.runs?.[t?.id]?.claim) : 'Helper';
 }
 // The display name of an add-on from its id ("sync" -> "Sync"): its dashboard label, else the id with a capital.
 function addonName(id) {
@@ -208,7 +207,8 @@ function questionCommandRows(text, key) {
   if (!window.UI?.commandCopy || !window.DashHelpers.questionCommands) return null;
   return window.DashHelpers.questionCommands(text).map((c, i) => window.UI.commandCopy(c, {dataKey:key + '-cmd-' + i}));
 }
-function needQuestion(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text; }
+function needQuestionOf(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question); }
+function needQuestion(row) { return needQuestionOf(row)?.text || row.title || row.text; }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on
 // the one generic op, a signed one after the person's sign step; "Not now" waits a day, "View file" opens the file.
 // The only core op a row may name is the existing, signed private.move, and only in a row of the sync add-on. Its button
@@ -445,7 +445,7 @@ function needListRow(row, count, same) {
 function resultRow(group) {
   const t = group[group.length - 1];
   return listRow('check-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Check the result' + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
-    h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Check result'));
+    h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Test results'));
 }
 // Changes a helper made in its own copy, waiting to be added to the person's files (the signed copies.approve path).
 function changeRow(t) {
@@ -826,7 +826,7 @@ function home() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, queued, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
+  // a ticket waiting for review is the person's "Test results" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
   const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
   // a ticket is in one box only: one with a helper row stays in Helpers, never also in Quiet (report r-1124-0536)

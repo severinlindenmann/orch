@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<title>Dialog close · orch master fixture</title>
+<!-- ORCH-2060: the real master scripts and styles, nothing page-local. Used by tests/dialog_close.cjs. -->
+<link rel="stylesheet" href="../../static/tokens.css"><link rel="stylesheet" href="../../static/components.css"><link rel="stylesheet" href="../../static/motion.css"><link rel="stylesheet" href="../../static/widgets.css"><link rel="stylesheet" href="../../static/fileviewer.css"><link rel="stylesheet" href="../../static/interaction.css">
+<script src="../../static/icons.js"></script><script src="../../static/motion.js"></script><script src="../../static/overlay.js"></script><script src="../../static/components.js"></script><script src="../../static/fileviewer.js"></script>
+</head><body>
+<main class="page" id="main">
+  <h1>Settings</h1>
+  <section class="card pad stack" aria-labelledby="look-h">
+    <h2 id="look-h">Workspace look</h2>
+    <div class="row"><p class="grow">Icon and colour · First letter · Mint</p><button type="button" class="btn outline sm" id="before">Rename</button><button type="button" class="btn outline sm" id="open-a" data-key="look-change">Change</button><button type="button" class="btn outline sm" id="after">Suggest</button></div>
+  </section>
+  <section class="card pad stack" aria-labelledby="share-h">
+    <h2 id="share-h">Shared links</h2>
+    <div class="row" id="row"><p class="grow">survey-results.html</p><button type="button" class="btn outline sm" id="open-gone">Stop sharing</button></div>
+    <div class="row"><p class="grow">notes.txt</p><button type="button" class="btn outline sm" id="after-gone">Open file</button></div>
+  </section>
+</main>
+<!-- Settings call site pattern (dashboard app.js dialog() + pages/settings.js): Cancel and the action both await orch.close(d). -->
+<dialog class="dialog ui-bottom-close" id="a" aria-labelledby="a-h"><h2 id="a-h">Workspace icon &amp; colour</h2><p class="muted">See your changes in the sidebar as you choose.</p>
+  <div class="actions"><button type="button" class="btn ghost" id="open-b">More colours</button><button type="button" class="btn outline" id="a-cancel" data-close>Cancel</button><button type="button" class="btn primary" id="a-save">Save</button></div></dialog>
+<dialog class="dialog ui-bottom-close" id="b" aria-labelledby="b-h"><h2 id="b-h">More colours</h2><p class="muted">Pick one more colour for the sidebar.</p>
+  <div class="actions"><button type="button" class="btn outline" id="b-cancel" data-close>Cancel</button><button type="button" class="btn primary" id="b-ok">Use colour</button></div></dialog>
+<dialog class="dialog ui-bottom-close" id="c" aria-labelledby="c-h"><h2 id="c-h">Saved</h2><p class="muted">Your workspace look is saved.</p>
+  <div class="actions"><button type="button" class="btn outline" id="c-cancel" data-close>Cancel</button><button type="button" class="btn primary" id="c-ok">Done</button></div></dialog>
+<dialog class="dialog ui-bottom-close" id="stop" aria-labelledby="stop-h"><h2 id="stop-h">Stop sharing survey-results.html?</h2><p class="muted">Anyone with the link loses access. The file stays in your workspace.</p>
+  <div class="actions"><button type="button" class="btn outline" id="stop-cancel" data-close>Cancel</button><button type="button" class="btn danger" id="stop-ok">Stop sharing</button></div></dialog>
+<script>
+const $ = id => document.getElementById(id);
+$('open-a').onclick = () => orch.open($('a'));
+$('open-b').onclick = () => orch.open($('b'));
+$('open-gone').onclick = () => orch.open($('stop'));
+$('a-save').onclick = async () => { await orch.close($('a')); orch.open($('c')); };
+$('b-ok').onclick = () => orch.close($('b'));
+$('c-ok').onclick = () => orch.close($('c'));
+// the action takes its own trigger out of the page, then closes (the row is gone when focus comes back)
+$('stop-ok').onclick = async () => { $('row').remove(); await orch.close($('stop')); };
+// file viewer call site (kit/fileviewer.js): × Close, Esc and a click outside go through the same lifecycle
+$('after-gone').onclick = () => FileViewer.open({files:[{tid:'t_demo', kind:'artifacts', name:'notes.txt', title:'notes.txt'}], index:0, context:'Shared links'});
+</script>
+</body></html>
