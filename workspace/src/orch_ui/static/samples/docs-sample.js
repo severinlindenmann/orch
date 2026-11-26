@@ -1047,15 +1047,15 @@ window.DOCS_SAMPLE = {
       },
       {
        "who": "other",
-       "text": "Their person sees: X wants to do this",
+       "text": "Their person sees: Task from X, with what allowing it does",
        "decision": true,
        "branch": [
         {
-         "if": "Allow once or Always (or Always was given before)",
+         "if": "Allow this task or Always allow tasks from X (or Always was given before)",
          "then": "It becomes their ticket: \"From X: title\""
         },
         {
-         "if": "Ignore",
+         "if": "Decline",
          "then": "Dropped, nothing runs",
          "stop": true
         }

@@ -115,6 +115,46 @@ enum MessageSigner {
         return SignedEnvelope(sigV: 1, keyId: e["key_id"] as! String, signed: e["signed"] as! String, sig: e["sig"] as! String)
     }
 
+    /// Sign an answer to a signed question (relay-api.md `/v1/phone/answer`, ORCH-1204 c9). The signed body is the
+    /// body the relay builds: question_id, answer, answered_by `human:<phone id>`, client_id and the verdict as sent.
+    /// The signed answer names the question by `question_id` and `question_sha256`, and lists every blob the verdict
+    /// names. Nil when it cannot be signed in v1 (an unreadable question envelope, a number with a fraction, a file
+    /// without a local copy, a blob named twice); the answer then goes as before, unsigned.
+    static func signAnswer(_ r: AnswerRequest, to workspace: String, ticket: String?, questionId: String,
+                           questionEnvelope: [String: Any], phoneId: String, key: Curve25519.Signing.PrivateKey,
+                           fileFacts: (String) -> (size: Int64, sha256: String)?) -> SignedEnvelope? {
+        guard let sha = questionSha256(envelope: questionEnvelope) else { return nil }
+        var plain = r
+        plain.envelope = nil
+        guard let data = try? JSONCoding.encoder.encode(plain),
+              let all = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var body: [String: Any] = ["question_id": questionId, "answer": r.answer, "answered_by": "human:\(phoneId)",
+                                   "client_id": r.clientId]
+        var blobs: [String] = []
+        if let v = all["verdict"] as? [String: Any] {
+            body["verdict"] = v
+            let note = v["note"] as? [String: Any]
+            for vo in ((note?["words"] as? [String: Any])?["voice"] as? [[String: Any]]) ?? [] {
+                guard let b = vo["blob_id"] as? String else { return nil }
+                blobs.append(b)
+            }
+            for f in (note?["files"] as? [[String: Any]]) ?? [] {
+                guard let b = f["blob_id"] as? String else { return nil }
+                blobs.append(b)
+            }
+        }
+        guard Set(blobs).count == blobs.count else { return nil }
+        var files: [File] = []
+        for b in blobs {
+            guard let f = fileFacts(b) else { return nil }
+            files.append(File(blobId: b, size: f.size, sha256: f.sha256))
+        }
+        let d = Draft(from: phoneId, to: workspace, type: "answer", body: body, ticket: ticket,
+                      replyTo: r.questionMessageId, questionId: questionId, questionSha256: sha, files: files)
+        guard let e = try? envelope(d, key: key) else { return nil }
+        return SignedEnvelope(sigV: 1, keyId: e["key_id"] as! String, signed: e["signed"] as! String, sig: e["sig"] as! String)
+    }
+
     /// Size and SHA-256 hex of a local file.
     static func facts(of url: URL) -> (size: Int64, sha256: String)? {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
