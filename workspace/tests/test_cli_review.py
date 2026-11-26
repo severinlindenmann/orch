@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from orch import net, review, tickets
+from orch import net, review, runs_live, tickets
 
 ME = "human:pat"
+_REAL_RESUME = runs_live.resume_after_answer  # conftest stubs both in every test (no agent is started)
+_REAL_RESUME_SOON = runs_live.resume_soon
 
 
 @pytest.fixture
@@ -255,9 +257,71 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch, person_grant
     assert code == 0, out + err
     e = json.loads(out)
     assert e["decision"]["action"] == "approve" and e["answered_by"] == ME and e["via"] == "page"
-    assert len(seen) == 1 and seen[0][1] == {}
+    assert len(seen) == 1 and seen[0][1] == {"wait": False}
     code, out, _ = run("review", "list", "--json")
     assert json.loads(out)["cards"] == []
+
+
+def _two_questions(run, tid):
+    for text in ("First?", "Second?"):
+        code, out, err = run("ask", tid, text, "--option", "A", "--option", "B", "--by", "agent:x")
+        assert code == 0, out + err
+
+
+def test_the_last_answer_returns_at_once_and_starts_the_asker_detached(tk, run, monkeypatch):
+    """ORCH bug 25 Nov: answering the last open question started the asking helper inside the answer command;
+    filling the ticket's copy (git took over 60 s on a full disk) kept `orch review answer` from returning for
+    minutes. The start now runs in a detached `orch run _resume`; the answer returns with its Next line."""
+    from orch import runs, runs_live
+
+    root, tid = tk
+    _two_questions(run, tid)
+    monkeypatch.setattr(runs_live, "resume_soon", _REAL_RESUME_SOON)
+    monkeypatch.setattr(runs_live, "resume_after_answer", _REAL_RESUME)
+
+    def hangs(*a, **k):  # a start that cannot run: in the answer command it would block it
+        raise AssertionError("the helper start ran inside the answer command")
+
+    monkeypatch.setattr(runs, "start", hangs)
+    spawned = []
+    monkeypatch.setattr(runs_live.subprocess, "Popen", lambda argv, **kw: spawned.append((argv, kw)))
+    code, out, err = run("review", "answer", tid, "q2", "--verdict", "ok", "--picked", "A", "--by", ME)
+    assert code == 0, out + err
+    assert spawned == []  # q1 is still open: nothing to start
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--picked", "B", "--by", ME)
+    assert code == 0, out + err
+    assert "Answered q1: B" in out and "\nNext: " in out
+    ((argv, kw),) = spawned
+    assert argv[-6:] == ["run", "_resume", tid, "q1", "--by", ME]
+    assert kw["env"]["ORCH_ROOT"] == str(root) and kw["stdin"] is not None
+    assert (root / ".orch" / "run" / "logs" / f"{tid}-resume.log").exists()
+
+
+def test_run_resume_starts_the_asker_and_says_why_not(tk, run, monkeypatch):
+    """The detached `orch run _resume` is resume_after_answer: a refused start says so on the ticket."""
+    from orch import runs, runs_live
+    from orch.errors import Refused
+
+    root, tid = tk
+    _two_questions(run, tid)
+    monkeypatch.setattr(runs_live, "resume_after_answer", _REAL_RESUME)
+    code, out, _ = run("run", "_resume", tid, "q1", "--by", ME)
+    assert code != 0  # not answered yet: nothing is started
+    started = []
+
+    def full(root_, tid_, by, **kw):
+        started.append((tid_, by))
+        raise Refused("every helper place is taken")
+
+    monkeypatch.setattr(runs, "start", full)
+    for qid, pick in (("q1", "A"), ("q2", "B")):
+        run("review", "answer", tid, qid, "--verdict", "ok", "--picked", pick, "--by", ME)
+    started.clear()  # the conftest runs the detached start in-process; here it is called on its own
+    code, out, err = run("run", "_resume", tid, "q2", "--by", ME)
+    assert code == 0, out + err
+    assert started == [(tid, ME)]
+    lines = [h["text"] for h in tickets.load(root, tid)["history"]]
+    assert "The helper could not start: every helper place is taken" in lines
 
 
 def test_answer_talk_with_note_and_answered_list(tk, run, person_grant):
@@ -289,7 +353,7 @@ def test_a_long_send_back_note_reaches_the_helper_whole(tk, run, person_grant, m
     root, tid = tk
     q = _draft(run, tid)
     passed = []
-    monkeypatch.setattr(runs_live, "pass_answer", lambda root, tid, entry, who: passed.append(entry))
+    monkeypatch.setattr(runs_live, "pass_answer", lambda root, tid, entry, who, **k: passed.append(entry))
     words = "Make the draft more detailed: " + " ".join(f"point{i} needs a line of its own" for i in range(9))
     assert 280 < len(words) <= 500
     person_grant(root)

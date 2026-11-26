@@ -1496,11 +1496,13 @@ def event(
     return result
 
 
-def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+def pass_answer(root: Path, tid: str, q: dict, by: str, *, wait: bool = True) -> dict | None:
     """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
     when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
     resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
-    An agent's own answer, or an add-on's question, starts nothing. Returns the start result, if any."""
+    An agent's own answer, or an add-on's question, starts nothing. Returns the start result, if any.
+    wait=False (a person's answer command): the start runs in a detached `orch run _resume`, so the answer
+    returns right after it is saved; a start can take minutes (filling the ticket's copy, a slow disk)."""
     if by.startswith("agent:"):
         return None
     rec = runs.read(root, tid)
@@ -1513,7 +1515,11 @@ def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
             "answer",
         )
         return None
-    return resume_after_answer(root, tid, q, by)
+    if wait:
+        return resume_after_answer(root, tid, q, by)
+    if _resume_asker(root, tid, q) is not None:
+        resume_soon(root, tid, q["id"], by)
+    return None
 
 
 def _asker(root: Path, ticket: dict, qid: str) -> str | None:
@@ -1528,11 +1534,39 @@ def _asker(root: Path, ticket: dict, qid: str) -> str | None:
     return None
 
 
-def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+def _resume_asker(root: Path, tid: str, q: dict) -> str | None:
+    """The agent to start again after this answer, or None when the answer starts nothing."""
     ticket = history.shown_ticket(root, tickets.load(root, tid))  # every person field as proven here
     asker = _asker(root, ticket, q["id"]) if q.get("kind") in (None, "plain") else None
     if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
         return None  # tickets.answer left it Ready (not Working): nobody works on it
+    return asker
+
+
+def resume_soon(root: Path, tid: str, qid: str, by: str) -> None:
+    """Start `orch run _resume TICKET QID` detached (it runs resume_after_answer). Never waits, never raises:
+    the answer is saved either way, and a start that cannot begin says so on the ticket."""
+    import tempfile
+
+    try:
+        with runs.open_log(root / ".orch" / "run" / "logs" / f"{tid}-resume.log") as out:
+            subprocess.Popen(
+                procs.orch_python_argv("run", "_resume", tid, qid, "--by", by),
+                cwd=Path(os.path.realpath(tempfile.gettempdir())),  # ORCH_ROOT names the workspace
+                env={**os.environ, "ORCH_ROOT": str(root)},
+                stdout=out,
+                stderr=out,
+                **procs.background_popen_kwargs(),
+            )
+    except Exception as e:  # noqa: BLE001
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, f"The helper could not start: {e}", "orch")
+
+
+def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+    asker = _resume_asker(root, tid, q)
+    if asker is None:
+        return None
     try:
         adapters.load(asker, root)
     except Refused:

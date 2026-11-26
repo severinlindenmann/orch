@@ -1985,7 +1985,7 @@ def run(args: argparse.Namespace) -> None:
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
-            runs_live.pass_answer(root, t["id"], q, who)
+            runs_live.pass_answer(root, t["id"], q, who, wait=False)
         note = _addon_note(root, q)
         _out(
             args,
