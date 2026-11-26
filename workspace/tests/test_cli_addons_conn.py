@@ -19,7 +19,7 @@ def test_addon_list_json_and_text(proj, run):
 
 
 def test_addon_list_empty_says_next_step(proj, run, monkeypatch):
-    monkeypatch.setattr(addons, "listing", lambda root: [])
+    monkeypatch.setattr(addons, "listing", lambda root, **kw: [])
     code, out, _ = run("addon", "list")
     assert (
         code == 0
