@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from orch import adapters, addons, cli_leave, diag
+from orch import adapters, addons, cli_leave, diag, procs
 
 
 @pytest.fixture(autouse=True)
@@ -14,6 +14,7 @@ def tools_found(monkeypatch):
     )
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}")
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")
+    monkeypatch.setattr(procs, "launcher_problem", lambda: None)  # the faked orch works (ORCH-2138)
 
 
 def test_fresh_init_reports_nothing_wrong(proj, run):

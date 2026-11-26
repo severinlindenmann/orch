@@ -48,8 +48,8 @@ def test_no_orch_on_the_path_is_this_python(monkeypatch):
     assert procs.orch_cmd() == procs.orch_python_argv()
     monkeypatch.setenv("ORCH_BIN", "orch")  # what the core passes when it found no orch either
     assert procs.orch_cmd() == procs.orch_python_argv()
-    monkeypatch.setenv("ORCH_BIN", "/fake/orch")
-    assert procs.orch_cmd() == ["/fake/orch"]
+    monkeypatch.setenv("ORCH_BIN", "/fake/orch_fake")  # not named orch: on Windows that is the launcher
+    assert procs.orch_cmd() == ["/fake/orch_fake"]
 
 
 def test_launcher_problem(windows, monkeypatch):
