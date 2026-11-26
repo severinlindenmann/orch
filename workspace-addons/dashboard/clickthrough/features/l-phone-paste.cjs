@@ -1,4 +1,4 @@
-// The phone link from Settings, no terminal (ORCH-1693): with the relay on but not connected, Settings > Contacts
+// The phone link from Settings, no terminal (ORCH-1693): with the relay on but not connected, Settings > Relay
 // says "Not set up" and asks for the line from the phone link's admin page; the person pastes it, presses Connect,
 // reloads and sees Connected. A line that is not that line is refused with a plain next step.
 const fs = require('node:fs');
