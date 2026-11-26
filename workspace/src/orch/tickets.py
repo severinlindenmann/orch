@@ -499,8 +499,28 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+# R5.1: a shared file's key lives only in its link's fragment (`#k=<key>`, contracts/crypto.md). A ticket
+# keeps the link without the key (`#k=…`, as in contracts/review/ticket.example.json): tickets go to git,
+# other workspaces and the phone, the key never does.
+_LINK_KEY_RE = re.compile(r"#k=[A-Za-z0-9_-]{16,}")
+LINK_KEY_KEPT = "#k=\u2026"
+
+
+def drop_link_keys(obj):
+    """`obj` with the key of every shared link (`#k=<key>`) replaced by `#k=…`, changed in place."""
+    if isinstance(obj, str):
+        return _LINK_KEY_RE.sub(LINK_KEY_KEPT, obj) if "#k=" in obj else obj
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = drop_link_keys(v)
+    elif isinstance(obj, list):
+        obj[:] = [drop_link_keys(v) for v in obj]
+    return obj
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    drop_link_keys(ticket)
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
