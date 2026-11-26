@@ -1483,7 +1483,14 @@ def confirm_prompt(pane: str) -> dict | None:
         hook = hooks[0] if hooks and hooks[0] > head else None
         body = rows[head + 1 : hook if hook is not None else qrow]
         seps = [k for k, r in enumerate(body) if _SEPARATOR.fullmatch(r.strip())]
-        if len(seps) == 2:
+        filled_body = [k for k, r in enumerate(body) if r.strip()]
+        top = rows[max(t for t in tops if t < head)].strip()
+        if top[:1] in (
+            "\u256d",
+            "\u250c",
+        ):  # a boxed dialog has no inner lines: any line is the command's own
+            unclear = bool(seps)
+        elif len(seps) == 2 and seps[0] <= 2 and seps[1] == filled_body[-1]:
             body = body[seps[0] + 1 : seps[1]]  # Claude's newer look: the words, a line, the command, a line
         elif seps:
             unclear = True

@@ -164,3 +164,15 @@ def test_a_command_that_imitates_the_dialog_is_unclear_no_command_and_no_answer(
     cut = "\n".join(OWNER_SCREEN.split("\n")[10:])  # the title shows, the top of the dialog does not
     assert runs_live.confirm_prompt(cut)["unclear"] is True
     assert runs_live.confirm_prompt(OWNER_SCREEN)["unclear"] is False
+
+
+def test_dash_lines_inside_a_boxed_dialog_or_in_the_wrong_place_are_unclear():
+    dashes = "│   " + "─" * 30 + "   │"
+    boxed = PERMISSION.replace(
+        "│   gh pr merge 105 --squash", f"{dashes}\n│   gh pr merge 105 --squash\n{dashes}"
+    )
+    p = runs_live.confirm_prompt(boxed)
+    assert p["unclear"] is True and p["command"] is None
+    # newer look: the second line must close the command right before the hook line, not sit inside it
+    moved = OWNER_SCREEN.replace(' "import json,sys;', " " + "╌" * 40 + '\n "import json,sys;', 1)
+    assert runs_live.confirm_prompt(moved)["unclear"] is True
