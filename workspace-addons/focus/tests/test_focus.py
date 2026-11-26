@@ -459,7 +459,9 @@ def test_open_says_why_when_the_dashboard_will_not_start(ws, monkeypatch, capsys
 
     monkeypatch.setattr(addons, "active_manifests", lambda r: {"dashboard": {}, "focus": {}})
     monkeypatch.setattr(services, "running", list)
-    monkeypatch.setattr(services, "start", lambda r, only=None: [{"addon": "dashboard", "error": "port busy"}])
+    monkeypatch.setattr(
+        services, "start", lambda r, only=None: [{"addon": "dashboard", "error": "port busy"}]
+    )
     assert cli.main(["open", t["id"], "--json"]) == 2
     assert json.loads(capsys.readouterr().out)["error"] == "The dashboard did not start: port busy"
     monkeypatch.setattr(services, "start", lambda r, only=None: [])
