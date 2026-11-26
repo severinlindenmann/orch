@@ -292,3 +292,15 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - `settings-helper.html` › What helpers need: "Databricks dev" says `Not approved yet` (warning tone) with one
   `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
   `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).
+
+## 26 Nov 2026 (ORCH-2169, RP1, RP6, RP8 B)
+
+- Tab, section title, menu and add-on rows say "Relay" (was Contacts) and "Publish" (was Shared / Shared links) on
+  every settings page; the "Add an add-on" sentence lists "Publish, Relay and Sync".
+- RP1 (`settings-phone.html`, draft rp1-b): Relay is two steps. Step 1 "Connect this workspace": a multi-line paste box
+  ("Paste the whole text here..."), Connect, and "Copy a note for my admin". Step 2 "Your admin chooses who you can
+  write to" is marked as the admin's turn ("Nothing for you to do"). Replaces the old "1. Phone link" card.
+- RP6 (draft rp6-b): a "Phones" section with three plain steps (Ask your admin for a phone code; Install the orch app
+  on your iPhone and scan the code; Done) and a phone row "Anna's iPhone, Paired." with a Remove button.
+- RP8 B: "Workspaces" lists who the admin connected; empty reads "No other workspaces yet". The "Allow a workspace" form
+  is gone, the admin does that.
