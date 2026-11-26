@@ -2309,8 +2309,10 @@ def test_view_not_connected_says_so(proj, run):
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
     assert code == 0 and "not connected" in v["notice"]
-    assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
-    assert v["blocks"][0]["empty"]["title"] == "Not connected"
+    # D5: one notice, its one button is the header link the dashboard draws in it; the page shows what it can
+    assert v["header"] == {"link": {"label": "Connect Contacts", "to": "app:settings/phone"}}
+    assert v["blocks"][0]["empty"]["title"] == "No messages yet"
+    assert "button" not in v["blocks"][0]["empty"]
 
 
 def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
@@ -2331,8 +2333,7 @@ def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
     words = [v["notice"]] + [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
     assert v["notice"].startswith(label + " ")
     assert not any("relay" in w.lower() for w in words), words
-    button = v["blocks"][0]["empty"]["button"]
-    assert button == {"label": f"Open {label} settings", "to": "app:settings/phone"}
+    assert v["header"]["link"] == {"label": f"Connect {label}", "to": "app:settings/phone"}
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):

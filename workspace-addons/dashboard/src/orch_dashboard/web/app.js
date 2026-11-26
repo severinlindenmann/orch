@@ -249,12 +249,11 @@ function addonRowLabel(row) {
 function notFoundPage() {
   const off = offAddonName(location.hash);
   if (off) {
-    const label = addonRowLabel(array(state?.settings?.addons).find(a => a && a.name === off));
-    return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
-      h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
-        h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
-        h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#settings/addons/' + encodeURIComponent(off)}, 'Open ' + label + ' settings'),
-          h('a', {className:'btn ghost sm', href:'#home'}, 'Go to Home')))));
+    // D5 (26 Nov): the page keeps its name; one notice under it with one green button (the Turn on of Settings).
+    const row = array(state?.settings?.addons).find(a => a && a.name === off), label = addonRowLabel(row);
+    return fragment(heading(label, '', {settings:addonSettingsHref(off)}),
+      pageNotice({what:label + ' is turned off.', still:'Your tickets and everything else still work.', dataKey:'addon-off',
+        action:snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'settings-addon', 'data-name':off, 'data-key':'addon-off-on', disabled:settingsBusy.has('addon-' + off)}, 'Turn on ' + label)}));
   }
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
@@ -1247,10 +1246,10 @@ main.addEventListener('click', async event => {
       const result = await addonUninstall(addon.name);
       settingsBusy.delete('addon-' + addon.name);
       window.orch.toast(result.ok ? 'Removed.' : result.text, result.ok ? 'ok' : 'error');
-      if (result.ok) location.hash = '#settings/addons';
+      if (result.ok) { settingsBack = null; location.hash = '#settings/addons'; }
       render();
     };
-    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
+    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and removed. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {
@@ -1339,8 +1338,9 @@ main.addEventListener('click', async event => {
     render();
   }
 });
-window.addEventListener('hashchange', async () => {
+window.addEventListener('hashchange', async event => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
+  noteSettingsBack(event?.oldURL, location.hash);  // D6: an add-on's settings go back to the page they were opened from
   // a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   soft?.hold(true);

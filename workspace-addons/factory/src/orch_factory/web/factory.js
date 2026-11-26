@@ -452,7 +452,9 @@
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
-    el.append(field, count, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
+    // D4 (26 Nov): the idea box is the master's empty-page look (.page-empty): one sentence, the first step right there.
+    const step = group('page-empty-step'); step.append(field, count, group('row', go, fallback), status);
+    el.append(step); el.classList.add('f-idea', 'page-empty'); return el;
   }
   // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
   // stays when the list arrives.
@@ -516,7 +518,12 @@
       const mark = badge('Needs you'); mark.classList.add('attn');
       block.setAttribute('aria-label', 'Needs you'); block.append(mark, ...waiting); view.append(block);
     }
-    view.append(theIdea(), askRow(auto));
+    // D4: with nothing in Factory yet the idea box IS the page: no switch, no lines about what is missing.
+    const empty = !orders.length && !auto?.on;
+    const box = theIdea(), boxTitle = box.querySelector('h2');
+    if (boxTitle) boxTitle.textContent = empty ? 'No ideas yet. Start with one' : 'Start with an idea';
+    if (empty) { view.append(box); return; }
+    view.append(box, askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),

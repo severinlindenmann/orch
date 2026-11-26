@@ -29,5 +29,7 @@ test('the click on a prompt button opens the dialog; the dashboard code never na
 test('place = settings: the add-on waits under More (never in the list by itself), its page route stays (D2 A)', () => {
   assert.match(app, /const menuPages = \(\) => addons\(\)\.filter\(a => a\.dashboard && a\.dashboard\.panel !== 'phone'\)/);
   assert.match(app, /pages\.filter\(a => a\.dashboard\?\.place !== 'settings'\)\.map\(a => a\.name\)/);
-  assert.match(settings, /href:'#addon\/' \+ encodeURIComponent\(addon\.name\), 'data-key':'addon-detail-open'/);
+  // D6: no "Open" row on the add-on settings; its way back is "Back to <page>" (where it was opened from), else Settings › Add-ons
+  assert.ok(!settings.includes("'data-key':'addon-detail-open'"));
+  assert.match(settings, /const back = settingsBack \|\| \{hash:'#settings\/addons', label:'Add-ons'\}/);
 });

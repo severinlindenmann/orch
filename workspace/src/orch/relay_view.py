@@ -339,9 +339,11 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        out["notice"] = "Contacts is not connected. Connect it in Settings."
+        # D5 (26 Nov): what happened, what still works, and one button to the place that connects it (the
+        # dashboard draws the header link as the notice's button when the notice has none of its own).
+        out["notice"] = "Contacts is not connected yet. Your tickets and everything else still work."
         out["notice_tone"] = "warn"
-        out["header"] = {"status": {"label": "Not connected", "tone": "warn"}}
+        out["header"] = {"link": {"label": "Connect Contacts", "to": "app:settings/phone"}}
         out["blocks"] += [
             {
                 "type": "list",
@@ -349,9 +351,8 @@ def view(root: Path) -> dict:
                 "span": "half",
                 "items": [],
                 "empty": {
-                    "title": "Not connected",
-                    "text": "Connect Contacts in Settings to send and receive messages.",
-                    "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
+                    "title": "No messages yet",
+                    "text": "Messages to and from other workspaces show here once Contacts is connected.",
                 },
             },
             {

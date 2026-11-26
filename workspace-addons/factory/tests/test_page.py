@@ -834,9 +834,20 @@ def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
     early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
     assert early < js.index("await read('/api/home', signal)")
-    assert (
-        "view.append(theIdea(), askRow(auto))" in js
-    )  # the same box (and its typed text) stays when the list comes
+    # the same box (and its typed text) stays when the list comes
+    assert "const box = theIdea()" in js and "view.append(box, askRow(auto))" in js
+
+
+def test_empty_factory_is_the_idea_box_alone():
+    """D4 (26 Nov, owner pick A): with nothing in Factory yet the idea box is the page, in the master's empty-page look
+    (.page-empty: one sentence, the first step right there); no switch and no lines about what is missing."""
+    js = _page_js()
+    assert "el.classList.add('f-idea', 'page-empty')" in js and "group('page-empty-step')" in js
+    assert "const empty = !orders.length && !auto?.on;" in js
+    assert "if (empty) { view.append(box); return; }" in js
+    assert js.index("if (empty) { view.append(box); return; }") < js.index(
+        "Budget health: shows here once an order runs."
+    )
 
 
 def test_the_newest_draft_opens_without_a_click():
