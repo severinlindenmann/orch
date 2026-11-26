@@ -445,7 +445,7 @@ function needListRow(row, count, same) {
 function resultRow(group) {
   const t = group[group.length - 1];
   return listRow('check-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Check the result' + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
-    h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Check result'));
+    h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Test results'));
 }
 // Changes a helper made in its own copy, waiting to be added to the person's files (the signed copies.approve path).
 function changeRow(t) {
@@ -826,7 +826,7 @@ function home() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, queued, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
+  // a ticket waiting for review is the person's "Test results" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
   const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
   // a ticket is in one box only: one with a helper row stays in Helpers, never also in Quiet (report r-1124-0536)

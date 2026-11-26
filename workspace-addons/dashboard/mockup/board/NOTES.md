@@ -165,7 +165,7 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
   Backlog, Done, Won't do. A row shows two lines of tiles, then "Show N more"; Done and Won't do start folded.
 - A tile is the title (2 lines, ticket key in front) and one line: tasks ("2/5 tasks"), ONE signal, "Part of: <title>",
   one add-on icon, the ⋯ menu.
-- The signal, most important first: Answer, Check result, late date, what the helper says (quiet, stuck), "Replaced by",
+- The signal, most important first: Answer, Test results, late date, what the helper says (quiet, stuck), "Replaced by",
   "Finished today", "Waits for", "Until 21:00", Paused, the parts bar.
 - An Epic or Release has a tag in front and a parts bar "1/3 done" instead of the tasks; the bar opens the list of its
   parts. A part says "Part of: <title>"; one click shows "Parts of ..." with a scope bar and "Back to all tickets".
