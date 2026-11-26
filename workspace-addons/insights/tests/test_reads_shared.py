@@ -61,6 +61,20 @@ def test_a_test_orch_keeps_its_own_process(ws, fake_orch, monkeypatch):
     assert server.read_counts(ws, fake_orch)["schema"] == "orch.counts/1"
 
 
+
+def test_the_slow_tokens_read_keeps_its_own_process(ws, monkeypatch):
+    # it takes seconds at 10,000 tickets: in the worker it held a place the overview waited for on a first open
+    monkeypatch.setattr(server, "_by_worker", lambda *a: (_ for _ in ()).throw(AssertionError("no worker")))
+    started = []
+
+    def run(args, **kwargs):
+        started.append(args)
+        return subprocess.CompletedProcess(args, 0, '{"models": []}', "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert server.read_json(ws, None, ["tokens", "--days", "30", "--json"]) == {"models": []}
+    assert started[0][-4:] == ["tokens", "--days", "30", "--json"]
+
 def test_one_counts_read_answers_every_ask_at_once(ws, monkeypatch):
     calls = []
 

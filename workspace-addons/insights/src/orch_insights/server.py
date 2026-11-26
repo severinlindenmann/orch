@@ -117,6 +117,11 @@ def read_ticket_titles(root, orch_bin=None):
     return read_json(root, orch_bin, ["ticket", "list", "--all", "--json"])
 
 
+# Reads that take seconds at 10,000 tickets (`tokens` reads every ticket of 30 days): they run as a process of
+# their own, so they never hold one of the few read workers the overview waits for on a first open (ORCH-2288).
+OWN_PROCESS = frozenset({"tokens"})
+
+
 def read_json(root, orch_bin, argv):
     """One read-only CLI answer as JSON, or None when it fails. Runs with the same cleaned environment as a
     write (M6); when that environment can not be built the read fails (and so counts as unknown)."""
@@ -129,7 +134,7 @@ def read_json(root, orch_bin, argv):
         env = actions.human_env(root, actions.real_bin(orch_bin))
     except actions.Unavailable:
         return None
-    if orch_bin in (None, actions.SELF):
+    if orch_bin in (None, actions.SELF) and argv[:1] and argv[0] not in OWN_PROCESS:
         got = _by_worker(root, argv, env)
         if got is not _MISS:
             return got
