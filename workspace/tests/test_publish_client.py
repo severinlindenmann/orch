@@ -65,6 +65,27 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
     assert "secrets/" in (proj / ".orch/.gitignore").read_text() and not (proj / "AGENTS.md").exists()
 
 
+def test_invite_adds_and_connects_a_second_folder(proj, run, pub, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, pub)
+    adm = make_admin(pub.token)
+    monkeypatch.setenv("ORCH_PUBLISH_ADMIN_TOKEN", ADMIN_TOKEN)
+    second = proj.parent / "second workspace"
+    try:
+        code, out, err = run(
+            "publish", "invite", "Second", "--folder", str(second), "--admin-url", adm.url, "--json"
+        )
+        assert code == 0, err
+        r = json.loads(out)
+        assert r["id"] == WS and "token" not in r and pub.token not in out
+        assert adm.made[0]["rights"] == {"files": True, "apps": True, "permanent": False, "public": False}
+        assert json.loads((second / ".orch/secrets/publish.json").read_text())["token"] == pub.token
+        assert adm.calls[0][2]["X-Orch-Admin"] == ADMIN_TOKEN
+    finally:
+        adm.stop()
+
+
 def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
     code, _, err = run("publish", "connect", pub.url, "--workspace", WS, "--token", "orp_" + "Z" * 43)
     assert code == 2 and "wrong" in err
@@ -94,6 +115,38 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert res["size"] == 12
     assert "12 B" in run("publish", "list")[1]
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
+
+
+def test_link_key_never_lands_in_a_ticket_or_a_run_record(proj, run, pub):
+    """R5.1: the key stays in the link fragment. Recording the link on a ticket keeps `#k=…`, the CLI never
+    echoes the key, and a run record hides it."""
+    from orch import secretrun
+
+    connect(run, pub)
+    f = proj / "report.txt"
+    f.write_bytes(b"hello report")
+    link = json.loads(run("publish", "file", str(f), "--json")[1])["link"]
+    key = link.split("#k=")[1]
+    tid = json.loads(run("ticket", "new", "Share report", "--json")[1])["id"]
+    run("check", "add", tid, "Share it")
+    run("check", "add", tid, "Tell them")
+    outs = [
+        run("ref", "add", tid, link),
+        run("ticket", "summary", tid, f"Shared at {link}"),
+        run("check", "done", tid, "c1", "--url", link),
+        run("check", "done", tid, "c2", "--note", f"sent {link} by mail"),
+    ]
+    assert all(code == 0 and key not in out + err for code, out, err in outs)
+    kept = link.split("#k=")[0] + "#k=\u2026"
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert key not in text and text.count(kept) >= 4
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and "secrets" not in p.parts and key in p.read_text("utf-8", errors="ignore")
+    ]
+    assert leaks == []
+    assert key not in secretrun.record_writer(proj).hider.hide_text(f"orch publish file -> {link}")
 
 
 BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())

@@ -25,6 +25,7 @@ from orch.errors import Refused
 HARNESS = Path(".orch") / "harness"
 COPY_HARNESS = ".orch-harness"  # in a separate copy: its own AGENTS.orch.md, refreshed at each start
 COPY_MARK = ".orch-copy"  # inside a copy made where links are not allowed: "orch owns this folder"
+COPY_PART = ".orch-copy.part"  # the file being copied; moved into place only once it is whole (ORCH-2011)
 LOCAL_MARK = ("<!-- orch:begin local -->", "<!-- orch:end local -->")
 EXCLUDE_MARK = ("# orch:begin", "# orch:end")
 SHARE_MARK = ("<!-- orch:begin share -->", "<!-- orch:end share -->")
@@ -805,7 +806,7 @@ def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
             for fn in fns:
                 p = Path(dp) / fn
                 rel_f = p.relative_to(dest).as_posix()
-                if rel_f == COPY_MARK or rel_f in KEEP_IN_COPY.get(dest.name, ()):
+                if rel_f in (COPY_MARK, COPY_PART) or rel_f in KEEP_IN_COPY.get(dest.name, ()):
                     continue
                 if rel_f not in listed or p.lstat().st_mtime > mt:  # a file orch did not copy is the user's
                     return False
@@ -899,8 +900,9 @@ def _norm_win(p: object) -> str:
 
 def _copy_dir(src: Path, dst: Path) -> None:
     """Where links are not allowed: a copy that orch keeps in sync (it owns it: COPY_MARK).
-    The marker is written first and each copied file gets its time, so a copy that breaks off part way is still
-    orch's and the next run replaces it (ORCH-1787)."""
+    The marker is written first and each file is copied to COPY_PART, gets the marker's time and only then moves
+    into place, so a copy that breaks off part way (even in the middle of a file) is still orch's and the next run
+    replaces it (ORCH-1787, ORCH-2011)."""
     dirs: list[Path] = []
     files: list[Path] = []
     for dp, dns, fns in os.walk(src, followlinks=False):
@@ -919,9 +921,18 @@ def _copy_dir(src: Path, dst: Path) -> None:
     mt = mark.stat().st_mtime
     for rel in dirs:
         (dst / rel).mkdir(parents=True, exist_ok=True)
+    part = dst / COPY_PART
     for rel in files:
-        shutil.copyfile(src / rel, dst / rel)
-        os.utime(dst / rel, (mt, mt))  # not newer than the marker: still orch's copy
+        try:
+            shutil.copyfile(src / rel, part)
+            os.utime(part, (mt, mt))  # not newer than the marker: still orch's copy
+            os.replace(part, dst / rel)
+        except BaseException:
+            try:
+                part.unlink()
+            except OSError:
+                pass
+            raise
 
 
 def _empty_tree(dest: Path) -> bool:

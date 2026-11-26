@@ -155,30 +155,37 @@ def _row(t: dict) -> dict:
     }
 
 
-def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool]:
-    """(row, shows sync) of one ticket file. The row is None when the file is not a ticket this orch lists
-    (unreadable, broken JSON, id not matching the name, a newer format): the same files list_all leaves
+def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
+    """(row, shows sync, broken) of one ticket file. The row is None when the file is not a ticket this orch
+    lists (unreadable, broken JSON, id not matching the name, a newer format): the same files list_all leaves
     out. "Shows sync" is history.doc_shows_sync of whatever JSON the file holds, as history.tickets_show_sync
-    reads it (a file over 64 MB counts as not showing it there, so here too)."""
+    reads it (a file over 64 MB counts as not showing it there, so here too). "Broken": the file holds no
+    valid JSON (a hand typo, an empty file), which the person has to fix (ORCH-2019)."""
     from orch import history
 
     try:
-        t = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError):
-        return None, False
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None, False, True
+    except OSError:
+        return None, False, False
+    try:
+        t = json.loads(text)
+    except (ValueError, RecursionError):
+        return None, False, True
     try:
         sync = size <= 64 * 1024 * 1024 and bool(history.doc_shows_sync(t))
     except (RecursionError, AttributeError):
         sync = False
     if not isinstance(t, dict) or t.get("id") != tid:
-        return None, sync
+        return None, sync, False
     m = _NEWER_RE.match(str(t.get("schema", "")))
     if m and int(m.group(1)) > 1:
-        return None, sync
+        return None, sync, False
     try:
-        return _row(t), sync
+        return _row(t), sync, False
     except (TypeError, AttributeError, ValueError, KeyError):
-        return None, sync  # odd field shapes (a checklist that is no list): no row, never a broken listing
+        return None, sync, False  # odd field shapes (a list that is no list): no row, never a broken listing
 
 
 def _read_index(root: Path) -> dict:
@@ -247,12 +254,17 @@ def _look(root: Path) -> dict:
         was = old.get(tid)
         if isinstance(was, dict) and was.get("sig") == sig and isinstance(was.get("traced"), bool):
             row = was.get("row", False)
-            if row is None or (isinstance(row, dict) and row.get("id") == tid):
+            # a file left out (row None) is kept only once the index knows whether it is broken (ORCH-2019)
+            if (row is None and isinstance(was.get("broken"), bool)) or (
+                isinstance(row, dict) and row.get("id") == tid
+            ):
                 files[tid] = was
                 continue
         changed = True
-        row, sync = _parse(Path(e.path), tid, sig[1])
+        row, sync, broken = _parse(Path(e.path), tid, sig[1])
         files[tid] = {"sig": sig, "row": row, "traced": sync}
+        if row is None:
+            files[tid]["broken"] = broken
     if (changed or set(files) != set(old)) and not _NO_WRITE.get():
         _write_index(root, files)
     return files
@@ -267,10 +279,10 @@ def rows(root: Path, include_hidden: bool = False) -> list[dict]:
     return out
 
 
-def unreadable(root: Path) -> list[Path]:
-    """The ticket files `ticket list` leaves out (broken JSON, wrong id, a newer format), for one message."""
-    d = root / ".orch" / "tickets"
-    return sorted(d / f"{tid}.json" for tid, f in _fresh(root).items() if f.get("row") is None)
+def broken(root: Path) -> list[str]:
+    """The file names (t_x.json) of the ticket files that hold no valid JSON, sorted: from the same look as
+    rows(), so inside reuse() it costs no second pass over the files."""
+    return sorted(f"{tid}.json" for tid, f in _fresh(root).items() if f.get("broken"))
 
 
 def load_where(root: Path, keep, include_hidden: bool = False) -> list[dict]:

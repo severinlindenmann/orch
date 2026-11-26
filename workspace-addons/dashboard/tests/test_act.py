@@ -2096,3 +2096,16 @@ def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_a_new_tickets_files_are_kept_as_the_request_and_a_later_file_is_not(ws, tmp_path, monkeypatch):
+    """#1812: the files sent with a new ticket go to `orch ticket attach --request`; Add to this ticket does not."""
+    fake = tmp_path / "orch"
+    fake.write_text(f'#!{sys.executable}\nimport json\nprint(json.dumps({{"ok": True, "id": "t_abcdef"}}))\n')
+    fake.chmod(0o755)
+    seen = []
+    monkeypatch.setattr(actions, "_attach_all", lambda *a, **k: seen.append(k) or {"saved": [], "failed": []})
+    files = [{"name": "a.md", "text": "x"}]
+    actions.run_op(ws, str(fake), "ticket.new", {"title": "T", "files": files}, True)
+    actions.run_op(ws, str(fake), "ticket.attach", {"ticket": "t_abcdef", "files": files}, True)
+    assert [k["request"] for k in seen] == [True, False]

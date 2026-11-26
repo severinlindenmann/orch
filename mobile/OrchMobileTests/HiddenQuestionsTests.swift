@@ -46,6 +46,25 @@ final class HiddenQuestionsTests: XCTestCase {
         XCTAssertFalse(SwipeToHideRules.isHorizontal(CGSize(width: 10, height: 40)))
     }
 
+    func testChatRowSwipeNeverCommits() {
+        XCTAssertEqual(SwipeToHideRules.actionsOutcome(offset: -340, width: 360), .reveal, "a long chat swipe only shows the buttons")
+        XCTAssertEqual(SwipeToHideRules.actionsOutcome(offset: -150, predicted: -900, width: 360), .reveal, "a fling only shows the buttons")
+        XCTAssertEqual(SwipeToHideRules.actionsOutcome(offset: -20, predicted: -500, width: 360), .springBack)
+    }
+
+    func testReduceMotionSettlesWithoutAnimation() {
+        for kind in [SwipeToHideRules.Settle.spring, .commit] {
+            let reduced = SwipeToHideRules.settle(kind, reduceMotion: true)
+            XCTAssertNil(reduced.animation)
+            XCTAssertTrue(reduced.disablesAnimations, "no inherited animation either")
+            let normal = SwipeToHideRules.settle(kind, reduceMotion: false)
+            XCTAssertNotNil(normal.animation)
+            XCTAssertFalse(normal.disablesAnimations)
+        }
+        XCTAssertEqual(SwipeToHideRules.settle(.spring, reduceMotion: false).animation, .spring(duration: 0.25), "normal settle unchanged")
+        XCTAssertEqual(SwipeToHideRules.settle(.commit, reduceMotion: false).animation, .easeOut(duration: 0.2), "normal commit unchanged")
+    }
+
     func testMarkUsesTheServerClockNotThePhoneClock() {
         // A phone clock far ahead must not keep the question hidden after the helper writes again.
         let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: "q1", from: "ws", to: "phones", type: "question",

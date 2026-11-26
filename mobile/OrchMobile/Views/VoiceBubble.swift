@@ -105,7 +105,6 @@ enum VoiceLoadResult: Equatable {
 }
 
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
-private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
 /// Nothing is shown until the length is known (never "00:00" for a real note).
 func voiceDurationLabel(_ duration: Double) -> String? { duration > 0 ? clockText(duration) : nil }
 /// The full length when stopped; the time left (counting down) once playback has started.
@@ -113,6 +112,57 @@ func voiceTimeLabel(duration: Double, progress: Double, started: Bool) -> String
     guard duration > 0 else { return nil }
     guard started, progress > 0, progress < 1 else { return clockText(duration) }
     return clockText(max(0, duration * (1 - progress)).rounded(.up))
+}
+
+/// What one voice bubble's play button shows and says. The label names the next action and matches the symbol
+/// (play or pause); the value only names the state and never changes while playing, so VoiceOver does not repeat it.
+enum VoicePlayState: Equatable {
+    case ready, loading, playing, paused, finished, failed
+
+    static func own(loadFailed: Bool, isAvailable: Bool, isPlaying: Bool, progress: Double) -> VoicePlayState {
+        if loadFailed { return .failed }
+        if !isAvailable { return .loading }
+        if isPlaying { return .playing }
+        if progress >= 1 { return .finished }
+        return progress > 0 ? .paused : .ready
+    }
+
+    /// Another message playing leaves this one `ready` (or `finished` once listened): only the playing message offers Pause.
+    static func agent(_ speech: SpeechPlayer.State, id: String, listened: Bool) -> VoicePlayState {
+        switch speech {
+        case .loading(id): return .loading
+        case .playing(id): return .playing
+        case .paused(id): return .paused
+        default: return listened ? .finished : .ready
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .playing: "pause.fill"
+        case .failed: "arrow.clockwise"
+        default: "play.fill"
+        }
+    }
+
+    func label(duration: Double) -> String {
+        let length = voiceDurationLabel(duration).map { ", \($0)" } ?? ""
+        switch self {
+        case .failed: return "Audio not available, try again"
+        case .playing: return "Pause voice message" + length
+        default: return "Play voice message" + length
+        }
+    }
+
+    var value: String {
+        switch self {
+        case .ready, .failed: ""
+        case .loading: "Loading"
+        case .playing: "Playing"
+        case .paused: "Paused"
+        case .finished: "Listened"
+        }
+    }
 }
 
 struct OwnVoiceBubble: View {
@@ -131,6 +181,9 @@ struct OwnVoiceBubble: View {
         item.attachments.first(where: { $0.kind == .voice })?.duration
             ?? item.queuedFiles.first(where: { $0.kind == .voice })?.duration ?? player.duration
     }
+    private var playState: VoicePlayState {
+        .own(loadFailed: loadFailed, isAvailable: player.isAvailable, isPlaying: player.isPlaying, progress: player.progress)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -139,15 +192,14 @@ struct OwnVoiceBubble: View {
                     if loadFailed { reload += 1 }
                     else if player.isPlaying { player.pause() } else { player.play(model: model) }
                 } label: {
-                    Image(systemName: loadFailed ? "arrow.clockwise" : (player.isPlaying ? "pause.fill" : "play.fill"))
+                    Image(systemName: playState.symbol)
                         .themeFont(16).frame(width: 44, height: 44)
                         .foregroundStyle(Theme.onBrand).background(Theme.brand, in: Circle())
-                        .opacity(player.isAvailable || loadFailed ? 1 : 0.45)   // still loading: looks waiting, not tappable
-                }.disabled(!player.isAvailable && !loadFailed)
+                        .opacity(playState == .loading ? 0.45 : 1)   // still loading: looks waiting, not tappable
+                }.disabled(playState == .loading)
                     .accessibilityIdentifier("voice-play")
-                    .accessibilityLabel(loadFailed ? "Audio not available, try again"
-                        : "Play voice message" + (voiceDurationLabel(duration).map { ", \($0)" } ?? ""))
-                    .accessibilityValue(loadFailed ? "" : (player.isPlaying ? "Pause" : "Play"))
+                    .accessibilityLabel(playState.label(duration: duration))
+                    .accessibilityValue(playState.value)
                 scrubber
                 Button { player.cycleRate() } label: {
                     Text(voiceRateText(player.rate)).themeFont(13)
@@ -239,6 +291,7 @@ struct AgentMemoBubble: View {
     private var current: Bool { model.speech.current?.messageId == item.id }
     private var playing: Bool { model.speech.state == .playing(item.id) }
     private var listened: Bool { model.speech.isListened(item.id) }
+    private var playState: VoicePlayState { .agent(model.speech.state, id: item.id, listened: listened) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -247,14 +300,14 @@ struct AgentMemoBubble: View {
                     Button(action: toggle) {
                         Group {
                             if model.speech.state == .loading(item.id) { ProgressView().tint(Theme.onBrand) }
-                            else { Image(systemName: playing ? "pause.fill" : "play.fill") }
+                            else { Image(systemName: playState.symbol) }
                         }.themeFont(16).frame(width: 44, height: 44)
                             .foregroundStyle(listened ? Theme.brand : Theme.onBrand)
                             .background(listened ? Theme.surface3 : Theme.brand, in: Circle())
-                    }.disabled(!item.canPlay || model.speech.state == .loading(item.id))
+                    }.disabled(!item.canPlay || playState == .loading)
                         .accessibilityIdentifier("voice-play")
-                        .accessibilityLabel("Play voice message" + (duration > 0 ? ", \(voiceDurationText(duration))" : ""))
-                        .accessibilityValue(playing ? "Pause" : "Play").accessibilityHint(workspaceName)
+                        .accessibilityLabel(playState.label(duration: duration))
+                        .accessibilityValue(playState.value).accessibilityHint(workspaceName)
                     GeometryReader { proxy in
                         Waveform(seed: item.id, progress: current ? model.speech.progress : 0).frame(height: 44)
                             .contentShape(Rectangle())
@@ -309,7 +362,7 @@ struct AgentMemoBubble: View {
             .task { if duration <= 0, let clip = model.speechClip(item, workspaceName: workspaceName), let d = await model.speech.cachedDuration(for: clip) { duration = d } }
             .onChange(of: model.speech.rate) { _, _ in captureTiming() }
             .accessibilityAction(named: "Reply") { onReply?() }
-            .accessibilityAction(named: playing ? "Pause" : "Listen") { toggle() }
+            .accessibilityAction(named: playState == .playing ? "Pause" : "Play") { toggle() }
     }
 
     private func toggle() {

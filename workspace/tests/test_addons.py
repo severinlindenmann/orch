@@ -1706,3 +1706,14 @@ def test_crash_while_saving_the_registry_keeps_the_old_list(proj, monkeypatch):
         addons._save_registry([])
     assert p.read_bytes() == before
     assert [x.name for x in p.parent.glob("addons.json*")] == ["addons.json"]
+
+
+def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
+    act = {"who": "people"}
+    addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
+    with pytest.raises(Refused, match="Only a person"):
+        addons._people_only("x", act, "on", ["act", "on", "--by", "agent:a"])
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    with pytest.raises(Refused, match="Only a person"):
+        addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
+    addons._people_only("x", {"who": "anyone"}, "on", ["act", "on", "--by", "agent:a"])

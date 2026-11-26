@@ -16,7 +16,13 @@ test('no "cannot do that yet" dialog and no dead "Set up relay" button anywhere'
 
 test('not connected: the next step is written inline; pairing is not offered in the workspace', () => {
   assert.match(panel, /phone-relay-steps/);
-  assert.match(panel, /orch relay connect/);
+  // ORCH-1693: the line is pasted here and Connect runs it; no terminal step
+  const paste = src.slice(src.indexOf('function relayPaste('), src.indexOf('async function relayReconnect'));
+  assert.doesNotMatch(panel + paste, /terminal/i);
+  assert.match(panel, /Paste that line below and press Connect/);
+  assert.match(paste, /'data-key':'phone-relay-line'/);
+  assert.match(paste, /act\('relay\.connect', \{line\}\)/);
+  assert.match(app, /action === 'relay-connect'\) \{ await relayConnect\(\)/);
   assert.ok(!/disabled:true/.test(panel), 'no disabled pair button');
   assert.ok(!/Pair a phone/.test(src + app), 'no pairing entry point in the workspace');
   assert.ok(!/phonePairDialog|'phone-pair'/.test(src + app));
