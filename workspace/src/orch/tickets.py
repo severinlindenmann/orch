@@ -4562,10 +4562,11 @@ def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
 PICKED_UP = "Picked up the answer to "
 
 
-def new_answers(ticket: dict) -> list[dict]:
+def new_answers(root: Path, ticket: dict) -> list[dict]:
     """R2.6: answers an agent has not picked up yet. An answer is new until a `PICKED_UP` line names it or an
     agent other than the one who answered writes to the ticket after it (the agent then went on with it)."""
-    hist = [h for h in ticket.get("history") or [] if isinstance(h, dict)]
+    ticket = history.shown_ticket(root, ticket)
+    hist = [h for h in history.lines(root, ticket) if isinstance(h, dict)]
     out = []
     for q in ticket.get("questions") or []:
         at = q.get("answered_at") if isinstance(q, dict) else None
@@ -4594,13 +4595,13 @@ def _stale_question_wait(ticket: dict) -> str | None:
     return str(w.get("ref")) if q is None or q.get("answer") is not None else None
 
 
-def needs_pick_up(ticket: dict, by: str, mark: bool = True) -> bool:
+def needs_pick_up(root: Path, ticket: dict, by: str, mark: bool = True) -> bool:
     """Cheap in-memory test: would pick_up_answers write anything? (a read path calls it before any lock)"""
     if ticket.get("status") in CLOSED:
         return False
     if _stale_question_wait(ticket) is not None:
         return True
-    return mark and str(by).startswith("agent:") and bool(new_answers(ticket))
+    return mark and str(by).startswith("agent:") and bool(new_answers(root, ticket))
 
 
 def pick_up_answers(root: Path, tid: str, by: str, mark: bool = True) -> dict:
@@ -4615,7 +4616,7 @@ def pick_up_answers(root: Path, tid: str, by: str, mark: bool = True) -> dict:
             _release_wait(root, tid, ticket, stale)
             changed = True
         if mark and str(by).startswith("agent:"):
-            for q in new_answers(ticket):
+            for q in new_answers(root, ticket):
                 add_history(ticket, by, PICKED_UP + str(q["id"]))
                 changed = True
         return None if changed else NO_WRITE

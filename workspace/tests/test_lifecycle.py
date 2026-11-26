@@ -404,7 +404,7 @@ def test_the_agents_next_show_prints_the_new_answer_first_and_picks_it_up(proj, 
     assert t["waiting_on"] is None and t["checklist"][0]["done"] is True
     picked = [h for h in t["history"] if h["text"] == tickets.PICKED_UP + qid]
     assert len(picked) == 1 and picked[0]["by"] == "agent:fake"
-    assert tickets.new_answers(t) == []
+    assert tickets.new_answers(proj, t) == []
     assert "New answer" not in run("ticket", "show", tid, "--by", "agent:fake")[1]  # only once
 
 
@@ -418,10 +418,10 @@ def test_a_new_answer_waits_for_the_agent_and_a_stale_wait_clears(proj, run):
     looked = run("ticket", "show", tid, "--by", "human:t")[1]
     assert looked.startswith(f"New answer:\n  {q2}: Which size? - Big")
     run("ticket", "show", tid, "--by", "agent:fake", "--json")
-    assert [q["id"] for q in tickets.new_answers(tickets.load(proj, tid))] == [q2]
+    assert [q["id"] for q in tickets.new_answers(proj, tickets.load(proj, tid))] == [q2]
     out = run("ticket", "show", tid, "--by", "agent:fake")[1]
     assert out.startswith(f"New answer:\n  {q2}: Which size? - Big") and "Next step: do c1" in out
-    assert tickets.new_answers(tickets.load(proj, tid)) == []
+    assert tickets.new_answers(proj, tickets.load(proj, tid)) == []
     assert tickets.load(proj, tid)["waiting_on"] == {"kind": "question", "ref": q1}  # q1 still open
 
     def answered_by_hand(t):  # a hand-fixed file or an older peer: answered, waiting_on left behind
@@ -433,7 +433,7 @@ def test_a_new_answer_waits_for_the_agent_and_a_stale_wait_clears(proj, run):
     out = run("ticket", "show", tid, "--by", "agent:fake")[1]
     assert out.startswith(f"New answer:\n  {q1}: Which colour? - Blue")
     t = tickets.load(proj, tid)
-    assert t["waiting_on"] is None and t["status"] == "ready" and tickets.new_answers(t) == []
+    assert t["waiting_on"] is None and t["status"] == "ready" and tickets.new_answers(proj, t) == []
 
 
 def test_no_agent_starts_while_other_questions_are_open(proj, run, gen, one_step):

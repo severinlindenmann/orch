@@ -1403,12 +1403,12 @@ def run(args: argparse.Namespace) -> None:
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = tickets.load(root, args.id)
-        fresh = frozenset() if args.json else frozenset(q["id"] for q in tickets.new_answers(t))
+        fresh = frozenset() if args.json else frozenset(q["id"] for q in tickets.new_answers(root, t))
         try:
             who = by()
         except Refused:
             who = ""
-        if tickets.needs_pick_up(t, who, mark=not args.json):  # R2.6: the agent picks the answer up here
+        if tickets.needs_pick_up(root, t, who, mark=not args.json):  # R2.6: the agent picks the answer up
             try:
                 t = tickets.pick_up_answers(root, t["id"], who or tickets.SYSTEM, mark=not args.json)
             except (Refused, OSError):
