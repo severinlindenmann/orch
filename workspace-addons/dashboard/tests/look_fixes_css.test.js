@@ -15,8 +15,8 @@ test('F1: on a wide screen the top bar stays on one row and the page name gives 
 test('F2: an empty row in a page adds no 24 px gap above the title', () => {
   assert.match(kit, /\.page>\.stack:empty\{display:none\}/);
 });
-test('F3: a wrapped button is pushed in only after a leading icon, never on a row that starts with its text', () => {
-  assert.match(kit, /\.card-row:has\(>:first-child:not\(\.grow\)\)>\.btn\{margin-left:24px\}/);
+test('F3: a wrapped button is pushed in only after a leading icon, never on a row that starts with its text or the button', () => {
+  assert.match(kit, /\.card-row:has\(>:first-child:not\(\.grow,\.btn\)\)>\.btn\{margin-left:24px\}/);
   assert.doesNotMatch(kit, /\n\.card-row>\.btn\{margin-left:24px\}/);
 });
 

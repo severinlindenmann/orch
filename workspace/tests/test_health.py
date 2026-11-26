@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -558,3 +559,27 @@ def test_only_the_helper_this_workspace_uses_shows(proj, new_ticket, monkeypatch
         lambda name, *a, **k: {"adapter": name} if name == "my-helper" else real_load(name, *a, **k),
     )
     assert {"claude", "codex"} <= {r["name"] for r in health.overview(proj, NOW)}
+
+
+@pytest.mark.parametrize("env", [{"ORCH_AGENT": "claude"}, {"ORCH_RUN": "r_abcdefgh"}])
+def test_a_helper_cannot_add_or_remove_a_check_recipe(proj, run, monkeypatch, env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    assert run("logins", "add", "wiki", "--command", "wikictl ping")[0] == 2
+    assert run("logins", "remove", "wiki")[0] == 2
+    with pytest.raises(Refused, match="Only a person"):
+        health.add_recipe(proj, "wiki", {"command": ["wikictl", "ping"]}, by="agent:x")
+    with pytest.raises(Refused, match="Only a person"):
+        health.remove_recipe(proj, "wiki", by="agent:x")
+
+
+def test_connection_check_runs_outside_the_workspace(proj, monkeypatch):
+    seen = {}
+
+    def fake(argv, **kw):
+        seen["cwd"] = kw["cwd"]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(health.subprocess, "run", fake)
+    health.conn_list(proj, "/bin/claude", ["mcp", "list"])
+    assert Path(seen["cwd"]).resolve() != Path(proj).resolve()

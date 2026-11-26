@@ -614,3 +614,140 @@ def test_failure_shows_the_last_log_line_on_screen(tmp_path):
     )
     why = winfinish.fail_reason_since(tmp_path, 0)
     assert "PermissionError" in why and "C:" not in why
+
+
+# ---- ORCH-1794: the "orch is updating" page on the dashboard's address while the services are off
+
+
+def _free_port():
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _get(url):
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a shell script")
+@pytest.mark.parametrize("failure", [False, True])
+def test_finisher_serves_the_updating_page_while_the_services_are_off(tmp_path, failure):
+    import socket
+    import threading
+
+    port = _free_port()
+    seen = tmp_path / "seen.json"
+    probe = (
+        "import json, urllib.request, urllib.error\n"
+        "def get(p):\n"
+        "    try:\n"
+        f"        r = urllib.request.urlopen('http://127.0.0.1:{port}' + p, timeout=2)\n"
+        "    except urllib.error.HTTPError as e:\n"
+        "        r = e\n"
+        "    return [r.status if hasattr(r, 'status') else r.code, r.read().decode()]\n"
+        "paths = ('/', '/ticket/x', '/orch-updating/state', '/orch-updating/widgets.css')\n"
+        "out = {p: get(p) for p in paths}\n"
+        f"open({str(seen)!r}, 'w').write(json.dumps(out))\n"
+    ) + ("raise SystemExit(3)\n" if failure else "")
+    job, _calls = _with_services(tmp_path, uv_code=probe)
+    job["page"] = winfinish._copy_page(tmp_path / "page", [["127.0.0.1", port]])
+    job["page_linger"] = 1.2
+    states, done = [], threading.Event()
+
+    def poll():  # what an open page sees, up to the moment the dashboard starts again
+        while not done.is_set():
+            try:
+                states.append(json.loads(_get(f"http://127.0.0.1:{port}/orch-updating/state")[2]))
+            except OSError:
+                pass
+            done.wait(0.1)
+
+    t = threading.Thread(target=poll)
+    t.start()
+    try:
+        assert _run_finisher(tmp_path, job).returncode == (1 if failure else 0)
+    finally:
+        done.set()
+        t.join()
+    out = json.loads(seen.read_text())
+    assert out["/"][0] == out["/ticket/x"][0] == 503 and "orch is updating" in out["/"][1]
+    css = out["/orch-updating/widgets.css"]
+    assert css[0] == 200 and ".run-steps" in css[1]
+    st = json.loads(out["/orch-updating/state"][1])
+    assert st["orch_updating"] is True and st["n"] == 2 and st["result"] is None
+    assert st["names"] == [
+        "Stopping the dashboard",
+        "Getting the new orch",
+        "Updating this workspace",
+        "Starting the dashboard again",
+    ]
+    assert len(st["took"]) == 1 and isinstance(st["took"][0], float)  # step 1 is done, with its time
+    end = states[-1]
+    assert end["result"] == ("fail" if failure else "ok") and end["n"] == 4
+    assert end["bad"] == (2 if failure else None)
+    with socket.socket() as s:  # the page let the port go (bound as the dashboard does: reuse on POSIX)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", port))
+        s.listen()
+    log = (tmp_path / "finish.log").read_text()
+    assert f"the updating page is on port {port}" in log
+    took = tmp_path / "took.json"
+    assert took.exists() != failure  # the step times are kept for next time only after an update that worked
+    if not failure:
+        assert set(json.loads(took.read_text())) == set(st["names"])
+
+
+def test_start_copies_the_page_next_to_the_finisher(tmp_path, monkeypatch):
+    monkeypatch.setattr(winfinish, "_popen", lambda argv, **kw: 4242)
+    base = str(tmp_path / "base" / "python.exe")
+    monkeypatch.setattr(winfinish.sys, "_base_executable", base, raising=False)
+    extra = {"services": [str(tmp_path)], "page": [["127.0.0.1", 8791]]}
+    winfinish.start(tmp_path, ["uv"], [["addon", "add", "files"], ["update"]], tmp_path, "done", extra=extra)
+    job = json.loads((tmp_path / "finish" / "job.json").read_text())
+    page = tmp_path / "finish" / "page"
+    assert job["page"] == {"dir": str(page), "at": [["127.0.0.1", 8791]]}
+    assert sorted(p.name for p in page.iterdir()) == sorted(winfinish.PAGE_FILES)
+    assert [c["name"] for c in job["then"]] == ["Turning on files", "Updating this workspace"]
+    (tmp_path / "b").mkdir()
+    winfinish.start(tmp_path / "b", ["uv"], [], tmp_path, "done")
+    assert json.loads((tmp_path / "b" / "finish" / "job.json").read_text())["page"] is None  # no dashboard
+
+
+def test_reinstall_hands_the_dashboard_addresses_to_the_finisher(proj, monkeypatch):
+    from orch import services
+
+    _windows_with_one_finisher(monkeypatch)
+    extras = []
+    monkeypatch.setattr(
+        winfinish,
+        "start",
+        lambda home, uv, then, cwd, done, reg=None, extra=None: extras.append(extra) or home,
+    )
+    ws = str(proj.resolve())
+    monkeypatch.setattr(
+        services,
+        "running",
+        lambda: [{"workspace": ws, "addon": "dashboard", "pid": 5, "url": "http://127.0.0.1:8791/"}],
+    )
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(addons, "_registered_workspaces", lambda root: {proj.resolve()})
+    cfg = proj / ".orch" / "config.toml"
+    cfg.parent.mkdir(exist_ok=True)
+    cfg.write_text('[dashboard]\nlisten = "0.0.0.0"\nlisten_port = 8800\n', encoding="utf-8")
+    addons._reinstall(
+        [{"name": "dashboard", "source": "built-in", "version": "0.0.0"}],
+        save=False,
+        then=[],
+        root=proj,
+        done="x",
+    )
+    assert extras[0]["page"] == [["127.0.0.1", 8791], ["0.0.0.0", 8800]]

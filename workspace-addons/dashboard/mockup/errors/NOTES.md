@@ -86,3 +86,15 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - A failed action never shows the server's raw answer (an HTML proxy page, a crash trace, an empty body, "Failed to
   fetch"): no answer or 5xx says "orch did not answer. Try again in a moment.", any other refusal without a plain
   sentence says "That did not work. Try again." The server's own plain sentence is kept (R8.4).
+
+## updating.html — orch is updating (ORCH-1794)
+
+- Option A (picked by the owner, 25 Nov): the steps with their times, the same step list as "Add several at once"
+  (`.run-steps`, `.run-step`, `.run-ic`, `.progress.indeterminate`, `.elapsed`) on the sign-in door (`.door`, `.door-card`).
+- Product: `workspace/src/orch_ui/static/updating.html` + `updating.js`. The Windows update finisher copies them and the
+  four master stylesheets next to itself before orch is replaced, serves them on the dashboard's address(es) while
+  the dashboard is off, and answers `/orch-updating/state` from `finish.step`. Once something else answers there
+  (the dashboard), the page opens it by loading the same address.
+- States: `?state=working` (default), `?state=starting` (the dashboard is starting again), `?state=failed`
+  (the failed step with its reason, then "Open the dashboard"), `?state=done` ("Opening the dashboard…").
+- No new components: master parts only.
