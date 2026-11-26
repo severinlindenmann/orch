@@ -677,17 +677,21 @@ def _message_ok(m):
         and _opt(
             m,
             "file",
-            lambda f: _keys_only(f, ("name", "size"))
-            and _text(f.get("name"), 120)
-            and _opt(f, "size", lambda v: _text(v, 20)),
+            lambda f: (
+                _keys_only(f, ("name", "size"))
+                and _text(f.get("name"), 120)
+                and _opt(f, "size", lambda v: _text(v, 20))
+            ),
         )
         and _opt(
             m,
             "task",
-            lambda t: _keys_only(t, ("title", "from", "note"))
-            and _text(t.get("title"))
-            and _opt(t, "from", lambda v: _text(v, 24))
-            and _opt(t, "note", _text),
+            lambda t: (
+                _keys_only(t, ("title", "from", "note"))
+                and _text(t.get("title"))
+                and _opt(t, "from", lambda v: _text(v, 24))
+                and _opt(t, "note", _text)
+            ),
         )
         and _opt(m, "state", _chip)
         and _opt(m, "note", lambda v: _text(v, 60))
