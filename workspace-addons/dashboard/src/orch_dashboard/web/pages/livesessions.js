@@ -43,13 +43,13 @@ function liveNow(s) {
 function liveTool(s) {
   return [s?.tool, s?.model].filter(x => typeof x === 'string' && x).join(' · ');
 }
-// How long it stays: draft D's words
+// How long it stays, in plain words (ORCH-1684: no "stays warm", no "the conversation is kept")
 function liveWarm(s) {
   if (!s) return '';
   if (s.status === 'idle') return Number.isFinite(s.closes_in_seconds) ? 'closes in ' + liveDur(s.closes_in_seconds) + ' if left idle' : 'idle';
-  if (s.status === 'closed') return s.needs === true ? '' : 'closed, the conversation is kept';
+  if (s.status === 'closed') return s.needs === true ? '' : 'closed, you can continue it later';
   if (s.status === 'in-line') return 'starts when a place is free';
-  return s.status === 'needs-you' ? 'stays warm while it waits for you' : 'stays warm while it works';
+  return s.status === 'needs-you' ? 'stays open while it waits for you' : 'stays open while it works';
 }
 // The meta line of a pane or tile: tool and model, open time, how long it stays
 function liveMeta(s) {
