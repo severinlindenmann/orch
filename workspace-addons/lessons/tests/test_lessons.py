@@ -189,6 +189,89 @@ def test_edit_to_another_lessons_text_is_refused(cli, ws):
     assert code == 2 and a["lesson"]["id"] in err["error"]
 
 
+def _backdate(ws, lid, at):
+    p = ws / ".orch" / "addons" / "lessons" / f"{lid}.md"
+    lines = p.read_text(encoding="utf-8").split("\n")
+    p.write_text("\n".join(f"at: {at}" if x.startswith("at: ") else x for x in lines), encoding="utf-8")
+
+
+def test_old_lesson_is_flagged_until_reviewed_or_edited(cli, ws):
+    _, a = jrun(cli, "add", "Production servers are the old ones.")
+    _, b = jrun(cli, "add", "Fresh lesson.")
+    ia, ib = a["lesson"]["id"], b["lesson"]["id"]
+    _backdate(ws, ia, "2026-01-01T00:00:00Z")
+    _, data = jrun(cli, "list")
+    validator(LIST).validate(data)
+    by_id = {x["id"]: x for x in data["lessons"]}
+    assert by_id[ia]["outdated"] is True and by_id[ib]["outdated"] is False
+    _, out, _ = cli("list")
+    old = next(x for x in out.splitlines() if x.startswith(ia))
+    assert "2026-01-01" in old and "outdated" in old and f"orch lessons review {ia}" in old
+    assert "outdated" not in next(x for x in out.splitlines() if x.startswith(ib))
+    _, view = jrun(cli, "view")
+    assert "check it still holds" in view["blocks"][0]["items"][1]["subtitle"]
+    code, r = jrun(cli, "review", ia, "--by", "human:sev")
+    assert code == 0 and r["lesson"]["outdated"] is False and r["lesson"]["reviewed_by"] == "human:sev"
+    assert "Production servers" in store.get(ws, ia)["text"]
+    _backdate(ws, ia, "2026-01-01T00:00:00Z")
+    p = ws / ".orch" / "addons" / "lessons" / f"{ia}.md"
+    p.write_text(p.read_text(encoding="utf-8").replace("reviewed_at:", "x_reviewed:"), encoding="utf-8")
+    _, data = jrun(cli, "list")
+    assert next(x for x in data["lessons"] if x["id"] == ia)["outdated"] is True
+    jrun(cli, "edit", ia, "Production servers moved.")
+    _, data = jrun(cli, "list")
+    assert next(x for x in data["lessons"] if x["id"] == ia)["outdated"] is False
+
+
+def test_two_adds_of_one_text_store_it_once(cli, ws):
+    import threading
+
+    from orch_lessons import store as st
+
+    errs = []
+
+    def go():
+        try:
+            st.add(ws, "Same lesson from two helpers.", "agent:a", None)
+        except Exception as e:  # noqa: BLE001
+            errs.append(e)
+
+    ts = [threading.Thread(target=go) for _ in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errs
+    assert len(list((ws / ".orch" / "addons" / "lessons").glob("l_*.md"))) == 1
+    assert not (ws / ".orch" / "addons" / "lessons" / st.LOCK).exists()
+
+
+def test_a_stale_lock_is_broken(cli, ws):
+    d = ws / ".orch" / "addons" / "lessons"
+    d.mkdir(parents=True)
+    lock = d / store.LOCK
+    lock.write_text("", encoding="utf-8")
+    os.utime(lock, (1, 1))
+    code, out = jrun(cli, "add", "After a crashed add.")
+    assert code == 0 and out["added"] is True
+
+
+def test_without_dir_the_workspace_comes_from_orch_root_or_the_walk_up(ws, tmp_path, monkeypatch, capsys):
+    from orch_lessons.cli import main
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)  # ORCH_ROOT (set by the ws fixture) wins over the folder we stand in
+    assert main(["add", "Via ORCH_ROOT.", "--json"]) == 0
+    monkeypatch.delenv("ORCH_ROOT")
+    sub = ws / "deep" / "er"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)  # no ORCH_ROOT: the walk up finds .orch
+    assert main(["add", "Via walk-up.", "--json"]) == 0
+    texts = [x["text"] for x in store.load(ws)["lessons"]]
+    assert sorted(texts) == ["Via ORCH_ROOT.", "Via walk-up."] and not (elsewhere / ".orch").exists()
+
+
 def test_view_notices_unreadable_and_hidden(cli, ws):
     d = ws / ".orch" / "addons" / "lessons"
     d.mkdir(parents=True)

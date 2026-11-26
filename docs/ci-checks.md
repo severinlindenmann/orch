@@ -37,7 +37,7 @@ files the group touches. A push to develop whose files equal a green queue group
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
 With the queue setting `group_check = local` (ORCH-1124) the queue checks a group with the local check on this Mac
-instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it, and the push to
+instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it only while the repository variable `GROUP_CHECK` is `local` (set it with the queue setting; unset, a pull request body alone skips nothing, ORCH-1124), and the push to
 develop runs the full set because a skipped group run proves nothing.
 
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran

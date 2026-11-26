@@ -14,7 +14,8 @@ VIEW = (
 )
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
-GONE = ("reference does not exist", "not found", "http 404")
+# GitHub also answers 404 when the token cannot see the ref: only this 422 line means the branch is really gone
+GONE = ("reference does not exist",)
 RUNS_MOST = 1000  # GitHub's limit for a search of workflow runs by time
 
 
@@ -336,6 +337,6 @@ class GitHub:
         return self._run("pr", "close", url).returncode == 0
 
     def delete_branch(self, repo: str, branch: str) -> bool:
-        """True when the branch is gone afterwards (deleted now, or not there at all)."""
+        """True when the branch is gone afterwards (deleted now, or GitHub says it is not there)."""
         got = self._run("api", "-X", "DELETE", f"repos/{repo}/git/refs/heads/{quote(branch, safe='/')}")
         return got.returncode == 0 or any(g in (got.stderr or "").lower() for g in GONE)
