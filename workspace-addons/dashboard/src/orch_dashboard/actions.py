@@ -685,6 +685,15 @@ def _away_set(a):
     return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
 
 
+def _reviewer_mode_set(a):
+    """Review > Nothing closes by itself (owner, 25 Nov 2026): `orch config set workflow.reviewer_mode propose|accept`;
+    only a person turns accept back on (the CLI refuses an agent)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.reviewer_mode", "propose" if a["on"] else "accept"], [], []
+
+
 def _review_undo(a):
     """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
     _only(a, ("ticket", "question"))
@@ -1576,6 +1585,7 @@ OPS = {
     "people.tie": _people_tie,
     "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
+    "reviewer_mode.set": _reviewer_mode_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
     "live.set": _live_set,
@@ -2094,6 +2104,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "prepare.set",
             "auto_reviewer.set",
             "away.set",
+            "reviewer_mode.set",
             "review.undo",
             "live.set",
             "copies.set",

@@ -293,9 +293,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
   `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).
 
-## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
-
-- "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.
 ## 26 Nov 2026 (ORCH-2169, RP1, RP6, RP8 B)
 
 - Tab, section title, menu and add-on rows say "Relay" (was Contacts) and "Publish" (was Shared / Shared links) on
@@ -307,3 +304,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   on your iPhone and scan the code; Done) and a phone row "Anna's iPhone, Paired." with a Remove button.
 - RP8 B: "Workspaces" lists who the admin connected; empty reads "No other workspaces yet". The "Allow a workspace" form
   is gone, the admin does that.
+
+## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
+
+- "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.
