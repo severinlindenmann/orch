@@ -744,7 +744,10 @@ def test_ticket_card_is_resent_when_it_changes(proj, run, rel, host):
     run("relay", "inbox")
     assert len(cards()) == 1  # nothing changed: nothing sent
     tickets.check_add(proj, host, "Pay it", "agent:t")
-    tickets.set_summary(proj, host, "Pay by 30 Nov <!-- x --> token=ghp_" + "b" * 30, "agent:t")
+    tickets.set_summary(proj, host, "Pay by 30 Nov <!-- x -->", "agent:t")
+    raw = tickets.load(proj, host)
+    raw["summary"] += " token=ghp_" + "b" * 30  # past the scan: an old ticket may hold it, the card hides it
+    tickets._write(proj, raw)
     run("relay", "inbox")
     c = cards()
     assert (

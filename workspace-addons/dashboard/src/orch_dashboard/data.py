@@ -1886,6 +1886,13 @@ def load_review(root: Path, orch_bin: str | None) -> dict:
 _KINDS: dict[str, list] = {}  # the link kinds of the last full build, per workspace
 
 
+def _drop_addon_names(tickets: list[dict]) -> None:
+    for t in tickets:
+        for h in t.get("history") or []:
+            if isinstance(h, dict):
+                h.pop("addon", None)  # ORCH-1946 add-on lines: a snapshot does not name the add-on
+
+
 def _shape_refs(root: Path, tickets: list[dict], with_settings: bool) -> None:
     try:
         from orch.refs import local_refs
@@ -2096,6 +2103,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
+        _drop_addon_names(tickets)
     else:
         add_spend(root, tickets, background=with_settings)
     _shape_refs(root, tickets, with_settings)

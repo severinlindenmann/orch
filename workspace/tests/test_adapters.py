@@ -713,7 +713,7 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     argv = reminder_settings.record_hook_argv()
     assert shlex.split(cmd) == argv  # bash (Git Bash)
     cmd_words = [t[1:-1] if t[:1] == t[-1:] == '"' else t for t in shlex.split(cmd, posix=False)]
-    assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
+    assert cmd_words == argv  # cmd: the quoted path is one word
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
     doc = adapters.reminder_doc("claude")
     assert all(_orch_groups(doc, e)[0] == f"{cmd} --with claude" for e in _RECORD_EVENTS)  # ORCH-634

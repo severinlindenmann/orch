@@ -193,7 +193,8 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
-BROKEN_FIX = "fix the JSON by hand or restore it from git"
+# .orch/ is kept out of git (info/exclude), so git has no copy to restore (ORCH-2111): only advice that works.
+BROKEN_FIX = "fix the JSON by hand, or delete the file to drop the ticket"
 
 
 def broken_file(name: str) -> str:
@@ -503,8 +504,28 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+# R5.1: a shared file's key lives only in its link's fragment (`#k=<key>`, contracts/crypto.md). A ticket
+# keeps the link without the key (`#k=…`, as in contracts/review/ticket.example.json): tickets go to git,
+# other workspaces and the phone, the key never does.
+_LINK_KEY_RE = re.compile(r"#k=[A-Za-z0-9_-]{16,}")
+LINK_KEY_KEPT = "#k=\u2026"
+
+
+def drop_link_keys(obj):
+    """`obj` with the key of every shared link (`#k=<key>`) replaced by `#k=…`, changed in place."""
+    if isinstance(obj, str):
+        return _LINK_KEY_RE.sub(LINK_KEY_KEPT, obj) if "#k=" in obj else obj
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = drop_link_keys(v)
+    elif isinstance(obj, list):
+        obj[:] = [drop_link_keys(v) for v in obj]
+    return obj
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    drop_link_keys(ticket)
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
@@ -1175,6 +1196,7 @@ def create(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}}, "ticket")
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -1346,7 +1368,7 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         return f"{count} {word}" + ("" if count == 1 else "s")
 
     if n["failed"]:
-        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
+        line, level = f"{plural(n['failed'], 'task')} failed", "fail"
     elif n["changed"]:
         line, level = "Changes haven't been checked yet", "warn"
     elif uncovered:
@@ -1356,12 +1378,12 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         line = f'{noun} of "Done when" {"has" if one else "have"} no task'
         level = "warn"
     elif n["passed"] or n["note"]:
-        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+        bits = ([f"{plural(n['passed'], 'task')} with evidence"] if n["passed"] else []) + (
             [plural(n["note"], "note")] if n["note"] else []
         )
         line, level = " · ".join(bits), "ok" if n["passed"] else "note"
     else:
-        line, level = "No checks recorded", "note"
+        line, level = "No evidence yet", "note"
     return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
@@ -2196,6 +2218,14 @@ def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
     return f"Quiet since {_when_words(at, now or datetime.now())}"
 
 
+def no_secret(root: Path, body, what: str) -> None:
+    """R5.2: text a person or agent writes into a ticket runs the one scanner (secretscan) first; a hit
+    refuses with the kind and the field, never the value, and nothing is written."""
+    from orch import secretscan
+
+    secretscan.refuse_if_secret_in(root, body, what, verb="saved")
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
     if key in PROTECTED_FIELDS:
@@ -2257,6 +2287,11 @@ def edit(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(
+        root,
+        {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}},
+        "ticket",
+    )
 
     def op(ticket):
         if title is not None:
@@ -2951,6 +2986,7 @@ def tidy(
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, "description": description, **fields}, "ticket")
     more = _prepare_fields(root, tid, extra or {})
     kind_name = clean_kind(kind_name) if kind_name else None
 
@@ -3354,6 +3390,7 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
+    no_secret(root, {"summary": text}, "summary")
 
     def op(t):
         _set_field(t, "summary", text)
@@ -3383,6 +3420,7 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         clean[k] = v
     if not clean:
         raise Refused("Say what to record: --changed, --why or --not-included.")
+    no_secret(root, clean, "outcome")
 
     def op(ticket):
         out = dict(ticket.get("outcome") or {})
@@ -3450,6 +3488,7 @@ def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = Non
     if not text.strip():
         raise Refused("A checklist item needs text.")
     covers = _clean_covers(covers)
+    no_secret(root, {"text": text}, "task")
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
@@ -3601,10 +3640,11 @@ def check_done(
     proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
+        name = ticket.get("key") or tid
         raise Refused(
-            "A check is done only with evidence. Say what shows it, for example "
-            f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
-            "(also --pr, --commit, --file, --url)."
+            "A task is done only with evidence. Say what shows it, for example "
+            f'orch check done {name} {cid} --note "what you did" or --file <file> '
+            "(also --url, --command, --pr, --commit)."
         )
     refuse_secret_in_evidence(root, evidence)
     evs = [parse_evidence(e) for e in evidence]
@@ -3614,8 +3654,7 @@ def check_done(
         item = _item(t, cid)
         _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
-            ev.setdefault("by", by)
-            ev.setdefault("at", now())
+            ev["by"], ev["at"] = by, now()  # the core sets who and when, whatever the item says
         add_evidence(item, evs)
         item["done"] = True
         if proved:
@@ -3988,6 +4027,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
+    no_secret(root, {"text": text}, "history entry")
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
 
@@ -3998,6 +4038,7 @@ def ref_add(
 
     t = load(root, tid)
     value = refs.detect(root, t["id"], target, kind, title, kinds)
+    no_secret(root, {k: v for k, v in value.items() if isinstance(v, str)}, "reference")
     identity = {k: v for k, v in value.items() if k != "title" and (k != "kind" or "url" not in value)}
     added = True
     result = None
@@ -4455,6 +4496,11 @@ def ask(
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
+    no_secret(
+        root,
+        {"text": text, "options": list(options), "recommended": recommended, "because": because},
+        "question",
+    )
     for part in (
         text,
         *options,
@@ -4494,6 +4540,7 @@ def ask(
             "answered_by": None,
             "via": None,
             "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
+            "asked_by": by,  # ORCH-2023: who asked (the dashboard names it); older questions have none
         }
         if kind is not None:
             q["kind"] = kind
@@ -4691,6 +4738,7 @@ def answer(
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    no_secret(root, {"answer": text}, "answer")
 
     person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
 
@@ -4808,7 +4856,7 @@ def record_answered(
     root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
-    a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
+    a Test results card, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
     decision.replaced_by. One apply_op, one history line "Answered <qid>: <summary>"."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
