@@ -209,7 +209,7 @@ function skeletonFor(kind) {
       : stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
-    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-side'}, Array.from({length:4}, () => bar('sk-tab'))), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
@@ -477,7 +477,9 @@ function navAddons(pages, here, navLink) {
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
+  // ORCH-2159: changing Tickets filters is an in-page update. Keep the search input, caret and scroll.
+  const r = route(), sameTickets = r.kind === 'tickets' && renderedRoute.split('?')[0] === '#tickets' && ticketAddressKey === ticketAddressPart();
+  const changed = !!renderedRoute && renderedRoute !== r.hash && !sameTickets, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];

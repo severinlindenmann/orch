@@ -1056,6 +1056,35 @@ def _running_workspaces(root: Path) -> list[str]:
     return sorted(found)
 
 
+def _dashboard_addresses(workspaces: list[str]) -> list[list]:
+    """[host, port] where the dashboard of these workspaces answers now: its own port on this computer, and
+    the address it listens on for other computers ([dashboard] listen, listen_port in .orch/config.toml)."""
+    import ipaddress
+
+    from orch import config, services
+
+    found: list[list] = []
+    try:
+        runs = services.running()
+    except Exception:
+        return []
+    for ws in workspaces:
+        for e in runs:
+            port = services._url_port(e.get("url")) if e.get("addon") == "dashboard" else None
+            if e.get("workspace") == ws and port and ["127.0.0.1", port] not in found:
+                found.append(["127.0.0.1", port])
+        try:
+            table = config.read(Path(ws)).get("dashboard")
+            host = str(ipaddress.IPv4Address(str(table["listen"]).strip()))
+            port = table["listen_port"]
+        except Exception:
+            continue
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
+            if [host, port] not in found:
+                found.append([host, port])
+    return found
+
+
 def _called_by_a_service() -> bool:
     """This command was started by one of the running services (the dashboard answering a click): restarting
     it now would kill the request before its answer is sent."""
@@ -1203,6 +1232,8 @@ def _reinstall(
             running
         ):  # the finisher stops these first (they run from the folder it replaces), starts them after
             extra["services"] = running
+            if page := _dashboard_addresses(running):
+                extra["page"] = page  # the finisher shows "orch is updating" there while the dashboard is off
         if consents:
             extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
@@ -2754,7 +2785,10 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
     m = discover().get(name) if consented(root, name) else None  # never run a package nobody turned on here
     if m is not None and m["background"]:
         env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
-        r = subprocess.run([sys.executable, "-P", "-m", m["run"], "stop"], cwd=root, env=env)
+        # its own "stopped" / "was not running" line is not for the person: the caller prints the summary
+        r = subprocess.run(
+            [sys.executable, "-P", "-m", m["run"], "stop"], cwd=root, env=env, stdout=subprocess.DEVNULL
+        )
         if r.returncode != 0:
             print(f"Note: '{name} stop' did not finish cleanly; the process ends by itself.", file=sys.stderr)
     _remove_skill_folders(root, name)
