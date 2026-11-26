@@ -2915,3 +2915,24 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
 .bulk-bar .menu-pop .meta{padding:4px 8px}
 .bulk-bar[aria-busy=true] .bulk-actions{opacity:.5;pointer-events:none}
 .bulk-bar .bulk-clear{margin-left:auto}
+
+/* Review gaps against the approved drafts (ORCH-2316). R4 A: Comment turns on pointing: what you can point at shows a
+   dashed outline (a paragraph takes a comment, a picture a numbered spot); words never zoom (.no-zoom). R6 A: a result's
+   steps fold under "What the helper did". */
+.swipe-preview.no-zoom{cursor:default}
+.swipe-commenting{margin:0 var(--s4) var(--s3);flex-shrink:0}
+.swipe-commenting .grow{min-width:0}
+.swipe-card.commenting .swipe-preview:not(.plain):not(.no-zoom){outline:1px dashed var(--border-strong);outline-offset:2px;cursor:crosshair}
+.swipe-card.commenting .swipe-point{outline:1px dashed var(--border-strong);outline-offset:var(--s1);border-radius:var(--radius);cursor:pointer}
+.swipe-card.commenting .swipe-point:hover,.swipe-card.commenting .swipe-point:focus-visible{outline:1px solid var(--warning)}
+.doc details.doc-steps{margin-top:var(--s2)}
+.doc details.doc-steps>summary{min-height:32px;display:flex;align-items:center}
+.doc details.doc-steps ol{margin:var(--s1) 0 0}
+@media (max-width:720px){.swipe-commenting{order:-1;flex-wrap:wrap;align-items:flex-start;margin:0 var(--s4) var(--s3);padding:var(--s2) var(--s3)}.swipe-commenting>.grow{flex:1 1 calc(100% - 32px)}.swipe-commenting>.btn{margin-left:auto}.swipe-commenting>.btn+.btn{margin-left:0}}
+/* ORCH-2316: on a phone the answers are pinned over the card's lower part, so the card's links (Open ticket, Open,
+   See the changes) sit right under its title, where the pinned bar never covers them */
+@media (max-width:720px){
+ .swipe-card>.swipe-head{order:-2}
+ .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
+ .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
+}

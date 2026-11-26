@@ -61,6 +61,22 @@ module.exports = {
       });
       must(!overlap, `expand overlaps progress at ${width}`);
     }
+    // ORCH-2316: at 390 the pinned answer bar never covers the card's Open ticket (it sits under the title on a phone)
+    for (const [width, height] of [[390,844], [320,844]]) {
+      await page.setViewportSize({width,height});
+      await page.evaluate(() => window.scrollTo(0,0));
+      await page.waitForTimeout(300);
+      const tl = card.locator('a.swipe-ticket').first();
+      if (await tl.count()) {
+        const hit = await tl.evaluate(b => { const r=b.getBoundingClientRect(), e=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+          return {visible:r.top>=0&&r.bottom<=innerHeight&&b.contains(e),top:r.top,bottom:r.bottom}; });
+        must(hit.visible, `Open ticket covered at ${width}x${height}: ${JSON.stringify(hit)}`);
+      }
+    }
+    await page.setViewportSize({width:1280,height:800});
+    // R6 A (ORCH-2316): the helper's steps fold under "What the helper did"; open it, then each step shows once
+    const fold=card.locator('details.doc-steps summary');
+    if (await fold.count()) await fold.first().click();
     const words=await card.innerText();
     must(words.split('Write the one-page summary').length===2, 'step repeated');
     must(words.split('Most customers like our staff.').length===2, 'summary repeated');

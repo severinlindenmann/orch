@@ -133,7 +133,10 @@ function reviewSubtitle() {
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
   // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
   const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
-  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
+  if (!n) return 'Nothing waits for you.';
+  // ORCH-2316 (R2 A, draft r2-a): "10 things need you. 2 hold up work now." (the second sentence only when any does)
+  const laneOf = window.UI?.review?.laneOf || (c => c?.card_kind?.lane), held = reviewCards().filter(c => laneOf(c) === 'holds_up').length;
+  return n + (n === 1 ? ' thing needs you.' : ' things need you.') + (held ? ' ' + held + (held === 1 ? ' holds up work now.' : ' hold up work now.') : '');
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
@@ -559,7 +562,7 @@ function reviewTicketFollow(deck) {
 }
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
+  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'Needs you'},
     reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
   const open = snapshot ? '' : reviewTicketId();
   return fragment(
