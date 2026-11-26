@@ -79,9 +79,9 @@ class E:
         return rc, out, err
 
     def person(self, ws, *args, ok=True):
-        """A person's action (answer, ticket done, relay connect ...), no --by. plain CLI action since #799."""
-        root = self.path_of(ws)
-        rc, out, err = self.orch(root, *args, ok=False)
+        """A person's action (answer, ticket done, relay connect ...), no --by, at a terminal: an unattended
+        caller is a helper (ORCH-2108)."""
+        rc, out, err = self.at_terminal(["orch", *args], cwd=self.path_of(ws))
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
