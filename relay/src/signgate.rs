@@ -134,17 +134,28 @@ fn end_key(c: &Connection, ws: &str, key: &str, state: &str) -> rusqlite::Result
     let kid = signkeys::parse_public(key)
         .map(|r| signkeys::key_id(&r))
         .unwrap_or_default();
-    c.execute(
-        "INSERT INTO sign_key_ended(ws, public_key, key_id, state, at) VALUES(?1,?2,?3,?4,?5)
-         ON CONFLICT(ws, public_key) DO UPDATE SET state=excluded.state, at=excluded.at",
-        params![ws, key, kid, state, now()],
-    )?;
-    // a pending change signed by a key that just ended loses its proof: drop it
-    c.execute(
-        "DELETE FROM sign_key_change WHERE ws=?1 AND old_key=?2",
-        params![ws, key],
-    )?;
-    Ok(())
+    // both or neither: an ended key never leaves a pending change it vouched for
+    c.execute_batch("SAVEPOINT sign_end_key")?;
+    let done = (|| -> rusqlite::Result<()> {
+        c.execute(
+            "INSERT INTO sign_key_ended(ws, public_key, key_id, state, at) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(ws, public_key) DO UPDATE SET state=excluded.state, at=excluded.at",
+            params![ws, key, kid, state, now()],
+        )?;
+        // a pending change signed by a key that just ended loses its proof: drop it
+        c.execute(
+            "DELETE FROM sign_key_change WHERE ws=?1 AND old_key=?2",
+            params![ws, key],
+        )?;
+        Ok(())
+    })();
+    match done {
+        Ok(()) => c.execute_batch("RELEASE sign_end_key"),
+        Err(e) => {
+            let _ = c.execute_batch("ROLLBACK TO sign_end_key; RELEASE sign_end_key");
+            Err(e)
+        }
+    }
 }
 
 /// The key a message from `ws` must be signed with, or why there is none.
@@ -620,6 +631,25 @@ pub async fn admin_approve(
     };
     if ended(&c, &ws, &new_key)?.is_some() {
         return Err(stale());
+    }
+    // a change vouched by the old key counts only while that key is still the current one and has not ended
+    if kind == "signed" {
+        let old_key: Option<String> = c
+            .query_row(
+                "SELECT old_key FROM sign_key_change WHERE ws=?1",
+                [&ws],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let cur = current_key(&c, &ws)?;
+        let vouched = match (&old_key, &cur) {
+            (Some(o), Some(k)) if o == k => ended(&c, &ws, o)?.is_none(),
+            _ => false,
+        };
+        if !vouched {
+            return Err(stale());
+        }
     }
     c.execute_batch("SAVEPOINT sign_approve")?;
     let done = (|| -> rusqlite::Result<()> {
