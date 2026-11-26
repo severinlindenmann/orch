@@ -355,3 +355,9 @@ test('Results: a completion note counts as a result, so no "Nothing yet" under i
   assert.equal(seen.pop(), '', 'no empty line under the note');
   assert.match(text(card), /Results1 note/);
 });
+
+test('Needs you: the strip names the agent stored on the question (ORCH-2023)', () => {
+  const c = ctx({state:{settings:{agents:[{name:'claude', label:'Claude', chosen:true}]}, runs:{}}});
+  const strip = stripOf(c, {status:'waiting', questions:[{id:'q1', text:'Which day?', asked_by:'agent:copilot'}]});
+  assert.match(text(strip), /Copilot asks: Which day\?/);
+});

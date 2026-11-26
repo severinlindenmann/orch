@@ -245,3 +245,9 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
   `ticket-working.html` when no helper runs too: one line "KEY · kind · status pill" above the 28 px title (24 px on a
   phone), the sentence and facts below. A Done ticket whose only result is its completion note shows "Results · 1 note"
   without the "Nothing yet" line, as `ticket-done.html` draws it. No mockup change was needed.
+
+## ORCH-2051: Replaced by, type a key to jump (25 Nov)
+
+- `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
+  (Replaced by, Cancel, Move to Superseded). The dialog opens with focus on the choice. Typing a whole key (ORCH-97)
+  jumps to that ticket; typing never chooses, Enter or a click does. The long title and the long word wrap in full.

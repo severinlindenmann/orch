@@ -158,6 +158,19 @@ def _tz(t: dict, ws=None):
     return zone(((t.get("ext") or {}).get("automation") or {}).get("tz")) or ws
 
 
+def _day(at: datetime) -> str:
+    """The day as the week strip writes it, no leading zero: "Tue 1 Dec"."""
+    return f"{at:%a} {at.day} {at:%b}"
+
+
+def _soon(at: datetime, now: datetime) -> str:
+    """A start within the week in this computer's time: "today at 07:30", "tomorrow at 07:30", "Monday at 07:30"."""
+    local = at.astimezone()
+    days = (local.date() - now.astimezone().date()).days
+    day = "today" if days == 0 else "tomorrow" if days == 1 else f"{local:%A}"
+    return f"{day} at {local:%H:%M}"
+
+
 def _basis(at: datetime) -> str:
     """The zone a shown time is in ("CET"): this computer's, not the reader's. A long Windows name becomes the
     offset ("UTC+01:00")."""
@@ -428,7 +441,7 @@ def _schedules(
         words = cron_human(cron, tz, now)
         nxt = next_after(cron, now, tz)
         here = local_next(cron, tz, now)
-        nxt_s = f"{here[0]:%a %d %b, %H:%M} {_basis(here[0])}" if here else "none"
+        nxt_s = f"{_day(here[0])}, {here[0]:%H:%M} {_basis(here[0])}" if here else "none"
         last = parse(sched.get("last_run"))
         result = _last_result(runs or [], t["id"])
         rows.append(
@@ -484,7 +497,7 @@ def _schedules(
                     "cells": {
                         "schedule": _name(t),
                         "repeats": "Once",
-                        "next": "Paused" if not running else clean(at.strftime("%a %d %b, %H:%M"), 40),
+                        "next": "Paused" if not running else clean(f"{_day(at)}, {at:%H:%M}", 40),
                         "last": "Not yet",
                     },
                     "link": t["id"],
@@ -495,15 +508,20 @@ def _schedules(
     return [r for _, r in sorted(rows, key=lambda e: e[0])]
 
 
+def _incoming(ls: dict, running: bool) -> str:
+    """Whether work from the phone and other workspaces comes in, in plain words (no "relay", no "listening")."""
+    if ls.get("listening"):
+        return "On"
+    if running and "could not be reached" in str(ls.get("note") or ""):
+        return "Can't connect just now, trying again"
+    return "Off"
+
+
 def _sources(tickets: list[dict], ls: dict, running: bool) -> list[dict]:
     """The relay inbox (phone and other workspaces), then each ticket that waits for an outside webhook."""
     recent = [_arrival(a) for a in reversed(ls.get("recent") or []) if isinstance(a, dict)]
     last = f"last: {recent[0]['title']} {recent[0]['subtitle']}" if recent else "nothing arrived yet"
-    state = (
-        "Listening"
-        if ls.get("listening")
-        else clean(ls.get("note") or ("Not listening" if running else "Automation is stopped"), 80)
-    )
+    state = _incoming(ls, running)
     rows = [
         {
             "title": "Phone and other workspaces",
@@ -715,10 +733,11 @@ def build(root: Path, now: datetime | None = None) -> dict:
         blocks.append(
             {
                 "type": "list",
-                "title": "Schedules",
+                "title": "Repeating",
+                "above": True,
                 "items": [],
                 "empty": {
-                    "title": "No schedules yet",
+                    "title": "No repeats yet",
                     "text": "Repeat any ticket on a plan you choose. Your upcoming work and results will appear here.",
                     "mark": "repeat",
                 },
@@ -793,18 +812,16 @@ def build(root: Path, now: datetime | None = None) -> dict:
             }
         )
     if recent or sched_rows:
-        nxt_row = sched_rows[0] if sched_rows else None
-        soon = None
-        if nxt_row:
-            tid = nxt_row["link"]
-            t = by_id.get(tid)
-            here = local_next(_repeats(t, True), _tz(t, ws), now) if t and _repeats(t, True) else None
-            soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
+        # the next start in plain words, as the line at the top says it; nothing starts by itself while stopped
+        soon = (
+            f"{clean(events[0][1].get('title'), 60)} starts {_soon(events[0][0], now)}. "
+            if pid and events
+            else ""
+        )
         blocks.append(
             {
                 "type": "table",
                 "title": "Recent starts",
-                "meta": "Latest activity",
                 "compact": True,
                 "columns": [
                     {"key": "ticket", "label": "Ticket", "type": "text"},
@@ -817,22 +834,17 @@ def build(root: Path, now: datetime | None = None) -> dict:
             else {
                 "type": "list",
                 "title": "Recent starts",
-                "meta": "Latest activity",
                 "above": True,
                 "items": [],
                 "empty": {
                     "title": "Nothing has run yet",
-                    "text": (soon or "") + "You can also run it now.",
+                    "text": soon + "Use Start now to run one sooner.",
                     "mark": "repeat",
                 },
             }
         )
     if relay:
-        state = (
-            "Listening"
-            if ls.get("listening")
-            else clean(ls.get("note") or ("Not listening" if pid else "Automation is stopped"), 80)
-        )
+        state = _incoming(ls, bool(pid))
         arrived = (ls.get("recent") or [None])[-1] if ls.get("recent") else None
         blocks.append(
             {
@@ -863,10 +875,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     if pid:
         nxt = events[0][0] if events else None
         if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)
-            local = nxt.astimezone()
-            days = (local.date() - now.astimezone().date()).days
-            day = "today" if days == 0 else "tomorrow" if days == 1 else f"{local:%A}"
-            line = f"On. Next: {day} at {local:%H:%M}"
+            line = f"On. Next: {_soon(nxt, now)}"
             if ran >= 5:
                 line += f". Ran {ran} times today"
             view.update(notice=line, notice_tone="good")
