@@ -173,7 +173,7 @@ struct NewTopicScreen: View {
         }
     }
     private var reviewSwitch: some View {
-        Toggle("Human review needed", isOn: $humanReview)
+        Toggle("I review the result", isOn: $humanReview)
             .themeFont(17).tint(Theme.brand)
             .frame(minHeight: 44)
             .accessibilityIdentifier("nt-human-review")

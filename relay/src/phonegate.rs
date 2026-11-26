@@ -71,15 +71,19 @@ pub fn check(
     blobs: &[String],
 ) -> Res<Gate> {
     let Some(env) = env else {
+        // the hard cut covers the phone too: once "signed only" is on, no unsigned send (a read error refuses)
+        if crate::signgate::require_signed(c)? {
+            return Err(refused(SigError::MissingSignature));
+        }
         return Ok(Gate::Unsigned);
     };
-    let (m, signed) = match verify(c, pid, &env)? {
-        Ok(v) => v,
-        Err(old) => return Ok(Gate::Duplicate(old)),
-    };
-    same_message(c, pid, &m, "text", to, ticket, reply_to, body, blobs)?;
+    let (m, signed, dup) = verify(c, pid, &env)?;
+    same_message(c, pid, &m, "text", to, ticket, reply_to, body, blobs, dup)?;
     if m.contains_key("question_id") || m.contains_key("question_sha256") {
         return Err(mismatch("type"));
+    }
+    if dup {
+        return Ok(duplicate(&m));
     }
     Ok(signed_gate(&m, env, &signed))
 }
@@ -100,12 +104,13 @@ pub fn check_answer(
     blobs: &[String],
 ) -> Res<Gate> {
     let Some(env) = env else {
+        // the hard cut: once "signed only" is on, no unsigned answer either
+        if crate::signgate::require_signed(c)? {
+            return Err(refused(SigError::MissingSignature));
+        }
         return Ok(Gate::Unsigned);
     };
-    let (m, signed) = match verify(c, pid, &env)? {
-        Ok(v) => v,
-        Err(old) => return Ok(Gate::Duplicate(old)),
-    };
+    let (m, signed, dup) = verify(c, pid, &env)?;
     same_message(
         c,
         pid,
@@ -116,6 +121,7 @@ pub fn check_answer(
         Some(question.id.as_str()),
         body,
         blobs,
+        dup,
     )?;
     if m.get("question_id") != Some(question_id) || question_id.as_str().is_none() {
         return Err(mismatch("question_id"));
@@ -133,15 +139,17 @@ pub fn check_answer(
     {
         return Err(mismatch("question_sha256"));
     }
+    if dup {
+        return Ok(duplicate(&m));
+    }
     Ok(signed_gate(&m, env, &signed))
 }
 
-/// The phone's signature checked against its paired key: Ok((signed message, signed bytes)), or Err(stored id)
-/// when the same signed bytes came before (a retry).
-/// A checked signature: the signed message and its bytes.
-type Checked = (Map<String, Value>, Vec<u8>);
+/// The phone's signature checked against its paired key: the signed message, its bytes, and whether the same
+/// signed bytes came before (a retry).
+type Checked = (Map<String, Value>, Vec<u8>, bool);
 
-fn verify(c: &Connection, pid: &str, env: &Value) -> Res<Result<Checked, String>> {
+fn verify(c: &Connection, pid: &str, env: &Value) -> Res<Checked> {
     let key = crate::phonekeys::raw_key(c, pid).ok_or_else(|| refused(SigError::UnknownKey))?;
     let read_err = std::cell::RefCell::new(None);
     let lookup = |id: &str| -> Option<String> { crate::msgsig::stored_digest(c, id, &read_err) };
@@ -150,10 +158,8 @@ fn verify(c: &Connection, pid: &str, env: &Value) -> Res<Result<Checked, String>
     if let Some(e) = read_err.into_inner() {
         return Err(e.into());
     }
-    if matches!(outcome, RelayOutcome::Duplicate) {
-        return Ok(Err(ver.msg["id"].as_str().unwrap_or_default().to_string()));
-    }
-    Ok(Ok((ver.msg, ver.signed)))
+    let dup = matches!(outcome, RelayOutcome::Duplicate);
+    Ok((ver.msg, ver.signed, dup))
 }
 
 fn signed_gate(m: &Map<String, Value>, envelope: Value, signed: &[u8]) -> Gate {
@@ -164,8 +170,13 @@ fn signed_gate(m: &Map<String, Value>, envelope: Value, signed: &[u8]) -> Gate {
     }
 }
 
+fn duplicate(m: &Map<String, Value>) -> Gate {
+    Gate::Duplicate(m["id"].as_str().unwrap_or_default().to_string())
+}
+
 /// The request says exactly what the signed message says: type, a person's origin, to, ticket, reply_to, body,
-/// and every file the request names listed with the stored size and hash, and nothing else.
+/// and every file the request names listed with the stored size and hash, and nothing else. A retry (`dup`) must
+/// say the same as the signed bytes too: it is checked up to the body before it is answered as a duplicate.
 #[allow(clippy::too_many_arguments)]
 fn same_message(
     c: &Connection,
@@ -177,6 +188,7 @@ fn same_message(
     reply_to: Option<&str>,
     body: &Value,
     blobs: &[String],
+    dup: bool,
 ) -> Res<()> {
     if m.get("type").and_then(Value::as_str) != Some(typ) {
         return Err(mismatch("type"));
@@ -196,12 +208,21 @@ fn same_message(
     if m.get("body") != Some(body) {
         return Err(mismatch("body"));
     }
+    if dup {
+        return Ok(());
+    }
+    // Every file the request names is listed in the signed bytes with the stored size and hash, and nothing else.
     let signed_files: Vec<&Value> = m
         .get("files")
         .and_then(Value::as_array)
         .map(|a| a.iter().collect())
         .unwrap_or_default();
     if signed_files.len() != blobs.len() {
+        return Err(mismatch("files"));
+    }
+    // one to one: a file named twice ([A, A] against signed [A, B]) never passes
+    let named: std::collections::HashSet<&str> = blobs.iter().map(String::as_str).collect();
+    if named.len() != blobs.len() {
         return Err(mismatch("files"));
     }
     for b in blobs {

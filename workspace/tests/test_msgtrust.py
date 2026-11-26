@@ -939,3 +939,64 @@ def test_a_signed_phone_answer_naming_another_question_is_never_applied(ws, run,
     rel.inbox.append(_phone_answer(tid, qmid, sha, answer="no"))
     inbox(run)
     assert tickets.load(ws, tid)["questions"][0]["answer"] == "no"
+
+
+# ---------------------------------------------------------------- outside review (ORCH-1206)
+
+
+@pytest.mark.parametrize("outer", [{"done": True}, {"done": 1.0}])
+def test_a_body_equal_only_to_python_is_a_mismatch(ws, run, rel, person, outer):
+    """True == 1 and 1.0 == 1 in Python: a body signed as {"done": 1} is not the same JSON."""
+    accept(ws, PEER)
+    m = signed_msg(SEED_PEER, body={"done": 1})
+    m["body"] = outer
+    rel.inbox.append(m)
+    inbox(run)
+    assert m["id"] not in handled_ids(ws) and msgtrust.refused(ws)[-1]["code"] == "signed_mismatch"
+
+
+def test_what_is_delivered_is_what_was_signed(ws, person):
+    """Outer fields the relay added or changed outside the compared ones never reach the handling."""
+    accept(ws, PEER)
+    m = signed_msg(SEED_PEER, origin="helper")
+    m["origin"] = "person"
+    m["question_sha256"] = "ab" * 32
+    m["files"] = [{"blob_id": "b_evil", "size": 1, "sha256": "cd" * 32}]
+    m["created_ms"] = 1
+    v = msgtrust.check_incoming(ws, m)
+    assert v.kind == "ok"
+    assert v.message["origin"] == "helper" and v.message["created_ms"] > 1
+    assert "question_sha256" not in v.message and "files" not in v.message
+
+
+@pytest.mark.parametrize("typ", ["start", "delegate"])
+def test_a_held_start_or_delegate_is_dropped_on_accept(ws, run, rel, person, typ):
+    m = signed_msg(SEED_PEER, type_=typ, body={"text": "Run it"}, origin="person")
+    rel.inbox.append(m)
+    inbox(run)
+    assert [h["id"] for h in msgtrust.held(ws)] == [m["id"]]
+    r = accept(ws, PEER)
+    assert {x["id"]: x["result"] for x in r["released"]} == {m["id"]: "dropped"}
+    assert m["id"] not in handled_ids(ws)
+
+
+def test_a_held_message_of_any_body_shape_never_breaks_accept(ws, run, rel, person):
+    odd = signed_msg(SEED_OTHER, frm=OTHER, body={"origin": "x", "text": "hi"})
+    mine = signed_msg(SEED_PEER)
+    rel.inbox += [odd, mine]
+    inbox(run)
+    r = accept(ws, PEER)
+    assert {x["id"]: x["result"] for x in r["released"]} == {mine["id"]: "released"}
+
+
+@pytest.mark.parametrize("field,value", [("signed", "A" * 400_000), ("sig", "A" * 10_000)])
+def test_an_oversized_envelope_field_is_refused_before_decoding(field, value, monkeypatch):
+    def boom(_):
+        raise AssertionError("decoded")
+
+    m = signed_msg(SEED_PEER)
+    env = {**m["envelope"], field: value}
+    monkeypatch.setattr(msgsig, "b64url_decode_strict", boom)
+    with pytest.raises(msgsig.SigError) as e:
+        msgsig.read_envelope(env)
+    assert e.value.code == "bad_envelope"
