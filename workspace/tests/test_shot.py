@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
-import shutil
 import struct
-import subprocess
 import zlib
 from pathlib import Path
 
@@ -50,6 +47,7 @@ class FakePipe:
 
     def __init__(self):
         self.calls = []
+        self.children = {}
         self.w = self.r = -1
 
     def call(self, method, params=None, session=None, timeout=30):
@@ -408,29 +406,21 @@ def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
     assert cli_shot.find_browser() == "/usr/bin/brave-browser"
 
 
-_FAKE_DOM = """
-const doc = (busy, frames = []) => ({
-  querySelector: q => (q === '[aria-busy="true"]' && busy ? {} : null),
-  querySelectorAll: q => (q === 'iframe, frame' ? frames : []),
-});
-const frame = d => ({ contentDocument: d });
-const foreign = { get contentDocument() { throw new Error('cross-origin'); } };
-const cases = {
-  idle: doc(false, [frame(doc(false)), frame(null)]),
-  top: doc(true),
-  iframe: doc(false, [frame(doc(true))]),
-  nested: doc(false, [frame(doc(false, [frame(doc(true))]))]),
-  foreign: doc(false, [foreign]),
-};
-const out = {};
-for (const [name, document] of Object.entries(cases)) out[name] = eval(BUSY_JS);
-console.log(JSON.stringify(out));
-"""
-
-
-@pytest.mark.skipif(not shutil.which("node"), reason="no node here")
-def test_busy_check_looks_into_same_origin_iframes():
-    # ORCH-2021: add-on pages run in an iframe and say aria-busy there; the top page alone looked done.
-    src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
-    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
-    assert json.loads(out) == {"idle": False, "top": True, "iframe": True, "nested": True, "foreign": False}
+@pytest.mark.skipif(not _has_browser(), reason="no Chrome or Chromium here")
+def test_waits_for_a_busy_sandboxed_iframe(tmp_path, monkeypatch):
+    if os.name == "nt" and _REAL_USERPROFILE:
+        monkeypatch.setenv("USERPROFILE", _REAL_USERPROFILE)
+    # ORCH-2115: add-on pages run in an iframe sandboxed without allow-same-origin, so the page cannot read
+    # it; the picture was taken while it still said aria-busy. It paints a black bar only once loaded.
+    inner = (
+        "<body style='margin:0'><div id=c aria-busy=true style='height:40px'></div><script>"
+        "setTimeout(()=>{c.style.width='100px';c.style.background='#000';c.removeAttribute('aria-busy')},2500)"
+        "</script>"
+    )
+    f = tmp_path / "s.html"
+    f.write_text(
+        "<!doctype html><body style='margin:0'><iframe sandbox='allow-scripts' style='border:0;width:390px'"
+        f' srcdoc="{inner}"></iframe>'
+    )
+    png = cli_shot.shoot(str(f), [390], tmp_path, "s", 200, 15)[0].read_bytes()
+    assert _bar_width(png) == 100

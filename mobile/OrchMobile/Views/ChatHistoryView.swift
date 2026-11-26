@@ -23,9 +23,13 @@ struct ChatHistoryView: View {
                                 Text(ChatDay.noMatchText(term))
                                     .themeFont(15).foregroundStyle(Theme.muted)
                                     .accessibilityIdentifier("history-no-match")
-                                Button("Clear search") { query = "" }
-                                    .buttonStyle(.borderless).themeFont(15, .semibold).foregroundStyle(Theme.brand)
-                                    .frame(minHeight: 44).accessibilityIdentifier("history-clear-search")
+                                // The 44pt frame sits inside the label: a frame around the Button pads the row but leaves the
+                                // tappable area at the text's height, which fails the hit-region audit.
+                                Button { query = "" } label: {
+                                    Text("Clear search").frame(minWidth: 44, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.borderless).themeFont(15, .semibold).foregroundStyle(Theme.brand)
+                                .accessibilityIdentifier("history-clear-search")
                             }.listRowBackground(Theme.bg)
                                 .onAppear { AccessibilityNotification.Announcement(ChatDay.noMatchText(term)).post() }
                         case .days(let found):

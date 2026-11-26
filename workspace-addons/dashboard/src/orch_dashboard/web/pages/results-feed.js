@@ -254,14 +254,19 @@ function resultsFill(item) {
   return resultsGet(resultsUrl(tid, kind, name), 'text', v).then(d => resultsWith(item, d));
 }
 // All results of a ticket, read: the list draws at once (text kinds loading) and again when each one is read
-function resultsLoad(t, onItems, withOwn = false) {
+// `max` (a wall tile): only the newest `max` widgets it shows are read; the rest are read when the overlay opens
+// (ORCH-2271: 50 tiles read every text result of their tickets, about 1,000 requests in 2 minutes at 10,000 tickets).
+function resultsNewest(list, max) {
+  return list.filter(it => it.type !== 'link' && !it.stepOnly).sort((a, b) => resultsAt(b) - resultsAt(a)).slice(0, max);
+}
+function resultsLoad(t, onItems, withOwn = false, max = 0) {
   if (!t?.id) { onItems([]); return; }
   resultsFiles(t.id).then(files => {
     const list = resultsItems(t, files, withOwn);
     onItems(list);
-    const pending = list.filter(it => it.state === 'loading');
-    if (!pending.length) return;
-    Promise.all(list.map(resultsFill)).then(onItems);
+    const read = new Set(max ? resultsNewest(list, max) : list);
+    if (!list.some(it => it.state === 'loading' && read.has(it))) return;
+    Promise.all(list.map(it => read.has(it) ? resultsFill(it) : it)).then(onItems);
   });
 }
 function resultsItemSig(it) {
@@ -290,7 +295,10 @@ function resultsDraw(host, list, o = {}) {
   const before = host.resultsCards || new Map(), cards = new Map();
   shown.forEach(it => {
     const k = resultsItemSig(it) + '\u0003' + pool.length, had = before.get(it.key);
-    const card = had && had.k === k ? had.el : UI.result(it, {size:o.size === 'lg' ? 'lg' : 'sm', list:pool, index:Math.max(0, pool.indexOf(it)), onRetry:() => { resultsForget(it); resultsRefill(host); }});
+    const onRetry = () => { resultsForget(it); resultsRefill(host); };
+    // a tile read only what it shows: the overlay reads the rest first (resultsLoad's max)
+    const onOpen = o.max ? () => resultsOpenAll(pool, Math.max(0, pool.indexOf(it)), onRetry) : undefined;
+    const card = had && had.k === k ? had.el : UI.result(it, {size:o.size === 'lg' ? 'lg' : 'sm', list:pool, index:Math.max(0, pool.indexOf(it)), onRetry, onOpen});
     cards.set(it.key, {k, el:card});
     want.push(card);
   });
@@ -300,7 +308,7 @@ function resultsDraw(host, list, o = {}) {
     more.type = 'button'; more.className = 'btn ghost sm result-more';
     more.textContent = '+' + rest + ' more';
     more.setAttribute('aria-label', 'Open the other ' + RESULTS_PLURAL(rest, 'result') + ' big');
-    more.addEventListener('click', () => UI.resultOverlay(pool, Math.max(0, pool.indexOf(widgets[shown.length]))));
+    more.addEventListener('click', () => resultsOpenAll(pool, Math.max(0, pool.indexOf(widgets[shown.length]))));
     want.push(more);
   }
   resultsPlace(grid, want);
@@ -321,6 +329,20 @@ function resultsDraw(host, list, o = {}) {
   resultsPlace(host, parts);
   host.hidden = !parts.length;
   if (end) log.scrollTop = log.scrollHeight;  // a chat that was at its end stays there when the widgets come in
+}
+// The big overlay over every result of a ticket. A tile read only the ones it shows: the rest are read first, for at
+// most RESULTS_OPEN_WAIT (a slow file then shows its own loading state); a second click meanwhile opens nothing more.
+const RESULTS_OPEN_WAIT = 1500;
+let resultsOpening = null;
+function resultsOpenAll(pool, index, onRetry) {
+  if (resultsOpening) return resultsOpening;
+  const o = onRetry ? {onRetry} : undefined;
+  if (!pool.some(it => it.state === 'loading')) return Promise.resolve(window.UI.resultOverlay(pool, index, o));
+  const late = new Promise(done => setTimeout(() => done(null), RESULTS_OPEN_WAIT));
+  resultsOpening = Promise.race([Promise.all(pool.map(resultsFill)), late])
+    .then(full => window.UI.resultOverlay(full || pool, index, o))
+    .finally(() => { resultsOpening = null; });
+  return resultsOpening;
 }
 // Puts exactly these children in place, moving only what moved: a kept node is never taken out (it keeps the keyboard)
 function resultsPlace(parent, kids) {
@@ -350,7 +372,7 @@ function resultsRefill(host) {
     if (!host.isConnected || host.resultsGen !== gen) return;
     const wide = list.filter(it => !it.stepOnly);
     resultsDraw(host, step ? list.filter(it => it.steps?.includes(step)) : wide, step ? {...o, all:wide} : o);
-  }, host.dataset.resultsOwn === '1');
+  }, host.dataset.resultsOwn === '1', step ? 0 : o.max);
 }
 // Fills every host under root; called after each redraw. A host fills again only when its ticket changed.
 function resultsFillAll(root) {
@@ -364,5 +386,5 @@ function resultsFillAll(root) {
   });
 }
 if (typeof module === 'object' && module.exports) {
-  module.exports = {resultsItems, resultsWith, resultsDiffFiles, resultsChart, resultsEvidenceFile, resultsOwnFiles, resultsLinkItem, RESULTS_TILE};
+  module.exports = {resultsItems, resultsNewest, resultsLoad, resultsOpenAll, resultsWith, resultsDiffFiles, resultsChart, resultsEvidenceFile, resultsOwnFiles, resultsLinkItem, RESULTS_TILE};
 }

@@ -573,6 +573,15 @@ def started_state(root, store, ticket, tickets=None):
     return d
 
 
+# Built things look like this workspace by default (#952): the crew agent reads the workspace's look with plain orch
+# commands when it starts (no copy of it here, so a later change of the look counts).
+CREW_NOTE = (
+    "Branding by default: when this task makes something people see (a page, an app, a document), use this "
+    "workspace's own look: its colour and icon (orch look show; the colour's tones in orch look list) and a brand or "
+    "style guide the workspace keeps. What the order says wins over it."
+)
+
+
 def crew_add(root, order, task):
     store = Store(root)
     with store.locked():
@@ -586,7 +595,9 @@ def crew_add(root, order, task):
             raise Refused("That task needs a crew role the proposal does not have.", "not_allowed")
         if task in d["crew"]:
             return {"order": d["tid"], "task": task, "ticket": d["crew"][task]["id"], "created": False}
-        new = orchcli.call(root, "ticket", "new", t["title"], "--parent", d["tid"], write=True)
+        new = orchcli.call(
+            root, "ticket", "new", t["title"], "--parent", d["tid"], f"--note={CREW_NOTE}", write=True
+        )
         orchcli.set_ext(
             root, new, role="crew", order=d["tid"], task=task, crew_role=t["role"], agent=t["agent"]
         )

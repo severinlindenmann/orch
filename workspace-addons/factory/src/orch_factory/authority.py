@@ -65,6 +65,19 @@ def _caps(d, kind):
                 problems.append(
                     f"The preview address of stop item {n} must be a web address (http or https)."
                 )
+            looks = i.get("looks") or []
+            if looks and i["tag"] != "taste":
+                problems.append(
+                    f"Stop item {n} offers looks, but only a taste item may: tag it taste or drop them."
+                )
+            titles = [look["title"] for look in looks]
+            if len(set(titles)) != len(titles):
+                problems.append(
+                    f"The looks of stop item {n} need different titles, so the person can tell them apart."
+                )
+            for m, look in enumerate(looks, 1):
+                one(f"The title of look {m} at stop item {n}", look["title"], 60)
+                one(f"The picture of look {m} at stop item {n}", look["picture"], 80)
         for key in ("checked", "not_checked", "changed_during_run"):
             each("Stop note", d.get(key))
     elif kind == "autopilot":
