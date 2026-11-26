@@ -78,7 +78,7 @@ test('b4: a PDF result shows a small inline preview from the same-origin file en
 });
 test('b4: a long ticket title wraps to three lines then an ellipsis; shared-link row actions are always visible', () => {
   const css = n => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web', n), 'utf8');
-  // the header clamps to three lines; while a helper works it shows the whole title, as drawn (ORCH-70)
+  // on a phone the header clamps to three lines; wider, and while a helper works, it shows the whole title (ORCH-70)
   assert.match(css('pages/ticket.css'), /ticket-strip h1\.title-clamp \.ed-title[^{]*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden/);
   const style = css('style.css');
   assert.doesNotMatch(style, /\.compact-actions\{[^}]*opacity:0/, 'row actions are not hidden until hover');
