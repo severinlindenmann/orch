@@ -22,7 +22,7 @@
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
 - 17 Nov (ORCH-79): Settings > General has the switch "Put new versions live without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
-- 17 Nov (ORCH-183, persona test): Send back on a Check result opens the "What should change?" box (it never goes
+- 17 Nov (ORCH-183, persona test): Send back on a Test results card opens the "What should change?" box (it never goes
   out without words) and the separate Comment button is left out there; an answer waits 6 s before it is saved, so
   Undo takes it back for real (after that Undo is off and the toast says it is already saved); the "What was done"
   box is as tall as its words, with the result's own pictures, pages and PDFs as tiles under it; the card gives up

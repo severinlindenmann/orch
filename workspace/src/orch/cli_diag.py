@@ -1,4 +1,5 @@
-"""`orch diag inspect | query | report | tickets`: what happened inside orch, read-only (contracts/diag.md).
+"""`orch diag inspect | query | report | tickets`: what happened inside orch (contracts/diag.md).
+`inspect` and `query` look; `report` and `tickets` save here; `delete` removes saved reports or notes.
 `tickets` (report_tickets.py) is the one that writes tickets: new problem reports become tickets.
 
 `inspect` and `query` never write anything and never repair anything: they do not call `orch run status`'s
@@ -9,6 +10,7 @@ uploads anything.
 
 from __future__ import annotations
 
+import argparse
 import json
 import time
 from pathlib import Path
@@ -16,15 +18,27 @@ from pathlib import Path
 from orch import diag, diag_checks, diag_collect, diag_query, diag_report
 from orch.errors import Refused
 
+# What each part does to the workspace: looking changes nothing that is yours, saving and deleting do.
+DIAG_HELP = "look into what orch did; save or delete local reports"
+DIAG_ABOUT = """\
+See what happened inside orch.
+inspect and query look: they change no
+tickets or reports. report and tickets
+save in this workspace. delete removes
+saved reports or debug notes for good."""
+
 
 def add_parsers(sub, common) -> None:
-    d = sub.add_parser("diag", help="what happened inside orch (read-only)").add_subparsers(
-        dest="sub", required=True
-    )
-    i = d.add_parser("inspect", parents=[common], help="the state and the health checks, now")
+    d = sub.add_parser(
+        "diag",
+        help=DIAG_HELP,
+        description=DIAG_ABOUT,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    ).add_subparsers(dest="sub", required=True)
+    i = d.add_parser("inspect", parents=[common], help="look: the state and the health checks, now")
     i.add_argument("--ticket")
     i.add_argument("--run")
-    q = d.add_parser("query", parents=[common], help="search the debug log and the activity record")
+    q = d.add_parser("query", parents=[common], help="look: search the debug log and the activity record")
     q.add_argument("--ticket")
     q.add_argument("--run")
     q.add_argument("--ev", help="event name pattern, like 'ticket.*'")
@@ -34,7 +48,7 @@ def add_parsers(sub, common) -> None:
     q.add_argument("--since", help="how far back, like 2h")
     q.add_argument("--limit")
     q.add_argument("--page", help="the `next` token of the last answer")
-    r = d.add_parser("report", parents=[common], help="write a report folder for a helper or a person")
+    r = d.add_parser("report", parents=[common], help="save: write a report folder here; sends nothing")
     r.add_argument("--ticket")
     r.add_argument("--run")
     r.add_argument("--addon")
@@ -57,9 +71,9 @@ def add_parsers(sub, common) -> None:
         help="include ticket text and helper excerpts (default)",
     )
     r.add_argument("--no-content", dest="content", action="store_false")
-    t = d.add_parser("tickets", parents=[common], help="turn new problem reports into tickets, once (no AI)")
+    t = d.add_parser("tickets", parents=[common], help="save: turn new problem reports into tickets (no AI)")
     t.add_argument("--dry-run", action="store_true", help="say what would happen, change nothing")
-    x = d.add_parser("delete", parents=[common], help="delete saved reports or the saved debug notes")
+    x = d.add_parser("delete", parents=[common], help="delete: the saved reports or the saved debug notes")
     x.add_argument("what", choices=["reports", "notes"])
 
 
