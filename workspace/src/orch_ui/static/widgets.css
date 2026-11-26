@@ -665,7 +665,14 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-table.data-table.compact td.cell-actions,.blk-table.data-table.compact td.cell-toggle{order:2}
 .blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle){display:inline;padding:0;color:var(--text-muted);font-size:12px}
 .blk-table.data-table.compact td[data-label]:not(:first-child):not(.cell-toggle):before{content:none}
-.blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle)+td:not(.cell-actions):not(.cell-toggle):before{content:"\00b7"!important;margin:0 var(--s2);color:var(--text-faint)}
+/* a cell with no value is left out; a long text cell gets its own line; a short first cell (a number) shares the name line;
+   the dot sits only between two short cells on one line, never at the start of a line */
+.blk-table.data-table.compact td.cell-none:not(:first-child):not(.cell-actions):not(.cell-toggle){display:none}
+.blk-table.data-table.compact td.cell-long{flex-basis:100%}
+.blk-table.data-table.compact tr td:first-child:has(+td.cell-main){flex-basis:auto;order:-2;margin-right:var(--s2);padding-bottom:0}
+.blk-table.data-table.compact tr td:first-child+td.cell-main:not(.cell-actions):not(.cell-toggle){flex:1 1 0;order:-2;font-size:inherit;color:var(--text);font-weight:500}
+.blk-table.data-table.compact tr:has(>td:first-child+td.cell-main)::before{content:"";flex-basis:100%;order:-1}
+.blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none)~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none):not(.cell-long~td):before,.blk-table.data-table.compact td.cell-long~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none)~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none):before{content:"\00b7"!important;margin:0 var(--s2);color:var(--text-faint)}
 .blk-table.data-table.compact td.cell-actions,.blk-table.data-table.compact td.cell-toggle{margin-top:var(--s2)}}
 
 /* Add-on page layout blocks (contract: addon-view.schema.json "Page layout"): headings with quiet text, two cards side by side,

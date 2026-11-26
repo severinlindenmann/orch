@@ -27,6 +27,8 @@ def test_empty_page(prws):
     v = valid(view.build(prws, running=True, queue_alive=True))
     assert [b["type"] for b in v["blocks"]] == ["list", "footnote"]  # one empty state, not two
     assert v["blocks"][0]["empty"]["title"] == "No pull requests yet"
+    assert v["blocks"][0]["title"] == "Open pull requests"  # not the page's own title again
+    assert v["blocks"][0]["empty"]["button"] == {"label": "Open tickets", "to": "app:tickets"}  # a next step
     assert "notice" not in v
 
 
