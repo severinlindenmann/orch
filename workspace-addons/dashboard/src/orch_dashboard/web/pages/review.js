@@ -428,7 +428,7 @@ function reviewAcceptedCard() {
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with “I review the result” on wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
     meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
 };

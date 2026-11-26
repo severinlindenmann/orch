@@ -103,6 +103,9 @@ Each time you are woken, ask Factory what to do next and follow it:
   request (`orch ref add`). A result without them shows the owner "nothing to show".
 - A message from the owner "Change at <stage>: <words>" comes from that review card: send the stage's crew tickets
   back with those words (`orch run send <crew> "<words>"`), and they come back to the owner for a new review.
+- Branding by default: every crew ticket's note tells its agent to make what people see in this workspace's own look
+  (`orch look show`, the colour's tones in `orch look list`, a brand or style guide the workspace keeps). The order's
+  own words win; say so in the task text when the order asks for another look.
 - Words that people read in a built app use the right singular and plural ("1 point", "2 points", never "1 pts"): tell
   the builders in their task text, and look for it when you check the results.
 - Pictures at a stop: for every taste item copy the tester's screenshots of that screen (phone width and desktop) to
@@ -110,6 +113,11 @@ Each time you are woken, ask Factory what to do next and follow it:
   look in `before`). Without a picture the owner cannot judge a look: say in `not_checked` that there is none.
   When the app runs for the test, also put its address in the item (`"preview": "http://127.0.0.1:5173/"`), so the
   owner can open the screen itself.
+- Looks to choose from: when a taste item has 2-3 real looks, have them built, put a picture of each in the stop folder
+  and list them in the item (`"looks": [{"title": "Calm", "picture": "s1/calm.png"}, {"title": "Bold", ...}]`, titles
+  up to 60 characters, only on taste items). Then ask once on the order which one, with exactly those titles as options:
+  `orch ask <order> "Which look for <item>?" --option Calm --option Bold`. The stop page shows the looks side by side
+  and opens that question. Build on the picked look; no pick yet: keep going on what does not depend on it.
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.

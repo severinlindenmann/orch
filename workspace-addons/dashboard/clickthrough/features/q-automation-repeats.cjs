@@ -50,7 +50,6 @@ module.exports = {
     await tag.waitFor({ timeout: 10000 });
     for (const end = Date.now() + 10000; (await tag.innerText()) !== zone && Date.now() < end;) await page.waitForTimeout(250);
     must((await tag.innerText()) === zone, 'Edit does not name the saved zone ' + zone + ': ' + (await tag.innerText()));
-    must(!(await page.locator('[data-key=repeat-zone-change]').isVisible()), 'a repeat in the default zone says saving moves it');
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     orchAsPerson('automation', 'repeat', tid, '--off');

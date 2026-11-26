@@ -1749,7 +1749,7 @@ def undo_reviewer_accept(root: Path, tid: str, by: str) -> dict:
         ticket.pop("human_review", None)
         add_history(ticket, by, "Status done -> review")
         add_history(ticket, by, autoreview.UNDONE_LINE + "the Reviewer's accept; back in Review for you, "
-                    "with Human review needed on.")  # fmt: skip
+                    "with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -1774,7 +1774,7 @@ def undo_reviewer_send_back(root: Path, tid: str, cid: str, by: str) -> dict:
         add_history(ticket, by, f"Status {was} -> review")
         what = _one_line(item.get("text"), 120)
         add_history(ticket, by, autoreview.UNDONE_LINE + f"the Reviewer's send-back ({what}); "
-                    "back in Review for you, with Human review needed on.")  # fmt: skip
+                    "back in Review for you, with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -2387,8 +2387,8 @@ def human_review(ticket: dict) -> bool:
     return ticket.get("human_review") is not False
 
 
-HUMAN_REVIEW_ON = "Human review needed: on"
-HUMAN_REVIEW_OFF = "Human review needed: off"
+HUMAN_REVIEW_ON = "I review the result: on"
+HUMAN_REVIEW_OFF = "I review the result: off"
 
 
 def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:

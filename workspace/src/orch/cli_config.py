@@ -513,7 +513,7 @@ def _config(args, root: Path) -> None:
         _out(
             args,
             {"workflow.auto_reviewer": value},
-            "Saved: new tickets start with Human review needed "
+            "Saved: new tickets start with “I review the result” "
             + ("off (the Auto Reviewer checks them)." if value else "on."),
         )
     elif args.sub == "set" and args.key == "workflow.dispatcher":
@@ -563,7 +563,7 @@ def _config(args, root: Path) -> None:
             "Saved: Away mode is "
             + (
                 "on: the Auto Reviewer accepts finished work and answers cards with the helper's "
-                "recommendation at once, on tickets without Human review needed."
+                "recommendation at once, on tickets with “I review the result” off."
                 if value
                 else "off."
             ),

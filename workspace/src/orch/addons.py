@@ -2162,8 +2162,8 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
     }
 
 
-def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+def listing(root: Path, *, catalog: bool = False) -> list[dict]:
+    """Only the installation catalog includes inactive core clients. Installed add-ons first (sorted), then
     shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
     Never touches the network: the not-installed ones come from the local source folder, else from the bundle
     in the package; one that is in neither is left out of the list (it can still be added by name)."""
@@ -2173,6 +2173,7 @@ def listing(root: Path) -> list[dict]:
     out = [
         _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
         for name, m in sorted(discover().items())
+        if catalog or name not in CORE_ADDONS or name in act
     ]
     for name, m in sorted(shipped_available(fetch=False).items()):
         out.append(_row(name, m, "built-in", False, False, False))
