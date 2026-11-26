@@ -13,7 +13,7 @@ def _item(kind, text="Move the old files to the archive folder?", **kw):
     return {"text": text, "card": kw.pop("card", {}), "card_kind": {"kind": kind}, **kw}
 
 
-def test_rules_quick_only_with_a_positive_sign():
+def test_rules_quick_only_with_a_clear_hint():
     g = attention.group_of
     assert g(_item("question", one_tap=True))["group"] == "quick"
     assert g(_item("document", proposal={"verdict": "accept", "why": "small"}))["group"] == "quick"
@@ -23,7 +23,7 @@ def test_rules_quick_only_with_a_positive_sign():
         "name": "Quick look",
         "why": "small and tested",
     }
-    # no sign that it is small: a Short decision, never a guess
+    # no hint that it is small: a Short decision, never a guess
     assert g(_item("question"))["group"] == "short"
     assert g(_item("pictures", text=""))["group"] == "short"
     failed = {"preview": {"type": "doc", "status": {"text": "2 failed", "tone": "failed"}}}
