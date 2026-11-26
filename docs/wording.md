@@ -42,6 +42,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | Home warning when several stopped | <n> things stopped working · See what to fix | - | <n> problems |
 | the place a key is typed in | Key entry | - | Safe key entry, Vault |
 | private network | private network (VPN) | - | NetBird (any product name) |
+| the card for a ticket's result to look at (owner, 26 Nov, ORCH-2178) | Test results | `test_results` | Check result |
 
 Rules
 - Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Evidence on this task".

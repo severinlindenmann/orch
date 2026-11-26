@@ -84,7 +84,7 @@ replaces the default. While a question waits, the agent keeps working on the ste
 
 ## Review stack
 
-Things that wait for your yes (a draft, a Check result, a plan, a link before it goes public, a question with
+Things that wait for your yes (a draft, a Test results card, a plan, a link before it goes public, a question with
 choices) are shown as cards you answer with one gesture: right is yes, left is no, down is "change this". A
 card is a question on the ticket with a `card` (what you were shown) and `shown` (an exact copy of the files it
 showed, kept under `.orch/tickets/<id>/reviewed/`, so a later change to a file never moves your answer onto
@@ -94,7 +94,7 @@ Your answer is kept on the ticket, in the same list as questions: one entry per 
 decision has a plain one-line summary (for example "Use C with 2 changes: questions on top; month in the
 heading.") which is also the answer text in the history. If you change your mind, a new entry is added that
 replaces the old one; the old one stays and says what replaced it. Helpers read a short "what applies now"
-block built from these entries. A Check result answered "looks good" marks the ticket Done exactly as
+block built from these entries. A Test results card answered "looks good" marks the ticket Done exactly as
 Accept does; "send back" works like Ask for changes.
 
 ## References and history

@@ -88,3 +88,7 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-25 (ORCH-2166, RP8 B, owner): The two add-ons are called "Relay" and "Publish" on every screen, in menus,
   Settings and the helper's texts; commands stay `orch relay` / `orch publish`. "Contacts", "Phone link" and
   "Shared" are no longer names of them. Errors read "The relay can't be reached" / "Publish can't be reached".
+- 2026-11-25 (review overhaul, owner's picks R1 A, R2 A, R3 B, R5 A): Review cards are twelve kinds in four
+  families (Decide, Look at the result, Only you can press it, Needs you in person), picked by orch from what a card
+  carries; the list shows what holds up work first. `orch ask` refuses a question over 40 words and a report of a
+  state. "Nothing closes by itself" is the Reviewer mode `workflow.reviewer_mode = propose`; the default stays accept.
