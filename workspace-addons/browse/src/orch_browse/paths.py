@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import netcheck
 
-SOCK_MAX = 100  # macOS allows 104 bytes for a socket path
+SOCK_MAX = 100  # macOS allows 104 bytes for a socket path (bytes, not characters: an umlaut takes two)
 
 
 def base(root: Path) -> Path:
@@ -42,7 +42,7 @@ def shots_dir(root: Path, tid: str) -> Path:
 
 def socket_path(run: Path) -> Path:
     p = run / "b.sock"
-    if len(str(p)) <= SOCK_MAX:
+    if len(os.fsencode(p)) <= SOCK_MAX:
         return p
     short = Path(tempfile.gettempdir()) / f"orch-browse-{os.getuid() if hasattr(os, 'getuid') else 0}"
     _private(short)
@@ -59,7 +59,10 @@ def load_sites(root: Path, tid: str) -> list[str]:
     if not f.exists():
         return []
     doc = json.loads(f.read_text(encoding="utf-8"))
-    return [netcheck.norm_site(s) for s in doc.get("sites", [])]
+    sites = doc.get("sites", []) if isinstance(doc, dict) else None
+    if not isinstance(sites, list) or not all(isinstance(s, str) for s in sites):
+        raise ValueError('the file must hold {"sites": ["example.com", ...]}')
+    return [netcheck.norm_site(s) for s in sites]
 
 
 def save_sites(root: Path, tid: str, sites: list[str]) -> None:

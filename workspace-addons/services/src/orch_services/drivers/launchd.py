@@ -154,7 +154,7 @@ class Launchd(Driver):
         cp = self._print(spec)
         if cp.returncode != 0:
             return Status(running=False)
-        state = re.search(r"^\s*state = (\S+)", cp.stdout, re.MULTILINE)
+        state = re.search(r"^[ \t]*state = (\S+(?: \S+)*)", cp.stdout, re.MULTILINE)  # "spawn scheduled"
         pid = re.search(r"^\s*pid = (\d+)", cp.stdout, re.MULTILINE)
         if not (state and state.group(1) == "running" and pid):
             # launchd says "spawn scheduled" or "xpcproxy" while a job is only being launched (slow under load)

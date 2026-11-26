@@ -209,7 +209,7 @@ function skeletonFor(kind) {
       : stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
-    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-side'}, Array.from({length:4}, () => bar('sk-tab'))), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
@@ -863,6 +863,7 @@ async function refresh() {
       signedOut = true;
       connection.hidden = true;
       if (!state) main.replaceChildren();
+      document.getElementById('side-menu')?.removeAttribute('aria-busy');  // settled: the login covers the page
       return;
     }
     if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
@@ -1197,6 +1198,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'relay-connect') { await relayConnect(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
