@@ -373,7 +373,7 @@ def test_human_review_needed_blocks_only_the_auto_reviewer_and_away_mode(proj, r
     tid = _finished(proj, run, new_ticket, "Fix the stale run record")
     t = tickets.load(proj, tid)
     assert tickets.human_review(t)  # on by default
-    with pytest.raises(Refused, match="Human review needed is on"):
+    with pytest.raises(Refused, match="I review the result” is on"):
         ownerpick.refuse_auto(t)
     tickets.set_human_review(proj, tid, False, "human:tester")
     ownerpick.refuse_auto(tickets.load(proj, tid))  # switch off, no draft: the Auto Reviewer may look

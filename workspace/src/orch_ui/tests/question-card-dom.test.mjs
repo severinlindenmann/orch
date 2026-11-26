@@ -62,3 +62,28 @@ test('a focus:permission question never sends in one tap, even when the caller a
     mounted.destroy();
   }
 });
+
+// ORCH-2140 W3: on the ticket page the question shows once; the card adds no Needs you line or second title.
+test('plain: no meta line, the title is for screen readers only, the suggested option is the filled button', () => {
+  const w = {};
+  globalThis.window = w;
+  delete require.cache[require.resolve('../static/question-card-state.js')];
+  delete require.cache[require.resolve('../static/question-card.js')];
+  w.QuestionCardState = require('../static/question-card-state.js');
+  require('../static/question-card.js');
+  const storage = {getItem: () => null, setItem() {}, removeItem() {}};
+  const question = {ticket: 't_1', id: 'q1', title: 'Which day?', text: '', options: [{text: 'Tuesday', suggested: true}, {text: 'Thursday'}]};
+  const host = new Node_('div'); host.ownerDocument = doc;
+  w.QuestionCard.mount(host, question, {storage, plain: true, send: async () => ({status: 200})});
+  assert.equal(host.all(n => n.className === 'row qmeta').length, 0);
+  const h3 = host.all(n => n.tag === 'h3')[0];
+  assert.equal(h3.className, 'sr-only');
+  assert.equal(h3.textContent, 'Your answer');
+  assert.equal(host.all(n => n.tag === 'p' && n.className === 'muted').length, 0);
+  const options = host.all(n => n.tag === 'button' && /qoption/.test(n.className));
+  assert.deepEqual(options.map(n => n.className), ['btn qoption primary', 'btn qoption']);
+  const other = new Node_('div'); other.ownerDocument = doc;
+  w.QuestionCard.mount(other, question, {storage, send: async () => ({status: 200})});
+  assert.equal(other.all(n => n.className === 'row qmeta').length, 1);
+  assert.equal(other.all(n => n.tag === 'h3')[0].textContent, 'Which day?');
+});
