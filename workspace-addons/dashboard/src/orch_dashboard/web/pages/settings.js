@@ -1,7 +1,7 @@
 'use strict';
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general', settingsAddon = null;
-// D6 (26 Nov): where an add-on's settings were opened from ({hash, label}), so "Back to Automation" returns there in one
+// D6 (26 Nov): where an add-on's settings were opened from ({hash, label}), so "Back to <add-on name>" returns there in one
 // hop. Opened from Settings › Add-ons (or a fresh load): Back goes to that list.
 let settingsBack = null;
 function noteSettingsBack(oldUrl, hash) {
