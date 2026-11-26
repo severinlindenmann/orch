@@ -32,6 +32,9 @@ q('#w-table').append(UI.table([{key:'t',label:'Ticket',sort:true},{key:'o',label
 q('#w-empty').append(UI.state({kind:'empty',title:'Nothing here yet',text:'Finished work shows up here.',action:{label:'Create a ticket'}}));
 q('#w-error').append(UI.state({kind:'error',title:'Could not reach your storage',text:'Check the address or your connection.',action:{label:'Try again'}}));
 q('#w-loading').append(UI.state({kind:'loading'}));
+q('#w-table-empty').append(UI.table([{key:'t',label:'Ticket'},{key:'s',label:'Status'}],[],{empty:'No tickets match',emptyText:'Clear the filter to see all tickets.',emptyAction:{label:'Clear filter'}}));
+q('#w-helpers-empty').append(UI.helperList([],{}));
+q('#w-preview-fail').append(UI.state({kind:'error',title:'The preview did not load',text:'Open the card to see it, or try again.',action:{label:'Try again'}}));
 {const run=()=>{const l=UI.launch({title:'Starting…',sub:'Plan the autumn newsletter',steps:['Creating the ticket','Starting your helper','Opening it']});q('#w-launch').replaceChildren(l.el);setTimeout(()=>l.step(1),600);setTimeout(()=>l.step(2),1300);setTimeout(()=>{l.finish('Started');setTimeout(()=>{l.el.classList.remove('launch-out')},900)},2000)};run();q('#w-launch-replay').onclick=run}
 {const w=UI.launch({title:'Saving…',sub:'Plan the autumn newsletter',steps:['Creating the ticket','Starting your helper','Opening it']});w.step(1);w.warn(1,'Helper not started. Your ticket is saved.');q('#w-launch-warn').append(w.el)}
 {const pg=(h,t)=>({type:'doc',heading:h,paras:[t]}),items=[
@@ -47,7 +50,7 @@ q('#w-loading').append(UI.state({kind:'loading'}));
  /* a plain question (orch ask --option Export --option Download): no pictures, so plain rows (ORCH-110) */
  items.push({id:'g3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'WS-4',ticketId:'t_name',ticketTitle:'Export button',when:'today 22:51',title:'Which name for the export?',then:'The helper uses the name you pick.',
   preview:{type:'options',options:[{id:'Export',title:'Export',suggested:true},{id:'Download',title:'Download',text:'Says what happens on a phone.'}]}});
- /* a Check result with its own files as tiles; Send back opens the words box, no Comment (ORCH-183) */
+ /* a Test results card with its own files as tiles; Send back opens the words box, no Comment (ORCH-183) */
  /* ORCH-548: a step still open turns Looks good off; the card says why and what to press */
  items.push({id:'g4b',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-6',ticketId:'t_lunch',ticketTitle:'Lunch plan',when:'today 10:30',need:'Looks good is off',title:'Lunch plan for Friday',why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',blocked:'1 step is not finished. Send it back to get it done.',preview:{type:'doc',progress:{done:1,total:2},steps:['Done: Ask the team what they want','Open: Book the table']}});
  items.push({id:'g4',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-5',ticketId:'t_cat',ticketTitle:'Spring catalogue',when:'today 10:24',title:'Spring catalogue: review the result',why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. Nothing else starts: no new ticket, no more work. To change something, press Send back and say what; a helper then works on it in this ticket.',
