@@ -73,7 +73,7 @@ def test_relay_allow_from_a_plain_terminal(proj, run, rel):
 
 def test_answer_from_a_plain_terminal_is_the_persons(proj, run, new_ticket, monkeypatch):
     tid, qid = _question(run, new_ticket)
-    monkeypatch.setattr(tickets.term, "is_terminal", lambda stream: True)
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     code, out, err = run("answer", tid, qid, "a")
     assert code == 0, out + err
     _plain(out, err)
@@ -89,7 +89,8 @@ def test_an_agent_answer_is_recorded_as_the_agent(proj, run, new_ticket, monkeyp
     assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "agent:claude"
 
 
-def test_unattended_done_leaves_human_review_pending(proj, run, new_ticket):
+def test_unattended_done_leaves_human_review_pending(proj, run, new_ticket, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: False)
     tid = new_ticket()
     run("check", "add", tid, "Write it")
     assert run("check", "done", tid, "c1", "--note", "wrote it")[0] == 0
@@ -113,7 +114,8 @@ def test_unattended_done_leaves_human_review_pending(proj, run, new_ticket):
         (("chat", "send", PEER, "Hello"), "Only a person"),
     ],
 )
-def test_person_commands_refuse_an_unattended_caller(proj, run, new_ticket, words, refusal):
+def test_person_commands_refuse_an_unattended_caller(proj, run, new_ticket, words, refusal, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: False)
     tid = new_ticket()
     code, out, err = run(*(word.format(tid=tid) for word in words))
     assert code == 2 and refusal in out + err

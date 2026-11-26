@@ -116,11 +116,12 @@ def test_review_answer_from_a_script_is_refused_on_a_draft_whatever_via_says(pro
     assert _q(proj, tid, q["id"])["answer"] is None
 
 
-def test_plain_answer_from_a_script_is_refused_on_a_draft(proj, run, new_ticket):
+def test_plain_answer_from_a_script_is_refused_on_a_draft(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     q = _choose(proj, run, tid)
     code, out, err = run("answer", tid, q["id"], "A", "--via", "dashboard", "--by", ME)
     assert code == 2 and "Only a person picks a draft" in out + err, out + err
+    monkeypatch.setattr(tickets, "attended", lambda: False)  # an unattended script
     code, out, err = run("answer", tid, q["id"], "A")
     assert code == 2 and "waits for the owner" in out + err
     assert _q(proj, tid, q["id"])["answer"] is None

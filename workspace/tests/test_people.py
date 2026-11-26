@@ -40,7 +40,7 @@ def test_owner_add_rename_rights_remove(proj, run):
 
 
 def test_cli_round_trip(proj, run, monkeypatch):
-    monkeypatch.setattr(tickets.term, "is_terminal", lambda stream: True)
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     assert run("people", "on", "--name", "Sev")[0] == 0
     code, out, _ = run("people", "add", "Max", "--rights", "write,decide", "--json")
     assert code == 0

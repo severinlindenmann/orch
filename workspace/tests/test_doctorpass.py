@@ -503,6 +503,7 @@ def test_setup_is_a_person_s_step(ws, run, tmp_path, monkeypatch, tool):
     f = tmp_path / "s.json"
     f.write_text(json.dumps(SETUP))
     monkeypatch.setattr(tickets, "agent_tool", lambda: tool)
+    monkeypatch.setattr(tickets, "attended", lambda: False)  # None: an unattended script
     assert run("doctor", "setup", str(f))[0] == 2
     assert run("doctor", "setup", "--off")[0] == 2 and doctorpass.setup(ws)
     assert run("doctor", "setup")[0] == 0  # showing it is fine
