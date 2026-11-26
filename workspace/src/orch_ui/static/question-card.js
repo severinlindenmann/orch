@@ -26,19 +26,23 @@
     const badge = make('span', 'badge attn', 'Needs you');
     meta.append(badge, make('span', 'muted', question.key || ('Ticket ' + question.ticket)));
     if (question.since) meta.append(make('span', 'faint', question.since));
-    const title = make('h3', '', question.title);
+    /* opts.plain (ORCH-2140 W3): the page already shows the question once above the card, so the card drops its
+       Needs you line and repeated title (kept for screen readers) and the suggested option is the filled button. */
+    const plain = opts.plain === true;
+    const title = make('h3', plain ? 'sr-only' : '', plain ? 'Your answer' : question.title);
     title.id = 'qcard-title-' + (++serial);
     card.setAttribute('aria-labelledby', title.id);
     const status = make('div', 'qstatus');
     status.setAttribute('aria-live', 'polite');
     const controls = make('div', 'qcontrols');
-    card.append(meta, title, make('p', 'muted', question.text), status, controls);
+    if (plain) card.append(title, ...(question.text ? [make('p', 'muted', question.text)] : []), status, controls);
+    else card.append(meta, title, make('p', 'muted', question.text), status, controls);
     el.replaceChildren(card);
     let phase, undoButton, draft = '';
     function choices() {
       const options = make('div', 'qoptions');
       [...(question.options || [])].sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested)).forEach(option => {
-        const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
+        const node = button('', 'btn qoption' + (option.suggested ? (plain ? ' primary' : ' suggested') : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
         node.append(make('span', '', option.text));
         const row = make('span', 'qopt');
         row.append(node);

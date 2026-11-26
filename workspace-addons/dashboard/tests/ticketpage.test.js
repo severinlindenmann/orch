@@ -207,7 +207,7 @@ test('the review buttons show whenever the status is Review, an open question fi
   const reviewText = JSON.stringify(review);
   assert.match(reviewText, /Result/);
   assert.match(reviewText, /next-steps\.html/);
-  assert.doesNotMatch(reviewText, /Looks good/, 'the verdict buttons live in the header strip');
+  assert.match(reviewText, /Looks good/, 'ORCH-2140 W4: the verdict buttons sit under the result, in the one Result card');
   assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
   // ORCH-1874: the step's copy is the result, but the file in the project was rewritten since: say so, with the current file
   vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[]}})", ctx);
@@ -267,17 +267,15 @@ test('task outcomes and result cards use plain text without sizes', () => {
   assert.doesNotMatch(text, /109|Helper says|Completed/);
 });
 
-test('next question stays above every tab and Answer scrolls and focuses it', () => {
+test('next question stays above every tab and is shown once, with no second Answer in the header (ORCH-2140 W3)', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
-  let scrolled = false, focused = false;
   const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
-    statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
-    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
+    statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[]};
   vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
@@ -290,9 +288,8 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length,0, 'no Steps card without steps');
     assert.ok(!all.some(n => n.children.includes('No parent ticket')));
     assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Tasks tab');
-    all.find(n => n.tag === 'button' && n.children.includes('Answer')).onclick();
+    assert.ok(!all.some(n => n.tag === 'button' && n.children.includes('Answer')), 'answered in its card only');
   }
-  assert.ok(scrolled && focused);
 });
 
 test('result preview tiles keep HTML static and bound text excerpts', async () => {
@@ -714,24 +711,6 @@ test('the ticket keeps saying that the plan was asked for first (ORCH-248)', () 
   assert.equal(c.ticketPlanFirstLine({id:'t_1', status:'done', plan_first:true}, false), null);
   assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[]}, false)), /asked to see the plan first.*waits for your OK/);
   assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[{text:'Plan ready: steps', answer:'Yes'}]}, false)), /You have approved it/);
-});
-test('Answer in the header opens the answer window like the ticket list; without one it brings the card into view (ORCH-234)', () => {
-  const opened = [], trigger = {};
-  const needs = [{ticket:'t_other', kind:'question'}, {ticket:'t_one', kind:'stopped'}, {ticket:'t_one', kind:'question'}];
-  const DashHelpers = {...helpers, needAction:n => ({kind:n.kind === 'question' ? 'answer' : 'run'})};
-  const c = context({needsList:() => needs, openNeed:(row, t) => opened.push([row, t]), main:{querySelector:() => null}});
-  c.window.DashHelpers = DashHelpers;
-  assert.equal(c.focusTicketAnswer('t_one', trigger), 'window');
-  assert.equal(opened.length, 1);
-  assert.equal(opened[0][0], needs[2], 'the question of this ticket, never a stopped-helper row (that would restart it)');
-  assert.equal(opened[0][1], trigger);
-  const focused = [], log = [];
-  const card = {scrollIntoView:o => log.push('scroll ' + o.block), querySelector:() => ({focus:o => focused.push(o)})};
-  const lone = context({needsList:() => [], openNeed:() => assert.fail('no window without a need'), main:{querySelector:sel => sel === '.next-question' ? card : null}});
-  assert.equal(lone.focusTicketAnswer('t_one', trigger), 'card');
-  assert.deepEqual(log, ['scroll center']);
-  assert.equal(focused.length, 1);
-  assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });
 test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
   const start = source.indexOf('const PREPARE_STATES'), end = source.indexOf('\nconst taskTitle', start);

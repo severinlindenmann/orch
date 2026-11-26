@@ -159,6 +159,7 @@ class _Pipe:
         self.buf = b""
         self.next_id = 0
         self.events: list[dict] = []
+        self.children: dict[str, list[str]] = {}  # session -> its frames in another process (auto-attached)
         # select() works only on sockets on Windows: there one thread reads the pipe into a queue.
         self.chunks: queue.Queue[bytes] | None = None
         if os.name == "nt":
@@ -196,7 +197,15 @@ class _Pipe:
                 raise EOFError
             self.buf += chunk
         msg, self.buf = self.buf.split(b"\0", 1)
-        return json.loads(msg)
+        m = json.loads(msg)
+        params = m.get("params") or {}
+        if m.get("method") == "Target.attachedToTarget" and m.get("sessionId"):
+            self.children.setdefault(m["sessionId"], []).append(params.get("sessionId"))
+        elif m.get("method") == "Target.detachedFromTarget" and m.get("sessionId"):
+            kids = self.children.get(m["sessionId"], [])
+            if params.get("sessionId") in kids:
+                kids.remove(params.get("sessionId"))
+        return m
 
     def call(self, method: str, params: dict | None = None, session: str | None = None, timeout: float = 30):
         self.next_id += 1
@@ -273,26 +282,45 @@ def page_url(url: str, part: str) -> str:
 
 
 STILL_LOADING = "the page was still loading"
-# Busy anywhere: the page or any same-origin iframe in it, at any depth (add-on pages run in an iframe and set
-# aria-busy there, ORCH-2021). Hidden panels do not affect the picture; their checks may only start
-# when opened. A cross-origin frame cannot be read and counts as not busy.
-BUSY_JS = """(function busy(d) {
-  for (const el of d.querySelectorAll('[aria-busy="true"]')) {
-    if (!el.closest('[hidden]')) return true;
-  }
-  for (const f of d.querySelectorAll('iframe, frame')) {
-    if (f.closest('[hidden]')) continue;
-    let inner = null;
-    try { inner = f.contentDocument; } catch (e) {}
-    if (inner && busy(inner)) return true;
-  }
-  return false;
-})(document)"""
+# Busy in one frame (asked per frame by _busy below). Hidden panels do not affect the picture:
+# their checks may only start when opened (ORCH-2038).
+BUSY_JS = "[...document.querySelectorAll('[aria-busy=\"true\"]')].some(e => !e.closest('[hidden]'))"
+
+
+def _frames(tree: dict) -> list[str]:
+    ids = [((tree.get("frame") or {}).get("id"))]
+    for child in tree.get("childFrames") or []:
+        ids += _frames(child)
+    return [i for i in ids if i]
 
 
 def _busy(pipe, session: str) -> bool:
-    r = pipe.call("Runtime.evaluate", {"expression": BUSY_JS, "returnByValue": True}, session=session)
-    return bool((r.get("result") or {}).get("value"))
+    """Busy anywhere: the page or any iframe in it, at any depth (add-on pages run in an iframe and set
+    aria-busy there, ORCH-2021). Each frame is asked through the protocol, never through contentDocument:
+    add-on iframes are sandboxed without allow-same-origin and cannot be read from the page (ORCH-2115).
+    Frames in another process are their own attached sessions and are asked the same way."""
+    sessions = [session]
+    for s in sessions:
+        sessions += pipe.children.get(s, [])
+        try:
+            frames = _frames(pipe.call("Page.getFrameTree", session=s).get("frameTree") or {})
+        except RuntimeError:
+            continue  # the frame went away meanwhile
+        for frame in frames:
+            try:
+                ctx = pipe.call(
+                    "Page.createIsolatedWorld", {"frameId": frame, "worldName": "orch-shot"}, session=s
+                )
+                r = pipe.call(
+                    "Runtime.evaluate",
+                    {"expression": BUSY_JS, "contextId": ctx["executionContextId"], "returnByValue": True},
+                    session=s,
+                )
+            except (RuntimeError, KeyError):
+                continue
+            if (r.get("result") or {}).get("value"):
+                return True
+    return False
 
 
 def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
@@ -309,6 +337,11 @@ def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
             session=s,
         )
         pipe.call("Network.enable", session=s)
+        pipe.call(
+            "Target.setAutoAttach",
+            {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
+            session=s,
+        )
         pipe.call("Page.navigate", {"url": url}, session=s)
         # Wait for the load, then until the page has fetched nothing new for a moment (it renders
         # after its own requests), never longer than --wait in all.

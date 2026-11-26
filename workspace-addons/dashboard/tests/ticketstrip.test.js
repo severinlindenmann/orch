@@ -29,8 +29,8 @@ const base = {id:'t_one', title:'Update the opening hours', owner:'human:Anna', 
 const STATES = [
   ['todo', {status:'open'}, {}, /Not started/],
   ['working', {status:'active', sessions:[{id:'s'}]}, {runs:{t_one:{running:true}}}, /Working/],
-  ['needs', {status:'waiting', questions:[{id:'q1', text:'Which opening time on Saturday?'}]}, {}, /Helper asks: Which opening time on Saturday\?/],
-  ['check', {status:'review'}, {}, /Helper finished/],
+  ['needs', {status:'waiting', questions:[{id:'q1', text:'Which opening time on Saturday?'}]}, {}, /^(?!.*Which opening time).*Waiting for your answer/],
+  ['check', {status:'review'}, {}, /The helper is finished\. Your turn: look at the result\./],
   ['done', {status:'done', done_at:'2026-11-14T11:05:00Z', history:[{at:'2026-11-14T11:05:00Z', by:'human:Severin', text:'Status review -> done'}], checklist:[{id:'c1', text:'Read the page', done:true}, {id:'c2', text:'Changed 3 lines', done:true}, {id:'c3', text:'Skipped bit', wont_do:true}]}, {}, /Done .*checked by Severin/],
 ];
 for (const [pill, patch, run, sentence] of STATES) {
@@ -53,23 +53,32 @@ for (const [pill, patch, run, sentence] of STATES) {
     assert.ok(nodes(strip).filter(n => n.tag === 'button' && /(^| )primary( |$)/.test(n.attrs.className || '')).length <= 1, 'one main action');
   });
 }
-test('Check: Looks good + Send back in the strip, no "Ask for changes" anywhere; Result card has the preview', () => {
+test('ORCH-2140 W4: one Result card, result first, Looks good + Send back under it; none in the strip, no Start', () => {
   const c = ctx();
-  const tree = c.detail({...base, status:'review', summary:'Hours now read 08:00-18:00.'});
+  const tree = c.detail({...base, status:'review', summary:'Hours now read 08:00-18:00.', checklist:[{id:'c1', text:'Read the page', done:true}]});
   const strip = nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
   const labels = nodes(strip).filter(n => n.tag === 'button').map(text);
-  assert.ok(labels.includes('Looks good') && labels.includes('Send back'));
+  assert.ok(!labels.includes('Looks good') && !labels.includes('Send back'), 'the verdict is not repeated in the header');
+  assert.ok(!nodes(strip).some(n => n.attrs?.['data-key'] === 'ticket-start'), 'Send back is the way on, not a second start');
   assert.doesNotMatch(JSON.stringify(tree), /Ask for changes|Your review/);
-  const result = nodes(tree).find(n => /review-card/.test(n.attrs.className || ''));
+  const cards = nodes(tree).filter(n => /review-card/.test(n.attrs.className || ''));
+  assert.equal(cards.length, 1);
+  const result = cards[0], inside = nodes(result);
   assert.match(text(result), /Result/);
   assert.match(text(result), /In short/);
-  assert.equal(nodes(result).filter(n => n.tag === 'button' && /Looks good|Send back/.test(text(n))).length, 0, 'verdict buttons live in the strip only');
+  assert.match(text(result), /What was done.*1 of 1 task/);
+  const order = key => inside.findIndex(n => key(n));
+  const short = order(n => typeof n.children?.[0] === 'string' && /In short/.test(n.children.join(''))), did = order(n => n.attrs?.['data-key'] === 'review-what-done');
+  const buttons = inside.filter(n => n.tag === 'button' && /^(Looks good|Send back)$/.test(text(n)));
+  assert.deepEqual(buttons.map(text), ['Looks good', 'Send back']);
+  assert.ok(short >= 0 && short < did && did < inside.indexOf(buttons[0]), 'result first, buttons last');
+  assert.ok(!nodes(tree).some(n => /helper-did/.test(n.attrs?.className || '')), 'no second "What the helper did" card');
 });
 test('Start, Answer, Stop and Reopen are the main actions of their states', () => {
   const c = ctx({state:{runs:{t_one:{running:true}}}});
   const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
   assert.ok(label({status:'open'}).includes('Start helper'));
-  assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Answer'));
+  assert.ok(!label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Answer'), 'ORCH-2140 W3: answered in its card only');
   assert.ok(label({status:'done'}).includes('Reopen'));
   assert.ok(c.detail);
 });
@@ -142,12 +151,14 @@ test('ORCH-415: the cost line is read with the start choice for screen readers',
   assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
 });
 
-test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
+test('ORCH-2140 W3: Needs you shows the question once (in its card); the strip says since when it waits', () => {
   const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
-  const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});
+  const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?', asked_at:'2026-11-14T10:00:00Z'}], checklist:[{id:'c1', text:'Draw the card'}]});
   const strip = nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
-  assert.match(text(strip), /Manager asks: Build the new card look\?/);
-  assert.doesNotMatch(text(strip), /Helper asks/);
+  assert.match(text(strip), /Waiting for your answer/);
+  assert.doesNotMatch(text(strip), /Build the new card look|asks:/);
+  const after = nodes(tree).find(n => n.attrs?.['data-key'] === 'after-answer-t_one');
+  assert.match(text(after), /One click answers, and you can undo it\. A helper picks your answer up on its next run and goes on with “Draw the card”\./);
 });
 // ORCH-235 (bug hunt 17 Nov): one word per state, a move by a person never says a helper ran, an epic offers Done.
 const stripOf = (c, t) => nodes(c.detail({...base, ...t})).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
@@ -163,20 +174,20 @@ test('a wait for a date reads Waiting with its date and reason, never Needs you'
   const asks = stripOf(c, {status:'waiting', waiting_on:{kind:'question', ref:'q1'}, questions:[{id:'q1', text:'Which day?'}]});
   assert.match(text(asks), /Needs you/);
 });
-test('a ticket a person moved to Check says who moved it, not that a helper finished', () => {
+test('a ticket a person moved to Review says who moved it, not that a helper finished', () => {
   const c = ctx();
   const byHand = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'human:Anna', text:'Patched status (status ready -> review)'}]});
-  assert.match(text(byHand), /Moved to Check by Anna/);
-  assert.doesNotMatch(text(byHand), /Helper finished/);
+  assert.match(text(byHand), /Moved to Review by Anna/);
+  assert.doesNotMatch(text(byHand), /helper is finished/);
   const byHelper = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'agent:claude', text:'Status active -> review'}]});
-  assert.match(text(byHelper), /Helper finished/);
+  assert.match(text(byHelper), /The helper is finished/);
 });
 test('a ticket the Reviewer left for the person says the same plain reason as Home (ORCH-1835)', () => {
   const row = {id:'core:unsure:t_one', kind:'reviewer:unsure', ticket:'t_one', since:'2026-11-24T03:46:10Z',
     short:'Release pull request #2746 waits for your merge into main.', text:'The Reviewer was not sure and left it for you: x.'};
   const c = ctx({needsList:() => [row, {kind:'reviewer:unsure', ticket:'t_other', short:'Not this one.'}]});
   const said = text(stripOf(c, {status:'review'}));
-  assert.match(said, /Helper finished .*\. Release pull request #2746 waits for your merge into main\./);
+  assert.match(said, /The helper is finished\. Your turn: look at the result\. Release pull request #2746 waits for your merge into main\./);
   assert.doesNotMatch(said, /Not this one|not sure/);
   assert.doesNotMatch(text(stripOf(ctx({needsList:() => []}), {status:'review'})), /Release/);
 });
@@ -211,11 +222,12 @@ test('waitWords: a date with a reason, another ticket, the outside, nothing', ()
   assert.equal(w({kind:'external', ref:'the supplier'}), 'Waits: the supplier');
   assert.equal(w(null), '');
 });
-test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) is on the ticket page in every state while no helper runs', () => {
+test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) is on the ticket page in every state but Review while no helper runs', () => {
   const label = (patch, st) => { const cc = st ? ctx({state:st}) : ctx(); const strip = nodes(cc.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || '')); return nodes(strip).filter(n => n.tag === 'button').map(text); };
   // ORCH-483 (owner): with no earlier session there is nothing to continue, so the one Start button says Start helper
   assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Start helper'), 'Needs you');
-  assert.ok(label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Check');
+  // ORCH-2140 W4 (owner accepted draft A): in Review the way on is Send back under the Result card, not a start
+  assert.ok(!label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Review');
   assert.ok(label({status:'done', sessions:[{id:'s'}]}).includes('Continue'), 'Done');
   assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z'}}).includes('Continue'), 'Waiting on a time (ORCH-435)');
   assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:null}).includes('Continue'), 'Waiting on nothing (ORCH-435)');
@@ -290,6 +302,13 @@ const handoverCtx = st => { const c = ctx({...results, state:{settings:{agents:[
 const keyed = (all, k) => all.find(n => n.attrs?.['data-key'] === k);
 const order = (all, ...keys) => keys.map(k => all.findIndex(n => n.attrs?.['data-key'] === k));
 
+test('helper bar without a run appears on active tickets, never Review or Done', () => {
+  for (const status of ['active', 'review', 'done']) {
+    const all = nodes(handoverCtx({}).detail({...lunch, status}));
+    assert.equal(Boolean(keyed(all, 'agent-bar')), status === 'active', status);
+  }
+});
+
 test('ORCH-1850: active task and no run: the bar names the last marked step and who marked it, never a helper that is not running', () => {
   const all = nodes(handoverCtx({}).detail(lunch));
   assert.equal(text(keyed(all, 'ticket-sentence')), 'No helper is working on it right now.');
@@ -344,6 +363,7 @@ test('ORCH-1850: Done with a real result keeps Results on top and no handover ba
   assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
   assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
 });
+<<<<<<< HEAD
 
 test('Results: a completion note counts as a result, so no "Nothing yet" under it', () => {
   const seen = [];
@@ -360,4 +380,19 @@ test('Needs you: the strip names the agent stored on the question (ORCH-2023)', 
   const c = ctx({state:{settings:{agents:[{name:'claude', label:'Claude', chosen:true}]}, runs:{}}});
   const strip = stripOf(c, {status:'waiting', questions:[{id:'q1', text:'Which day?', asked_by:'agent:copilot'}]});
   assert.match(text(strip), /Copilot asks: Which day\?/);
+=======
+test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to start instead of a Start that cannot work', () => {
+  const StartChoiceState = require('../../../workspace/src/orch_ui/static/start-choice-state.js');
+  const page = agents => { const c = ctx({state:{runs:{}, settings:{agents}}}); c.window.StartChoiceState = StartChoiceState; c.window.UI.commandCopy = (cmd, o) => h('div', {className:'cmd-copy', 'data-key':o.dataKey}, cmd); return nodes(c.detail({...base, status:'open', key:'ORCH-7'})); };
+  const none = page([]);
+  const card = none.find(n => /two-ways/.test(n.attrs?.className || ''));
+  assert.ok(card, 'the two ways card');
+  assert.match(text(card), /Nobody works on this ticket yet\. Two ways to start:/);
+  assert.equal(none.find(n => n.attrs?.['data-key'] === 'two-ways-setup').attrs.href, '#settings/helper');
+  assert.equal(text(none.find(n => n.attrs?.['data-key'] === 'two-ways-line')), 'Work on orch ticket ORCH-7');
+  assert.ok(!none.some(n => n.attrs?.['data-key'] === 'ticket-start'), 'no Start that cannot work');
+  const tool = page([{name:'claude', label:'Claude', chosen:true}]);
+  assert.ok(!tool.some(n => /two-ways/.test(n.attrs?.className || '')));
+  assert.ok(tool.some(n => n.attrs?.['data-key'] === 'ticket-start'));
+>>>>>>> origin/develop
 });

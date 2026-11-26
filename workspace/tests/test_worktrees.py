@@ -860,13 +860,16 @@ def test_the_copies_folder_never_carries_the_homes_name(tmp_path):
         assert not addons.names_clash(h, b) and b.parent == h.resolve().parent, (name, b)
 
 
-def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
+def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo, monkeypatch):
     """An import outside the folder the tool runs in makes Claude Code ask "Allow external CLAUDE.md file
     imports?": an unattended helper in a copy hung there. The copy gets the workspace's AGENTS.orch.md as
     a file of its own (refreshed at each start), imported relatively, kept out of git."""
     import re
 
-    from orch import harness
+    from orch import harness, skills
+
+    # Claude's local file is excluded only when Claude is detected; CI has no agent binaries.
+    monkeypatch.setattr(skills, "detected_agents", lambda root: ["claude"])
 
     blocks = repo / ".orch" / "harness" / "blocks"
     blocks.mkdir(parents=True, exist_ok=True)
@@ -875,6 +878,7 @@ def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
     a, _ = repo.tids
     config.set_copies_mode(repo, "always")
     f, _ = _route(repo, a)
+    assert git(f, "check-ignore", "CLAUDE.local.md") == "CLAUDE.local.md"
     assert harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
     text = (f / "CLAUDE.local.md").read_text()
     imports = re.findall(r"^@(\S+)", text, re.M)
@@ -882,9 +886,10 @@ def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
     for i in imports:
         assert (f / i).resolve().is_relative_to(f.resolve()), i
     assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v1\n"
-    assert ".orch-harness" not in git(f, "status", "--porcelain", "-uall")  # kept out by the shared exclude
+    assert git(f, "status", "--porcelain", "-uall") == ""  # both files use the shared exclude
     (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v2\n")
     f2, _ = _route(repo, a)  # the next start refreshes it
     assert f2 == f
-    harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
+    assert harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
     assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v2\n"
+    assert git(f, "status", "--porcelain", "-uall") == ""

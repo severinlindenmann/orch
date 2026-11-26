@@ -246,6 +246,16 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
   phone), the sentence and facts below. A Done ticket whose only result is its completion note shows "Results · 1 note"
   without the "Nothing yet" line, as `ticket-done.html` draws it. No mockup change was needed.
 
+## ORCH-2140: what the owner accepted from the workflow drafts (25 Nov)
+
+- ticket-start.html?start=notool (W2): a saved ticket with no helper tool set up shows "Two ways to start" (Set up a
+  helper, or paste "Work on orch ticket ORCH-12" into the AI tool you already use) instead of a Start that cannot work.
+- ticket-question.html (W3): the header says only "Waiting for your answer since 12:26."; the question shows once, in
+  its card, with what happens after the answer under it. No second Answer button in the header.
+- ticket-review.html (W4): one Result card. The result first, then "What was done" with its evidence, then Looks good
+  and Send back under it. No verdict buttons in the header and no Continue in Review.
+- Every ticket page (W5): the step is called Review (pill, stepper, history) and the switch reads "I review the result".
+
 ## ORCH-2051: Replaced by, type a key to jump (25 Nov)
 
 - `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
