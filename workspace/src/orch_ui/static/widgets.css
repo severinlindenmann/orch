@@ -1711,9 +1711,18 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-end-opt{align-items:flex-start;min-height:var(--touch)}
 .live-end-opt .ic-wrap{margin-top:2px}
 .live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
-.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
-.live-end-idle p{margin:0}
+.live-end-idle{display:flex;flex:none;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
 .live-end-idle[hidden]{display:none}
+.live-stuck-t{min-width:0}
+/* ORCH-2201: a ticket that waits for the person says why before Start: the question with its answer field, or the review (Start choice, inline) */
+.live-why{display:grid;gap:var(--s2);padding:var(--s3);border:1px solid var(--warning);border-radius:var(--radius-card);background:var(--warning-soft)}
+.live-why-h{margin:0;color:var(--warning);font-size:var(--fs-meta);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.live-why-q{margin:0}
+.live-why-opts,.live-why-act{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.live-why-line{display:flex;gap:var(--s2);align-items:center}
+.live-why-line .input{flex:1;min-width:0}
+.live-why-line>.live-why-q{flex:1}
+.live-why-link{color:var(--brand)}
 .live-ended{display:grid;gap:var(--s3)}
 .live-ended h3,.live-ended>p{margin:0}
 .wall-foot,.wall-line{position:relative}

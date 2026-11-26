@@ -330,9 +330,9 @@ test('ORCH-817: an ended helper without a ticket keeps its pane with Start again
   assert.match(source, /liveHistBody\(sess\)/);
 });
 
-test('ORCH-817: an idle helper pane gets the idle note instead of one status line', () => {
+test('ORCH-817: a quiet helper pane has no notice and no status line; a stuck one gets the slim line (ORCH-2201)', () => {
   assert.match(source, /sess\.kind === 'terminal' \? null : h\('div', \{className:'live-end-idle', 'data-live-idle':''/);
-  assert.match(source, /window\.liveEndIdleFill\(idle, body\.dataset\.liveBody, text\)/);
+  assert.match(source, /window\.liveEndIdleFill\(idle, body\.dataset\.liveBody\)/);
 });
 
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
