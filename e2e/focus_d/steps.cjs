@@ -580,10 +580,7 @@ async function widgetsInPane(page, dash) {
   await page.evaluate(id => window.LiveLayer.open(id), WIDGET_ID);
   const pane = `#live-dock .live-pane[data-session="${WIDGET_ID}"]`;
   await page.waitForSelector(`${pane} [data-key="live-pane-more"]`, { timeout: 15000 });
-  if (!(await page.$('#live-dock[data-mode="full"]'))) {
-    await page.click(`${pane} [data-key="live-pane-more"]`);
-    await page.click('[data-key="live-more-full"]');
-  }
+  if (!(await page.$('#live-dock[data-mode="full"]'))) await fullScreen(page, pane);
   await page.waitForFunction(p => document.querySelectorAll(p + ' .live-shelf .result[data-type]').length >= 6, pane, { timeout: 15000 })
     .catch(async () => { throw new Error('the pane shows no results: ' + await page.textContent(pane)); });
 }
@@ -642,8 +639,7 @@ async function shelfView(page, dash, width) {
   await mode('right');
   if (await where() !== 'above') throw new Error('on the right the shelf is not a strip above the chat');
   await extraShot(page, 'fd-34-shelf-right', width);
-  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
-  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${inPane} .live-shelf .result`, { timeout: 5000 });
   if (await where() !== 'beside') throw new Error('in full screen the shelf is not a column beside the chat');
   const wf = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
@@ -667,6 +663,14 @@ async function openSplit(page, btn) {
   if (await page.isVisible(btn)) { await page.click(btn); return; }
   await page.click(btn.replace(/\[data-key="live-split-(right|down)"\]$/, '[data-key="live-pane-more"]'));
   await page.click(btn.replace(/^.*\[data-key="live-split-(right|down)"\]$/, '[data-key="live-more-menu"] [data-key="live-more-split-$1"]'));
+}
+// Full screen of a pane (ORCH-2199, owner pick G a): the header's Full screen; a phone pane has none, so there it is
+// "Where Focus sits", Full screen, in More (More has no Full screen item of its own any more).
+async function fullScreen(page, pane) {
+  const btn = `${pane} [data-key="live-full"]`;
+  if (await page.isVisible(btn)) { await page.click(btn); return; }
+  await page.click(`${pane} [data-key="live-pane-more"]`);
+  await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="full"]');
 }
 async function splitBeside(page, btn) {
   await openSplit(page, btn);
@@ -1288,11 +1292,7 @@ async function layer(page, dash, width) {
   const docked = phone ? 'bottom' : 'right';
   // full screen; Esc goes back one step at a time: full screen, the panel, the bar
   // a compact pane (on the right, on a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$('#live-dock .live-pane [data-key="live-full"]')) await page.click('[data-key="live-full"]');
-  else {
-    await page.click('#live-dock .live-pane [data-key="live-pane-more"]');
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
-  }
+  await fullScreen(page, '#live-dock .live-pane');
   await page.waitForSelector(panel('full'), { timeout: 5000 });
   // the page behind full screen takes no keyboard (ORCH-340)
   if (!(await page.evaluate(() => document.getElementById('content').inert))) throw new Error('the page behind full screen still takes Tab');
@@ -2010,8 +2010,8 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(pane, { timeout: 5000 });
   if (!await page.$eval(`${pane} .key`, el => el.textContent.trim() === 'ORCH-189')) throw new Error('the pane does not show the ticket key');
   // from full screen too: Open ticket steps out of it so the ticket page shows
-  // Full screen is a button in every pane header (ORCH-2199)
-  await page.click(`${pane} [data-key="live-full"]`);
+  // Full screen is a button in every pane header (ORCH-2199); a phone pane has it under More, Where Focus sits
+  await fullScreen(page, pane);
   await page.waitForSelector('#live-dock[data-mode="full"]', { timeout: 5000 });
   await page.evaluate(() => { location.hash = '#home'; });
   await mainHasText(page);
@@ -2276,8 +2276,7 @@ async function zoom(page, dash, width) {
   const docked = await page.$eval('#live-dock', el => el.dataset.mode);
   if (phone && docked !== 'bottom') throw new Error('a phone opened the session on the right');
   // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
-  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   if (!(await page.isVisible('#live-dock[data-mode="full"] #live-bar'))) throw new Error('full screen keeps no strip of the other sessions');
   await page.keyboard.press('Escape');
@@ -2290,8 +2289,7 @@ async function zoom(page, dash, width) {
   await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
   await page.waitForSelector('#live-dock ' + pane, { timeout: 5000 });
   // a compact pane (narrower than 1200 px, a phone) keeps Full screen in More (ORCH-463)
-  if (await page.$(`${pane} [data-key="live-full"]`)) await page.click(`${pane} [data-key="live-full"]`);
-  else { await page.click(`${pane} [data-key="live-pane-more"]`); await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]'); }
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] ${pane}`, { timeout: 5000 });
   await page.waitForTimeout(300);
   await noSideways(page);
@@ -2422,8 +2420,7 @@ async function foldView(page, dash, width) {
     await noSideways(page);
     return;
   }
-  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
-  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await fullScreen(page, pane);
   await page.waitForSelector(`#live-dock[data-mode="full"] .live-pane[data-session="${gid('ORCH-302')}"] .live-shelf`, { timeout: 5000 });
   await page.waitForTimeout(600);  // the pane grows into full screen first (motion); a click during it hits the leaving picture
   await page.click(`${pane} [data-key="live-view-term"]`);
@@ -2661,9 +2658,7 @@ async function motionTour(page, dash, width, reduce) {
   const inPane = (id, what) => `#live-dock ${pane(id)} [data-key="${what}"]`;
   const count = n => page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
   const full = async id => {
-    if (await page.$(inPane(id, 'live-full'))) return page.click(inPane(id, 'live-full'));
-    await page.click(inPane(id, 'live-pane-more'));
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+    await fullScreen(page, `#live-dock ${pane(id)}`);
   };
   // 1. the big overlay (style guide): opens and closes
   await page.goto(dash + '/styleguide/#result-widgets');
@@ -2720,9 +2715,8 @@ async function motionTour(page, dash, width, reduce) {
     }, 'live-pane');
     await step('add a third pane', async () => {
       await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
-      // as many as get 480 px each show side by side (ORCH-1616): 2 at 1280, 3 at 1920; the new one always
-      // on the right (where it opens under 1600 px, ORCH-1643) two stack, the most there
-      await count(await page.evaluate(() => document.getElementById('live-dock').dataset.mode === 'right' ? 2 : Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
+      // up to four panes show at once, whatever the room (ORCH-2200), at the bottom and on the right alike
+      await count(3);
       await page.waitForSelector('#live-dock ' + pane('t_bar240'), { timeout: quick });
     }, 'live-pane');
     await step('close a pane', async () => {

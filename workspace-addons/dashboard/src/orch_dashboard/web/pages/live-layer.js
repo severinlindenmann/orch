@@ -1079,13 +1079,15 @@ function liveLayerPaint() {
 // reduced motion keeps all of it still. The panel's own entry (up from the bottom, in from the right, full screen) is
 // CSS (widgets.css .live-panel); here: a pane grows out of the wall tile it was opened from, panes that stay slide and
 // resize to their new place when one is added or closed, and the panel leaves for --dur-exit when it closes to the bar.
+// ORCH-2200: from two panes on they sit in the split tree's boxes (.live-split), not straight under the panel
+const LIVE_PANES_SEL = ':scope > .live-panel .live-pane';
 function liveLayerMotionBefore(host, where) {
   const m = window.orch;
   if (!m?.flip || Date.now() - liveLayerActed > 1000) { liveLayerFrom = null; return null; }
   const panel = host.querySelector(':scope > .live-panel');
   const from = liveLayerFrom && Date.now() - liveLayerFrom.at < 1000 ? liveLayerFrom : null;
   liveLayerFrom = null;
-  return {panel, rect:panel?.getBoundingClientRect() || null, panes:m.rects(host, ':scope > .live-panel > .live-pane', 'data-session'), from, where:liveLayerWas};
+  return {panel, rect:panel?.getBoundingClientRect() || null, panes:m.rects(host, LIVE_PANES_SEL, 'data-session'), from, where:liveLayerWas};
 }
 function liveLayerMove(host, where, was) {
   const m = window.orch;
@@ -1101,7 +1103,7 @@ function liveLayerMove(host, where, was) {
     }
     return;
   }
-  const panes = [...host.querySelectorAll(':scope > .live-panel > .live-pane')];
+  const panes = [...host.querySelectorAll(LIVE_PANES_SEL)];
   const grown = was.from && panes.find(p => p.dataset.session === was.from.id && !was.panes.has(p.dataset.session));
   if (grown) {
     // zoom: the pane grows out of its tile; the panel does not slide in at the same time (one move at a time)
