@@ -375,9 +375,14 @@ def _root_of(p: Path) -> Path:
     return p.parent.parent.parent  # <root>/.orch/tickets/<file>
 
 
+# A writer names itself (pid + start time) right after it makes its lock, so a nameless lock this old was
+# left by a writer killed in between. A named lock is stale only when its holder is verifiably gone.
+_NAMELESS_STALE = 3.0
+
+
 def _break_stale(lock: Path) -> bool:
     """Claim a stale lock by renaming it to a name only we know (atomic: just one waiter wins), then check
-    that what we took is really old. If it was a fresh lock a faster waiter had just made, put it back."""
+    that what we took is really stale. If it was a fresh lock a faster waiter had just made, put it back."""
     mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
     try:
         os.replace(lock, mine)
@@ -388,8 +393,10 @@ def _break_stale(lock: Path) -> bool:
             holder = mine.read_text(encoding="utf-8")
         except OSError:
             holder = ""
-        # old enough, and its holder (if it named itself) is gone: a live or unverifiable holder keeps it
-        if time.time() - mine.stat().st_mtime > 30 and (not holder.strip() or procs.owner_dead(holder)):
+        named = bool(holder.strip())
+        if named and procs.owner_dead(holder):  # a live or unverifiable holder keeps it
+            return True
+        if not named and time.time() - mine.stat().st_mtime > _NAMELESS_STALE:
             return True
         with contextlib.suppress(OSError):
             os.link(mine, lock)  # no-clobber put-back
@@ -418,7 +425,9 @@ def sync_apply(root: Path, tid: str):
 
 @contextlib.contextmanager
 def _locked(root: Path, tid: str, wait: float = 5.0):
-    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
+    """One writer at a time per ticket: an exclusive lock file next to it that names its holder. A writer
+    killed mid-write leaves it behind; the next writer takes it over at once (holder gone) and removes the
+    dead writer's temp file, so a killed write never blocks the ticket or leaves half a file.
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
     the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
     for every file it writes) never has a writer inside a file it replaces. Never waits for the gate while
@@ -430,11 +439,19 @@ def _locked(root: Path, tid: str, wait: float = 5.0):
     if gated:
         syncgate.wait_clear(root, what)
     end = time.monotonic() + wait
+    token = procs.own_token().encode()  # made before the lock exists, so the lock is nameless for no time
+    looked: dict[str, float] = {}  # holder -> when it was last found alive (asked again every 0.5 s)
+    broke = False
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(procs.own_token())
+            try:
+                os.write(fd, token)
+            except OSError:
+                os.close(fd)
+                procs.unlink(lock)
+                raise
+            os.close(fd)
             break
         except (
             FileExistsError,
@@ -443,16 +460,30 @@ def _locked(root: Path, tid: str, wait: float = 5.0):
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             try:
-                stale = time.time() - lock.stat().st_mtime > 30
+                age = time.time() - lock.stat().st_mtime
+                holder = lock.read_text(encoding="utf-8").strip()
             except OSError:
                 time.sleep(0.02)
                 continue
+            if not holder:
+                stale = age > _NAMELESS_STALE
+            elif time.monotonic() - looked.get(holder, -1.0) < 0.5:
+                stale = False
+            else:
+                stale = procs.owner_dead(holder)  # a writer killed mid-write: its ticket is free at once
+                looked[holder] = time.monotonic()
             if stale and _break_stale(lock):
+                broke = True
                 continue
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             time.sleep(0.02)
     try:
+        if broke and gated:
+            # we hold the lock now: a temp file of this ticket is the dead writer's, never a live one's
+            for tmp in tickets_dir(root).glob(f".tmp-{tid}-*.json"):
+                with contextlib.suppress(OSError):
+                    procs.unlink(tmp)
         if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
             raise syncgate.busy(what)
         yield
@@ -500,16 +531,19 @@ def _get(ticket: dict, path: str):
 
 
 def _write(root: Path, ticket: dict) -> None:
-    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    """Lock-free atomic write (tmp + fsync + os.replace). Callers hold the lock. The temp file names the
+    ticket, so the next writer cleans up after a writer that was killed before the replace."""
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".tmp-{ticket['id']}-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(ticket, f, indent=2, ensure_ascii=False)
             f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())  # a crash right after the replace never leaves an empty ticket file
         procs.replace(tmp, p)
     except BaseException:
         if os.path.exists(tmp):
