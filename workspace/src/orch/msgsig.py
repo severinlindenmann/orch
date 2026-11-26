@@ -481,6 +481,11 @@ def read_envelope(env: Any) -> Envelope:
     kid = env.get("key_id")
     if not isinstance(kid, str) or not _RE_KEY_ID.fullmatch(kid):
         raise SigError("bad_envelope", "key_id")
+    # bounded before decoding: never decode more than the largest signed message could take
+    if isinstance(env.get("signed"), str) and len(env["signed"]) > -(-MAX_SIGNED_BYTES * 4 // 3):
+        raise SigError("bad_envelope", "size of the message bytes")
+    if isinstance(env.get("sig"), str) and len(env["sig"]) != 86:
+        raise SigError("bad_envelope", "sig size")
     try:
         signed = b64url_decode_strict(env.get("signed"))
         sig = b64url_decode_strict(env["sig"])

@@ -151,6 +151,14 @@ fn wycheproof() {
                 "tc {}",
                 t["tcId"]
             );
+            // first registration and phone pairing use the same rule (outside review, ORCH-1206)
+            if let Ok(raw) = <[u8; 32]>::try_from(h(&t["pk"]).as_slice()) {
+                assert!(
+                    orch_relay::signkeys::parse_public(&URL_SAFE_NO_PAD.encode(raw)).is_err(),
+                    "tc {} registers",
+                    t["tcId"]
+                );
+            }
         }
     }
     assert!(wrong.is_empty(), "{wrong:?}");
