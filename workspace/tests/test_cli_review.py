@@ -159,6 +159,61 @@ def test_text_card_reads_the_tickets_own_artifact(tk, run):
         assert code == 2 and json.loads(out)["code"] == "refused", name
 
 
+def test_card_reads_the_path_artifacts_dir_prints(tk, run):
+    """ORCH-1777: .orch/tickets/<this ticket>/artifacts/<name> (what `orch ticket artifacts-dir` prints, also
+    with backslashes) is read as artifacts/<name> for text, glance and option cards."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "intro.md").write_text("New intro.\n\nSecond part.\n")
+    (folder / "note.txt").write_text("Plain note.\n")
+    (folder / "card.json").write_text(json.dumps({"headline": "Ready."}))
+    (folder / "a.md").write_text("Option A.\n")
+    for src in (f".orch/tickets/{tid}/artifacts/intro.md", f".orch\\tickets\\{tid}\\artifacts\\intro.md"):
+        code, out, err = _add(run, tid, "--draft", "Intro", "--file", src, "--then", "x")
+        assert code == 0, out + err
+        pv = json.loads(out)["card"]["preview"]
+        assert pv["heading"] == "intro.md" and pv["paras"] == ["New intro.", "Second part."]
+    code, out, err = _add(
+        run, tid, "--draft", "Note", "--file", f".orch/tickets/{tid}/artifacts/note.txt", "--then", "x"
+    )
+    assert code == 0 and json.loads(out)["card"]["preview"]["paras"] == ["Plain note."], out + err
+    code, out, err = _add(
+        run, tid, "--draft", "Glance", "--file", f".orch/tickets/{tid}/artifacts/card.json", "--then", "x"
+    )
+    assert code == 0 and json.loads(out)["card"]["preview"]["headline"] == "Ready.", out + err
+    code, out, err = _add(
+        run, tid, "--choose", "Pick", "--option", "A=Title:artifacts/a.md", "--option", "B=Two", "--then", "x"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["card"]["preview"]["options"][0]["preview"]["paras"] == ["Option A."]
+
+
+@pytest.mark.parametrize(
+    "src, says",
+    [
+        (".orch/tickets/t_other1/artifacts/x.md", "inside a .orch folder"),  # another ticket stays refused
+        (".orch/secrets/key.md", "inside a .orch folder"),
+        ("artifacts/nope.md", "was not found (checked .orch/tickets/"),
+        ("docs/nope.md", "was not found (checked docs/nope.md)"),
+        ("artifacts/big.md", "over the 64 KB limit"),
+        ("big.md", "over the 64 KB limit"),
+    ],
+)
+def test_text_card_refusals_name_the_cause(tk, run, src, says):
+    """ORCH-1777: one message per cause instead of 'was not found or is too large'."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "big.md").write_text("x" * (65 * 1024))
+    (root / "big.md").write_text("x" * (65 * 1024))
+    code, out, _ = _add(run, tid, "--draft", "T", "--file", src, "--then", "x")
+    assert code == 2 and json.loads(out)["code"] == "refused"
+    error = json.loads(out)["error"]
+    assert says in error and "or is too large" not in error, error
+    assert tickets.load(root, tid)["questions"] == []
+
+
 @pytest.mark.parametrize(
     "extra",
     [

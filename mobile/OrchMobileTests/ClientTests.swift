@@ -119,6 +119,29 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(StubProtocol.seenBodies[0], Data([1, 2, 3]))
     }
 
+    func testTokenGoesOnlyToASafeRelay() async throws {
+        StubProtocol.handler = { _ in (200, Data(#"{"items":[],"next":null}"#.utf8)) }
+        let plain = URLSessionRelayClient(base: URL(string: "http://10.0.0.5:8080")!, credentials: creds, session: StubProtocol.session())
+        _ = try await plain.workspaces()
+        XCTAssertNil(StubProtocol.seen[0].value(forHTTPHeaderField: "Authorization"), "no token over plain http to another machine")
+        do { _ = try await plain.blob(id: "b_" + String(repeating: "a", count: 22)); XCTFail() } catch { XCTAssertEqual(error as? RelayError, .unauthorized) }
+        XCTAssertEqual(StubProtocol.seen.count, 1, "no blob request without a safe relay")
+        let local = URLSessionRelayClient(base: URL(string: "http://127.0.0.1:8080")!, credentials: creds, session: StubProtocol.session())
+        _ = try await local.workspaces()
+        XCTAssertEqual(StubProtocol.seen[0].value(forHTTPHeaderField: "Authorization"), "Bearer \(creds.token)")
+    }
+
+    func testRedirectsStayOnTheSameRelay() {
+        let relay = URL(string: "https://relay.severin.io/v1/phone/workspaces")
+        XCTAssertTrue(RelayRedirects.allows(from: relay, to: URL(string: "https://relay.severin.io/v1/phone/workspaces/")))
+        XCTAssertTrue(RelayRedirects.allows(from: URL(string: "http://127.0.0.1:9/a"), to: URL(string: "http://127.0.0.1:9/b")))
+        for bad in ["https://evil.example/v1", "http://relay.severin.io/v1", "https://relay.severin.io:8443/v1", "orch://pair"] {
+            XCTAssertFalse(RelayRedirects.allows(from: relay, to: URL(string: bad)), bad)
+        }
+        XCTAssertFalse(RelayRedirects.allows(from: URL(string: "https://127.0.0.1:9/a"), to: URL(string: "http://127.0.0.1:9/a")), "no downgrade")
+        XCTAssertFalse(RelayRedirects.allows(from: nil, to: relay))
+    }
+
     func testTranscribeOffIs503() async throws {
         StubProtocol.handler = { _ in (503, Data(#"{"error":"transcription_off","message":"Voice transcription is not set up on this relay."}"#.utf8)) }
         let c = URLSessionRelayClient(base: base, credentials: creds, session: StubProtocol.session())
