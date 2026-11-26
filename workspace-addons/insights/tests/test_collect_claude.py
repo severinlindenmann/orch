@@ -7,17 +7,17 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-
 from orch import hider
-from orch.collect_claude import StreamJsonMapper, collect, map_stream
 from orch.collect_execjson import detail_name
 from orch.record import RecordWriter, read_detail, read_run
 
-ROOT = Path(__file__).resolve().parents[2]
+from orch_insights.collector import StreamJsonMapper, collect, map_stream
+
+ROOT = Path(__file__).resolve().parents[3]
 FIX = ROOT / "workspace/tests/fixtures/w2b/claude"
 SCHEMA = json.loads((ROOT / "contracts/activity.schema.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA, format_checker=jsonschema.FormatChecker())
-CTX = dict(run="r_cl00001", ticket="t_inv7c2", harness="claude", at="2026-11-16T09:00:00Z")
+CTX = {"run": "r_cl00001", "ticket": "t_inv7c2", "harness": "claude", "at": "2026-11-16T09:00:00Z"}
 SECRET = "KEYVALUE-abc123XYZ-secret"
 
 
@@ -30,18 +30,23 @@ def mapper(**kwargs):
 
 
 def use(tid, name="Bash", inp=None, parent=None, at="2026-11-16T09:00:01.000Z"):
-    block = dict(type="tool_use", id=tid, name=name, input=inp if inp is not None else {"command": "ls"})
+    block = {
+        "type": "tool_use",
+        "id": tid,
+        "name": name,
+        "input": inp if inp is not None else {"command": "ls"},
+    }
     return json.dumps(
-        dict(type="assistant", message=dict(content=[block]), parent_tool_use_id=parent, timestamp=at)
+        {"type": "assistant", "message": {"content": [block]}, "parent_tool_use_id": parent, "timestamp": at}
     )
 
 
 def result(tid, content="ok", error=None, parent=None, at="2026-11-16T09:00:03.000Z"):
-    block = dict(type="tool_result", tool_use_id=tid, content=content)
+    block = {"type": "tool_result", "tool_use_id": tid, "content": content}
     if error is not None:
         block["is_error"] = error
     return json.dumps(
-        dict(type="user", message=dict(content=[block]), parent_tool_use_id=parent, timestamp=at)
+        {"type": "user", "message": {"content": [block]}, "parent_tool_use_id": parent, "timestamp": at}
     )
 
 
@@ -72,9 +77,15 @@ def test_real_capture():
         ("usage", False),
         ("run.state", False),
     ]
-    read_start, read_end, bash_start, bash_end = steps(events)
+    read_start, read_end, _bash_start, bash_end = steps(events)
     assert read_start["id"] == read_end["id"] and read_start["id"].startswith("toolu_")
-    assert read_start["used"] == dict(kind="tool", name="Read", action=None, source="builtin", version=None)
+    assert read_start["used"] == {
+        "kind": "tool",
+        "name": "Read",
+        "action": None,
+        "source": "builtin",
+        "version": None,
+    }
     assert read_start["text"] == "Read notes.txt"
     assert read_start["detail"] is None
     assert read_end["outcome"]["ok"] is True and read_end["outcome"]["ms"] == 93
@@ -106,7 +117,7 @@ def test_errors_are_failed_steps():
     assert events[-1]["outcome"]["ok"] is False
     assert events[-1]["outcome"]["error"] == "boom"
     ok = list(mapper().events([use("t1"), result("t1", error=False)]))
-    assert ok[-1]["outcome"] == dict(ok=True, error=None, ms=2000)
+    assert ok[-1]["outcome"] == {"ok": True, "error": None, "ms": 2000}
 
 
 def test_helper_mcp_skill_denial():
@@ -118,9 +129,21 @@ def test_helper_mcp_skill_denial():
     child = by[("step", "toolu_02In", False)]
     assert child["agent"] == "h_1" and child["parent"] == "main"
     mcp = by[("step", "toolu_03Mc", False)]
-    assert mcp["used"] == dict(kind="mcp", name="docs", action="lookup", source="harness", version=None)
+    assert mcp["used"] == {
+        "kind": "mcp",
+        "name": "docs",
+        "action": "lookup",
+        "source": "harness",
+        "version": None,
+    }
     skill = by[("step", "toolu_04Sk", False)]
-    assert skill["used"] == dict(kind="skill", name="pdf-report", action=None, source="harness", version=None)
+    assert skill["used"] == {
+        "kind": "skill",
+        "name": "pdf-report",
+        "action": None,
+        "source": "harness",
+        "version": None,
+    }
     denial = by[("denial", "toolu_05Wf", True)]
     assert denial["outcome"]["ok"] is False and denial["used"]["name"] == "WebFetch"
     assert "WebFetch" in denial["text"]
@@ -144,7 +167,7 @@ def test_unknown_types_counted_not_silent():
 
 def test_unknown_block_makes_next_step_partial():
     m = mapper()
-    m.feed(json.dumps(dict(type="assistant", message=dict(content=[dict(type="server_tool_use")]))))
+    m.feed(json.dumps({"type": "assistant", "message": {"content": [{"type": "server_tool_use"}]}}))
     first = m.feed(use("t1"))[0]
     assert first["coverage"] == "partial"
     assert m.feed(use("t2"))[0]["coverage"] == "full"
@@ -186,7 +209,7 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     ws, writer = store
     unsafe = "bad/id"
     collect([use(unsafe), result(unsafe)], writer, CTX)
-    done = [e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"]][0]
+    done = next(e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"])
     hook = dict(done, via="hook", detail=None)
     assert writer.append(hook) is None  # after the log's line: dropped (the log wins, same hashed id)
     finished = [e for e in read_run(ws, CTX["run"]).unwrap() if e["kind"] == "step" and e["outcome"]]
@@ -198,7 +221,7 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     "interrupt, code", [(None, "tool_failed"), (False, "tool_failed"), (True, "interrupted")]
 )
 def test_a_failure_hook_maps_to_a_failed_end_with_a_fixed_code(interrupt, code):
-    from orch.collect_claude import hook_line
+    from orch_insights.collector import hook_line
 
     raw = {
         "hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_use_id": "toolu_f1",
@@ -277,8 +300,8 @@ def test_hider_on_events():
 def test_detail_carries_input_and_output_unhidden_for_the_writer():
     m = mapper()
     m.feed_with_detail(use("t1", "Bash", {"command": f"echo {SECRET}"}))
-    ((event, detail),) = m.feed_with_detail(result("t1", f"out {SECRET}"))
-    assert detail == dict(input={"command": f"echo {SECRET}"}, output=f"out {SECRET}")
+    ((_event, detail),) = m.feed_with_detail(result("t1", f"out {SECRET}"))
+    assert detail == {"input": {"command": f"echo {SECRET}"}, "output": f"out {SECRET}"}
     started, _ = m.feed_with_detail(use("t2"))[0]
     assert started["detail"] is None
 
@@ -319,7 +342,9 @@ def test_collect_into_writer_hides_secrets_and_replay_dedupes(store):
 
 
 def test_resume_process_does_not_collide_and_uuid_ids_are_stable():
-    say = json.dumps(dict(type="assistant", uuid="u-1", message=dict(content=[dict(type="text", text="Hi")])))
+    say = json.dumps(
+        {"type": "assistant", "uuid": "u-1", "message": {"content": [{"type": "text", "text": "Hi"}]}}
+    )
     first = StreamJsonMapper(CTX["run"], CTX["ticket"], "claude", now=lambda: CTX["at"])
     second = StreamJsonMapper(CTX["run"], CTX["ticket"], "claude", now=lambda: CTX["at"], seq_start=40)
     done = json.dumps({"type": "result", "is_error": False})
@@ -402,7 +427,7 @@ STREAM2 = [use("toolu_a", "Read", {"file_path": "a.py"}), use("toolu_b", "Read",
 def test_collect_counts_and_skips_an_invalid_event(store, monkeypatch):
     from orch import record
 
-    ws, writer = store
+    _ws, writer = store
     real = RecordWriter._commit
     calls = []
 
@@ -421,7 +446,7 @@ def test_collect_counts_and_skips_an_invalid_event(store, monkeypatch):
 def test_collect_stops_loudly_on_tampered_or_unavailable(store, monkeypatch, error):
     from orch import record
 
-    ws, writer = store
+    _ws, writer = store
     exc = record.RecordTampered("swapped") if error == "tampered" else record.RecordUnavailable("io")
 
     def commit(self, *a, **k):
@@ -449,7 +474,7 @@ def test_collect_busy_goes_to_the_spool_and_the_run_continues(store, monkeypatch
 def test_collect_spool_failure_keeps_the_real_cause(store, monkeypatch):
     from orch import record
 
-    ws, writer = store
+    _ws, writer = store
     monkeypatch.setattr(record, "_lock", lambda *a, **k: (_ for _ in ()).throw(record.RecordBusy("busy")))
     monkeypatch.setattr(
         record, "_open", lambda *a, **k: (_ for _ in ()).throw(record.RecordUnavailable("io"))
