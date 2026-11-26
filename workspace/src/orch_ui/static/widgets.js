@@ -776,7 +776,7 @@ UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken b
   b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
   if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
   if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
-  b.setAttribute('aria-label',g.name+', '+n+' waiting'+(n&&g.deadline?', '+g.deadline:''));
+  /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
   if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
  /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */
