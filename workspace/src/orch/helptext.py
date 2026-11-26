@@ -102,7 +102,7 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
         f"orch ticket model {K} sonnet",
         f'orch ticket model {K} up --why "the test keeps failing"',
     ),
-    "ticket plan": (f'orch ticket plan {K} --goal "Sign-in works on the phone"',),
+    "ticket plan": (f'orch ticket plan {K} --goal "Sign-in works on small screens"',),
     "ticket attach": (f"orch ticket attach {K} --name notes.txt < notes.txt",),
     "ticket artifacts-dir": (f"orch ticket artifacts-dir {K}",),
     "ticket wait": (

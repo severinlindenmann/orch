@@ -526,7 +526,7 @@ class _Parser(argparse.ArgumentParser):
             self.exit(2, _EXAMPLES[self.prog] + "\n")
         m = re.search(r"required: (.*)", message)
         sp = next((a for a in self._actions if isinstance(a, argparse._SubParsersAction)), None)
-        if m and sp is not None and m.group(1) == sp.dest:  # a command is missing, not a value
+        if m and sp is not None and m.group(1) in (sp.dest, sp.metavar):  # a command is missing, not a value
             seen: set[int] = set()  # an alias names the same command once
             hidden = getattr(sp, "_hidden", set())
             names = ", ".join(
