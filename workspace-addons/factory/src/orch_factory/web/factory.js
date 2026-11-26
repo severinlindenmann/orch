@@ -4,6 +4,7 @@
   const prefix = document.documentElement.dataset.prefix || '';
   const view = document.getElementById('factory-view');
   const notices = document.getElementById('notices');
+  const said = document.getElementById('factory-said');  // says once where an update moved you (ORCH-2046)
   const validId = id => typeof id === 'string' && /^t_[a-z0-9]{6,16}$/.test(id);
   const validVersion = value => /^[1-9][0-9]*$/.test(String(value)) && Number.isSafeInteger(Number(value));
   const array = value => Array.isArray(value) ? value : [];
@@ -453,6 +454,18 @@
       group('row-action', label));
     return group('card', row);
   }
+  // Every card of one order on home carries its id, so a background update can find your place again, and its
+  // actions say which order they are for ("Open order: Online booking page"), not only "Open order" (ORCH-2046).
+  function of(o, el) {
+    if (!validId(o.id)) return el;
+    el.dataset.order = o.id;
+    const title = text(o.title).trim();
+    for (const x of el.querySelectorAll('a.btn, button.btn')) {
+      const words = x.textContent.trim();
+      if (words && !x.hasAttribute('aria-label') && !words.includes(title)) x.setAttribute('aria-label', words + ': ' + title);
+    }
+    return el;
+  }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
@@ -466,20 +479,20 @@
       ['drafts', orders.filter(draftWaiting), o => {
         const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
           tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['proposals', orders.filter(o => o.phase === 'proposed'), o => {
         const need = yourTime(o.owner_min);
         const c = card(o.title, meta('Your helper planned the run. Read it, then start it or say not now.'),
           ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
         const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false),
           tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
-      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
+      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))],
     ];
     const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
@@ -499,7 +512,7 @@
     const primary = group('stack'), secondary = group('stack');
     const section = (parent, title, rows, paint) => {
       if (!rows.length) return;
-      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(paint)); parent.append(el);
+      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(o => of(o, paint(o)))); parent.append(el);
     };
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
@@ -836,44 +849,101 @@
     box.dataset.key = 'factory-stopped';
     return box;
   }
+  // The notices are a live region: they are replaced only when their words change, so an update never says them again.
   function showNotices(homeData, ...data) {
-    notices.replaceChildren();
-    if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
-    if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
-    if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
+    const next = [];
+    if (homeData.day_limit?.warning) next.push(node('p', homeData.day_limit.warning, 'f-banner'));
+    if (homeData.watcher === false) next.push(stopped(homeData.workspace));
+    if ([homeData, ...data].some(d => d?.stale === true)) next.push(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
+    if (next.map(n => n.textContent).join('\n') !== [...notices.children].map(n => n.textContent).join('\n')) notices.replaceChildren(...next);
   }
-  async function render() {
+  // Your place on the page (ORCH-2046): the focused action, the order card and part of the page it is in, and where it
+  // sits on screen. A background update draws the page anew and puts you back on the same action, where it was.
+  const partOf = el => { const s = el.closest('section.f-section'); return s ? s.getAttribute('aria-label') || s.querySelector('h2')?.textContent || '' : ''; };
+  const orderOf = el => el.closest('[data-order]')?.dataset.order || '';
+  const actionOf = el => [el.tagName, el.getAttribute('aria-label') || '', el.textContent.trim()].join('\n');
+  const sameAction = (a, b) => actionOf(a) === actionOf(b) && (a.getAttribute('href') || '') === (b.getAttribute('href') || '');
+  const FOCUSABLE = 'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea';
+  function placeNow() {
+    const el = document.activeElement, y = window.scrollY;
+    if (!el || !view.contains(el) || el === view || el.tagName === 'H1') return {y};
+    const boxes = [...view.querySelectorAll('[data-order]')], box = el.closest('[data-order]');
+    const twins = [...view.querySelectorAll(el.tagName)].filter(x => sameAction(x, el) && orderOf(x) === orderOf(el) && partOf(x) === partOf(el));
+    const r = el.getBoundingClientRect();
+    return {y, el, nth: twins.indexOf(el), order: orderOf(el), part: partOf(el), at: boxes.indexOf(box), orders: boxes.map(b => b.dataset.order),
+      top: r.bottom > 0 && r.top < window.innerHeight ? r.top : null};
+  }
+  function putBack(place, before) {
+    window.scrollTo(0, place.y);
+    if (!place.el) return;
+    const old = place.el, all = sel => [...view.querySelectorAll(sel)];
+    const usable = x => x && !x.matches(':disabled') && !x.closest('[hidden]');
+    // 1 the same action of the same order in the same part, 2 the same action of that order anywhere on the page
+    const same = all(old.tagName).filter(x => sameAction(x, old) && orderOf(x) === place.order);
+    const here = same.filter(x => partOf(x) === place.part);
+    let target = [here[Math.min(place.nth, here.length - 1)], ...here, ...same].find(usable), words = '';
+    if (!target && place.order) {
+      // 3 it is gone: the order that came after it (or else before it), on the same action when it has one
+      const near = [...place.orders.slice(place.at + 1), ...place.orders.slice(0, Math.max(place.at, 0)).reverse()].filter(id => id !== place.order);
+      for (const id of near) {
+        const box = view.querySelector('[data-order="' + CSS.escape(id) + '"]');
+        if (!box) continue;
+        const links = [...box.querySelectorAll(FOCUSABLE)].filter(usable);
+        target = links.find(x => x.tagName === old.tagName && x.textContent.trim() === old.textContent.trim()) || links[0];
+        if (target) { words = '“' + text(before.get(place.order)) + '” is no longer here. You are on “' + text(titles.get(id)) + '”.'; break; }
+      }
+      if (!target) words = '“' + text(before.get(place.order)) + '” is no longer here. You are at the top of the page.';
+    } else if (!target) words = 'This part of the page changed. You are at the top of the page.';
+    target = target || view.querySelector('h1');
+    if (!target) return;
+    target.focus({preventScroll: true});
+    if (target.tagName === 'H1') target.scrollIntoView({block: 'nearest'});
+    else if (place.top !== null) window.scrollBy(0, target.getBoundingClientRect().top - place.top);
+    if (words) said.textContent = words;  // said once; an update that keeps your place says nothing
+  }
+  let titles = new Map(), following = false;
+  // render() is a deliberate visit (a link, Back, Try again): the loading frame, the motion, focus on the heading.
+  // render(true) is a background update: the page stays as it is while it reads, then changes in place (ORCH-2046).
+  async function render(quiet) {
+    quiet = quiet === true;
     const serial = ++request;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
-    view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
-    const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
-    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
-      // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
-    } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
+    following = quiet;
+    if (!quiet) {
+      view.setAttribute('aria-busy', 'true'); notices.replaceChildren(); said.textContent = '';
+      const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
+      if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+        // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
+        view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
+    }
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
       if (serial !== request) return;
-      lastHome = JSON.stringify({...homeData, generated_at: null});
-      showNotices(homeData);
+      const seen = JSON.stringify({...homeData, generated_at: null});
+      // a visit shows the notices at once; an update shows them with the page, when it really draws
+      let noticeData = [homeData];
+      const showNoticesNow = (...d) => { noticeData = d; if (!quiet) showNotices(...d); };
+      if (!quiet) lastHome = seen;
+      showNoticesNow(homeData);
       const hash = location.hash || '#/';
       let draw;
       if (hash === '#/' || hash === '#content') draw = () => home(homeData);
       else if (hash === '#/autopilot') {
         const data = await read('/api/autopilot', signal);
         if (serial !== request) return;
-        showNotices(homeData, data); draw = () => autopilot(data);
+        showNoticesNow(homeData, data); draw = () => autopilot(data);
       } else {
         const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop)\/([1-9][0-9]*)|\/(draft)(?:\/([1-9][0-9]*))?)?$/.exec(hash);
         if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4])) || (match[6] && !validVersion(match[6]))) throw new Error('Unknown route');
         const order = await read('/api/order/' + match[1], signal);
         if (serial !== request) return;
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
-        showNotices(homeData, order);
+        showNoticesNow(homeData, order);
         if (match[2]) draw = () => proposal(order);
         else if (match[3] === 'stop') {
           const reach = await read('/api/reach', signal).catch(() => []);  // empty when the relay is off: no button then
@@ -886,23 +956,34 @@
           const version = match[6] || String(newest || 1);
           const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
-          showNotices(homeData, order, draft);
+          showNoticesNow(homeData, order, draft);
           // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
           const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
           draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;
-      view.replaceChildren(); draw(); view.classList.add('page-enter');
-      if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+      const before = titles;
+      titles = new Map(array(homeData.orders).filter(o => validId(o?.id)).map(o => [o.id, o.title]));
+      if (!quiet) {
+        view.replaceChildren(); draw(); view.classList.add('page-enter');
+        if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+        return;
+      }
+      // an update waits while you type, write or have a dialog open (you may have started while it read): next tick
+      if (busy()) { titles = before; return; }
+      const place = placeNow();
+      lastHome = seen; showNotices(...noticeData);
+      view.replaceChildren(); draw();  // no loading frame, no entry motion, no focus on the heading
+      putBack(place, before);
     } catch (error) {
-      if (serial !== request) return;
+      if (serial !== request || quiet) return;  // an update that could not read keeps the page as it is; the next tick tries again
       const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', render);
       const box = card('Factory could not load this page', p('Factory did not answer in time, or this page no longer exists. Try again, or go back to Factory.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
       view.replaceChildren(box);
     } finally {
       clearTimeout(timeout);
-      if (serial === request) view.setAttribute('aria-busy','false');
+      if (serial === request) { view.setAttribute('aria-busy','false'); following = false; }
     }
   }
   document.querySelector('.skip-link').addEventListener('click', event => {
@@ -915,10 +996,11 @@
   const busy = () => asked.size > 0 || ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)
     || [...view.querySelectorAll('textarea')].some(t => t.value.trim()) || !!document.querySelector('dialog[open]');
   async function follow() {
-    if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
+    if (document.visibilityState !== 'visible' || busy() || following || view.getAttribute('aria-busy') === 'true') return;
     try {
       const data = await read('/api/home');
-      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+      // a link or button with focus never holds an update back: the update keeps you on it (ORCH-2046)
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy() && !following && view.getAttribute('aria-busy') !== 'true') render(true);
     } catch (_) { /* the next tick tries again */ }
   }
   setInterval(follow, 15000);

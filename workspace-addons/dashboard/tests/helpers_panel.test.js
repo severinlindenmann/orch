@@ -129,7 +129,7 @@ test('Home: the Helpers side card replaces Working now, with Remind on idle rows
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
     ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Remind'],
     ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
-  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Check result, no Helpers row and no Stop
+  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Test results, no Helpers row and no Stop
 });
 
 test('ticket page: the state pill, the last activity line and a Stop that says when the helper is idle', () => {

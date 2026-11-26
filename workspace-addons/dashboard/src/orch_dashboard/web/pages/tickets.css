@@ -61,3 +61,4 @@
 /* Owner 15 Nov (fb3): the card's "..." is a small icon button in the top-right corner; the title uses the full width */
 
 .ticket-table td:first-child a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@media(max-width:720px){a.view-chip{min-height:var(--touch);min-width:var(--touch);justify-content:center}.view-chips{gap:4px}}

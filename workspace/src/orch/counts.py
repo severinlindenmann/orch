@@ -255,7 +255,7 @@ def summary(
         run = runs.get(t["id"])
         h = helper(run)
         if h in ("idle", "stuck") and t.get("status") == "review":
-            h = None  # a left-over session of a ticket in Review: its "Check result" row (ORCH-407)
+            h = None  # a left-over session of a ticket in Review: its "Test results" row (ORCH-407)
         if h:
             helpers[h] += 1
         why = stuck(t, run, now)

@@ -110,8 +110,9 @@ function searchKey() { const q = String(ticketSearch).trim(); return q ? JSON.st
 const searchServed = () => !!hits.key && hits.key === searchKey();
 function wantSearch() {
   const key = searchKey();
-  if (!key || !pagingOn() || hits.want === key) return;
+  if (!pagingOn() || hits.want === key) return;
   hits.want = key; clearTimeout(hits.timer);
+  if (!key) return;
   hits.timer = setTimeout(() => searchPage(key, 0), 250);
 }
 function searchPage(key, offset) {
@@ -122,7 +123,10 @@ function searchPage(key, offset) {
     if (hits.want !== key) return;
     hits.rows = offset ? [...hits.rows, ...array(out.items)] : array(out.items);
     hits.key = key; hits.next = out.next ?? null; hits.total = Number(out.total) || 0;
-  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => { hits.busy = false; render(); });
+  }).catch(() => { if (hits.want === key && !offset) hits.want = null; }).finally(() => {
+    if (searchKey() !== key) return;
+    hits.busy = false; render();
+  });
 }
 // The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
 function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
@@ -285,9 +289,22 @@ function stuckLabel() {
   const n = ticketParents(tickets()).filter(isStuck).length;
   return n ? 'Stuck ' + n : 'Stuck';
 }
+// ORCH-2159: leave typing in the native input; coalesce costly page redraws after a short pause.
+// Keep the URL and server debounce current immediately, so a slow previous reply cannot win.
+let ticketSearchTimer = null;
+function changeTicketSearch(value) {
+  ticketSearch = value; searchFolds.clear(); writeTicketAddress(); wantSearch();
+  clearTimeout(ticketSearchTimer);
+  const address = typeof location === 'object' ? location.hash : '';
+  ticketSearchTimer = setTimeout(() => {
+    ticketSearchTimer = null;
+    if (typeof location === 'object' && location.hash !== address) return;
+    render();
+  }, 80);
+}
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
-  input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
+  input.addEventListener('input', event => changeTicketSearch(event.currentTarget.value));
   const people = ticketOwners(tickets()), picked = ticketPerson ? ownerKey(ticketPerson) : '';
   const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
@@ -335,7 +352,7 @@ function ticketNext(t) {
     }
     if (text) text = 'Question: ' + text;
   } else if (status === 'review') {
-    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
@@ -515,7 +532,7 @@ function boardSignal(t, lane, parts) {
       else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
     });
   }
-  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Check result');
+  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Test results');
   if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
   const helper = helperChip(t);
   if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
@@ -924,9 +941,9 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
-  // ORCH-1716: a result to check says Check result at every width (the computer row shows it first, the session button
+  // ORCH-1716: a result to check says Test results at every width (the computer row shows it first, the session button
   // only on hover); the phone has room for one thing, so it is that one
-  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
   if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {

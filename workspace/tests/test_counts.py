@@ -103,7 +103,7 @@ def test_needs_you_equals_the_review_cards(proj, run):
 
 
 def test_a_left_over_session_of_a_ticket_in_review_is_no_helper():
-    # ORCH-407: its "Check result" row stands for it; Home lists no helper row, so the core counts none
+    # ORCH-407: its "Test results" row stands for it; Home lists no helper row, so the core counts none
     t = _t("t_revidl", status="review")
     s = counts.summary([t], {"t_revidl": {"running": True, "helper": {"state": "stuck"}}})
     assert s["running"] == 0 and s["stuck"] == 0 and s["tickets"]["t_revidl"]["helper"] is None

@@ -40,12 +40,14 @@ module.exports = {
     // a copy on this computer only (ORCH-896): pick it, Save, reload: it is on; then Off, Save: it is off again
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
-    // the card reads the status again every 15 s, and a busy computer is slower: poll the page's shown text (the
-    // first element that matches can be a hidden copy) for up to a minute (#2587: the loop had synced, the
-    // click-through still waited)
+    // the card reads the status again every 15 s, and a busy computer is slower: poll for up to a minute (#2587: the
+    // loop had synced, the click-through still waited). Since ORCH-2107 the page shows no 'Last synced' line when all
+    // went well; a finished sync is a visible row with a green dot in the history card (hidden copies don't count).
+    const synced = () => page.locator('[data-key="sync-history-row"] .dot.ok >> visible=true').count().then(n => n > 0, () => false);
     let shown = '';
-    for (const end = Date.now() + 60000; !/Last synced|Synced/.test(shown = await text()) && Date.now() < end;) await page.waitForTimeout(500);
-    if (!/Last synced|Synced/.test(shown)) {
+    for (const end = Date.now() + 60000; !(await synced()) && Date.now() < end;) await page.waitForTimeout(500);
+    if (!(await synced())) {
+      shown = await text();
       let st = '';
       try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
       // the loop's own words say why it did not start (#2587: seen on Linux only)
