@@ -327,8 +327,8 @@ def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, m
         assert [c["ticket"] for c in res["started"]] == [want]
         assert dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))["started"] == []  # the one place is taken
         test_run_wrap._wait(proj, want)
-        t = tickets.load(proj, want)
-        t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
-        tickets.save(proj, t)
+        # The claim disappears before the wrapper finishes recording run_ended.
+        # Close through the atomic operation so that concurrent update is preserved.
+        assert tickets.set_status(proj, want, "done", "human:tester")["status"] == "done"
     started = [ln.split()[1] for ln in test_run_wrap._lines(log, "env")]
     assert started == [high, normal, low]

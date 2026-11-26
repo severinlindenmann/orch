@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -358,6 +359,122 @@ def test_two_writers_on_one_ticket_do_not_corrupt_it(proj, new_ticket):
     t = read(proj, tid)
     assert len(t["checklist"]) + len(errors) == 6 and len(t["checklist"]) >= 1
     assert not list((proj / ".orch" / "tickets").glob(".tmp-*"))
+
+
+_MIXED_WRITER = """
+import json, sys, time
+from pathlib import Path
+from orch import tickets
+root, tid, me, go = Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path(sys.argv[4])
+while not go.exists():
+    time.sleep(0.005)
+for i in range(5):
+    _, item = tickets.check_add(root, tid, f"{me} step {i}", "agent:x")
+    tickets.note_history(root, tid, "agent:x", f"{me} log {i}")
+    ev = json.dumps({"type": "note", "ref": f"{me} saw {i}"})
+    tickets.check_done(root, tid, item["id"], [ev], "agent:x")
+"""
+
+
+def test_two_processes_mixing_check_evidence_history_lose_nothing(proj, subprocess_home, new_ticket):
+    """R8.2: two processes editing one ticket at once (checklist add, evidence, history) both fully land."""
+    tid = new_ticket()
+    base = read(proj, tid)["revision"]
+    go = proj / "go"
+    kids = [
+        subprocess.Popen(
+            [sys.executable, "-c", _MIXED_WRITER, str(proj), tid, me, str(go)],
+            cwd=proj,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for me in ("A", "B")
+    ]
+    go.write_text("", encoding="utf-8")  # both start together
+    outs = [k.communicate(timeout=120) for k in kids]
+    assert [k.returncode for k in kids] == [0, 0], outs
+    t = read(proj, tid)
+    assert t["revision"] == base + 2 * 5 * 3
+    steps = {c["text"]: c for c in t["checklist"]}
+    want = {f"{me} step {i}" for me in "AB" for i in range(5)}
+    assert set(steps) == want and len(t["checklist"]) == 10
+    assert all(c["done"] and c["evidence"] for c in steps.values())
+    texts = [h["text"] for h in t["history"]]
+    assert all(f"{me} log {i}" in texts for me in "AB" for i in range(5))
+    assert len({c["id"] for c in t["checklist"]}) == 10
+
+
+_KILLED_WRITER = """
+import sys, time
+from pathlib import Path
+from orch import tickets
+root, tid, ready = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+real = tickets.procs.replace
+def stuck(src, dst):
+    if str(dst).endswith(tid + ".json"):  # the new ticket file is written, the swap never happens
+        ready.write_text("", encoding="utf-8")
+        time.sleep(120)
+    real(src, dst)
+tickets.procs.replace = stuck
+tickets.check_add(root, tid, "never lands", "agent:x")
+"""
+
+
+def test_writer_killed_mid_write_leaves_the_ticket_whole_and_free(proj, subprocess_home, new_ticket):
+    """R8.2: a writer killed between writing its temp file and the swap leaves the old ticket whole, and the
+    next write goes through at once (no 30 s "busy"), cleaning the dead writer's temp file."""
+    tid = new_ticket()
+    tickets.check_add(proj, tid, "first", "agent:x")
+    d = proj / ".orch" / "tickets"
+    before = (d / f"{tid}.json").read_text(encoding="utf-8")
+    ready = proj / "ready"
+    kid = subprocess.Popen(
+        [sys.executable, "-c", _KILLED_WRITER, str(proj), tid, str(ready)],
+        cwd=proj,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        for _ in range(600):
+            if ready.exists() or kid.poll() is not None:
+                break
+            time.sleep(0.05)
+        assert ready.exists(), kid.communicate()
+        assert (d / f".lock-{tid}").exists() and list(d.glob(".tmp-*.json"))
+    finally:
+        kid.kill()  # SIGKILL / TerminateProcess: no cleanup runs
+        kid.communicate()
+    assert (d / f"{tid}.json").read_text(encoding="utf-8") == before  # not torn, not half-applied
+    start = time.monotonic()
+    tickets.check_add(proj, tid, "second", "agent:x")
+    assert time.monotonic() - start < 3  # was refused "busy" after 5 s until the lock was 30 s old
+    t = read(proj, tid)
+    assert [c["text"] for c in t["checklist"]] == ["first", "second"]
+    assert t["revision"] == json.loads(before)["revision"] + 1
+    assert not (d / f".lock-{tid}").exists() and not list(d.glob(".tmp-*"))
+
+
+def test_a_live_holders_lock_is_never_broken(proj, new_ticket):
+    tid = new_ticket()
+    lock = proj / ".orch" / "tickets" / f".lock-{tid}"
+    lock.write_text(tickets.procs.own_token(), encoding="utf-8")  # this process: alive
+    with pytest.raises(Refused, match="busy"):
+        with tickets._locked(proj, tid, wait=0.3):
+            pass
+    assert lock.read_text(encoding="utf-8") == tickets.procs.own_token()
+
+
+def test_a_nameless_lock_frees_in_seconds_not_half_a_minute(proj, run, new_ticket):
+    """A writer killed between making its lock and naming itself leaves an empty lock."""
+    tid = new_ticket()
+    lock = proj / ".orch" / "tickets" / f".lock-{tid}"
+    lock.write_text("", encoding="utf-8")
+    with pytest.raises(Refused, match="busy"):  # just made: its writer is naming itself right now
+        with tickets._locked(proj, tid, wait=0.3):
+            pass
+    old = lock.stat().st_mtime - 10
+    os.utime(lock, (old, old))
+    assert run("log", tid, "x")[0] == 0 and not lock.exists()
 
 
 def test_edit_and_show_json(proj, run, new_ticket):
