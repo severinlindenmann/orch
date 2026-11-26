@@ -685,6 +685,15 @@ def _away_set(a):
     return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
 
 
+def _reviewer_mode_set(a):
+    """Review > Nothing closes by itself (owner, 25 Nov 2026): `orch config set workflow.reviewer_mode propose|accept`;
+    only a person turns accept back on (the CLI refuses an agent)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.reviewer_mode", "propose" if a["on"] else "accept"], [], []
+
+
 def _review_undo(a):
     """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
     _only(a, ("ticket", "question"))
@@ -1418,7 +1427,7 @@ MAX_ADD_NAMES = 32
 def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | None]:
     """Add several add-ons in one run (ORCH-1739): `addonjob.launch` starts `orch addon add <names> --yes --job`
     detached and returns the job at once (202); the page follows it with GET /api/addon-job. Every name must be in
-    the catalogue (`orch addon list`: shipped and not installed yet, or installed and off). A live job, or an orch
+    the catalogue (shipped and not installed yet, or installed and off). A live job, or an orch
     update, is refused by the core with one plain sentence (409). The caller checks the page session."""
     if not isinstance(args, dict):
         raise BadRequest("The arguments must be an object.")
@@ -1433,7 +1442,7 @@ def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | 
         raise BadRequest("Pick the add-ons to add.")
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     if not isinstance(rows, list):
         raise Unavailable("orch could not read the add-on list. Try again in a moment.")
     known = {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
@@ -1576,6 +1585,7 @@ OPS = {
     "people.tie": _people_tie,
     "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
+    "reviewer_mode.set": _reviewer_mode_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
     "live.set": _live_set,
@@ -1659,7 +1669,7 @@ def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
 
 
 def _addon_row(root: Path, orch_bin: str, name: str) -> dict | None:
-    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    rows = run_orch(orch_bin, ["addon", "list", "--catalog", "--json"], root)
     for r in rows if isinstance(rows, list) else []:
         if isinstance(r, dict) and r.get("name") == name:
             return r
@@ -2092,6 +2102,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "prepare.set",
             "auto_reviewer.set",
             "away.set",
+            "reviewer_mode.set",
             "review.undo",
             "live.set",
             "copies.set",

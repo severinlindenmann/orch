@@ -34,7 +34,8 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
     x = a.add_parser("uninstall", parents=[common], help="uninstall an add-on")
     x.add_argument("name")
-    a.add_parser("list", parents=[common])
+    x = a.add_parser("list", parents=[common])
+    x.add_argument("--catalog", action="store_true", help=argparse.SUPPRESS)  # installation choices
     x = a.add_parser("check", parents=[common], help="check an add-on against the add-on contract")
     x.add_argument(
         "name", metavar="NAME|./FOLDER", help="an installed or shipped add-on, or an add-on folder"
@@ -99,7 +100,7 @@ def dispatch(args, root: Path) -> bool:
         return False
     sub = getattr(args, "sub", None)
     if sub == "list":
-        rows = addons.listing(root)
+        rows = addons.listing(root, catalog=args.catalog)
         have = [r for r in rows if r["installed"]]
         avail = [r for r in rows if not r["installed"]]
         w = addons.name_width(r["name"] for r in rows)

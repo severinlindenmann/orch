@@ -80,7 +80,9 @@ record. The installed list (`addons.json` in the same folder) is the registry of
    `--purge` also deletes `.orch/addons/<name>/` and the `[<name>]` table of `.orch/config.toml`.
 The package stays in the tool env (other workspaces may use it); `orch addon uninstall <name>` removes it from the machine.
 
-`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name
+`orch addon list --json` omits the built-in relay and publish clients unless active in this workspace.
+The installation manager requests `orch addon list --catalog --json` to include both even while off.
+Both return a JSON list with one entry per visible installed add-on, sorted by name
 (`"installed": true`), followed by one entry per shipped add-on that is **not installed yet** (`"installed": false`,
 always `active: false` and `running: false`, `source: "built-in"`; sorted by name). The available entries are read
 from the local source folder only (never the network); one whose manifest cannot be read there is left out. Adding one
