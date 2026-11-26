@@ -98,8 +98,14 @@ def build(root) -> dict:
         notes.append(f"This page lists the newest {MAX_ROWS}; {hidden} older are hidden.")
     n = data["unreadable"]
     if n:
-        what = "1 lesson file could not be read and is left out" if n == 1 else f"{n} lesson files could not be read and are left out"
-        notes.append(f"{what}. Fix or delete {'it' if n == 1 else 'them'} in the folder .orch/addons/lessons.")
+        what = (
+            "1 lesson file could not be read and is left out"
+            if n == 1
+            else f"{n} lesson files could not be read and are left out"
+        )
+        notes.append(
+            f"{what}. Fix or delete {'it' if n == 1 else 'them'} in the folder .orch/addons/lessons."
+        )
     if notes:
         view["notice"] = " ".join(notes)
         view["notice_tone"] = "warn"
