@@ -1,3 +1,6 @@
+# 25 Nov Not sent says why and what to do (ORCH-1942)
+- New page `not-sent.html`: a refused message keeps Not sent, Retry and Discard, plus one safe sentence under it: "This workspace no longer takes messages from this phone. Ask its owner to add your phone again." (403), "A file in it is no longer on the server. Retry uploads it again." (404), else "Try sending this message again.". The server's own text never shows; VoiceOver reads Not sent and the sentence once. The Chats line names the workspace and points to the chat.
+
 # 25 Nov swipe rows and Reduce Motion (ORCH-2049)
 - Needs your OK rows (Hide) and ticket chat rows (Archive / Delete): with Reduce Motion on, the row still follows the finger, but reveal, spring back, close and hide jump to where they end instead of sliding. Buttons, Undo, long-press menu and VoiceOver actions are unchanged; with Reduce Motion off nothing changes.
 - `archive.html` now says what the phone does: a long swipe or fling on a chat only shows its buttons, it never archives or deletes on its own.

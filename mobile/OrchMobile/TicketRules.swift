@@ -74,6 +74,28 @@ enum ArtifactMentions {
     }
 }
 
+/// ORCH-1942: the one safe sentence under a "Not sent" bubble: why, when the phone knows it, and what to do.
+/// Built from the refusal's status only; the relay's own text never reaches the screen or VoiceOver.
+enum NotSentNote {
+    static let generic = "Try sending this message again."
+    static func text(status: Int?) -> String {
+        switch status {
+        case 403: "This workspace no longer takes messages from this phone. Ask its owner to add your phone again."
+        case 404: "A file in it is no longer on the server. Retry uploads it again."
+        default: generic
+        }
+    }
+    static func text(for item: OutboxItem) -> String { text(status: item.failureStatus) }
+    /// What VoiceOver says for the bubble (once: the visible sentence itself is hidden from VoiceOver).
+    static func spoken(_ note: String) -> String { "Not sent. \(note)" }
+    /// The short banner line outside the chat: names the affected message's workspace and points to the bubble.
+    static func banner(workspace: String?) -> String {
+        let to = workspace.map { " to \($0)" } ?? ""
+        return "A message\(to) was not sent. Open the chat to retry it."
+    }
+    static let answer = "Your answer was not sent. Try answering again."
+}
+
 enum QueuedNote {
     static let waiting = "Waiting · will send when online"
     static func text(for item: OutboxItem?) -> String? {
