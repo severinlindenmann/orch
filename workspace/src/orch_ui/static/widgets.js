@@ -734,7 +734,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
 /* Attention tiles (ORCH-2184, Focused review C; owner's words of 26 Nov). UI.attentionTiles(groups, o) -> .stat-row of three
-   tile buttons: Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
+   tile buttons (in a .attn-tiles-wrap with the deadline as one line under them on a phone): Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
    deadline ("Next deadline: <card> · <time>", only on the tile that holds the next one)}]. A tile with nothing in it
    says "Nothing waits here" and does nothing. o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
 UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken back afterwards.',short:'One clear question each.',time:'Big, public or hard to take back.'};
@@ -746,7 +746,10 @@ UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken b
   b.setAttribute('aria-label',g.name+', '+n+' waiting'+(n&&g.deadline?', '+g.deadline:''));
   if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
- return row};
+ /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */
+ const due=(groups||[]).find(g=>(g.count|0)>0&&g.deadline),wrap=el('div','attn-tiles-wrap');wrap.append(row);
+ if(due)wrap.append(el('p','attn-tile-line attn-due attn-due-line phone-only',due.name+': '+due.deadline));
+ return wrap};
 })();
 /* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, commands, error, notice}) is the full-page login card
    ("Welcome", one token field, Log in) plus the way in for someone without a token (ORCH-1851): ask the person who
