@@ -51,14 +51,30 @@ SUBCOMMANDS = (
     *cli_screen.SUBCOMMANDS,
 )
 
+HELP = {  # the subcommands a person uses; the rest are for tools and hooks and stay out of help
+    "start": "start your helper on a ticket",
+    "status": "what the run on a ticket is doing",
+    "list": "every run at once",
+    "attach": "open the live session of a ticket",
+    "screen": "the last lines of a live session (read-only)",
+    "send": "send the helper a message",
+    "take-back": "take back a message that still waits",
+    "interrupt": "stop what the helper is doing now; the session stays",
+    "stop": "stop the run on a ticket",
+    "history": "the earlier sessions of a ticket",
+    "tend": "look after every run in one pass",
+}
+
 
 def add_parsers(sub, common) -> None:
-    r = sub.add_parser("run", help=argparse.SUPPRESS).add_subparsers(dest="sub")
+    r = sub.add_parser("run", help="start your helper on a ticket, watch it, stop it").add_subparsers(
+        dest="sub", metavar="<command>"
+    )
     cli_screen.add_run_parsers(r, common)
     for name in SUBCOMMANDS:
         if name in cli_screen.SUBCOMMANDS:
             continue
-        x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
+        x = r.add_parser(name, parents=[common], help=HELP.get(name, argparse.SUPPRESS))
         if name == "list":
             continue  # every run; no ticket
         if name == "tend":  # every live run; no ticket

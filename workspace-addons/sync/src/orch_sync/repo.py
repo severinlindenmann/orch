@@ -363,19 +363,6 @@ def state(root):
     return "new"
 
 
-# Any trace of the sync add-on's local state means "synced before" (never adopt). The whole run/sync folder
-# counts too (an agent deleting single files must not get adoption). The first `orch sync set` (local or
-# remote) calls _history_on before it writes anything there; a step only reaches it once `set` has run.
-EARLIER = (
-    "run/sync/state.json",
-    "run/sync/pending.json",
-    "run/sync/choices.json",
-    "run/sync/held",
-    "run/sync/settings.json",
-    "run/sync",
-)
-
-
 def _history_on(root):
     """Sync is on here from now on: core's one rule for person fields applies (orch.history). Recorded in the
     guarded orch home (keyed by real path and workspace id) FIRST, whatever state the repository is in and
@@ -384,9 +371,9 @@ def _history_on(root):
     in its tickets as this machine's own; core never adopts when a ticket shows sync's traces."""
     from orch import history
 
-    fresh = not os.path.lexists(safe(root, ".git")) and not any(
-        os.path.lexists(safe(root, p)) for p in EARLIER
-    )
+    # Any trace of the sync add-on's local state means "synced before" (never adopt), except a run/sync folder
+    # holding only the person's "left off" choice (core's history.sync_run_used, ORCH-2114).
+    fresh = not os.path.lexists(safe(root, ".git")) and not history.sync_run_used(Path(root))
     try:
         adopted = history.enable_sync(Path(root), adopt=fresh)
     except Exception as e:  # noqa: BLE001 - the guarded home refused: sync does not start
