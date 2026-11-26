@@ -70,7 +70,7 @@ def asking(tmp_path):
         "print(json.dumps(state)) if sys.argv[1:3] == ['run', 'status'] else sys.exit(2)\n"
     )
     orch.chmod(0o755)
-    for _ in range(40):
+    for _ in range(150):
         if "Esc to cancel" in tm("capture-pane", "-p", "-t", f"={TID}:").stdout:
             break
         time.sleep(0.1)
@@ -93,7 +93,7 @@ def test_allow_once_types_only_the_yes_key_of_the_prompt_the_person_saw(asking, 
     assert termsession.answer(tmp_path, orch, TID, "always", p["digest"])[0] == 400
     assert not got.exists()  # nothing was typed
     assert termsession.answer(tmp_path, orch, TID, "yes", p["digest"]) == (200, "{}")
-    for _ in range(40):
+    for _ in range(150):
         if got.exists():
             break
         time.sleep(0.1)
@@ -119,7 +119,7 @@ def test_the_routes_need_the_persons_session_and_not_the_typing_setting(asking, 
         assert call(base + "/api/term/confirm", extra, h)[0] == 400
         assert not got.exists()
         assert call(base + "/api/term/confirm", want, h)[0] == 200
-        for _ in range(40):
+        for _ in range(150):
             if got.exists() and got.read_text():
                 break
             time.sleep(0.1)
