@@ -5,7 +5,7 @@
 # variable EDGE_RUNNER only steers where ci.yml sends the jobs. The runner's registration on GitHub is removed by
 # hand (Settings > Actions > Runners > the runner > Remove); until then GitHub shows it offline and ci.yml sends the
 # Linux jobs to GitHub's machines by itself. The users orch-ci, orch-ci-2 ... stay unless you add --remove-user.
-# The packages (faketime, build tools, tmux, Node, nftables) stay.
+# The packages (faketime, build tools, tmux, Node, nftables) stay; the git setup.sh built goes.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "Run it as root: sudo bash $0" >&2; exit 1; }
 # every runner: orch-ci with orch-edge-runner(-loop).service, orch-ci-K with orch-edge-runner(-loop)-K.service
@@ -31,4 +31,6 @@ rm -f /etc/systemd/system/orch-edge-runners.slice
 systemctl daemon-reload
 nft delete table inet orch_ci_runner 2>/dev/null || true
 rm -rf /usr/local/orch-edge-runner
+for f in /usr/local/bin/*; do case $(readlink "$f" 2>/dev/null) in (/opt/orch-edge-git/*) rm -f "$f";; esac; done
+rm -rf /opt/orch-edge-git
 echo "Runner stopped and removed from orch edge. Remove it on GitHub too: Settings > Actions > Runners."

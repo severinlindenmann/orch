@@ -524,3 +524,31 @@ def test_clock_jobs_get_twice_the_time_on_orch_edge():
     assert "timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}" in wf
     assert wf.count("timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}") == 2
     assert "timeout-minutes: 8\n" not in wf and "timeout-minutes: 12\n" not in wf
+
+
+def test_the_runner_has_a_git_as_current_as_github_s_and_a_job_refuses_an_older_one():
+    # Debian 13's git 2.47 ignores merge.renames=false in `git merge-tree`: the sync add-on's case-clash test got a
+    # rename conflict on orch edge only (ORCH-1932, queue group #3338). setup.sh builds the pinned release.
+    setup = (RUNNER / "setup.sh").read_text()
+    ver = re.search(r"^GIT_VER=(\d+\.\d+\.\d+); GIT_SHA=([0-9a-f]{64})$", setup, re.M)
+    assert ver, "setup.sh pins git with its checksum"
+    assert 'sha256sum -c --quiet -' in setup and "pub/software/scm/git/git-$GIT_VER.tar.xz" in setup
+    assert 'DESTDIR="$GT/root" install' in setup  # a failed build never replaces the working copy
+    assert 'ln -sfn "$f" "/usr/local/bin/${f##*/}"' in setup
+    assert "Environment=PATH=$B/bin:/usr/local/bin:/usr/bin:/bin" in setup  # /usr/local/bin before Debian's git
+    home = (ROOT / ".github" / "actions" / "edge-job-home" / "action.yml").read_text()
+    assert f"want={ver.group(1)}\n" in home and "sort -V" in home and "exit 1" in home
+    assert "rm -rf /opt/orch-edge-git" in (RUNNER / "uninstall.sh").read_text()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize("have, ok", [("2.47.3", False), ("2.56.0", False), ("2.56.1", True), ("2.60.0", True)])
+def test_the_job_home_git_check(tmp_path, have, ok):
+    home = (ROOT / ".github" / "actions" / "edge-job-home" / "action.yml").read_text()
+    check = home[home.index("        want="):home.index("        # The runner user's")]
+    fake = tmp_path / "git"
+    fake.write_text(f"#!/bin/sh\necho 'git version {have}'\n")
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    r = subprocess.run(["bash", "-c", "set -eu\n" + textwrap.dedent(check)], env=env, capture_output=True, text=True)
+    assert (r.returncode == 0) is ok, r.stdout + r.stderr
