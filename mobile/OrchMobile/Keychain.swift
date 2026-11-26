@@ -19,13 +19,27 @@ enum Keychain {
         return try? JSONDecoder().decode(Credentials.self, from: data)
     }
 
-    static func save(_ c: Credentials) {
-        delete()
-        guard let data = try? JSONEncoder().encode(c) else { return }
+    /// Updates in place, so a failed write never leaves the phone without its token. This device only: never in a
+    /// backup or iCloud Keychain; readable after the first unlock so a refresh in the background works.
+    @discardableResult
+    static func save(_ c: Credentials) -> Bool {
+        guard let data = try? JSONEncoder().encode(c) else { return false }
+        let attributes: [String: Any] = [kSecValueData as String: data,
+                                         kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
+        let updated = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updated == errSecSuccess { return true }
+        guard updated == errSecItemNotFound else { return false }
+        return SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// How the stored item may be read (`kSecAttrAccessible…`); nil when nothing is stored.
+    static func accessibility() -> String? {
         var q = query
-        q[kSecValueData as String] = data
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(q as CFDictionary, nil)
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let a = out as? [String: Any] else { return nil }
+        return a[kSecAttrAccessible as String] as? String
     }
 
     static func delete() { SecItemDelete(query as CFDictionary) }
