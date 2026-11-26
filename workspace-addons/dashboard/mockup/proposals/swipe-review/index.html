@@ -15,7 +15,7 @@
 <section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">How it works</h2>
 <table class="mini-table" style="font-size:14px;line-height:20px;width:100%"><thead><tr><th>Move</th><th>Phone</th><th>Workspace</th><th>What happens</th></tr></thead><tbody>
 <tr><td>Right</td><td>swipe right or ✓</td><td>→ or drag or click</td><td>Approve. The button and the stamp name the action (“Build it”, “Publish”, “Start reminders”, “Use C”), and the card says what happens (“If you approve: goes live for everyone at cafe.example”). Things that publish or send still ask for Face ID / the one-click confirm.</td></tr>
-<tr><td>Left</td><td>swipe left or ✕</td><td>←</td><td>Don't do (on a Check result: Send back). The helper stops this.</td></tr>
+<tr><td>Left</td><td>swipe left or ✕</td><td>←</td><td>Don't do (on a Test results card: Send back). The helper stops this.</td></tr>
 <tr><td>Down</td><td>swipe down or mic</td><td>↓</td><td>Comment sheet: hold or tap to talk (gsw / de / en, written out) or type. The button says the outcome: “Send back for changes” (never approves); on options also “Use C with these changes”. Pull down to close, words kept.</td></tr>
 <tr><td>Up</td><td>swipe up or Later</td><td>↑</td><td>Later: stays unanswered, goes to the end of the stack.</td></tr>
 <tr><td>Tap the middle</td><td>tap, pinch</td><td>Space, click, Ctrl+wheel</td><td>Bigger view: zoom, Open, “Comment on a spot” (pin + words). Pins go with whatever you swipe next.</td></tr>
@@ -110,8 +110,8 @@ entry with "replaces"):
 </section>
 <section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">My recommendation</h2>
 <ul style="margin:0;padding-left:20px;display:grid;gap:6px">
-<li>Put in the stack: drafts, Check results, helper plans that need a yes, links before they go public. Questions with several choices stay normal question cards (a swipe can't pick option B).</li>
-<li>Left word: “Don't do”, but “Send back” on Check results (that is the word the ticket already uses).</li>
+<li>Put in the stack: drafts, Test results, helper plans that need a yes, links before they go public. Questions with several choices stay normal question cards (a swipe can't pick option B).</li>
+<li>Left word: “Don't do”, but “Send back” on Test results (that is the word the ticket already uses).</li>
 <li>Swipe up = Later (added after the challenge: an honest “not now”).</li>
 <li>A comment never approves. To approve with changes on options, the sheet has its own button “Use C with these changes”.</li>
 <li>Build: built into orch (no add-on): one widget in the master design system (<code>UI.swipeDeck</code>, used by every page here), the Review page orch serves itself, the same page inside the dashboard, one SwiftUI screen in the app. Answers use the same paths as today's Looks good / Send back and the question answers, so nothing new on the wire.</li>
