@@ -1337,7 +1337,7 @@ body.mk-focus-v4d .mw-bands{align-items:start;gap:var(--s4) var(--s4)}
 body.mk-focus-v4d .mw-works{grid-template-columns:repeat(auto-fit,minmax(min(100%,232px),1fr))}
 body.mk-focus-v4d .mw-works{grid-template-columns:repeat(auto-fit,minmax(min(100%,264px),1fr))}
 body.mk-focus-v4d .mw-lines{container-type:inline-size}
-body.mk-focus-v4d .mw-line .mw-tt{white-space:nowrap}
+body.mk-focus-v4d .mw-line .mw-tt{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 body.mk-focus-v4d .mw-lnow{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 body.mk-focus-v4d .mw-bands[data-many] .mw-works,body.mk-focus-v4d .mw-bands[data-many] .mw-lines{max-height:360px}
 /* needs you: one compact row each */
