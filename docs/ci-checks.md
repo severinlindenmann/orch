@@ -78,10 +78,10 @@ Increasing `max_group` does not help a PR that must run alone.
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
 | add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
-| page smoke (Focus and Insights pages, Focus click-through) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
+| page smoke (Focus and Insights pages, Focus click-through with axe-core: a serious or critical finding fails, #2420) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
 | dashboard click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
-| contracts, publish, relay, transcription | required | required (contracts always) | runs unless proven | | required |
+| contracts, publish, relay (with the relay browser page click-through, #2495), transcription | required | required (contracts always) | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
@@ -106,6 +106,22 @@ a green group proved (then only they run, unless they are on our own Windows VM,
 release check; a red one on develop opens the red-develop ticket. The click-throughs were out of queue groups from
 20 to 22 Nov (ORCH-1106) and run and count there again since ORCH-1107 (24 develop runs in a row green with them);
 `brand/tests/test_ci_queue_skip.py` keeps `ci.yml`, `addons.yml` and this table in step.
+
+## Scheduled runs that GitHub drops or delays (#2657)
+
+GitHub creates this repository's scheduled runs late or not at all. From 20 to 23 Nov, `live-check` (hourly) ran 7
+times in about 100 slots, and `ci` (01:00 UTC) and `e2e` (03:17 UTC) started 7-8 hours late. GitHub says a schedule
+may be delayed or dropped under load, and no setting changes that. The crons stay as the first try. On every push to
+develop the `catch-up` job in `ci.yml` (`scripts/ci_catch_up.py`, a few seconds, never red, the run's result does not wait for it) starts the
+following with `gh workflow run` on develop:
+
+- `live-check`, when its newest run is 2 hours old;
+- the full `e2e`, when no nightly or manual run came for 26 hours. A dropped nightly, not a late one: a late one would
+  run twice. It is named `e2e (catch-up)`, and the Development expert reads its result like the nightly.
+
+The `ci` nightly gets no catch-up. Every push to develop already runs macOS and Windows unless a green group proved it
+(ORCH-1107), and the release check runs everything again. The Development expert still reports a nightly that came
+late or did not come (ORCH-454).
 
 ## Windows on our own Windows VM (ORCH-1127)
 

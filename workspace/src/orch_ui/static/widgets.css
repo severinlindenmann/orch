@@ -1447,7 +1447,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
-.wall-lines{display:grid;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
+.wall-lines{display:grid;grid-auto-rows:max-content;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
 .wall-line{display:flex;gap:var(--s2);align-items:center;min-height:var(--touch);padding:var(--s1) var(--s3)}
 .wall-line+.wall-line{border-top:1px solid var(--border)}
 .wall-line:hover{background:var(--surface-2)}
@@ -1460,6 +1460,9 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
+/* a list beside the open layer (about 260 px): the title takes the whole first line and the buttons go below it,
+   else the title is squeezed to one letter per line over Open ticket (axe target-size, ORCH-1883) */
+@container (max-width:320px){.wall-line{flex-wrap:wrap}.wall-lopen{flex:1 0 100%;flex-wrap:wrap}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
