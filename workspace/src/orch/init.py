@@ -71,10 +71,15 @@ def init(root: Path, code: str | None = None, new: bool | None = None) -> list[s
         f"Ticket keys {code}-1, {code}-2, ... (change the code: orch config set workspace.code <code>)",
         adapters.permission_line(root),
         *([w] if (w := harness.git_visible_warning(root)) else []),
-        "Your agent can now use tickets.",
-        "Your agent will be allowed to work in this folder.",  # consent for a live start's folder trust
     ]
     return lines
+
+
+FIRST_TICKET = 'orch ticket new "<title>"'
+READY = "orch is ready in this folder: local tickets work now."
+CAN_USE = "Your agent can now use tickets."
+CONSENT = "Your agent will be allowed to work in this folder."  # consent for a live start's folder trust
+NO_AGENT = "No agent found yet. Optional: install one (orch agents lists them), then run orch init again."
 
 
 STARTER_TITLE = "Set up this workspace"
@@ -162,12 +167,20 @@ def _notice(captured: str, names: list[str], shown: str | None) -> str:
     return "\n".join(ln for ln in keep if ln.strip()).strip()
 
 
-def has_recommended(root: Path) -> bool:
+def recommended_names(root: Path) -> list[str]:
+    """The add-ons `orch init --recommended` would turn on here, read without the network."""
     from orch import addons
 
-    return any(
-        r.get("installed", True) and r["recommended"] and not r["active"] for r in addons.listing(root)
-    ) or bool(addons.shipped_recommended(fetch=False))
+    off = {
+        r["name"]
+        for r in addons.listing(root)
+        if r.get("installed", True) and r["recommended"] and not r["active"]
+    }
+    return sorted(off | set(addons.shipped_recommended(fetch=False)))
+
+
+def optional_line(names: list[str]) -> str:
+    return f"Optional    {', '.join(names)}: orch init --recommended (shows what it adds and asks first)"
 
 
 def recommended(root: Path, yes: bool = False, interactive: bool = False) -> list[str]:
@@ -192,13 +205,17 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
     text = "\n\n".join(addons.consent_text(mans[r["name"]], False) for r in rows)
     if not yes:
         if not interactive:
-            err = Refused(f"{text}\n\nTo turn these on, run it again with --yes.")
+            err = Refused(
+                f"{text}\n\nLocal tickets work here already. To turn these on, run it again with --yes."
+            )
             err.confirm = True
             raise err
         sys.stderr.write(text + "\nTurn these on? [y/N] ")
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
-            raise Refused("Not confirmed. Nothing was changed. Run orch init again and answer y to go on.")
+            raise Refused(
+                f"Not confirmed, so no add-on was turned on. Local tickets work here: {FIRST_TICKET}"
+            )
     names = [r["name"] for r in rows]
     before = set(addons.active(root))  # whatever is on already stays on, whatever fails
     now: list[str] = []  # turned on at once (already installed); the rest wait for the one reinstall
@@ -248,8 +265,10 @@ def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> st
     found = [r for r in adapters.detect() if r["found"]]
     if not found:
         if interactive and not yes:
-            return _other(root)
-        return "No agent found; set one later: orch config set workspace.agent <name>"
+            ask = "None found here. Add yours by its command now (optional)? [y/N] "
+            if input(ask).strip().lower() in ("y", "yes"):
+                return _other(root)
+        return NO_AGENT
     if yes or not interactive:
         _save(root, found[0]["name"])
         return f"Agent: {found[0]['label']} (found first)."
@@ -282,7 +301,7 @@ def _other(root: Path) -> str:
         raise Refused(f"There is already an agent called '{name}'. Pick another name; nothing was changed.")
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
-        return "No agent chosen; set one later: orch config set workspace.agent <name>"
+        return "No agent chosen. Optional: run orch init again to add one."
     from orch import tickets
 
     if not (1 <= len(cmd) <= 500 and "\n" not in cmd and "\r" not in cmd):
