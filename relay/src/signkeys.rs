@@ -45,6 +45,10 @@ pub fn parse_public(s: &str) -> Result<[u8; 32], &'static str> {
     if vk.is_weak() {
         return Err("`public_key` is a weak (small-order) key.");
     }
+    // the same rule as a key change (msgsig::registration_key_ok): no torsion part, so every library agrees
+    if !vk.to_edwards().is_torsion_free() {
+        return Err("`public_key` is not a valid Ed25519 key.");
+    }
     Ok(raw)
 }
 

@@ -25,6 +25,7 @@ mobile/OrchMobileTests/Fixtures/msgsig-v1.json
 mobile/OrchMobile/MessageSignature.swift
 mobile/OrchMobileTests/MessageSignatureTests.swift
 relay/src/msgsig.rs
+relay/src/signgate.rs                # the relay's gate for signed messages (ORCH-1201; merged with the owner's label)
 relay/tests/msgsig_vectors.rs
 scripts/gen_msgsig_vectors.py
 workspace/src/orch/msgsig.py
