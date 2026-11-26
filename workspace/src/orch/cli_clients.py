@@ -415,7 +415,7 @@ def _said_line(r: dict) -> str:
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
-    by, sub = tickets.current_actor(), args.gsub
+    by, sub = tickets.acting_by(args), args.gsub
     tid = tickets.resolve_cli(root, args.ticket, json_output=args.json) if hasattr(args, "ticket") else None
     ws = relay.resolve(root, args.workspace) if hasattr(args, "workspace") else None
     if sub == "list":
@@ -501,6 +501,7 @@ def run_group(args, root: Path, out) -> None:
             click,
             _confirm(args),
             expect_sha=sha if click else None,
+            by=by,
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":
