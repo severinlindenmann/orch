@@ -60,8 +60,10 @@ function storedTicketView() { const v = localStorage.getItem('orch.tickets.view'
 // ORCH-523: with 10,000 tickets the page can neither hold nor draw every ticket. /api/state carries the open and
 // recently finished ones (ORCH-522); /api/tickets brings older finished tickets a page at a time and searches every
 // ticket on the server. Each group and lane draws its first rows and the next ones when its end scrolls into view.
-const ROWS_STEP = 50, LANE_STEP = 30, rowsCap = new Map(), moreHandlers = new Map();
-const capOf = (key, step = ROWS_STEP) => rowsCap.get(key) || step;
+// ORCH-2271: a list group draws its first LIST_FIRST rows (a screen shows about a dozen); its end then brings ROWS_STEP
+// more as it nears the view. Six open groups of 50 rows were 11,000 elements and kept the list at 2 s at 10,000 tickets.
+const ROWS_STEP = 50, LANE_STEP = 30, LIST_FIRST = 20, rowsCap = new Map(), moreHandlers = new Map();
+const capOf = (key, step = ROWS_STEP) => rowsCap.get(key) || (key.startsWith('list-') ? LIST_FIRST : step);
 const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false, failed:false};
 const hits = {key:null, want:null, rows:[], next:null, total:0, busy:false, timer:null};
 const pagingOn = () => !snapshot && typeof fetch === 'function';
@@ -437,9 +439,13 @@ function prepareWord(t) {
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
 // A friendly date for a tooltip, never the raw ISO string.
+// One formatter for every row (ORCH-2271: toLocaleString with options builds a new one per call, 40 ms per list draw)
+let whenFormat = null;
 function whenTitle(at) {
   const d = new Date(at);
-  return !at || Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+  if (!at || Number.isNaN(d.getTime())) return '';
+  whenFormat ||= new Intl.DateTimeFormat(undefined, {weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+  return whenFormat.format(d);
 }
 // A real relative time: when it finished, or when it last changed.
 // G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
