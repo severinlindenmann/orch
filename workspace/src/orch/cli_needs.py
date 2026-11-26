@@ -22,7 +22,9 @@ def add_parsers(sub, common) -> None:
 
 
 def _helpers_now(n: int) -> str:
-    return "no helper running right now" if not n else f"{n} {'helper' if n == 1 else 'helpers'} running right now"
+    if not n:
+        return "no helper running right now"
+    return f"{n} {'helper' if n == 1 else 'helpers'} running right now"
 
 
 def _counts_text(c: dict) -> str:
@@ -50,7 +52,8 @@ def _line(r: dict, keys: dict[str, str]) -> str:
     pad = " " * 14
     ans = r.get("answer")
     stale = "  (not up to date)" if r.get("stale") else ""
-    if ans and r["ticket"]:  # a ticket question: one line to answer it, never a choice filled in for the person
+    # A ticket question: one line to answer it, never a choice filled in for the person.
+    if ans and r["ticket"]:
         opts = "  [" + " | ".join(ans.get("labels") or ans["options"]) + "]" if ans.get("options") else ""
         how = f'{pad}you answer: orch answer {who} {ans["question"]} "<your choice>"'
         return f"  {who:<10}  Question: {r['text']}{opts}{stale}\n{how}"
@@ -80,8 +83,8 @@ def _person_line(item: dict, t: dict) -> str:
 
 
 def _person_rows(root: Path, rows: list[dict]) -> list[tuple[dict, dict]]:
-    """The needs-you items `orch counts` counts that are no needs row: a result to review and a helper that could
-    not start (the same items, by the same rule, as counts.needs_you), with their tickets."""
+    """The needs-you items `orch counts` counts that are no needs row: a result to review and a helper that
+    could not start (the same items, by the same rule, as counts.needs_you), with their tickets."""
     from orch import counts, history, ticketindex
 
     def keep(r: dict) -> bool:

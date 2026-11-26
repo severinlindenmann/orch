@@ -78,7 +78,8 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
     assert "orch check done" in seen[1] and "orch check done" in seen[2]  # after check add
     assert "orch check done" in seen[3]  # one task is still open
     assert "orch ticket summary" in seen[4]  # all tasks done, no summary yet
-    # summary written: hand it to the person (ORCH-2140: a helper's Done is never accepted, so it is never the hint)
+    # summary written: hand it to the person (ORCH-2140: a helper's Done is never accepted, so it is never the
+    # hint)
     assert re.search(r"hand it to the person: orch ticket status \S+ review", seen[5])
 
 
@@ -168,7 +169,8 @@ def test_keeper_off_cli_has_no_red_run_next_line(proj, run):
 
 
 def test_needs_lists_every_thing_counts_counts(proj, run):
-    """ORCH-2140: `orch counts` said 2 things need you, `orch needs` listed 1 (the result to review was missing)."""
+    """ORCH-2140: `orch counts` said 2 things need you, `orch needs` listed 1 (the result to review was
+    missing)."""
     run("init", "--yes")
     q = json.loads(run("ticket", "new", "Supplier", "--json")[1])["key"]
     r = json.loads(run("ticket", "new", "Newsletter", "--json")[1])["key"]

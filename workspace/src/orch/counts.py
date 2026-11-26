@@ -22,10 +22,10 @@ nothing is stored.
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
   with no live process has no helper and is not working.
 - stuck: the ticket rule (tickets.stuck_why) or a stuck helper, one reason.
-- in_progress / not_started (ORCH-2140, Home and `orch counts`): the open tickets that do not need the person now.
-  Not started = Backlog or Ready, no task finished, no live helper and no Send back open; in progress = every other
-  one (Working, Waiting, a Send back, a ticket with a task finished). In Review, finished, and a ticket that needs
-  you are in neither.
+- in_progress / not_started (ORCH-2140, Home and `orch counts`): the open tickets that do not need the person
+  now. Not started = Backlog or Ready, no task finished, no live helper and no Send back open; in progress =
+  every other one (Working, Waiting, a Send back, a ticket with a task finished). In Review, finished,
+  and a ticket that needs you are in neither.
 """
 
 from __future__ import annotations
@@ -221,7 +221,8 @@ def stuck(ticket: dict, run: dict | None = None, now: datetime | None = None) ->
 
 
 def started(ticket: dict, helper_state: str | None = None) -> bool:
-    """ORCH-2140: work on an open ticket began: Working or Waiting, a live helper, a task finished or a Send back."""
+    """ORCH-2140: work on an open ticket began: Working or Waiting, a live helper, a task finished
+    or a Send back."""
     from orch import tickets as core
 
     if ticket.get("status") not in ("open", "ready"):
@@ -256,8 +257,8 @@ def summary(
     stopped: list | None = None,
 ) -> dict:
     """Everything a page counts, from one pass: {needs_you, helpers: {state: n}, working, running, stuck,
-    in_progress: [ids], not_started: [ids], tickets: {id: {step, progress, helper, stuck}}}. runs: {ticket id: run status dict}; stopped: the needs
-    rows of work that stopped (stuck.rows)."""
+    in_progress: [ids], not_started: [ids], tickets: {id: {step, progress, helper, stuck}}}.
+    runs: {ticket id: run status dict}; stopped: the needs rows of work that stopped (stuck.rows)."""
     runs = runs or {}
     per: dict[str, dict] = {}
     helpers = dict.fromkeys(HELPER_STATES, 0)
