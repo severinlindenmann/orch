@@ -133,6 +133,10 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
         if let state = UserDefaults.standard.string(forKey: "mockToolAlert") { received.append(Self.toolAlert(state)) }
         if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
+        if UserDefaults.standard.bool(forKey: "mockEarlier") {
+            for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            received += Self.earlierDays()
+        }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -361,6 +365,20 @@ actor MockRelay: RelayAPI {
                  text("m_cd_t1", 600, mine: true, "Good morning. What is due next?", by: "you", day: today)],
                 [text("m_cd_y2", 89_900, mine: false, "All set. Your tickets are saved.", by: Self.pilatus, day: yesterday),
                  text("m_cd_t2", 540, mine: false, "Your car tax is due on 30 Nov.", by: Self.pilatus, day: today)])
+    }
+
+    /// Test hook `-mockEarlier YES` (with `-mockGroups YES`): Finance's Chat has three earlier days; "car tax" is only in a
+    /// finished group's title, never in these messages.
+    static func earlierDays(now: Date = Date()) -> [PhoneMessage] {
+        let f = ISO8601DateFormatter()
+        let lines = [(3, "The 2025 invoice from the garage is filed."), (3, "I added it to the household folder."),
+                     (2, "Reminder: renew the parking permit."), (1, "Insurance renewal is due in December.")]
+        return lines.enumerated().map { i, line in
+            let at = now.addingTimeInterval(-Double(line.0) * 86_400)
+            var body = TextBody(text: line.1, general: true); body.by = GroupMock.finance; body.via = "helper"; body.day = ChatDay.key(for: at)
+            return PhoneMessage(message: TextMessage(id: String(format: "m_earlier%05d", i), from: GroupMock.finance, to: "ph_iphone0001", type: "text",
+                                                     createdAt: f.string(from: at), ticket: nil, body: body), workspaceName: "Finance")
+        }
     }
 
     /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).

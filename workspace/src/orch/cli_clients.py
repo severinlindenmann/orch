@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import getpass
+import os
 import re
 import sys
 from pathlib import Path
@@ -71,6 +73,37 @@ def _run_profile(args, mod, out) -> None:
 _COMMON: list = []
 
 
+def _add_invite(svc, common, server: str):
+    x = svc.add_parser(
+        "invite", parents=[common], help=f"admin: add a new workspace on this {server} and connect its folder"
+    )
+    x.add_argument("name", help="the new workspace's name")
+    x.add_argument("--folder", required=True, help="the new workspace's folder (made when missing)")
+    x.add_argument("--admin-url", required=True, help="the admin page's address (private network)")
+    return x
+
+
+def _admin_token(name: str) -> str:
+    """The server's admin token: its environment variable, else typed (not shown). Never saved or printed."""
+    env = net.ADMIN_TOKEN_ENV[name]
+    t = os.environ.get(env, "").strip()
+    if t:
+        return t
+    if not term.is_terminal(sys.stdin):
+        raise Refused(f"orch needs the admin token: set {env}, or run this in a terminal to type it.")
+    t = getpass.getpass("Admin token (not shown, not saved): ").strip()
+    if not t:
+        raise Refused("No admin token typed; nothing was changed.")
+    return t
+
+
+def _invite_text(r: dict, server: str) -> str:
+    return (
+        f"Added {r['name']} ({r['id']}) on the {server} and connected {r['folder']}.\n"
+        "Its token went straight into that folder; nothing secret was shown."
+    )
+
+
 def add_parsers(sub, common) -> None:
     _COMMON[:] = [common]
     pub = sub.add_parser("publish", help="share files and apps by private link").add_subparsers(
@@ -80,6 +113,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
+    _add_invite(pub, common, "publish server")
     pub.add_parser("whoami", parents=[common], help="show who you are and what you may share")
     _add_profile(pub)
     life = argparse.ArgumentParser(add_help=False)
@@ -129,8 +163,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("url")
     x.add_argument("--workspace", required=True)
     x.add_argument("--token", required=True)
+    _add_invite(rel, common, "relay").add_argument("--group", help="the group it joins (id or name)")
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
-    rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
+    rel.add_parser("status", parents=[common], help="is this folder connected to a relay, and does it answer")
     rel.add_parser(
         "key",
         parents=[common],
@@ -475,7 +510,11 @@ def run_publish(args, root: Path, out) -> None:
     args._root = root
     if sub == "profile":
         return _run_profile(args, publish, out)
-    if sub == "connect":
+    if sub == "invite":
+        cardtext.server_address(args.admin_url)
+        r = publish.invite(root, args.name, args.folder, args.admin_url, _admin_token("publish"))
+        out(args, r, _invite_text(r, "publish server"))
+    elif sub == "connect":
         who = publish.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -768,7 +807,7 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "status", "outbox", "view", "key") and not dry
+        sub not in ("connect", "invite", "status", "outbox", "view", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
         _key_once(root)
@@ -776,7 +815,11 @@ def run_relay(args, root: Path, out) -> None:
         return run_group(args, root, out)
     if sub == "contacts":
         return run_contacts(args, root, out)
-    if sub == "connect":
+    if sub == "invite":
+        cardtext.server_address(args.admin_url)
+        r = relay.invite(root, args.name, args.folder, args.group, args.admin_url, _admin_token("relay"))
+        out(args, r, _invite_text(r, "relay"))
+    elif sub == "connect":
         cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
@@ -790,7 +833,18 @@ def run_relay(args, root: Path, out) -> None:
             st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
         except Refused:
             st = {"configured": False}
-        text = f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay."
+        text = "Not connected to a relay."
+        if st["configured"]:
+            try:
+                relay.whoami_quick(root)
+                st["reachable"] = True
+                text = f"Connected to {_host(st['url'])}."
+            except (Refused, OSError, TimeoutError) as e:
+                st["reachable"], st["error"] = False, str(e)
+                text = (
+                    f"Set up, but the relay does not answer right now ({_host(st['url'])}): {e}\n"
+                    "Local work is not affected. Messages wait and go out when it answers again."
+                )
         fp = _own_fingerprint(root)
         if fp:
             st["fingerprint"] = fp
@@ -909,17 +963,21 @@ def run_relay(args, root: Path, out) -> None:
         out(args, _preview_dict(m), _preview_text(m))
     elif sub == "send":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Message sent to {}."))
+        out(args, m, _sent_line(root, m, "Message sent to {}.") + "\n" + _left_line(m))
         _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
+        out(
+            args,
+            m,
+            _sent_line(root, m, "Task handed to {}. It starts once they allow it.") + "\n" + _left_line(m),
+        )
     elif sub == "start":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Start request sent to {}."))
+        out(args, m, _sent_line(root, m, "Start request sent to {}.") + "\n" + _left_line(m))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
         # who gave it goes along: only then is a person's allow at a terminal marked as a person's, and the
@@ -1029,6 +1087,46 @@ def _card_lines(c: dict) -> list[str]:
     out.append(f"  checklist: {c.get('done', 0)} of {c.get('total', 0)} done")
     out.extend(f"    [{'x' if i['done'] else ' '}] {i['text']}" for i in c.get("checklist", []))
     return out
+
+
+def _left_line(m: dict) -> str:
+    """R3.3: after every real send, one line on what left this machine (no prompt). Built from the message as
+    it went, so it never says more than was sent; the body is already scanned (R5.2)."""
+    b = m.get("body") if isinstance(m.get("body"), dict) else {}
+    kind = m.get("type")
+    parts = []
+    if kind == "delegate":
+        parts.append(f'the task "{_one(b.get("title"))}"')
+    elif kind == "start":
+        parts.append(f'start "{_one(b.get("key"))}"')
+    elif kind == "file":
+        parts.append(f"the file {_one(b.get('name'))} ({_size(int(b.get('size') or 0))})")
+    if b.get("text"):
+        what = "the text" if kind in ("text", "file") else "its details"
+        parts.append(f"{what} ({_count(len(b['text']), 'character')})")
+    if isinstance(b.get("speak"), dict) and b["speak"].get("summary"):
+        parts.append("a spoken summary")
+    if b.get("checklist"):
+        parts.append(_count(len(b["checklist"]), "checklist item"))
+    if b.get("refs"):
+        parts.append(_count(len(b["refs"]), "card"))
+    word = m.get("key") or m.get("ticket")
+    if isinstance(b.get("ticket_card"), dict):
+        parts.append(f"the whole ticket {word} (--full)")
+    elif b.get("group"):
+        parts.append(f"the group card of ticket {word}")
+    elif word:
+        parts.append(f"a link to ticket {word}, not its content")
+    head = "Goes out once sent: " if m.get("sent") is False else "What left this machine: "
+    return head + (", ".join(parts) or "an empty message") + ". To check first next time, add --dry-run."
+
+
+def _count(n: int, one: str) -> str:
+    return f"{n} {one}" + ("" if n == 1 else "s")
+
+
+def _one(v) -> str:
+    return " ".join(str(v or "").split())[:80]
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:

@@ -125,7 +125,25 @@ test('the Browser page: live ones with their preview, ended today as links, else
   lb.browseList.doc = {on: true, browsers: []};
   assert.match(words(lb.browserListPage(a)), /No helper is using a browser right now/);
   lb.browseList.doc = {on: false, browsers: []};
-  assert.match(words(lb.browserListPage(a)), /not turned on/);
+  assert.match(words(lb.browserListPage(a)), /The browser is turned off in this workspaceTurn it on again in Settings, under Add-ons\./);
+});
+
+test('the Browser page says when the list did not load, with Try again, instead of loading on', async () => {
+  const a = {name: 'browse', dashboard: {label: 'Browser'}};
+  lb.browseList.doc = null; lb.browseList.sig = ''; lb.browseList.failed = false;
+  global.fetch = async () => ({ok: false, status: 502, json: async () => ({})});
+  renders = 0;
+  await lb.browseListLoad();
+  assert.equal(renders, 1, 'the page paints the error once');
+  const err = find(lb.browserListPage(a), n => n.tag === 'state');
+  assert.equal(err.props.kind, 'error');
+  assert.match(words(err), /The browsers did not load/);
+  await lb.browseListLoad();
+  assert.equal(renders, 1, 'a second miss does not paint again');
+  global.fetch = async () => ({ok: true, json: async () => ({on: true, browsers: []})});
+  await lb.browseListLoad();
+  assert.equal(renders, 2, 'the list that loads later replaces the error');
+  assert.match(words(lb.browserListPage(a)), /No helper is using a browser right now/);
 });
 
 test('the places: ticket Activity, Focus pane, ticket chat, the Browser tab; no header button', () => {

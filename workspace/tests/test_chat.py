@@ -1419,3 +1419,50 @@ def test_status_running_is_false_while_a_live_helper_is_idle(proj, monkeypatch):
     monkeypatch.setattr(runs, "state", lambda r, at=None: "dead")
     assert chat.status(proj)["running"] is False
     assert gid
+
+
+def _chat_file(proj, run, name="agenda.txt", data=b"Agenda\n"):
+    run("chat", "say", "--by", "human:marco", "--json", "--", "first")
+    gid = tickets.general_id(proj)
+    tickets.attach(proj, gid, name, data, "human:marco")
+    return gid
+
+
+def test_say_with_files_shows_them_on_the_message_and_tells_the_helper(proj, run):
+    """ORCH-2171: a Chat message carries the files the person added (attached to the Chat ticket first)."""
+    gid = _chat_file(proj, run)
+    code, out, err = run(
+        "chat", "say", "--by", "human:marco", "--json", "--file=agenda.txt", "--", "Read this"
+    )
+    assert code == 0, err
+    m = chat.read_day(proj, chat.day_key(proj))["messages"][-1]
+    assert m["text"] == "Read this"  # the shown words stay the person's own
+    assert m["files"] == [{"name": "agenda.txt", "size": 7}]
+    told = runs.human_waiting(proj, gid)[-1]["text"]
+    assert (
+        told.startswith("Read this\n\nI added a file to this chat: agenda.txt") and "Read it first." in told
+    )
+
+
+def test_say_with_only_a_file_needs_no_words(proj, run):
+    _chat_file(proj, run)
+    code, _, err = run("chat", "say", "--by", "human:marco", "--json", "--file=agenda.txt", "--", "")
+    assert code == 0, err
+    m = chat.read_day(proj, chat.day_key(proj))["messages"][-1]
+    assert m["text"] == "" and m["files"][0]["name"] == "agenda.txt"
+
+
+@pytest.mark.parametrize("name", ["missing.txt", "../x.txt", "sub/agenda.txt", ""])
+def test_say_refuses_a_file_that_is_not_in_the_chat(proj, run, name):
+    _chat_file(proj, run)
+    code, _, err = run("chat", "say", "--by", "human:marco", "--json", f"--file={name}", "--", "hi")
+    assert code != 0 and "not in the Chat" in err
+    assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "first"  # nothing was written
+
+
+def test_say_refuses_files_in_a_ticket_chat(proj, run):
+    _chat_file(proj, run)
+    code, out, _ = run("ticket", "new", "Lunch", "--json")
+    tid = json.loads(out)["id"]
+    code, _, err = run("chat", "say", "--by", "human:marco", "--ticket", tid, "--file=agenda.txt", "--", "hi")
+    assert code != 0 and "--file" in err

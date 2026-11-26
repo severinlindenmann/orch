@@ -477,9 +477,12 @@ def line(info: dict) -> str:
 
 def list_runs(root: Path) -> list[dict]:
     """Every run this workspace knows (alive or ended without finishing), newest first."""
+    records = runs_live.records(root)
+    if not records:
+        return []
     table = _table()
     out = []
-    for rec in runs_live.records(root):
+    for rec in records:
         tid = rec["ticket"]
         if tickets.is_general(root, tid):
             continue

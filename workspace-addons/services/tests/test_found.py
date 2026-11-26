@@ -550,6 +550,46 @@ def test_orchs_own_background_pages_are_never_found(cli, mac, tools, ws):
     assert out["others"] == 1  # only watcher.py; orch's own pages are not counted
 
 
+def test_helper_sessions_and_orchs_pages_are_no_candidates(cli, mac, tools, ws):
+    # #1556: `python -I -P -m orch run _wrap ...` (a helper session) and its node child, and orch's own pages,
+    # were listed as about 50 candidates
+    tools.set(
+        ps=[
+            {
+                "pid": 970,
+                "ppid": 1,
+                "tty": "??",
+                "argv": [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-P",
+                    "-m",
+                    "orch",
+                    "run",
+                    "_wrap",
+                    "r_x",
+                    "--ticket",
+                    "t_x",
+                ],
+            },
+            {"pid": 971, "ppid": 970, "tty": "??", "argv": ["node", "/opt/agent/main.js"]},
+            {"pid": 972, "ppid": 971, "tty": "??", "argv": ["tail", "-f", "log.txt"]},
+            {
+                "pid": 973,
+                "ppid": 1,
+                "tty": "??",
+                "argv": ["/usr/bin/python3", "-P", "-m", "orch_dashboard", "--dir", str(ws), "serve"],
+            },
+            {"pid": 974, "ppid": 1, "tty": "??", "argv": ["python3", "worker.py"]},
+        ],
+        lsof={str(p): str(ws) for p in range(970, 975)},
+    )
+    out = jrun(cli, "found")[1]
+    assert all(not i["id"].startswith("process:") for i in out["found"])
+    assert out["others"] == 1  # only worker.py
+    assert _process_ids(ws) == {"process:974"}
+
+
 def test_a_test_home_with_the_real_account_home_finds_no_real_jobs(cli, mac, tools, monkeypatch):
     """ORCH-637: a test install (own ORCH_HOME) whose process still has the real HOME must not list the account's jobs."""
     from orch_services import found
