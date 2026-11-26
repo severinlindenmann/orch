@@ -369,9 +369,9 @@ def test_replayed_message_is_refused_and_a_resend_is_quiet(ws, run, rel, person)
 
 
 def test_a_signed_message_whose_save_failed_is_saved_on_the_next_pull(ws, run, rel, person, monkeypatch):
-    """R3.1: the replay list marks the id before the inbox file is written. When that write fails (disk full, a
-    synced folder holding the file), the relay's next delivery of the very same bytes is a 'duplicate' - it must
-    still be saved and handled once, never acked away and lost."""
+    """R3.1: the replay list marks the id before the inbox file is written. When that write fails (disk full,
+    a synced folder holding the file), the relay's next delivery of the very same bytes is a 'duplicate' - it
+    must still be saved and handled once, never acked away and lost."""
     accept(ws, PEER)
     m = signed_msg(SEED_PEER)
     rel.inbox.append(m)

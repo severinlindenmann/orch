@@ -2516,7 +2516,8 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice.
         # The replay list marks a message before it is saved: when that save failed, the relay's next
         # delivery of the same bytes is the only copy left, so it is saved now (R3.1, nothing is lost).
-        if v.kind == "refused" or v.kind == "duplicate" and (v.code == "dropped" or _kept_here(root, v.message)):
+        lost_save = v.kind == "duplicate" and v.code != "dropped" and not _kept_here(root, v.message)
+        if v.kind in ("refused", "duplicate") and not lost_save:
             continue
         m = v.message
         if not msgtrust.inbox_slot_free(d / f"{m['id']}.json", m):

@@ -1098,14 +1098,19 @@ def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, mo
 
 
 def test_a_new_send_never_overtakes_a_waiting_message(proj, run, rel, monkeypatch):
-    """R3.1: a message sent while older ones wait in the outbox (Chat, a phone note: no CLI flush first) goes out
-    after them, in the order they were written; a waiting one the relay refuses is remembered as not sent."""
+    """R3.1: a message sent while older ones wait in the outbox (Chat, a phone note: no CLI flush first) goes
+    out after them, in the order they were written; a waiting one the relay refuses is remembered as not
+    sent."""
     from orch import relay
     from orch.errors import Refused
 
     connect(run, rel)
     real = relay._post_message
-    monkeypatch.setattr(relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(_http(Refused("x"), 503)))
+
+    def down(r, raw):
+        raise _http(Refused("x"), 503)
+
+    monkeypatch.setattr(relay, "_post_message", down)
     first = relay.send_text(proj, PEER, "first")
     refused = relay.send_text(proj, "ws_denied0001", "to a workspace that refuses")
     assert first["sent"] is False and refused["sent"] is False and not rel.sent
@@ -1114,7 +1119,7 @@ def test_a_new_send_never_overtakes_a_waiting_message(proj, run, rel, monkeypatc
     assert second["sent"] is True
     assert [s["body"]["text"] for s in rel.sent] == ["first", "second"]
     assert relay.outbox_list(proj) == [] and set(relay.not_sent(proj)) == {refused["id"]}
-    monkeypatch.setattr(relay, "_post_message", lambda r, raw: (_ for _ in ()).throw(_http(Refused("x"), 503)))
+    monkeypatch.setattr(relay, "_post_message", down)
     assert relay.send_text(proj, PEER, "third")["sent"] is False
     monkeypatch.setattr(relay, "_post_message", real)
     with pytest.raises(Refused):  # the relay refusing the new message itself still fails its send

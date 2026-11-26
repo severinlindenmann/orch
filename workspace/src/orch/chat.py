@@ -1329,7 +1329,7 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
                     if rid in sent_ids:
                         m["state"] = "delivered"
                         changed.add(ws)
-                    elif rid in refused:  # queued, then refused when the outbox went out: never "Sending…" for ever
+                    elif rid in refused:  # queued, refused when the outbox went out: no "Sending…" for ever
                         m.update(state="failed", error=refused[rid])
                         changed.add(ws)
         for ws in changed:
