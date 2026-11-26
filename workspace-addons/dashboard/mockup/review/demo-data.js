@@ -200,7 +200,7 @@ window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket
   if(p.type==='img'||p.type==='page'||files.some(f=>f.type==='img'||f.type==='page'))return ['Pictures','image','look'];
   if(p.type==='table'||p.chart)return ['Numbers','chart','look'];
   if(p.diff)return ['Changed words','diff','look'];
-  if(p.status||(p.chips||[]).length)return ['Check result','check','look'];
+  if(p.status||(p.chips||[]).length)return ['Test results','check','look'];
   return ['Document','file','look']};
  const put=list=>list.forEach(it=>{const [n,i,l]=of(it);it.kindLabel=n;it.icon=i;it.lane=l;it.laneName=LANE[l];
   if(it.kind==='check'&&it.preview&&it.preview.headline){it.title=it.preview.headline;delete it.preview.headline}});

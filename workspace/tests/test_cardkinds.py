@@ -64,9 +64,10 @@ def test_twelve_kinds_in_four_families_with_plain_names():
     assert len(cardkinds.KINDS) == 12
     assert {f for f, _ in cardkinds.KINDS.values()} == set(cardkinds.FAMILIES)
     # orch is for any work (owner, 25 Nov): no developer words on a card
+    # ("Test results" is the one owner-approved exception, 26 Nov: it replaces "Check result")
     words = " ".join(
         [*cardkinds.FAMILIES.values(), *(n for _, n in cardkinds.KINDS.values()), *cardkinds.LANES.values()]
-    )
+    ).replace("Test results", "")
     for dev in ("merge", "pull request", "deploy", "CI", "test", "code", "commit", "diff"):
         assert dev.lower() not in words.lower().split()
 

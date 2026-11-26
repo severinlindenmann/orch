@@ -35,7 +35,7 @@ KINDS = {  # kind -> (family, the name on the card)
     "document": ("look", "Document"),
     "changed_words": ("look", "Changed words"),
     "numbers": ("look", "Numbers"),
-    "check_result": ("look", "Check result"),
+    "check_result": ("look", "Test results"),
     "put_live": ("click", "Put it live"),
     "run_it": ("click", "Run it"),
     "try_yourself": ("help", "Try it yourself"),
