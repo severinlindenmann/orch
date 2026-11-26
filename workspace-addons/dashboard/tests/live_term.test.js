@@ -216,3 +216,27 @@ test('ORCH-1797: a one-step helper (Windows has no live screen) shows its log un
   win.api.liveTermApply(chat.b, {id: 't_b', mode: 'oneshot', lines: ['x']});
   assert.equal(note2.hidden, true, 'the Chat view keeps its own look');
 });
+
+test('ORCH-2203: liveTermSend types the text without Enter into a shown terminal, helper or plain', async () => {
+  for (const plain of [false, true]) {
+    const {api, streams, posts, ctx} = load();
+    const {b} = body('s1', {dataset: {liveKind: plain ? 'terminal' : ''}});
+    ctx.liveLayerFill = () => api.liveTermApply(b, {});
+    ctx.liveViewOf = () => 'term'; ctx.liveViewSet = () => {};
+    const done = api.liveTermSend('s1', 'npm test', {plain, wait: 2000});
+    await new Promise(r => setTimeout(r, 50));
+    streams[0].emit('hello', JSON.stringify({page: 'p1', typing_allowed: true}));
+    const r = await done;
+    assert.equal(r.ok, true);
+    assert.deepEqual(posts.at(-1), ['/api/term/input', {ticket: 's1', data: 'npm test', page: 'p1'}]);
+    assert.ok(!/[\r\n]/.test(posts.at(-1)[1].data));
+  }
+});
+
+test('ORCH-2203: liveTermSend says what to do when the terminal does not open', async () => {
+  const {api, ctx} = load();
+  ctx.liveLayerFill = () => {};
+  const r = await api.liveTermSend('s2', 'ls', {plain: true, wait: 150});
+  assert.equal(r.ok, false);
+  assert.match(r.text, /try again/i);
+});

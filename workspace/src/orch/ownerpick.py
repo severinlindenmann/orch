@@ -70,7 +70,7 @@ def refuse_ticket(ticket: dict, person: bool) -> None:
 
 
 HUMAN_REVIEW_REFUSAL = (
-    "Human review needed is on for this ticket: the Auto Reviewer and Away mode leave it for you."
+    "“I review the result” is on for this ticket: the Auto Reviewer and Away mode leave it for you."
 )
 
 
