@@ -169,3 +169,70 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src, /Every ticket has a working helper/);
 });
+
+// ORCH-2045: a result to check without a session sits in Needs you; the filter finds it by "Needs you" (its band and the
+// summary's word) and by its own reason ("Check"), in 119 other sessions, pinned or in a group, never twice.
+test('the filter finds a result that needs you by "Needs you" and by its reason, and nothing it does not', () => {
+  const others = Array.from({length:119}, (_, i) => sess('t_' + i, 'ORCH-' + (3001 + i), ['working', 'in-line', 'idle', 'closed'][i % 4], {title:'Order form ' + i}));
+  const list = wall.liveWallWithNeeds(others, [{id:'t_chk', key:'ORCH-412', title:'Price page for schools', word:'Check'}]);
+  const hits = (q, pins = [], groups) => { const b = wall.liveWallBands(list, pins, q, groups); return {b, ids:[...b.pin, ...b.need, ...b.queue, ...b.idle].map(s => s.id)}; };
+  for (const q of ['Needs you', 'needs YOU', 'Check', 'orch-412', 'schools']) {
+    const {b, ids} = hits(q);
+    assert.deepEqual(ids, ['t_chk'], q);
+    assert.deepEqual(keys(b.need), ['ORCH-412'], q + ' sits in Needs you');
+    assert.equal(b.total, 120, 'the total is the workspace, not the hits');
+  }
+  assert.equal(hits('zebra crossing').b.shown, 0);
+  assert.equal(hits('').b.shown, 120, 'cleared: every entry again');
+  assert.equal(hits('working').ids.length, 30, '"working" finds the working sessions, never the result that asks');
+  assert.deepEqual(hits('Needs you', ['t_chk']).b.pin.map(s => s.id), ['t_chk'], 'pinned: found in Pinned only');
+  assert.deepEqual(hits('Needs you', ['t_chk']).ids, ['t_chk']);
+  // an idle session whose ticket asks reads "Idle" on its tile and is found by both words
+  const idle = wall.liveWallWithNeeds([sess('t_i', 'ORCH-9', 'idle'), sess('t_j', 'ORCH-10', 'idle')], [{id:'t_i', word:'Check'}]);
+  assert.deepEqual(keys(wall.liveWallBands(idle, [], 'needs you').need), ['ORCH-9']);
+  assert.equal(wall.liveWallBands(idle, [], 'idle').shown, 2);
+  // a group whose helper is the result to check: the one group entry is found by "Check" and by "Needs you", once
+  const groups = [{id:'g1', key:'ORCH-400', title:'Shop for schools', members:[{id:'t_0', key:'ORCH-3001', title:'Order form 0', status:'working', word:'Working', main:true},
+    {id:'t_chk', key:'ORCH-412', title:'Price page for schools', status:'closed', word:'No session'}]}];
+  for (const q of ['Check', 'Needs you']) {
+    const {b, ids} = hits(q, [], groups);
+    assert.deepEqual(ids, ['g1'], q + ' finds the group once, not its tickets on their own');
+    assert.equal(b.need[0].status, 'needs-you');
+  }
+  // the one rule: the band, the counts and the filter agree on who asks
+  assert.equal(wall.liveWallAsks({status:'closed', needs:true}), true);
+  assert.equal(wall.liveWallAsks({status:'working', needs:true}), false);
+  assert.equal(wall.liveWallCounts(list)['needs-you'], 1);
+});
+
+test('with a filter, a band without a match is left out and the filter is a plain search box', () => {
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  assert.match(src, /filter\(\(\[id\]\) => b\[id\]\.length \|\| !ui\.f\.trim\(\)\)/);
+  // typing only filters what is drawn: no form to submit, no action, no start
+  const input = src.slice(src.indexOf("document.addEventListener('input'"), src.indexOf("document.addEventListener('click'"));
+  assert.match(input, /liveWallState\(\)\.f = e\.target\.value;\s*liveWallRepaint\(\);/);
+  assert.doesNotMatch(input, /fetch|act\(|start|submit/i);
+  assert.doesNotMatch(src, /<form|h\('form'/);
+});
+
+// Focus polish: the wall says when it is loading, when the sessions did not load, when there are none and when the
+// filter finds none; each is the kit's state with one next step, under the filter (keyboard order = visual order).
+test('the wall state: loading, error only before the first answer, empty, no match, bands', () => {
+  assert.equal(wall.liveWallView(false, false, 0, 0), 'wait');
+  assert.equal(wall.liveWallView(false, true, 0, 0), 'error');
+  assert.equal(wall.liveWallView(true, true, 3, 3), 'bands', 'a later failed read keeps the sessions on screen');
+  assert.equal(wall.liveWallView(true, false, 0, 0), 'empty');
+  assert.equal(wall.liveWallView(true, false, 4, 0), 'nomatch');
+  assert.equal(wall.liveWallView(true, false, 4, 2), 'bands');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  const order = ['data-key\':\'wall-head', 'data-key\':\'wall-tools', 'data-key\':\'wall-body'].map(k => src.indexOf(k, src.indexOf('function liveWall()')));
+  assert.ok(order.every((n, i) => n > 0 && (!i || n > order[i - 1])), 'summary, then the filter, then the bands');
+  for (const k of ['wall-error', 'Try again', 'data-wall-retry', 'Clear filter', 'data-wall-clear', 'skeleton sk-card']) assert.ok(src.includes(k), k);
+});
+
+test('a session without a live helper that asks shows the needs-you mark, as the summary counts it', () => {
+  for (const status of ['idle', 'closed']) {
+    assert.equal(wall.liveWallMark(sess('t_1', 'ORCH-1', status, {needs:true})), 'needs-you', status);
+    assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
+  }
+});

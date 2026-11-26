@@ -14,6 +14,9 @@ nothing is stored.
   ORCH-1741: a ticket in Review whose pull request the merge queue (or a working helper) still holds is not
   counted (its id is listed under "queue"), and a ticket's Check card gives way to its other card (an open
   question, a pull request to merge), so one ticket never shows two cards (`quiet`).
+  #2385: plus one per row of work that stopped (stuck.rows: a pull request left open, an idle helper, a stuck
+  ticket, a ticket the Reviewer was not sure about), as Home lists them; a "Reviewer not sure" row stands in
+  for that ticket's Check card, so the ticket is counted once.
 - progress / step: every task counts, a won't-do task too (it is finished, never "skipped"); the step is the
   task being done, else the first open one, "Step n of total".
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
@@ -29,6 +32,8 @@ OPEN_DONE = ("done", "dropped")
 WONT_DO = "won't do"  # the one word for a task that will not be done (never "skipped")
 HELPER_STATES = ("working", "starting", "you", "waiting", "idle", "stuck", "limit")
 WORKING = ("working", "starting")  # what "N working" counts
+# the needs rows of work that stopped (stuck.rows); each is one of the needs-you number (#2385)
+STOPPED_KINDS = ("helper:unmerged", "helper:idle", "helper:permission", "helper:failing", "reviewer:unsure")
 
 
 def _tasks(ticket: dict) -> list[dict]:
@@ -108,11 +113,31 @@ def quiet(root, tickets: list[dict]) -> dict:
     return out
 
 
-def needs_you_items(tickets: list[dict], hidden: dict | None = None) -> list[dict]:
-    """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review (the Review
-    page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in ticket
-    order. hidden: `quiet` (the Check cards not shown)."""
+def stopped_rows(rows) -> list[dict]:
+    """The needs rows (`orch needs`, stuck.rows) of work that stopped on a ticket, one per row id."""
+    out, seen = [], set()
+    for r in rows or []:
+        if not isinstance(r, dict) or r.get("source") != "core" or r.get("kind") not in STOPPED_KINDS:
+            continue
+        if not isinstance(r.get("ticket"), str) or not isinstance(r.get("id"), str) or r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        out.append(r)
+    return out
+
+
+def needs_you_items(
+    tickets: list[dict], hidden: dict | None = None, stopped: list | None = None
+) -> list[dict]:
+    """[{ticket, question}] per open question, [{ticket, question: None, stopped: kind, row: id}] per row of
+    work that stopped (`stopped`: needs rows, see stopped_rows), [{ticket, question: None}] per ticket in
+    Review
+    (the Review page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in
+    ticket order. hidden: `quiet` (the Check cards not shown)."""
     skip = set((hidden or {}).get("queue") or ()) | set((hidden or {}).get("folded") or ())
+    by_ticket: dict[str, list[dict]] = {}
+    for r in stopped_rows(stopped):
+        by_ticket.setdefault(r["ticket"], []).append(r)
     out = []
     for t in tickets:
         if not isinstance(t, dict) or not _counts(t):
@@ -123,7 +148,11 @@ def needs_you_items(tickets: list[dict], hidden: dict | None = None) -> list[dic
                 if isinstance(q, dict) and q.get("answer") is None and isinstance(q.get("id"), str):
                     out.append({"ticket": t["id"], "question": q["id"]})
                     asked += 1
-        if t.get("status") == "review" and t["id"] not in skip:
+        rows = by_ticket.get(t["id"], []) if t.get("status") not in OPEN_DONE else []
+        for r in rows:
+            out.append({"ticket": t["id"], "question": None, "stopped": r["kind"], "row": r["id"]})
+        unsure = any(r["kind"] == "reviewer:unsure" for r in rows)  # that row is its Check card
+        if t.get("status") == "review" and t["id"] not in skip and not unsure:
             out.append({"ticket": t["id"], "question": None})
         elif failed_start(t) and not asked:  # its question is the row then, as on Home
             out.append({"ticket": t["id"], "question": None, "start": True})
@@ -136,13 +165,14 @@ def failed_start(ticket: dict) -> bool:
     return ticket.get("status") == "waiting" and isinstance(w, dict) and w.get("start") is True
 
 
-def needs_you(tickets: list[dict], hidden: dict | None = None) -> dict:
-    """{count, questions, results, failed, tickets, items}: the one "N things need you" number, its parts
-    and the items it counts (a page that hides a row for a moment, an answer being sent, takes that item
-    off)."""
-    items = needs_you_items(tickets, hidden)
+def needs_you(tickets: list[dict], hidden: dict | None = None, stopped: list | None = None) -> dict:
+    """{count, questions, results, failed, stopped, tickets, items}: the one "N things need you" number, its
+    parts and the items it counts (a page that hides a row for a moment, an answer being sent, takes that
+    item off)."""
+    items = needs_you_items(tickets, hidden, stopped)
     questions = sum(1 for i in items if i["question"])
     failed = sum(1 for i in items if i.get("start"))
+    halted = sum(1 for i in items if i.get("stopped"))
     seen: list[str] = []
     for i in items:
         if i["ticket"] not in seen:
@@ -150,8 +180,9 @@ def needs_you(tickets: list[dict], hidden: dict | None = None) -> dict:
     return {
         "count": len(items),
         "questions": questions,
-        "results": len(items) - questions - failed,
+        "results": len(items) - questions - failed - halted,
         "failed": failed,
+        "stopped": halted,
         "tickets": seen,
         "items": items,
         "queue": list((hidden or {}).get("queue") or []),  # ORCH-1741: in the merge queue, not waiting on you
@@ -198,17 +229,22 @@ def live_runs(root) -> dict:
 
 def now(root) -> dict:
     """summary over every ticket (as shown) and every live run of this workspace: `orch counts`."""
-    from orch import history, tickets
+    from orch import history, stuck, tickets
 
     shown = history.shown_json(root, tickets.list_all(root))
-    return summary(shown, live_runs(root), hidden=quiet(root, shown))
+    return summary(shown, live_runs(root), hidden=quiet(root, shown), stopped=stuck.rows(root, shown))
 
 
 def summary(
-    tickets: list[dict], runs: dict | None = None, now: datetime | None = None, hidden: dict | None = None
+    tickets: list[dict],
+    runs: dict | None = None,
+    now: datetime | None = None,
+    hidden: dict | None = None,
+    stopped: list | None = None,
 ) -> dict:
     """Everything a page counts, from one pass: {needs_you, helpers: {state: n}, working, running, stuck,
-    tickets: {id: {step, progress, helper, stuck}}}. runs: {ticket id: run status dict}."""
+    tickets: {id: {step, progress, helper, stuck}}}. runs: {ticket id: run status dict}; stopped: the needs
+    rows of work that stopped (stuck.rows)."""
     runs = runs or {}
     per: dict[str, dict] = {}
     helpers = dict.fromkeys(HELPER_STATES, 0)
@@ -227,7 +263,7 @@ def summary(
             stuck_ids.append(t["id"])
         per[t["id"]] = {"step": step(t), "progress": progress(t), "helper": h, "stuck": why}
     return {
-        "needs_you": needs_you(tickets, hidden),
+        "needs_you": needs_you(tickets, hidden, stopped),
         "helpers": helpers,
         "working": sum(helpers[k] for k in WORKING),
         "running": sum(helpers.values()),  # every live helper process, whatever its state

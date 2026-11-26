@@ -127,7 +127,9 @@ def test_crlf_file_and_unreadable_skipped(cli, ws):
     (d / "notes.txt").write_text("x", encoding="utf-8")
     _, data = jrun(cli, "list")
     validator(LIST).validate(data)
-    assert [x["text"] for x in data["lessons"]] == ["CRLF lesson."] and data["unreadable"] == 3
+    assert [x["text"] for x in data["lessons"]] == ["CRLF lesson."] and data[
+        "unreadable"
+    ] == 2  # notes.txt is no lesson file
     jrun(cli, "edit", "l_aaaaaa", "Edited.")
     body = (d / "l_aaaaaa.md").read_text(encoding="utf-8")
     assert "flavour: kept" in body and "changed_at:" in body and "\r" not in body
@@ -187,3 +189,17 @@ def test_edit_to_another_lessons_text_is_refused(cli, ws):
     _, b = jrun(cli, "add", "Lesson two.")
     code, err = jrun(cli, "edit", b["lesson"]["id"], "lesson ONE.")
     assert code == 2 and a["lesson"]["id"] in err["error"]
+
+
+def test_view_notices_unreadable_and_hidden(cli, ws):
+    d = ws / ".orch" / "addons" / "lessons"
+    d.mkdir(parents=True)
+    (d / "l_bbbbbb.md").write_text("no front matter", encoding="utf-8")
+    for i in range(52):
+        (d / f"l_{i:06d}.md").write_text(
+            f"---\nby: agent:x\nat: 2026-11-15T18:{i // 60:02d}:{i % 60:02d}Z\n---\nL{i}\n", encoding="utf-8"
+        )
+    _, view = jrun(cli, "view")
+    validator(VIEW).validate(view)
+    assert len(view["blocks"][0]["items"]) == 50
+    assert "2 older are hidden" in view["notice"] and "1 lesson file is unreadable" in view["notice"]

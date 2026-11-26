@@ -597,6 +597,10 @@
         h('h3', {text: 'Work for ' + w.kind + ' waits'}),
         h('p', {text: w.why + ' Raise a limit or allow another account for ' + w.kind + ' below.'}))));
     }
+    // past 80% of a limit, with the fix: the same line `orch usage list` prints; the stronger boxes above already say it
+    if (m.near && !m.all_at_limit && !(m.waiting || []).length) {
+      parts.push(h('div', {className: 'banner attn', role: 'status', 'data-near': ''}, h('p', {className: 'grow', text: m.near})));
+    }
     if (m.flapping) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Accounts switched ' + m.flapping.count + ' times back and forth'}),

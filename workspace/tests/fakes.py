@@ -332,3 +332,43 @@ def make_relay() -> Fake:
 
     f.route("POST", "/v1/transcribe", transcribe)
     return f.start()
+
+
+ADMIN_TOKEN = "admin-" + "z" * 40
+
+
+def make_admin(token: str, ws: str = WS, redirect: str | None = None) -> Fake:
+    """The admin API of a relay or publish server (X-Orch-Admin). POST /admin/api/workspaces hands out `ws`
+    and `token`, so the new folder connects to the matching fake relay or publish server. `redirect`: every
+    call answers 302 there instead."""
+    f = Fake()
+    f.made, f.deleted = [], []
+    f.groups = [{"id": "grp_team0001", "name": "Team", "members": []}]
+
+    class H(f.server.RequestHandlerClass):
+        def _do(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n) if n else b""
+            f.calls.append((self.command, self.path, dict(self.headers.items()), body))
+            if redirect:
+                self.send_response(302)
+                self.send_header("Location", redirect)
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
+            if self.headers.get("X-Orch-Admin") != ADMIN_TOKEN:
+                return self._send(401, {"error": "unauthorized", "message": "Admin token is wrong."})
+            if self.command == "GET" and self.path == "/admin/api/groups":
+                return self._send(200, {"items": f.groups})
+            if self.command == "POST" and self.path == "/admin/api/workspaces":
+                req = json.loads(body)
+                f.made.append(req)
+                return self._send(201, {"id": ws, "token": token, "prompt": f"orch connect ... {token}"})
+            if self.command == "DELETE" and self.path.startswith("/admin/api/workspaces/"):
+                f.deleted.append(self.path.rsplit("/", 1)[1])
+                return self._send(204)
+            return self._send(404, {"error": "not_found", "message": "No such route."})
+
+        do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _do
+
+    f.server.RequestHandlerClass = H
+    return f.start()
