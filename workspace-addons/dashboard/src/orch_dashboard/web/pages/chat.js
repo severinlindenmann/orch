@@ -806,7 +806,8 @@ function chatHeading() {
   const who = chatRich() ? [] : [CHAT_HELPER];
   const running = chatCount(state?.chat?.activity?.running);
   const doing = counts || (running ? 'working on ' + running + (running === 1 ? ' ticket' : ' tickets') : '');
-  return heading('Chat', [...who, ...(doing ? [doing] : [])].join(' · '));
+  // One top (D1): always one sentence under the name, also when nothing runs beside an open conversation.
+  return heading('Chat', [...who, ...(doing ? [doing] : [])].join(' · ') || 'Talk with your helper and other workspaces.');
 }
 const chatPageBody = chatPage;
 chatPage = function () { return fragment(chatHeading(), chatPageBody()); };

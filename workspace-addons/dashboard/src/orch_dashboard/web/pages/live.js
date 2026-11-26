@@ -26,7 +26,7 @@ function liveNewButtons() {
 function liveNextPage(r) {
   const a = livePageOf(r.id), label = addonLabel(a);
   // One top (D1) with its one sentence and the add-on's Settings button (D6).
-  const top = () => heading(label, a?.dashboard?.subtitle || 'Watch your helpers work and step in when one needs you.', {settings:typeof addonSettingsHref === 'function' ? addonSettingsHref(a?.name) : null});
+  const top = () => heading(label, a?.dashboard?.subtitle || '', {settings:typeof addonSettingsHref === 'function' ? addonSettingsHref(a?.name) : null});
   if (!liveFocusOn()) return fragment(top(), h('p', {className:'meta', 'data-key':'live-next-copy'}, 'Live sessions show only on the computer the helpers work on.'));
   window.LiveSessions?.sync();
   return fragment(top(),
