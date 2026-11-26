@@ -2218,6 +2218,17 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;padding:0;overflow:auto;overscroll-behavior:contain}
 .review-ticket-h{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s2) var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--surface)}
 .review-ticket-h h2{flex:1;min-width:0;margin:0;font-size:14px;line-height:20px;font-weight:600;color:var(--text-muted)}
+/* ORCH-2094: the card lines up with the heading and the tabs (the deck's keyboard-ring room sits outside the column),
+   a card has the same 24 px inside every edge (before: 32 above the question, 40 under the footer), and a rail with
+   nothing to show (one card, no Auto Reviewer, nothing the Reviewer did) leaves no empty column; the empty state sits in the card column, and the merge-queue line
+   above All cards keeps the list's inner edge */
+.review-main .swipe-desk{margin-inline:calc(-1 * var(--s3))}
+.review-side>p.meta{padding:var(--s3) var(--s4) 0}
+.review-main #deck>.empty-state,.review-main #answered>.empty-state{max-width:var(--review-card-w)}
+.swipe-head>.swipe-lead:first-child{margin-top:0}
+.swipe-card>.swipe-foot:not(.empty):last-child{margin-bottom:0;padding-bottom:var(--s5)}
+.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty){display:none}
+.review-layout:not(.with-ticket)>.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty)+.review-main{grid-column:1/-1}
 .review-ticket-b{min-width:0;padding:var(--s4)}
 .review-ticket .ticket-page .ticket-layout,.review-ticket .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}
 .review-ticket .ticket-page .ticket-side,.review-ticket .ticket-page [aria-controls^="ticket-rail-"]{display:none}
