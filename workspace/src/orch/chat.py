@@ -771,7 +771,7 @@ def last_moved(root: Path) -> dict | None:
 # "run" (the wrapper's hooks) must be the Chat ticket and, when given, the helper's own run (ORCH_RUN).
 HELPER_COMMANDS = {
     ("ticket", "show"): ("read", {"id"}, ("id",)),
-    ("ticket", "list"): ("read", {"status", "all"}, ()),
+    ("ticket", "list"): ("read", {"status", "all", "search", "waiting", "blocked"}, ()),
     ("ticket", "tree"): ("read", {"id"}, ("id",)),
     ("log", None): ("write", {"id", "text"}, ("id",)),
     ("check", "add"): ("write", {"id", "text"}, ("id",)),
