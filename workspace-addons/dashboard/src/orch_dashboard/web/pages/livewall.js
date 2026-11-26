@@ -3,7 +3,7 @@
 // workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
 // working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
 // sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays
-// folded (per workspace, in this browser). Clicking a tile zooms into it: it opens in the layer (pages/live-layer.js);
+// folded (per workspace, in this browser); a search opens a folded band that holds a match (ORCH-2063). Clicking a tile zooms into it: it opens in the layer (pages/live-layer.js);
 // full screen and Esc are the layer's. Pins and own names are kept by orch for the workspace (window.LiveSessions, ORCH-361).
 // Look: the kit's .wall-* rules (widgets.css).
 const LIVE_WALL_KEY = 'orch.live.wall';
@@ -110,6 +110,15 @@ function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
   return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '')).filter(x => x.trim()).slice(-n).join('\n');
 }
+// ORCH-2063: is a band shown folded? While a search runs, a band the person folded opens by itself when it holds a
+// match (their saved choice stays as it is). A fold click during the search counts for that search only (ui.sf, never
+// saved) and is dropped when the search is cleared, so the next search starts from the saved choice again.
+function liveWallFolded(id, ui, n) {
+  const col = !!ui?.col?.[id];
+  if (!String(ui?.f || '').trim()) return col;
+  const now = ui?.sf && typeof ui.sf === 'object' ? ui.sf : {};
+  return Object.prototype.hasOwnProperty.call(now, id) ? now[id] === true : col && !n;
+}
 // What is kept per workspace in this browser: the folded bands. The filter is not kept (a fresh visit shows all).
 function liveWallRead(store, ws) {
   try {
@@ -129,7 +138,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallFolded, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -138,7 +147,7 @@ let liveWallWs = null;
 function liveWallStore() { try { return window.localStorage; } catch { return null; } }
 function liveWallState() {
   const ws = typeof state === 'object' && state ? String(state.workspace || state.settings?.ws_name || '') : '';
-  if (!liveWallUi || liveWallWs !== ws) { liveWallUi = {...liveWallRead(liveWallStore(), ws), f:liveWallUi?.f || ''}; liveWallWs = ws; }
+  if (!liveWallUi || liveWallWs !== ws) { liveWallUi = {...liveWallRead(liveWallStore(), ws), f:liveWallUi?.f || '', sf:{}}; liveWallWs = ws; }
   return liveWallUi;
 }
 function liveWallPins() {
@@ -237,7 +246,7 @@ function liveWallEmpty(id, empty, b) {
   return empty;
 }
 function liveWallBand(id, title, empty, list, ui, many) {
-  const col = !!ui.col[id], tiles = id === 'pin' || id === 'need';
+  const col = liveWallFolded(id, ui, list.length), tiles = id === 'pin' || id === 'need';
   return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
     h('h2', {className:'wall-bh'}, h('button', {type:'button', className:'wall-bt', 'data-wall-fold':id, 'data-key':'wall-fold-' + id, 'aria-expanded':String(!col)},
       h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), title + ' (' + list.length + ')')),
@@ -332,13 +341,17 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   window.addEventListener('orch:live-pins', liveWallRepaint);
   document.addEventListener('input', e => {
     if (!e.target.matches?.('[data-wall-filter]')) return;
-    liveWallState().f = e.target.value;
+    const ui = liveWallState();
+    ui.f = e.target.value;
+    if (!ui.f.trim()) ui.sf = {};  // a cleared search forgets its own fold clicks (ORCH-2063)
     liveWallRepaint();
   });
   document.addEventListener('click', e => {
     if (e.target.closest?.('[data-wall-retry]')) { window.LiveSessions?.refresh?.(); return; }
     if (e.target.closest?.('[data-wall-clear]')) {
-      liveWallState().f = '';
+      const ui = liveWallState();
+      ui.f = '';
+      ui.sf = {};  // a cleared search forgets its own fold clicks (ORCH-2063)
       const input = document.querySelector('main [data-wall-filter]');
       if (input) input.value = '';
       liveWallRepaint();
@@ -348,8 +361,12 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     const fold = e.target.closest?.('[data-wall-fold]');
     if (fold) {
       const ui = liveWallState(), id = fold.dataset.wallFold;
-      if (ui.col[id]) delete ui.col[id]; else ui.col[id] = true;
-      liveWallWrite(liveWallStore(), liveWallWs, ui);
+      // during a search the click folds or opens what is on screen for this search only; the saved choice stays
+      if (ui.f.trim()) ui.sf = {...ui.sf, [id]:fold.getAttribute('aria-expanded') === 'true'};
+      else {
+        if (ui.col[id]) delete ui.col[id]; else ui.col[id] = true;
+        liveWallWrite(liveWallStore(), liveWallWs, ui);
+      }
       liveWallRepaint();
       document.querySelector('main [data-wall-fold="' + id + '"]')?.focus({preventScroll:true});
       return;
