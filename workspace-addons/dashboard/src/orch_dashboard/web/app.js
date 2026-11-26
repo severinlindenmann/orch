@@ -1149,6 +1149,7 @@ main.addEventListener('click', async event => {
   if (action.startsWith('people-')) { await peopleAction(action, control); return; }
   if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
   if (action === 'away-set') { await reviewSwitch('away'); return; }
+  if (action === 'reviewer-mode-set') { await reviewSwitch('propose'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'update-check-report') { reportOpen(); return; }
