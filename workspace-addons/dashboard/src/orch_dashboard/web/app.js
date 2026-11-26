@@ -563,6 +563,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'docs') mountDocs(main, r);
+  if (r.kind === 'chat' && typeof mountChatBoxes === 'function') mountChatBoxes(main);  // the Chat message box (pages/chat.js)
   if (r.kind === 'ticket' || (r.kind === 'review' && typeof reviewTicketId === 'function' && reviewTicketId())) mountTicketTalk(main);  // the ticket beside Review too (ORCH-1804)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);

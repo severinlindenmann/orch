@@ -10,7 +10,7 @@ function context(fetch) {
     replaceChildren(...nodes){this.children = nodes.flat(Infinity).filter(c => c != null);},
     addEventListener(){}, querySelector(){return null;}, get textContent(){return JSON.stringify(this.children);}});
   let dialogNode = null, now = 1000;
-  const c = vm.createContext({setTimeout:() => 1, clearTimeout(){}, Date:{now:() => now}, h, fragment:(...children) => h('fragment', {}, ...children),
+  const c = vm.createContext({iconEl:() => null, setTimeout:() => 1, clearTimeout(){}, Date:{now:() => now}, h, fragment:(...children) => h('fragment', {}, ...children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), state:{}, snapshot:false,
     CSS:{supports:() => false}, time:() => '', date:() => '', ticketOf:() => null,
     location:{hash:'#chat'}, history:{replaceState(){}}, route:() => ({kind:'chat'}), render(){},

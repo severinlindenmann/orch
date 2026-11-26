@@ -8,6 +8,20 @@ $fails = @()
 function L($m) { Add-Content -Path $log -Value $m }
 function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; $script:fails += $what } }
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
+function NewSmokeTicket($title) {
+    $out = O ticket new ('"' + $title + '"') --json --by human:owner | Out-String
+    $code = $LASTEXITCODE
+    L $out
+    try {
+        if ($code -ne 0) { throw "ticket new exited $code" }
+        $ticket = $out | ConvertFrom-Json -ErrorAction Stop
+        if (-not $ticket.id) { throw "ticket new returned no id" }
+        return $ticket.id
+    } catch {
+        L "RESULT fail: could not create $title; $_"
+        throw
+    }
+}
 function Results($out) {
     $m = [regex]::Match("$out", 'Log: (\S+)')
     if (-not $m.Success) { return @() }
@@ -38,7 +52,9 @@ L ""
 L "=== scheduler (automation add-on)"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:ORCH_AGENT = ""
-$p = "$env:USERPROFILE\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+# The installed orch is a test install: both workspace and key store belong under .orch-test.
+$p = "$env:USERPROFILE\.orch-test\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+$env:ORCH_HOME = "$p\.orch-tool"
 O init | Out-Null
 $before = Get-Date; $out = O addon add automation --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add automation"
@@ -51,12 +67,12 @@ L (cmd /c "orch config agent add fake --command `"$py $agent`" < NUL 2>&1" | Out
 L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
-$rep = ((O ticket new '"Scheduled smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$rep = NewSmokeTicket "Scheduled smoke"
 O check add $rep '"Say hello"' --by human:owner | Out-Null
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
-$one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$one = NewSmokeTicket "Wake-up smoke"
 O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
