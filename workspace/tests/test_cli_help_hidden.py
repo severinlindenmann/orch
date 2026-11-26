@@ -35,6 +35,18 @@ def test_secret_help_leaves_hidden_subcommands_out():
     assert ns.sub == "scan"
 
 
+@pytest.mark.parametrize(
+    "argv", ["ticket list --all", "ticket show WS-1", "needs --json", "doctor pass --dry-run", "counts"]
+)
+def test_everyday_branch_parses_like_the_full_cli(argv):
+    words = argv.split()
+    quick, full = cli.build_parser(command=words[0]), cli.build_parser()
+    assert quick.parse_args(words) == full.parse_args(words)
+    assert cli.nextstep.leaf_path(quick, quick.parse_args(words)) == cli.nextstep.leaf_path(
+        full, full.parse_args(words)
+    )
+
+
 @pytest.mark.parametrize("show_all", [False, True])
 def test_help_starts_with_the_two_everyday_examples(show_all):
     """ORCH-1936: a person sees how to list tickets and what needs them before the command list."""

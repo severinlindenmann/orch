@@ -288,7 +288,7 @@
     return n('div', {className: 'card-row', 'data-key': 'lk-owner-row'}, n('span', {className: 'set-label'}, 'Owner'),
       n('div', {className: 'grow'},
         n('p', {className: 'set-ctl', 'data-testid': 'look-owner'}, owner || 'Not set'),
-        n('p', {className: 'meta'}, owner ? 'Taken from “You” in the sidebar. Only you see it here; it is not sent to other workspaces.' : 'Choose your name under “You” in the sidebar. Only you see it here; it is not sent to other workspaces.')));
+        n('p', {className: 'meta'}, owner ? 'Taken from “You” in the sidebar. Only you see it here; it is not sent to other workspaces.' : 'Pick your name in the sidebar. Only you see it here; it is not sent to other workspaces.')));
   }
 
   function section() {
@@ -302,6 +302,7 @@
         n('div', {className: 'card-row lk-shared-row', 'data-key': 'lk-shared-row'},
           n('div', {className: 'grow'}, n('h3', {}, 'Shared pages: show workspace name and icon'),
             n('p', {className: 'meta'}, 'On files you share with a link. Turn off to show nothing.')),
+          n('span', {className: 'switch-text', 'aria-hidden': 'true'}, on ? 'On' : 'Off'),
           n('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show workspace name and icon on shared pages', 'data-lk': 'shared', 'data-key': 'lk-shared', 'data-testid': 'look-shared-pages', disabled: busy}))),
       null);
   }

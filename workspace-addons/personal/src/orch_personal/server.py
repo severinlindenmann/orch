@@ -195,7 +195,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/today":
                 return self._json(api.today(self.root, who))
             if path == "/api/notes":
-                num = lambda k: int(one(k)) if one(k).isdigit() else None
+                num = lambda k: int(one(k)) if one(k).isascii() and one(k).isdigit() else None
                 return self._json(
                     api.notes_list(self.root, who, one("group") or None, num("limit"), num("offset") or 0)
                 )
@@ -368,13 +368,13 @@ def _open_tickets(root: Path) -> list[dict]:
             continue
         if not isinstance(t, dict) or t.get("status") in ("review", "done", "dropped"):
             continue
-        rows.append(
+        rows.append(  # str(): a hand-edited value (a number, a list) never breaks the sort or the page
             {
-                "id": t.get("id") or f.stem,
-                "key": t.get("key") or "",
+                "id": f.stem,
+                "key": str(t.get("key") or ""),
                 "title": str(t.get("title") or "")[:120],
-                "status": t.get("status") or "",
-                "updated": t.get("updated_at") or t.get("created_at") or "",
+                "status": str(t.get("status") or ""),
+                "updated": str(t.get("updated_at") or t.get("created_at") or ""),
             }
         )
     rows.sort(key=lambda r: r["updated"], reverse=True)

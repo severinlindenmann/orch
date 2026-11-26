@@ -105,14 +105,13 @@ function needRow(row, newest, questionCount = 1, same = []) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
   // An add-on's own row (no ticket) is named by the add-on's display name, never its id ("sync").
-  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t);
+  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t, needQuestionOf(row));
   const question = (window.DashHelpers.questionWords || String)(needQuestion(row)), when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
       t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ' + (window.DashHelpers.ticketKey(t) ? window.DashHelpers.ticketKey(t) + ' ' : '') + '‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     questionCommandRows(needQuestion(row), key),
-    actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
@@ -131,7 +130,7 @@ function factoryStartRow(row, key, t, p, buttons) {
     h('h2', {className:'question-title'}, 'Start “' + clean(p.title) + '”?'),
     h('p', {className:'muted'}, clean(p.goal)),
     h('p', {className:'meta'}, p.meta),
-    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : '') + ' · ',
+    h('p', {className:'meta question-context'}, whoAsked(t, needQuestionOf(row)) + ' asked' + (when ? ' ' + when : '') + ' · ',
       h('a', {href:factoryProposalHref(t), 'data-key':key + '-proposal'}, 'Read proposal')),
     buttons.length ? h('div', {className:'actions'}, buttons) : null);
 }
@@ -194,9 +193,9 @@ function needNoticeRow(row, key) {
     h('div', {className:'grow'}, h('p', {}, clean(row.text || row.title)), h('p', {className:'meta'}, typeof capitalise === 'function' ? capitalise(row.source || 'orch') : 'orch')),
     h('div', {className:'acts'}, later));
 }
-// Who asked: the helper working on the ticket (the product's name for it), else "Helper".
-function whoAsked(t) {
-  return window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state?.settings, state?.runs?.[t?.id]?.claim) : 'Helper';
+// Who asked: the agent stored on the question (orch ask), else the agent of the run on the ticket, else "Helper" (ORCH-2023).
+function whoAsked(t, q) {
+  return window.DashHelpers.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, state?.runs?.[t?.id]?.claim) : 'Helper';
 }
 // The display name of an add-on from its id ("sync" -> "Sync"): its dashboard label, else the id with a capital.
 function addonName(id) {
@@ -208,7 +207,8 @@ function questionCommandRows(text, key) {
   if (!window.UI?.commandCopy || !window.DashHelpers.questionCommands) return null;
   return window.DashHelpers.questionCommands(text).map((c, i) => window.UI.commandCopy(c, {dataKey:key + '-cmd-' + i}));
 }
-function needQuestion(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text; }
+function needQuestionOf(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question); }
+function needQuestion(row) { return needQuestionOf(row)?.text || row.title || row.text; }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on
 // the one generic op, a signed one after the person's sign step; "Not now" waits a day, "View file" opens the file.
 // The only core op a row may name is the existing, signed private.move, and only in a row of the sync add-on. Its button
@@ -570,7 +570,7 @@ function needsToday() {
   const groups = homeNeeds(needs), all = tickets();
   // ORCH-1741: with the core's count, only the tickets whose Check card shows are results to check: one the merge queue
   // holds waits on nobody (one line, queueLine), one with another card (a question, a pull request to merge) is that card
-  const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question).map(i => i.ticket)) : null;
+  const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question && !i.stopped && !i.start).map(i => i.ticket)) : null;
   const review = all.filter(t => t.status === 'review' && (!checks || checks.has(t.id)));  // each result to check is one row and one count, like the Review page cards
   const queued = array(state.counts?.needs_you?.queue);
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
@@ -589,6 +589,9 @@ function needsToday() {
   // ORCH-476: questions and results are the core's (state.counts); an older core without it: counted here as before
   const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
   const questions = core ? core.questions : window.DashHelpers.needsYouCount(needs), resultCount = core ? core.results : review.length;
+  // #2385: the core counts the work that stopped (and leaves out the result a "Reviewer not sure" row stands for); an
+  // older core: the rows are added here
+  const stoppedCount = core && core.stopped != null ? core.stopped : stuck.length;
   // ORCH-1358: a helper that needs you on its screen (an OK in the terminal, no written question) is in Home's Helpers
   // list as Needs you and an orange chip in the live bar, so it counts here too; a ticket already counted is not again
   // (never a finished ticket, nor one already in the needs list or the core's count: a Home row, or one snoozed for
@@ -601,7 +604,7 @@ function needsToday() {
     // ORCH-1687: a ticket whose helper could not start is a row of Home's Needs you with its own Try again, so it is
     // part of THE number too (the Review badge said 2 above a Needs you list of 5); the Review page and the Tickets
     // Needs you view list it the same way
-    count:questions + resultCount + stuck.length - hiddenResults + screen + failed.length + drafts};
+    count:questions + resultCount + stoppedCount - hiddenResults + screen + failed.length + drafts};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review badge shows it (ORCH-1616:
 // only there), the Review page's line, the live bar's need-you end on a phone and the wall read the same one.
@@ -745,7 +748,7 @@ function lastFinished(all) {
 // Check again runs every check once more (orch logins), and Try again for one that cannot be reached.
 const loginWarnings = () => window.DashHelpers.needWarnings(snapshot ? null : state?.logins);
 function loginTicketLinks(list) {
-  return list.flatMap((t, i) => [i ? ' · ' : null, h('a', {href:href(t.id), 'data-key':'login-ticket-' + t.id}, (typeof t.key === 'string' && t.key ? t.key + ' ' : '') + clean(t.title || ''))]);
+  return list.flatMap((t, i) => [i ? ' · ' : null, h('a', {href:href(t.id), 'data-key':'login-ticket-' + t.id}, (typeof t.key === 'string' && t.key && t.key !== t.id && !/^t_[a-z0-9]+$/i.test(t.key) ? t.key + ' ' : '') + clean(t.title || ''))]);
 }
 async function checkLogins(item, key) {
   if (changeUnavailable() || locks.has(key)) return;
@@ -788,7 +791,7 @@ function loginBanner(stopped) {
   if (stopped.length === 1) {
     const item = stopped[0], name = clean(window.DashHelpers.needName(item));
     return h('div', {className:'banner error', role:'alert', 'data-key':'login-stopped', 'data-login':'stopped'},
-      h('div', {className:'grow'}, h('strong', {}, 'The ' + name + (item.state === 'unreachable' ? ' cannot be reached' : ' stopped working')),
+      h('div', {className:'grow'}, h('strong', {}, 'The ' + name + window.DashHelpers.needStoppedWord(item)),
         lead ? h('p', {}, lead + (n ? ': ' : '.'), n ? loginTicketLinks(list) : null) : null, loginHow(item)),
       loginAction(item, 'login-stopped-' + item.name));
   }

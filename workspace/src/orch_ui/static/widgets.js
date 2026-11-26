@@ -91,7 +91,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
    (orch run status "helper": working | starting | you | waiting | idle | stuck | limit); the page never words it itself.
    UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 needs you · 1 idle";
    UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
-   o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
+   o.title (default "Helpers"), o.empty (title when there are no rows), o.emptyText, o.emptyAction {label,onClick}, o.dataKey. */
 const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs'],limit:['','check']};
 UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
 const HELPER_COUNT=[['working','working'],['starting','starting'],['you','needs you','need you'],['waiting','on hold'],['idle','idle'],['stuck','stuck'],['limit','stopped on the usage limit']];
@@ -126,7 +126,7 @@ UI.ticketState=(t,helper)=>{t=t||{};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
 UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card helper-list');if(o.dataKey)box.dataset.key=o.dataKey;
  const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));/* ORCH-1616: no need-you count in the head (the number lives on the Review badge); each row still says Needs you */const sum=UI.helperSummary((rows||[]).filter(r=>r.state!=='you'));if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
- if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}
+ if(!rows.length){box.append(UI.state({kind:'empty',title:o.empty||'No helper is running',text:o.emptyText||'A helper shows up here while it works on a ticket.',action:o.emptyAction}));return box}
  rows.forEach(r=>{const row=el('div','card-row helper-row');row.dataset.state=r.state||'';if(r.dataKey)row.dataset.key=r.dataKey;
   const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;title.title=(r.key?r.key+' ':'')+(r.title||'');
   if(r.key)title.append(el('span','helper-key',r.key),document.createTextNode(' '));title.append(document.createTextNode(r.title||''));main.append(title);
@@ -194,10 +194,10 @@ UI.spark=(values,o)=>{o=o||{};const NS='http://www.w3.org/2000/svg',w=72,h=24,v=
 UI.progress=(value,max,unit,label)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label',label||'Progress');bar.setAttribute('aria-valuetext',value+' of '+max+(unit?' '+unit:''));bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
 /* Sheet: UI.sheet('Title', node) opens the side sheet (native dialog, same lifecycle as every dialog); returns the dialog */
 UI.sheet=(title,content)=>{const d=el('dialog','sheet');d.setAttribute('aria-label',title);const h=el('div','sheet-h');h.append(el('h2','',title));const x=el('button','btn ghost icon sm');x.type='button';x.setAttribute('aria-label','Close');x.textContent='×';x.onclick=()=>d.close();h.append(x);d.append(h,content);d.addEventListener('close',()=>d.remove(),{once:true});document.body.append(d);d.showModal();return d};
-/* Table: UI.table([{key,label,sort:true}], rows, {empty}) sortable by click or Enter on a header; text goes through textContent */
+/* Table: UI.table([{key,label,sort:true}], rows, {empty, emptyText, emptyAction:{label,onClick}}) sortable by click or Enter on a header; text goes through textContent */
 UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('table'),thead=el('thead'),tr=el('tr'),tbody=el('tbody');let sortKey=null,dir=1;
  const draw=()=>{tbody.replaceChildren();const list=rows.slice();if(sortKey)list.sort((a,b)=>String(a[sortKey]).localeCompare(String(b[sortKey]),undefined,{numeric:true})*dir);
-  if(!list.length){const r=el('tr'),c=el('td','',o.empty||'Nothing here yet.');c.colSpan=cols.length;r.append(c);tbody.append(r)}
+  if(!list.length){const r=el('tr'),c=el('td');c.append(UI.state({kind:'empty',title:o.empty||'Nothing here yet',text:o.emptyText,action:o.emptyAction}));c.colSpan=cols.length;r.append(c);tbody.append(r)}
   list.forEach(row=>{const r=el('tr');cols.forEach(c=>r.append(el('td','',row[c.key]==null?'':String(row[c.key]))));tbody.append(r)});
   [...tr.children].forEach((th,i)=>{if(cols[i].sort)th.setAttribute('aria-sort',cols[i].key===sortKey?(dir>0?'ascending':'descending'):'none')})};
  cols.forEach(c=>{const th=el('th','',c.label);th.scope='col';if(c.sort){th.setAttribute('aria-sort','none');th.tabIndex=0;th.append(UI.chevron());const go=()=>{dir=sortKey===c.key?-dir:1;sortKey=c.key;draw()};th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}}tr.append(th)});
@@ -297,7 +297,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
- const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
+ const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');let timer;
+  const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>{const wait=fr.parentNode&&fr.parentNode.querySelector('.preview-wait');if(!wait)return;/* a page that never answers: say so, with one way on */
+   const bad=UI.state({kind:'error',title:'The preview did not load',text:'Open the card to see it, or try again.',action:{label:'Try again',onClick:()=>{bad.replaceWith(wait);fr.src=src;arm()}}});bad.classList.add('preview-fail');wait.replaceWith(bad)},15000)};
+  fr.addEventListener('load',()=>{clearTimeout(timer);fr.classList.remove('loading');fr.parentNode&&fr.parentNode.querySelector('.preview-fail')&&fr.parentNode.querySelector('.preview-fail').replaceWith(el('span','preview-wait'))});arm();return fr};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
   if(p.type==='compare'){f.append(buildCompare(it,big));return f}
   if(p.type==='options'){f.append(buildOptions(it,big));return f}
@@ -432,7 +435,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
- const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If it looks good: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
  const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
@@ -680,8 +683,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
 })();
-/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card
-   ("Welcome", one token field, Log in); onLogin(token) returns a promise of an error line or null. UI.profilePicker(
+/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, commands, error, notice}) is the full-page login card
+   ("Welcome", one token field, Log in) plus the way in for someone without a token (ORCH-1851): ask the person who
+   sent the address for a private sign-in link or a token, and how to use each. commands: [{command, text}] for the
+   person who runs the workspace, shown last and small. notice: a line above the card (a sign-in link that no longer
+   works). onLogin(token) returns a promise of an error line or null. UI.profilePicker(
    {people, current, onPick, onAdd, onLogout}) is the full-page "Who is using orch?" picker; onPick(name) and
    onAdd(name) return a promise of an error line or null. Both return the .door element (the caller adds it to the page
    and removes it when done). Text only through textContent. */
@@ -699,13 +705,22 @@ UI.doorLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token
  inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='door-token';label.htmlFor=inp.id;inp.required=true;
  const err=el('p','door-error');err.id='door-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
  const go=el('button','btn primary','Log in');go.type='submit';
- field.append(label,inp,err);form.append(field,go);inner.append(form);
- if(o.hintCommand){const p=el('p','door-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
+ field.append(label,inp,err);form.append(field,go);
+ if(o.notice){const n=el('div','banner error door-notice',o.notice);n.setAttribute('role','alert');inner.append(n)}
+ inner.append(form);
+ const help=el('section','door-help'),ht=el('h2','door-help-title');ht.id=inp.id+'-help';help.setAttribute('aria-labelledby',ht.id);
+ const again=()=>{ht.textContent='Need a new link or token?'};ht.textContent='No token yet?';if(o.error||o.notice)again();
+ const ask=el('p');ask.append(el('strong','','Ask the person who sent you this address'),' for a private sign-in link or a token, just for you.');
+ const steps=el('ol','door-steps');steps.append(el('li','','Sign-in link: open it in this browser.'),el('li','','Token: paste it above, then Log in.'));
+ help.append(ht,ask,steps);
+ if(o.commands&&o.commands.length){const c=el('div','door-hint');c.append(el('p','','For the person who runs this workspace, in their terminal:'));
+  o.commands.forEach(x=>{const p=el('p');p.append(el('code','',x.command),' '+x.text);c.append(p)});help.append(c)}
+ inner.append(help);
  form.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}
   go.disabled=true;go.setAttribute('aria-busy','true');go.textContent='Logging in…';
   let why=null;try{why=o.onLogin?await o.onLogin(v):null}catch(_){why='That did not work. Try again.'}
   go.disabled=false;go.removeAttribute('aria-busy');go.textContent='Log in';
-  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);inp.select()}});
+  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);again();inp.select()}});
  setTimeout(()=>inp.focus(),0);return g};
 UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
  const list=el('ul','profiles'),err=el('p','door-error');err.setAttribute('role','alert');err.hidden=true;

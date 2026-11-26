@@ -1787,6 +1787,14 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
+def test_attach_refuses_tab_and_line_breaks_in_a_file_name():
+    for name in ("a\tb.md", "a\nb.md", "a\rb.md"):
+        with pytest.raises(actions.BadRequest):
+            actions.attachments(
+                "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": name, "text": "x"}]}
+            )
+
+
 def test_a_voice_note_is_a_ticket_file_like_a_picture():
     """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
     import base64
@@ -2096,3 +2104,16 @@ def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_a_new_tickets_files_are_kept_as_the_request_and_a_later_file_is_not(ws, tmp_path, monkeypatch):
+    """#1812: the files sent with a new ticket go to `orch ticket attach --request`; Add to this ticket does not."""
+    fake = tmp_path / "orch"
+    fake.write_text(f'#!{sys.executable}\nimport json\nprint(json.dumps({{"ok": True, "id": "t_abcdef"}}))\n')
+    fake.chmod(0o755)
+    seen = []
+    monkeypatch.setattr(actions, "_attach_all", lambda *a, **k: seen.append(k) or {"saved": [], "failed": []})
+    files = [{"name": "a.md", "text": "x"}]
+    actions.run_op(ws, str(fake), "ticket.new", {"title": "T", "files": files}, True)
+    actions.run_op(ws, str(fake), "ticket.attach", {"ticket": "t_abcdef", "files": files}, True)
+    assert [k["request"] for k in seen] == [True, False]
