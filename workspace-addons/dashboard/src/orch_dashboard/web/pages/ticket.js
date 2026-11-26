@@ -2313,14 +2313,13 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
-<<<<<<< HEAD
 // The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
 function stripKicker(t, pill, extra, dataKey) {
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
   const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, ...extra].filter(Boolean);
   return h('p', {className:'t-meta strip-kicker', 'data-key':dataKey}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
-=======
+}
 // ORCH-2140 W2: no helper tool is set up (the dashboard knows the list of tools). Unknown while settings load: false.
 const ticketNoHelperTool = () => Array.isArray(state?.settings?.agents) && !!window.StartChoiceState?.tools && !window.StartChoiceState.tools(state.settings.agents).tools.length;
 // ORCH-2140 W2 (owner accepted B): a saved ticket no helper can start yet is no dead end. Two ways: set a helper up
@@ -2335,7 +2334,6 @@ function ticketTwoWays(t) {
       h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'Let orch start a helper')), h('p', {className:'muted'}, 'Set it up once. After that, Start on a ticket is one click.'),
         h('div', {className:'row'}, h('a', {className:'btn primary sm', href:'#settings/helper', 'data-key':'two-ways-setup'}, 'Set up a helper'))),
       h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'You already work with an AI tool')), h('p', {className:'muted'}, 'Open your AI tool in this workspace’s folder and paste this line:'), copy)));
->>>>>>> origin/develop
 }
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
 // cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.

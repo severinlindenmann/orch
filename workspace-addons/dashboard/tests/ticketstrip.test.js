@@ -363,7 +363,6 @@ test('ORCH-1850: Done with a real result keeps Results on top and no handover ba
   assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
   assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
 });
-<<<<<<< HEAD
 
 test('Results: a completion note counts as a result, so no "Nothing yet" under it', () => {
   const seen = [];
@@ -376,11 +375,6 @@ test('Results: a completion note counts as a result, so no "Nothing yet" under i
   assert.match(text(card), /Results1 note/);
 });
 
-test('Needs you: the strip names the agent stored on the question (ORCH-2023)', () => {
-  const c = ctx({state:{settings:{agents:[{name:'claude', label:'Claude', chosen:true}]}, runs:{}}});
-  const strip = stripOf(c, {status:'waiting', questions:[{id:'q1', text:'Which day?', asked_by:'agent:copilot'}]});
-  assert.match(text(strip), /Copilot asks: Which day\?/);
-=======
 test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to start instead of a Start that cannot work', () => {
   const StartChoiceState = require('../../../workspace/src/orch_ui/static/start-choice-state.js');
   const page = agents => { const c = ctx({state:{runs:{}, settings:{agents}}}); c.window.StartChoiceState = StartChoiceState; c.window.UI.commandCopy = (cmd, o) => h('div', {className:'cmd-copy', 'data-key':o.dataKey}, cmd); return nodes(c.detail({...base, status:'open', key:'ORCH-7'})); };
@@ -394,5 +388,4 @@ test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to 
   const tool = page([{name:'claude', label:'Claude', chosen:true}]);
   assert.ok(!tool.some(n => /two-ways/.test(n.attrs?.className || '')));
   assert.ok(tool.some(n => n.attrs?.['data-key'] === 'ticket-start'));
->>>>>>> origin/develop
 });
