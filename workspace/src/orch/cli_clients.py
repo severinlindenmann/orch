@@ -172,6 +172,9 @@ def add_parsers(sub, common) -> None:
         help="this workspace's signing key: its fingerprint, made and registered if needed",
     )
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
+    rel.add_parser(
+        "needs", parents=[common], help="Home lines: a new contact your admin connected (no network)"
+    )
     _add_mobile(rel, common)
     _add_profile(rel)
     _add_contacts(rel, common)
@@ -506,6 +509,11 @@ def run_group(args, root: Path, out) -> None:
 
 
 def run_publish(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_publish(args, root, out)
+
+
+def _run_publish(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -798,6 +806,11 @@ def _problem(args, root: Path, out) -> None:
 
 
 def run_relay(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_relay(args, root, out)
+
+
+def _run_relay(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -807,7 +820,7 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "invite", "status", "outbox", "view", "key") and not dry
+        sub not in ("connect", "invite", "status", "outbox", "view", "needs", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
         _key_once(root)
@@ -849,6 +862,13 @@ def run_relay(args, root: Path, out) -> None:
         if fp:
             st["fingerprint"] = fp
             text += f"\nSigning key fingerprint: {fp}"
+        if st["configured"] and (n := len(relay.outbox_list(root))):  # queued stays visible (R1.1, R3.1)
+            st["waiting"], problem = n, relay.outbox_problem(root)
+            text += f"\n{n} message{'s' if n != 1 else ''} not sent yet: " + (
+                f"{problem} They go out once this is fixed."
+                if problem
+                else "the relay could not be reached. They go out with the next orch relay command."
+            )
         out(args, st, text)
     elif sub == "key":
         from orch import signkey
@@ -863,11 +883,18 @@ def run_relay(args, root: Path, out) -> None:
         rows = [
             f"{i['title']}  {i['subtitle']}"
             if b["type"] == "list"
+            else f"{i['name']}  {i.get('last', '')}".strip()
+            if b["type"] == "conversations"
             else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
             for b in v["blocks"]
             for i in b["items"]
         ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
+    elif sub == "needs":
+        from orch import relay_view
+
+        rows = relay_view.needs(root)
+        out(args, rows, "\n".join(r["text"] for r in rows) or "Nothing new.")
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]

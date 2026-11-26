@@ -1168,8 +1168,27 @@ def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path |
     else:
         new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block
     if new != text:
+        if local_file_left(root, fn):
+            return False
         write_text(path, new)
     return True
+
+
+def local_file_left(root: Path, fn: str) -> str | None:
+    """Why orch leaves the local instruction file `fn` alone, or None (R1.4: `git status` stays clean). A file
+    git tracks is the team's; a new one git would show (a `!` line in the team's .gitignore beats
+    .git/info/exclude) is not made. Asks git, so only call it when orch is about to write the file."""
+    path = root / fn
+    try:
+        if path.exists() or is_link(path):
+            if _tracked(root, fn):
+                return f"{fn} is part of your team's files (tracked by git): orch left it as it is."
+            return None
+        if _in_git_repo(root) and not _ignored(root, fn):
+            return f"Git would show a new {fn} (your .gitignore lets it in): orch did not make it."
+    except Refused:
+        return f"orch cannot ask git whether {fn} stays out of git: orch did not make it."
+    return None
 
 
 # ------------------------------------------------------------------ Share with team

@@ -1190,6 +1190,12 @@ def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
             assert argv[argv.index("--by") + 1].startswith("human:")
         with pytest.raises(actions.BadRequest):
             build_argv(op, {"on": 1})
+    for on, mode in ((True, "propose"), (False, "accept")):  # owner 25 Nov: nothing closes by itself
+        argv = build_argv("reviewer_mode.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.reviewer_mode", mode]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("reviewer_mode.set", {"on": "yes"})
     argv = build_argv("review.undo", {"ticket": "t_abcdef"})
     assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
     argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
@@ -1410,9 +1416,27 @@ def test_chat_new_and_make_ticket_validation():
         ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "files": ["a.txt"]}),
+        ("chat.say", {"text": "hi", "files": "a.txt"}),
+        ("chat.say", {"text": "hi", "files": [f"{i}.txt" for i in range(11)]}),
+        ("chat.say", {"text": "", "files": []}),
     ]:
         with pytest.raises(actions.BadRequest):
             actions.OPS[op](args)
+
+
+def test_chat_say_with_files():
+    """ORCH-2171: files already attached to the Chat ticket go with the message; words may be empty then."""
+    assert actions.OPS["chat.say"]({"text": "see", "files": ["a b.txt", "-x.png"]}) == (
+        ["chat", "say"],
+        ["--file=a b.txt", "--file=-x.png"],
+        ["see"],
+    )
+    assert actions.OPS["chat.say"]({"text": "", "files": ["a.txt"]}) == (
+        ["chat", "say"],
+        ["--file=a.txt"],
+        [""],
+    )
 
 
 # ---- fb19: long text and attached files for a new ticket

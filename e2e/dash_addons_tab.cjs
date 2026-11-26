@@ -1,7 +1,7 @@
 // Settings › Add-ons draws its rows, and "Report a problem" saves the page the person was looking at (ORCH-1117,
 // report r-1120-2034-ws: the picture showed an empty Add-ons tab, the saved page the whole list).
 // Chromium with the real dashboard web files and no server: /api/state comes from the screenshot fixture
-// (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json) with twelve add-ons, Contacts among them,
+// (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json) with twelve add-ons, the relay among them,
 // and a new revision on every read, so the page redraws as it does at home.
 // Flow, at 1366 and 390 px: open Settings, Add-ons tab, the heading and every row are on screen; About, then the
 // browser's Back to Add-ons, the rows again. Then the report: open it, the page redraws behind the dialog, Create,
@@ -20,9 +20,11 @@ const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
+// The built-in add-ons' menu labels come from their own toml (RP8 B: Relay, Publish), never typed here.
+const builtinLabel = name => /^label = "([^"]+)"/m.exec(fs.readFileSync(path.join(__dirname, '..', 'workspace', 'src', 'orch', 'builtin', name, 'orch-addon.toml'), 'utf8'))[1];
 const ADDONS = [['automation', 'Automation', true], ['dashboard-tester', 'Dashboard-tester', false], ['factory', 'Factory', true], ['focus', 'Focus', true],
-  ['insights', 'Insights', true], ['lessons', 'Lessons', true], ['publish', 'Shared links', true], ['pull-requests', 'Pull requests', true],
-  ['relay', 'Contacts', true], ['services', 'Services', true], ['sync', 'Sync', true], ['usage', 'Usage', true]];
+  ['insights', 'Insights', true], ['lessons', 'Lessons', true], ['publish', builtinLabel('publish'), true], ['pull-requests', 'Pull requests', true],
+  ['relay', builtinLabel('relay'), true], ['services', 'Services', true], ['sync', 'Sync', true], ['usage', 'Usage', true]];
 
 function fixture() {
   const state = JSON.parse(fs.readFileSync(path.join(DASH, 'tests', 'fixtures', 'state-chat-settings.json'), 'utf8'));

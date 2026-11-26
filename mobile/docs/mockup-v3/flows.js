@@ -156,7 +156,7 @@ function sendFeedback(){if(!viewer.pins.length){toast('Add a comment on the prev
 // "+" in Chats opens New topic directly (Add workspace lives in Settings); after Send the new topic's chat opens at once ("Getting started…", then the real topic in place).
 // A workspace-scoped composer creates a topic for text, voice and attachments alike.
 let ntTimer=null,ntSecs=0,ntText='',ntHumanReview=true;
-function ntReviewSwitch(){return `<button class="setting-row" data-action="nt-human-review" role="switch" aria-checked="${ntHumanReview}"><span>Human review needed</span><span class="ios-toggle ${ntHumanReview?'on':''}" aria-hidden="true"></span></button>`;}
+function ntReviewSwitch(){return `<button class="setting-row" data-action="nt-human-review" role="switch" aria-checked="${ntHumanReview}"><span>I review the result</span><span class="ios-toggle ${ntHumanReview?'on':''}" aria-hidden="true"></span></button>`;}
 function ntClock(){return String(Math.floor(ntSecs/60)).padStart(2,'0')+':'+String(ntSecs%60).padStart(2,'0');}
 /* New topic, hands busy (phone E): workspace tiles, one huge mic, Photo / Camera, "Type instead"; recording state with big Send / Cancel.
    Recording keeps going with the phone locked; while a call or Siri has the mic the line reads "● Paused" and the clock holds (ORCH-1823). */

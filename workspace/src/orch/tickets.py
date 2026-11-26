@@ -1392,11 +1392,12 @@ def _check_can_finish(ticket: dict) -> None:
 
 
 def _open_questions(ticket: dict) -> list[str]:
-    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    """Plain questions nobody answered yet (an add-on's own questions are its business). Ideas left for later
+    (ORCH-2186, `left_from`) wait for the person without holding up the ticket."""
     return [
         q["id"]
         for q in ticket.get("questions") or []
-        if q.get("answer") is None and q.get("kind") in (None, "plain")
+        if q.get("answer") is None and q.get("kind") in (None, "plain") and not q.get("left_from")
     ]
 
 
@@ -1659,6 +1660,11 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away
             raise Refused(f"{qid} waits for the owner.")
         if q.get(autoreview.OWNER_ONLY):
             raise Refused(f"{qid} waits for the owner: they took it back from the Reviewer.")
+        if "said" in q:  # ORCH-2183: the quote is checked again on the fresh ticket
+            from orch import cardcontext
+
+            if cardcontext.stale(root, ticket, q) is not None:
+                raise Refused(f"{qid} waits for the owner: the words it quotes changed since.")
         rec = q.get("recommended")
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
@@ -1703,7 +1709,7 @@ def undo_reviewer_accept(root: Path, tid: str, by: str) -> dict:
         ticket.pop("human_review", None)
         add_history(ticket, by, "Status done -> review")
         add_history(ticket, by, autoreview.UNDONE_LINE + "the Reviewer's accept; back in Review for you, "
-                    "with Human review needed on.")  # fmt: skip
+                    "with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -1728,7 +1734,7 @@ def undo_reviewer_send_back(root: Path, tid: str, cid: str, by: str) -> dict:
         add_history(ticket, by, f"Status {was} -> review")
         what = _one_line(item.get("text"), 120)
         add_history(ticket, by, autoreview.UNDONE_LINE + f"the Reviewer's send-back ({what}); "
-                    "back in Review for you, with Human review needed on.")  # fmt: skip
+                    "back in Review for you, with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -2337,8 +2343,8 @@ def human_review(ticket: dict) -> bool:
     return ticket.get("human_review") is not False
 
 
-HUMAN_REVIEW_ON = "Human review needed: on"
-HUMAN_REVIEW_OFF = "Human review needed: off"
+HUMAN_REVIEW_ON = "I review the result: on"
+HUMAN_REVIEW_OFF = "I review the result: off"
 
 
 def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
@@ -4445,8 +4451,24 @@ def ask(
     links: list[dict] | None = None,
     add_workspace: str | None = None,
     because: str | None = None,
+    if_wait: str | None = None,
+    facts: list[str] | None = None,
+    said: str | None = None,
+    due: str | None = None,
+    ideas: list[str] | None = None,
 ) -> tuple[dict, dict]:
-    """because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
+    """ideas (ORCH-2186, Focused review E): IDEAS_MIN to IDEAS_MAX one-line ideas the person sorts one by one
+    (Keep, Later or No) on Review; the question then has no --option. What is left for later comes back as a
+    smaller card (`left_from`) that never holds up the ticket.
+    due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
+    stored as UTC (`due`), shown as "Next deadline" on Review and counted when it passes unanswered
+    (attention.week).
+    said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
+    history:<at>, rules:<n>); orch copies the words, author and day from that record (orch/cardcontext.py) and
+    refuses a reference that is not a person's words. No reference, no quote.
+    if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
+    answers) and up to FACTS_MAX "What matters" lines. One line each; an empty one is left out, never guessed.
+    because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
     when it has one.
     card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
@@ -4471,8 +4493,17 @@ def ask(
             )
         if len(because) > BECAUSE_MAX:
             raise Refused(f"--because is one line of at most {BECAUSE_MAX} characters.")
+    if_wait = " ".join((if_wait or "").split()) or None
+    if if_wait and len(if_wait) > BECAUSE_MAX:
+        raise Refused(f"--if-wait is one line of at most {BECAUSE_MAX} characters.")
+    facts = [f for f in (" ".join(str(x or "").split()) for x in facts or []) if f] or None
+    if facts and len(facts) > FACTS_MAX:
+        raise Refused(f"Give at most {FACTS_MAX} --fact lines: the few that decide it.")
+    if facts and any(len(f) > BECAUSE_MAX for f in facts):
+        raise Refused(f"A --fact is one line of at most {BECAUSE_MAX} characters.")
     if kind is not None and not KIND_RE.fullmatch(kind):
         raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
+    ideas = clean_ideas(ideas, options, recommended, card) if ideas else None
     act = None
     if action is not None:
         try:
@@ -4493,7 +4524,15 @@ def ask(
     _guard_question(root, text, options, recommended, check)
     no_secret(
         root,
-        {"text": text, "options": list(options), "recommended": recommended, "because": because},
+        {
+            "text": text,
+            "options": list(options),
+            "recommended": recommended,
+            "because": because,
+            "if_wait": if_wait,
+            "facts": facts,
+            "ideas": ideas,
+        },
         "question",
     )
     for part in (
@@ -4501,6 +4540,9 @@ def ask(
         *options,
         *([recommended] if recommended else []),
         *([because] if because else []),
+        *([if_wait] if if_wait else []),
+        *(facts or []),
+        *(ideas or []),
         *_labels(act),
     ):
         if _asks_for_secret(part):
@@ -4520,12 +4562,26 @@ def ask(
 
     preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
 
+    said_ref = (said or "").strip() or None
+    due_at = parse_time(due) if due and due.strip() else None
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
-            if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
+            if (
+                old["answer"] is None
+                and old["text"] == text.strip()
+                and old["options"] == list(options)
+                and old.get("ideas") == ideas
+            ):
                 return old
         if check is not None:
             _item(ticket, check)
+        quoted = None
+        if said_ref:  # copied from the record itself, on the locked ticket (ORCH-2183)
+            from orch import cardcontext
+
+            quoted = cardcontext.quote(root, ticket, said_ref)
+            no_secret(root, {"said": quoted["words"]}, "question")
         q = {
             "id": _next_id(ticket["questions"], "q"),
             "text": text.strip(),
@@ -4545,6 +4601,16 @@ def ask(
             q["check"] = check
         if because:  # RULE A: only when given (old digests stay the same); part of what the person is shown
             q["because"] = because
+        if if_wait:  # RULE A, as because (ORCH-2182)
+            q["if_wait"] = if_wait
+        if facts:
+            q["facts"] = facts
+        if quoted:  # RULE A, as because (ORCH-2183)
+            q["said"] = quoted
+        if due_at:  # RULE A (ORCH-2184)
+            q["due"] = due_at
+        if ideas:  # RULE A (ORCH-2186)
+            q["ideas"] = ideas
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4566,6 +4632,56 @@ def ask(
 
 GROUP_MAX = 80
 BECAUSE_MAX = 200
+FACTS_MAX = 4
+IDEAS_MIN, IDEAS_MAX = 2, 12  # ORCH-2186: a list to sort, short enough to sort in one sitting
+
+
+def clean_ideas(ideas, options, recommended, card) -> list[str]:
+    """The ideas of `orch ask --idea` (ORCH-2186): one line each, no repeats, IDEAS_MIN to IDEAS_MAX of them,
+    never with --option, --recommend or a card (each idea gets its own Keep, Later or No)."""
+    if options or recommended or card is not None:
+        raise Refused(
+            "--idea goes with a plain question only (no --option, --recommend or card): "
+            "each idea gets Keep, Later or No."
+        )
+    out = [i for i in (" ".join(str(x or "").split()) for x in ideas) if i]
+    if not IDEAS_MIN <= len(out) <= IDEAS_MAX:
+        raise Refused(f"Give {IDEAS_MIN} to {IDEAS_MAX} --idea lines, one idea each.")
+    if any(len(i) > BECAUSE_MAX for i in out):
+        raise Refused(f"An --idea is one line of at most {BECAUSE_MAX} characters.")
+    if len({i.casefold() for i in out}) != len(out):
+        raise Refused("Each --idea once: two of them say the same.")
+    return out
+
+
+IDEAS_LEFT_COPY = ("text", "facts", "if_wait", "due", "said", "asked_by")
+
+
+def _ideas_left(ticket: dict, q: dict, decision: dict | None, by: str) -> str | None:
+    """ORCH-2186: the ideas the person left for later (or did not sort) come back as a smaller card on the
+    same ticket: the same question with only those ideas, marked `left_from`, so it never holds up the ticket
+    (the helper works on what was kept). Returns its id, or None when nothing is left."""
+    left = (decision or {}).get("ideas", {}).get("later") if isinstance(q.get("ideas"), list) else None
+    if not left:
+        return None
+    n = {
+        "id": _next_id(ticket["questions"], "q"),
+        **{k: q[k] for k in IDEAS_LEFT_COPY if q.get(k) is not None},
+        "options": [],
+        "recommended": None,
+        "answer": None,
+        "answered_by": None,
+        "via": None,
+        "asked_at": now(),
+        "ideas": list(left),
+        "left_from": q["id"],
+    }
+    ticket["questions"].append(n)
+    k = len(left)
+    add_history(ticket, by, f"{k} idea{'' if k == 1 else 's'} left for later: {n['id']}")
+    return n["id"]
+
+
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -4580,6 +4696,11 @@ def question_digest(q) -> str:
         "shown",
         "links",
         "because",
+        "if_wait",
+        "facts",
+        "said",
+        "due",
+        "ideas",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
@@ -4772,6 +4893,7 @@ def answer(
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
+        _ideas_left(ticket, q, decision, by)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
         # A click on the dashboard or a phone is a person even when that server was started from a helper's
         # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
@@ -4851,7 +4973,7 @@ def record_answered(
     root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
-    a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
+    a Test results card, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
     decision.replaced_by. One apply_op, one history line "Answered <qid>: <summary>"."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
