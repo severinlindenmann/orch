@@ -788,8 +788,8 @@ function phonePanel(phoneAddon, settings) {
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
     connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
       h('li', {}, 'Open the admin page of your phone link and add this workspace. It gives you one line to copy.'),
-      h('li', {}, 'Paste that line below and press Connect.')),
-      snapshot ? null : relayPaste()),
+      h('li', {}, 'Paste that line below and press Connect.'))),
+    connected || snapshot ? null : relayPaste(),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your phone link.')));
   // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
   const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
@@ -877,7 +877,7 @@ function settingsPage() {
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
     const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' : 'Not found on this computer. Install it, then it shows up here.';
-    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
+    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, h('label', {className:'tap-box'}, radio),
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
   }).map(row => row);
@@ -1875,7 +1875,7 @@ function repeatsDialog(only = null, addonName = null) {
   const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket), replaces,
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
-  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
+  if (!ticket.options.length) fields.append(stateNote('No open tickets yet', 'A repeat needs a ticket to start from. Make one first.', 'empty', {label:'New ticket', onClick:async () => { await window.orch.close(d); location.hash = '#new'; }}));
   const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
