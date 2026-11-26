@@ -223,6 +223,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
        on the buttons), J next card, K card before, M opens More, U undo, Esc o.onEscape (a round: back to the start);
        the arrow keys stay. A new card comes in with the kit's page motion (orch.enter). o.endView(): the element shown
        when every card is answered, in place of the summary (a round's "What you decided")
+       With it (ORCH-2186, Focused review E), item.ideas (2 to 12 lines) draws one row per idea with Keep / Later / No in
+       place of the preview; the ok answer is "Save" ("Save, N left for later" when some stay) and answers ok with
+       note.ideas = {keep:[n], no:[n], later:[n]} (numbers from 1). Nothing sorted: Save asks to sort one first
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -258,6 +261,9 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(p.foot)d.append(el('p','doc-foot',p.foot));
  if(Array.isArray(p.details)&&p.details.length){const dt=el('div','doc-details');p.details.forEach(x=>dt.append(el('p','meta',x)));d.append(dt)}
  return d};
+/* ORCH-2186: an ideas card's answer in a few words ("2 kept, 1 no, 5 for later"); the deck, the round end and the
+   dashboard's answered list say the same */
+UI.ideasWord=(sorted,total)=>{const k=(sorted&&sorted.keep||[]).length,no=(sorted&&sorted.no||[]).length,l=Math.max(0,(total||0)-k-no);return k+' kept, '+no+' no'+(l?', '+l+' for later':'')};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,ticked=(o.ticked||[]).slice(0,2),pairSide=0,picking=!!o.picking,showing=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
@@ -302,8 +308,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&(it.kind==='check'||it.noWords===true);/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?(words(it)?'Send back with your comment':'Send back'):"Don't do");
- const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
- const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
+ const okWord=it=>{if(isIdeas(it)){const s=ideaSort(it);return s.keep.length+s.no.length+s.later.length===0||!s.left?'Save':'Save, '+s.left+' left for later'}if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
+ const ansWord=a=>!a?'':a.verdict==='ok'&&a.note&&a.note.ideas?UI.ideasWord(a.note.ideas,(a.item.ideas||[]).length):a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');let timer;
@@ -367,7 +373,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* R4 A / R6 A: a comment that waits, or a part still open, makes Send back the filled button: Looks good never sends it along */
  const sugOf=it=>it&&sendsBack(it)&&(words(it)||it.blocked)?'no':it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked||(isIdeas(it)&&!ideaSort(it).any));okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
   const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(oneTap(it))okBtn.hidden=true;/* the answers are the buttons */if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
@@ -405,7 +411,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.blocked&&it.kind==='check'){const b=el('div','banner slim attn swipe-open'),g=el('div','grow');g.append(el('strong','','Still open'),el('p','',it.blocked));b.append(g);h.append(b)}/* R6 A: an open part sits on top, never only in the footer */
   /* ORCH-2182: the facts that decide it, in one box right under the decision; no facts, no box (never a guess) */
   const fx=df&&Array.isArray(it.facts)&&it.facts.length?factBox(it.facts):null;
-  const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
+  const ix=!layer&&isIdeas(it)?ideasBox(it):null;/* ORCH-2186: the ideas to sort take the place of their plain list */
+  const pv=!ix&&hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
   if(pv){pv.dataset.type=it.preview.type;pv.append(buildPreview(it,false));
   if(visual(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
@@ -425,7 +432,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(df)moreMenu(row);/* ORCH-2182: the card's links and Open sit in one More menu; the answers stay in the bar */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   const sd=df&&it.said?saidLine(it):null;/* ORCH-2183: what the person said, copied by orch from its record */
-  c.append(...(it.kind==='check'?[h,fx,sd,fl,pv,rb,ft]:[h,fx,sd,pv,rb,fl,ft]).filter(Boolean));return c};
+  c.append(...(it.kind==='check'?[h,fx,sd,fl,pv,rb,ft]:[h,fx,sd,ix,pv,rb,fl,ft]).filter(Boolean));return c};
  const decisionFirst=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
  /* ORCH-2183 (Focused review B): "You said on 21 Nov: “…” · open", "<name> wrote ...", "Team rule, 21 Nov: ...";
     orch copied the words from a chat line, a history line or the team rules file. Out of date: one plain line under
@@ -439,6 +446,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   return b.children.length?b:null};
  const factBox=fs=>{const b=el('section','swipe-fact');b.setAttribute('aria-label','What matters');b.append(el('p','swipe-fact-h','What matters'));
   const ul=el('ul','swipe-facts');fs.slice(0,4).forEach(f=>{if(typeof f==='string'&&f.trim())ul.append(el('li','',f))});b.append(ul);return b};
+ /* ORCH-2186 (Focused review E): ideas, one row each with Keep / Later / No (a segmented control; a second tap on the
+    same word takes it back). Saving part of them is fine: what is not sorted stays for later. */
+ const sorts={};/* item id -> {n (from 1): 'keep'|'later'|'no'} */
+ const isIdeas=it=>!!(it&&decisionFirst()&&Array.isArray(it.ideas)&&it.ideas.length>1&&!it.blocked);
+ const IDEA_WORDS=[['keep','Keep'],['later','Later'],['no','No']];
+ const ideaSort=it=>{const m=sorts[it.id]||{},o={keep:[],no:[],later:[]};(it.ideas||[]).forEach((_,i)=>{const w=m[i+1];if(w)o[w].push(i+1)});o.any=o.keep.length+o.no.length+o.later.length>0;o.left=(it.ideas||[]).length-o.keep.length-o.no.length;return o};
+ const ideaNote=it=>{const s=ideaSort(it);return {keep:s.keep,no:s.no,later:s.later}};
+ const ideasBox=it=>{const b=el('section','swipe-ideas');b.setAttribute('aria-label','Ideas');b.addEventListener('pointerdown',e=>e.stopPropagation());const m=sorts[it.id]=sorts[it.id]||{};
+  it.ideas.forEach((idea,i)=>{const n=i+1,row=el('div','swipe-idea'),seg=el('div','segmented swipe-idea-sort');seg.setAttribute('role','group');seg.setAttribute('aria-label',idea);
+   const sync=()=>seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(m[n]===x.dataset.v)));
+   IDEA_WORDS.forEach(([v,w])=>{const x=btn('btn sm',[w]);x.dataset.v=v;x.setAttribute('aria-label',w+': '+idea);x.onclick=e=>{e.stopPropagation();if(m[n]===v)delete m[n];else m[n]=v;sync();syncWords()};seg.append(x)});sync();
+   row.append(el('p','swipe-idea-t',idea),seg);b.append(row)});
+  b.append(el('p','meta swipe-idea-left','Ideas you do not sort stay here for later.'));return b};
  const moreMenu=row=>{const items=[...row.children].filter(x=>x.matches('a'));if(!items.length)return;
   const d=el('details','dropdown swipe-more'),s=el('summary','btn ghost sm','More'),mn=el('div','menu');s.setAttribute('aria-haspopup','menu');mn.setAttribute('role','menu');
   items.forEach(a=>{a.className='menu-item';a.setAttribute('role','menuitem');a.addEventListener('click',()=>{d.open=false});mn.append(a)});
@@ -563,8 +583,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,oneTap(it)?'Tap the answer you want.':'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
+  if(verdict==='ok'&&isIdeas(it)&&!ideaSort(it).any)return nudge(c,'Sort at least one idea, then save.');/* ORCH-2186 */
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
-  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
+  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:isIdeas(it)&&verdict==='ok'?{ideas:ideaNote(it)}:null)},120)};
  /* an answer on one side of Compare: the same words and the same rules as the shared bar (ORCH-477) */
  const answerIn=(it,verdict,pick)=>{if(!it||overlay||busy)return;
   if(verdict==='later')return defer(it);

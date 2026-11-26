@@ -83,6 +83,17 @@ test('ORCH-2182: mapCard carries If you wait and the facts, and leaves out what 
   const none = UI.review.mapCard(card('g'), fakeApi([[]]), NOW);
   assert.equal(none.ifWait, ''); assert.equal(none.facts.length, 0);
 });
+test('ORCH-2186: mapCard carries the ideas (text only, at most 12); Save sends how they were sorted', async () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('i', {ideas: ['Customer story', '', 7, ...Array.from({length: 14}, (_, n) => 'idea ' + n)]}), fakeApi([[]]), NOW);
+  assert.equal(it.ideas.length, 12); assert.equal(it.ideas[0], 'Customer story');
+  assert.equal(UI.review.mapCard(card('j'), fakeApi([[]]), NOW).ideas.length, 0);
+  const sent = [];
+  const {decks} = await mount(fakeApi([[card('a', {ideas: ['A', 'B', 'C']})]], async b => { sent.push(b); return {ok: true}; }));
+  decks[0].o.onDecide(decks[0].items[0], 'ok', {ideas: {keep: [1], no: [3], later: []}});
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[0])), {id: 'a', digest: 'd-a', verdict: 'ok', picked: null, note: {ideas: {keep: [1], no: [3], later: []}}});
+});
 test('ORCH-2183: mapCard carries the quote with its day; words taken away or changed are dropped', () => {
   const {UI} = load();
   const at = new Date(NOW.getTime() - 5 * 864e5);

@@ -850,6 +850,9 @@ def _card_of(q: dict) -> dict:
     """The card of a question; a plain question gets a plain options card."""
     if isinstance(q.get("card"), dict):
         return q["card"]
+    if isinstance(q.get("ideas"), list):  # ORCH-2186: a page that cannot sort them shows the ideas as a list
+        steps = list(q["ideas"])
+        return {"kind": "draft", "title": q.get("text", ""), "preview": {"type": "doc", "steps": steps}}
     return {
         "kind": "choice" if q.get("options") else "draft",
         "title": q.get("text", ""),
@@ -926,9 +929,59 @@ def _option_ids(q: dict, card: dict) -> list[str]:
     return list(q.get("options") or [])
 
 
+IDEAS_SORT = ("keep", "no", "later")
+
+
+def _ideas_sorted(q: dict, note) -> tuple[dict, object]:
+    """ORCH-2186: how the person sorted an ideas question: the note's {"ideas": {"keep": [1, 3], "no": [2],
+    "later": [4]}} (numbers from 1, as the list shows them). An idea not named stays for later. No sorting at
+    all keeps every idea (a page without the Keep / Later / No rows answers with Looks good).
+    Returns ({keep, no, later: [idea text]}, the note without "ideas")."""
+    ideas = q["ideas"]
+    if isinstance(note, str) and note.strip():
+        try:
+            note = json.loads(note)
+        except ValueError as e:
+            raise BadVerdict("A note must be JSON.") from e
+    got = note.get("ideas") if isinstance(note, dict) else None
+    rest = {k: v for k, v in note.items() if k != "ideas"} if isinstance(note, dict) else note
+    if got is None:
+        return {"keep": list(ideas), "no": [], "later": []}, rest
+    if not isinstance(got, dict) or set(got) - set(IDEAS_SORT):
+        raise BadVerdict('Sort ideas as {"keep": [1, 3], "no": [2], "later": [4]}.')
+    seen: dict[int, str] = {}
+    for word in IDEAS_SORT:
+        nums = got.get(word) or []
+        if not isinstance(nums, list):
+            raise BadVerdict(f'"{word}" is a list of idea numbers.')
+        for i in nums:
+            if isinstance(i, bool) or not isinstance(i, int) or not 1 <= i <= len(ideas):
+                raise BadVerdict(f"Idea numbers go from 1 to {len(ideas)}.")
+            if i in seen:
+                raise BadVerdict(f"Idea {i} is sorted twice.")
+            seen[i] = word
+    if not seen:
+        raise BadVerdict("Sort at least one idea, then save.")
+    word = [seen.get(i, "later") for i in range(1, len(ideas) + 1)]
+    return {w: [x for x, got in zip(ideas, word, strict=True) if got == w] for w in IDEAS_SORT}, rest
+
+
+def ideas_summary(sorted_: dict) -> str:
+    """One plain line for the helper: "Keep: A; B. No: C. Later: D." (empty parts left out)."""
+    names = {"keep": "Keep", "no": "No", "later": "Later"}
+    return " ".join(f"{names[w]}: {'; '.join(sorted_[w])}." for w in IDEAS_SORT if sorted_.get(w))
+
+
 def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
     if verdict not in VERDICTS:
         raise BadVerdict(f"verdict is one of {', '.join(VERDICTS)}.")
+    if verdict == "ok" and isinstance(q.get("ideas"), list) and "card" not in q:
+        if picked is not None:
+            raise BadVerdict("An ideas question has no options to pick: sort the ideas.")
+        sorted_, note = _ideas_sorted(q, note)
+        d = _bare("approve", None, [], _note_bv(note))
+        d["ideas"], d["summary"] = sorted_, ideas_summary(sorted_)
+        return d
     n = _note_bv(note)
     ids = _option_ids(q, card)
     choose = bool(ids)
@@ -1837,6 +1890,13 @@ def stack(root: Path) -> list[dict]:
                         **({"said": said} if said else {}),
                         # ORCH-2184: the deadline the helper gave (orch ask --due), for "Next deadline"
                         **({"due": q["due"]} if isinstance(q.get("due"), str) else {}),
+                        # ORCH-2186: the ideas to sort (Keep / Later / No), and the card they were left from
+                        **(
+                            {"ideas": [i for i in q["ideas"] if isinstance(i, str)]}
+                            if isinstance(q.get("ideas"), list)
+                            else {}
+                        ),
+                        **({"left_from": q["left_from"]} if isinstance(q.get("left_from"), str) else {}),
                         **run_last(t, q, card, root),
                     }
                 )

@@ -978,6 +978,13 @@ def _remaining_parsers(sub, common):
         help="a fact that decides it, one line (up to 4; shown first on the card: What matters)",
     )
     x.add_argument(
+        "--idea",
+        action="append",
+        default=[],
+        metavar="LINE",
+        help="one idea for the person to sort (2 to 12; each gets Keep, Later or No; no --option)",
+    )
+    x.add_argument(
         "--due",
         metavar="TIME",
         help="when the answer is needed (a time; without a zone it is this computer's local time)",
@@ -1792,6 +1799,7 @@ def run(args: argparse.Namespace) -> None:
             or args.because is not None
             or args.if_wait is not None
             or args.fact
+            or args.idea
             or args.said is not None
             or args.due is not None
             or args.kind
@@ -1813,6 +1821,7 @@ def run(args: argparse.Namespace) -> None:
             or args.because is not None
             or args.if_wait is not None
             or args.fact
+            or args.idea
             or args.said is not None
             or args.due is not None
             or args.kind
@@ -1841,6 +1850,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if card and args.idea:
+            raise Refused("--idea goes with a plain question, not a card: each idea gets Keep, Later or No.")
         if (args.group is not None or args.ref or args.describe) and not card:
             raise Refused(
                 "--group, --ref and --describe go with a card (--draft, --choose, --plan or --link)."
@@ -1875,6 +1886,7 @@ def run(args: argparse.Namespace) -> None:
                 facts=args.fact,
                 said=args.said,
                 due=args.due,
+                ideas=args.idea,
             )
         if card:
             pass
@@ -1893,6 +1905,9 @@ def run(args: argparse.Namespace) -> None:
                 "\nHint: the question holds an orch command. A person copies or runs it in one click on "
                 'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
                 if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else "\nNext: the person sorts each idea (Keep, Later or No); the answer lists them, and "
+                "what is left for later comes back as its own card. Work on the kept ones."
+                if q.get("ideas")
                 else "\n" + cardkinds.ASK_HINT
                 if not card and not args.kind and not (args.option and args.recommend)
                 else ""

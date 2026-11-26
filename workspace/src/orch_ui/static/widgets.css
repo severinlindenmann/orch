@@ -2862,6 +2862,13 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .swipe-facts li{overflow-wrap:anywhere}
 .swipe-more>.menu{top:auto;bottom:calc(100% + 4px);min-width:200px}
 @media (max-width:720px){.swipe-fact{margin:0 var(--s4) var(--s3)}}
+/* ORCH-2186 (Focused review E): ideas to sort, one row each, Keep / Later / No on the right (full width on a phone) */
+.swipe-ideas{display:grid;gap:var(--s2);margin:0 var(--s5) var(--s4);min-width:0}
+.swipe-idea{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2) var(--s3);padding-top:var(--s2);border-top:1px solid var(--border)}
+.swipe-idea-t{flex:1 1 240px;margin:0;min-width:0;font-size:15px;line-height:22px;color:var(--text);overflow-wrap:anywhere}
+.swipe-idea-sort{flex:none}
+.swipe-idea-left{margin:0}
+@media (max-width:720px){.swipe-ideas{margin:0 var(--s4) var(--s3)}.swipe-idea-sort{width:100%}.swipe-idea-sort .btn{flex:1}}
 /* Focused review B (ORCH-2183): the person's quoted words under "What matters", one line; out of date in warning ink */
 .swipe-said{display:grid;gap:var(--s1);margin:0 var(--s5) var(--s4);min-width:0;font-size:15px;line-height:22px;color:var(--text)}
 .swipe-said p{margin:0;max-width:70ch;overflow-wrap:anywhere}

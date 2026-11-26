@@ -228,3 +228,12 @@ window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket
  const put=list=>list.forEach(it=>{const [g,why]=of(it);it.attention={group:g,name:G[g],why}});
  put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
  const t=new Date();t.setDate(t.getDate()+1);t.setHours(9,0,0,0);const d8=window.SWIPE_ITEMS.find(it=>it.id==='d8');if(d8)d8.due=t.toISOString()})();
+
+/* Focused review E (ORCH-2186): with ?decide=1 one ideas card (orch ask --idea): Keep / Later / No per idea, Save in the
+   bar; saving part is fine. In Take your time (you sort the ideas yourself), in the Look at the result lane. */
+(()=>{if(!/[?&]decide\b/.test(location.search))return;const L=window.SWIPE_ITEMS,at=L.findIndex(it=>it.lane==='proposed');
+ const ideas=['One winter with a heat pump: the Meier family, 3 short posts','Advent calendar with 24 saving tips','Answer the 5 most asked questions, one per week','60-second video with an installer (CHF 900 for the filming)','Live question hour on LinkedIn'];
+ L.splice(at<0?L.length:at,0,{id:'i1',kind:'draft',kindLabel:'Document',icon:'file',lane:'look',laneName:'Look at the result',ticket:'NOR-76',ticketId:'t_nor76',ticketTitle:'Content ideas for December',
+  title:'Content ideas for December',text:'Which content ideas should the helper work out?',ifWait:'Nothing is held up. December planning starts next week.',
+  facts:['Posts with a real customer got 3 times more clicks than product posts in October','Video is missing: 0 of 22 posts last month','Three ideas need no budget'],
+  ideas,preview:{type:'doc',steps:ideas},attention:{group:'time',name:'Take your time',why:'you sort the ideas yourself'}})})();

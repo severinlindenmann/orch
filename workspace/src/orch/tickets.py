@@ -1392,11 +1392,12 @@ def _check_can_finish(ticket: dict) -> None:
 
 
 def _open_questions(ticket: dict) -> list[str]:
-    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    """Plain questions nobody answered yet (an add-on's own questions are its business). Ideas left for later
+    (ORCH-2186, `left_from`) wait for the person without holding up the ticket."""
     return [
         q["id"]
         for q in ticket.get("questions") or []
-        if q.get("answer") is None and q.get("kind") in (None, "plain")
+        if q.get("answer") is None and q.get("kind") in (None, "plain") and not q.get("left_from")
     ]
 
 
@@ -4454,8 +4455,12 @@ def ask(
     facts: list[str] | None = None,
     said: str | None = None,
     due: str | None = None,
+    ideas: list[str] | None = None,
 ) -> tuple[dict, dict]:
-    """due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
+    """ideas (ORCH-2186, Focused review E): IDEAS_MIN to IDEAS_MAX one-line ideas the person sorts one by one
+    (Keep, Later or No) on Review; the question then has no --option. What is left for later comes back as a
+    smaller card (`left_from`) that never holds up the ticket.
+    due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
     stored as UTC (`due`), shown as "Next deadline" on Review and counted when it passes unanswered
     (attention.week).
     said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
@@ -4498,6 +4503,7 @@ def ask(
         raise Refused(f"A --fact is one line of at most {BECAUSE_MAX} characters.")
     if kind is not None and not KIND_RE.fullmatch(kind):
         raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
+    ideas = clean_ideas(ideas, options, recommended, card) if ideas else None
     act = None
     if action is not None:
         try:
@@ -4525,6 +4531,7 @@ def ask(
             "because": because,
             "if_wait": if_wait,
             "facts": facts,
+            "ideas": ideas,
         },
         "question",
     )
@@ -4535,6 +4542,7 @@ def ask(
         *([because] if because else []),
         *([if_wait] if if_wait else []),
         *(facts or []),
+        *(ideas or []),
         *_labels(act),
     ):
         if _asks_for_secret(part):
@@ -4559,7 +4567,12 @@ def ask(
 
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
-            if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
+            if (
+                old["answer"] is None
+                and old["text"] == text.strip()
+                and old["options"] == list(options)
+                and old.get("ideas") == ideas
+            ):
                 return old
         if check is not None:
             _item(ticket, check)
@@ -4596,6 +4609,8 @@ def ask(
             q["said"] = quoted
         if due_at:  # RULE A (ORCH-2184)
             q["due"] = due_at
+        if ideas:  # RULE A (ORCH-2186)
+            q["ideas"] = ideas
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4618,6 +4633,55 @@ def ask(
 GROUP_MAX = 80
 BECAUSE_MAX = 200
 FACTS_MAX = 4
+IDEAS_MIN, IDEAS_MAX = 2, 12  # ORCH-2186: a list to sort, short enough to sort in one sitting
+
+
+def clean_ideas(ideas, options, recommended, card) -> list[str]:
+    """The ideas of `orch ask --idea` (ORCH-2186): one line each, no repeats, IDEAS_MIN to IDEAS_MAX of them,
+    never with --option, --recommend or a card (each idea gets its own Keep, Later or No)."""
+    if options or recommended or card is not None:
+        raise Refused(
+            "--idea goes with a plain question only (no --option, --recommend or card): "
+            "each idea gets Keep, Later or No."
+        )
+    out = [i for i in (" ".join(str(x or "").split()) for x in ideas) if i]
+    if not IDEAS_MIN <= len(out) <= IDEAS_MAX:
+        raise Refused(f"Give {IDEAS_MIN} to {IDEAS_MAX} --idea lines, one idea each.")
+    if any(len(i) > BECAUSE_MAX for i in out):
+        raise Refused(f"An --idea is one line of at most {BECAUSE_MAX} characters.")
+    if len({i.casefold() for i in out}) != len(out):
+        raise Refused("Each --idea once: two of them say the same.")
+    return out
+
+
+IDEAS_LEFT_COPY = ("text", "facts", "if_wait", "due", "said", "asked_by")
+
+
+def _ideas_left(ticket: dict, q: dict, decision: dict | None, by: str) -> str | None:
+    """ORCH-2186: the ideas the person left for later (or did not sort) come back as a smaller card on the
+    same ticket: the same question with only those ideas, marked `left_from`, so it never holds up the ticket
+    (the helper works on what was kept). Returns its id, or None when nothing is left."""
+    left = (decision or {}).get("ideas", {}).get("later") if isinstance(q.get("ideas"), list) else None
+    if not left:
+        return None
+    n = {
+        "id": _next_id(ticket["questions"], "q"),
+        **{k: q[k] for k in IDEAS_LEFT_COPY if q.get(k) is not None},
+        "options": [],
+        "recommended": None,
+        "answer": None,
+        "answered_by": None,
+        "via": None,
+        "asked_at": now(),
+        "ideas": list(left),
+        "left_from": q["id"],
+    }
+    ticket["questions"].append(n)
+    k = len(left)
+    add_history(ticket, by, f"{k} idea{'' if k == 1 else 's'} left for later: {n['id']}")
+    return n["id"]
+
+
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -4636,6 +4700,7 @@ def question_digest(q) -> str:
         "facts",
         "said",
         "due",
+        "ideas",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
@@ -4828,6 +4893,7 @@ def answer(
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
+        _ideas_left(ticket, q, decision, by)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
         # A click on the dashboard or a phone is a person even when that server was started from a helper's
         # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.

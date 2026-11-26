@@ -160,3 +160,9 @@ both to the right at 1280 to 1920). Two or more cards show the list in the left 
   and the keys line. Keys: 1 2 3 the answers (digits on the buttons), J next card, K card before, M More, U undo, Esc
   back to the start. The round ends on "What you decided", "Still waiting: …", "Next N in <group>" and "Back to the
   start". Motion: the kit's page enter (`orch.enter`) for the tiles, a new card and the round's end. No minutes.
+- 26 Nov (ORCH-2186, Focused review E): with `?decide=1` the card "Which content ideas should the helper work out?"
+  (Take your time) is an ideas card (`orch ask --idea`, 2 to 12): one row per idea with Keep / Later / No (a second tap
+  takes it back), "Ideas you do not sort stay here for later." under them, and Save in the bar ("Save, N left for
+  later" when some stay; nothing sorted: "Sort at least one idea, then save."). The answer reads "2 kept, 1 no, 2 for
+  later"; orch asks the rest again as a smaller card that never holds up the ticket. Switch off: the ideas are a plain
+  list with Looks good (keeps them all).

@@ -634,3 +634,57 @@ test('a deck built again on the same host: only the newest one answers a key (OR
   assert.deepEqual(decided, [], 'the old deck stays quiet');
   assert.deepEqual(again, [['c', 'ok']]);
 });
+
+// ORCH-2186 (Focused review E): an ideas card, behind decisionFirst: one row per idea with Keep / Later / No, Save in
+// the bar; saving part is fine (the rest stays for later). Without the switch the ideas are the plain list as before.
+const ideasCard = extra => ({id: 'q7', kind: 'draft', kindLabel: 'Document', ticket: 'NOR-76', title: 'Which content ideas?', text: 'Which content ideas should the helper work out?',
+  ideas: ['Customer story', 'Advent calendar', 'Video with an installer'], preview: {type: 'doc', steps: ['Customer story', 'Advent calendar', 'Video with an installer']}, ...extra});
+const sortBtn = (host, row, word) => host.querySelectorAll('.swipe-idea')[row].querySelectorAll('button').find(b => b.textContent === word);
+test('ideas: one row per idea with Keep, Later and No in place of the list', () => {
+  const {host, okBtn} = deck([ideasCard()], {decisionFirst: true});
+  const card = host.querySelector('.swipe-card');
+  assert.equal(card.querySelector('.swipe-preview'), null, 'the plain list is not drawn twice');
+  const rows = card.querySelectorAll('.swipe-idea');
+  assert.deepEqual(rows.map(r => r.querySelector('.swipe-idea-t').textContent), ['Customer story', 'Advent calendar', 'Video with an installer']);
+  assert.deepEqual(rows[0].querySelectorAll('button').map(words), ['Keep', 'Later', 'No']);
+  assert.equal(rows[0].querySelector('.segmented').getAttribute('role'), 'group');
+  assert.ok(card.querySelector('.swipe-idea-left').textContent.includes('Ideas you do not sort stay here for later.'));
+  assert.match(words(okBtn), /^Save/);
+  assert.ok(okBtn.classList.contains('wait'), 'nothing sorted yet');
+});
+test('ideas: Save with nothing sorted asks to sort one, saves nothing', async () => {
+  const {host, okBtn, decided} = deck([ideasCard()], {decisionFirst: true});
+  okBtn.click(); await wait(200);
+  assert.equal(decided.length, 0);
+  assert.ok(words(host).includes('Sort at least one idea, then save.'));
+});
+test('ideas: saving part says how many stay and answers ok with the sorting', async () => {
+  const {host, okBtn, decided} = deck([ideasCard(), ideasCard({id: 'q8'})], {decisionFirst: true});
+  sortBtn(host, 0, 'Keep').click();
+  assert.equal(sortBtn(host, 0, 'Keep').getAttribute('aria-pressed'), 'true');
+  sortBtn(host, 2, 'No').click();
+  assert.match(words(okBtn), /Save, 1 left for later/);
+  assert.equal(okBtn.classList.contains('wait'), false);
+  sortBtn(host, 2, 'No').click();  // a second tap takes it back
+  assert.equal(sortBtn(host, 2, 'No').getAttribute('aria-pressed'), 'false');
+  assert.match(words(okBtn), /Save, 2 left for later/);
+  sortBtn(host, 1, 'Later').click();
+  okBtn.click(); await wait(200);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id: 'q7', v: 'ok', note: {ideas: {keep: [1], no: [], later: [2]}}}]);
+});
+test('ideas: everything sorted is a plain Save; the answer reads as counts', async () => {
+  const {host, okBtn, decided, note} = deck([ideasCard(), ideasCard({id: 'q8'})], {decisionFirst: true});
+  ['Keep', 'No', 'Keep'].forEach((w, i) => sortBtn(host, i, w).click());
+  assert.match(words(okBtn), /^Save(?!,)/);
+  okBtn.click(); await wait(200);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided[0].note)), {ideas: {keep: [1, 3], no: [2], later: []}});
+  const vm2 = {}; vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: vm2.window = {UI: {}}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  assert.equal(vm2.window.UI.ideasWord({keep: [1, 3], no: [2]}, 3), '2 kept, 1 no');
+  assert.equal(vm2.window.UI.ideasWord({keep: [1], no: [], later: [2]}, 5), '1 kept, 0 no, 4 for later');
+});
+test('ideas: switch off draws the plain list and Looks good, as before', () => {
+  const {host, okBtn} = deck([ideasCard()]);
+  assert.equal(host.querySelector('.swipe-idea'), null);
+  assert.ok(host.querySelector('.swipe-preview'));
+  assert.match(words(okBtn), /Looks good/);
+});

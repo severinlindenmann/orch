@@ -140,6 +140,7 @@ function reviewWord(answer) {
   const it = answer.item || {}, note = answer.note || {};
   const own = Array.isArray(it.answers) && it.answers.find(x => x.picked === note.picked);
   if (answer.verdict === 'ok' && own) return own.label;
+  if (answer.verdict === 'ok' && note.ideas && window.UI?.ideasWord) return window.UI.ideasWord(note.ideas, (it.ideas || []).length);  // ORCH-2186
   if (answer.verdict === 'ok') return note.picked ? 'Use ' + note.picked : it.okLabel || 'Looks good';
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';

@@ -3,7 +3,7 @@ decision, Take your time. Plain rules on what orch already knows about a card, n
 
 - Take your time: a card that puts something live or asks the person to try it themselves, any card whose
   words name words or names, money, production, something that cannot be undone, logins or keys, or something
-  others see (Away mode's own list, autoreview.AWAY_STAYS), or a long document.
+  others see (Away mode's own list, autoreview.AWAY_STAYS), a long document, or ideas to sort (ORCH-2186).
 - Quick look: only with a clear hint that it is small: the Reviewer proposes to accept it, a passed test
   result, or a one-tap question; and never with anything from the Take-your-time list.
 - Short decision: everything else. A card orch cannot read plainly (unknown risk) is never a Quick look.
@@ -77,6 +77,8 @@ def group_of(item: dict) -> dict:
 
     if kind in _WHY_KIND:
         return out("time", _WHY_KIND[kind])
+    if isinstance(item.get("ideas"), list) and item["ideas"]:  # ORCH-2186: one by one, Keep / Later / No
+        return out("time", "you sort the ideas yourself")
     hits = autoreview._away_hits(text)
     risky = [h for h in hits if h != VAGUE]
     if risky:
