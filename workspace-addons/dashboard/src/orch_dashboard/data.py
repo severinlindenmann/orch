@@ -1657,7 +1657,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "addons": [
             {
                 "name": r["name"],
-                "label": _label(r),  # the menu name (Publish, Relay), same as the sidebar
+                "label": _label(r),  # the menu name from the add-on toml, same as the sidebar
                 "description": str(r.get("description") or "")[:200],
                 "active": r.get("active") is True,
                 "consent": _consent(r),
