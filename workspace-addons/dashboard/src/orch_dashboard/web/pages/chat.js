@@ -108,8 +108,12 @@ const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0
 function chatDmPending() {
   if (snapshot || chatDm.loaded) return null;
   return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
-    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatText('p', 'chat-muted', 'Loading…'));
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatSkeleton());
 }
+// The master loading shape (rows) where the dashboard's skeleton exists; the plain line when this file runs alone.
+const chatSkeleton = () => typeof skeletonFor === 'function' ? skeletonFor('section') : chatText('p', 'chat-muted', 'Loading…');
+// The master empty state (UI.state) with its one next step; a plain line when the kit is not loaded.
+const chatState = (title, text) => typeof stateNote === 'function' ? stateNote(title, text) : chatText('p', 'chat-muted', title);
 function chatList() {
   // Newest group first, so an old group never sits above a fresh one.
   const groups = chatGroups().filter(g => !chatFinished(g)).sort((a, b) => chatGroupTime(b) - chatGroupTime(a)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
@@ -675,8 +679,8 @@ function chatDmContacts() {
         const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
         retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
         rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
-      } else rows.push(chatText('p', 'chat-muted', 'Loading…'));
-    } else if (!chatDm.contacts.length) rows.push(chatText('p', 'chat-muted', 'No contacts.'));
+      } else rows.push(chatSkeleton());
+    } else if (!chatDm.contacts.length) rows.push(chatState('No contacts yet', 'Other workspaces show up here once your admin has paired them with yours.'));
     body.replaceChildren(...rows);
   };
   chatDm.picker = paint; paint();
@@ -700,7 +704,7 @@ function chatDmThread() {
         array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, !c && !messages.length && !chatDm.error ?
-      chatText('p', 'chat-muted', chatDm.loaded ? 'This workspace is not in your contacts.' : 'Loading…') : null, messages.map(m =>
+      (chatDm.loaded ? chatState('This workspace is not in your contacts', 'Go back to your chats and pick one from the list.') : chatSkeleton()) : null, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,

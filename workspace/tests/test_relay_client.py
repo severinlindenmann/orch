@@ -2724,6 +2724,32 @@ def test_dry_run_sends_nothing_and_prints_the_body(proj, run, rel, new_ticket):
     assert rel.sent[-1]["body"] == {"text": "Field X renamed"}
 
 
+def test_a_real_send_says_what_left_without_asking(proj, run, rel, new_ticket):
+    """R3.3: every real send, delegate and start ends with one line on what left this machine (no prompt):
+    the summary and the picked items; the whole ticket only with --full."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    tid = new_ticket("Rename the field")
+    run("check", "add", tid, "Never shared")
+    code, out, _ = run("relay", "send", "reports", "Field X renamed", "--ticket", tid)
+    assert code == 0 and "What left this machine: the text (15 characters), a link to ticket" in out
+    assert "not its content" in out and "add --dry-run" in out
+    argv = ("relay", "delegate", "reports", "Use event_time", "--text", "why", "--check", "Change query")
+    code, out, _ = run(*argv, "--ticket", tid)
+    line = next(x for x in out.splitlines() if x.startswith("What left this machine:"))
+    assert '"Use event_time"' in line and "its details (3 characters)" in line and "1 checklist item," in line
+    assert "not its content" in line and "Never shared" not in out and "whole ticket" not in line
+    code, out, _ = run(*argv, "--ticket", tid, "--full")
+    assert code == 0 and "the whole ticket" in out and "(--full)" in out
+    (proj / "rows.csv").write_bytes(b"a,b\n1,2\n")
+    code, out, _ = run("relay", "send", "reports", "--file", "rows.csv")
+    assert code == 0 and "What left this machine: the file rows.csv (8 B)." in out
+    code, out, _ = run("relay", "start", "reports", "weekly-report")
+    assert code == 0 and 'What left this machine: start "weekly-report".' in out
+    code, out, _ = run("relay", "send", "reports", "hi", "--json")
+    assert "What left" not in out and json.loads(out)["body"] == {"text": "hi"}
+
+
 def _delegate(run, rel, tid, title="Use event_time"):
     run("relay", "delegate", PEER, title, "--text", "x", "--check", "Change query", "--ticket", tid)
     return rel.sent[-1]
@@ -2987,6 +3013,19 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)
+
+
+def test_relay_status_checks_that_the_relay_answers(proj, run, rel):
+    """ORCH-2052: "Connected" only when the relay answers; else it says so, with the address."""
+    connect(run, rel)
+    code, out, _ = run("relay", "status")
+    assert code == 0 and out.startswith("Connected to ")
+    assert json.loads(run("relay", "status", "--json")[1])["reachable"] is True
+    rel.stop()
+    code, out, _ = run("relay", "status")
+    assert code == 0 and "Connected" not in out and "does not answer right now" in out
+    shown = json.loads(run("relay", "status", "--json")[1])
+    assert shown["reachable"] is False and shown["error"]
 
 
 def test_invite_adds_and_connects_a_second_folder(proj, run, rel, monkeypatch):

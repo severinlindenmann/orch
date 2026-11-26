@@ -97,9 +97,6 @@
   "Agents": 1,
   "agent": 7
  },
- "workspace/src/orch/cli_diag.py": {
-  "agent": 1
- },
  "workspace/src/orch/cli_leave.py": {
   "agent": 2
  },
@@ -133,7 +130,8 @@
   "agent": 1
  },
  "workspace/src/orch/nextstep.py": {
-  "agent": 1
+  "agent": 4,
+  "agents": 1
  },
  "workspace/src/orch/profile_propose.py": {
   "agent": 1,
