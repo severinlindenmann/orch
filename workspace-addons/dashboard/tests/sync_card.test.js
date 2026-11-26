@@ -62,7 +62,7 @@ test('add-on off: one switch row that turns it on through the add-on switch path
   const {c} = context();
   assert.equal(c.syncCard({addons:[]}), null);
   const row = c.syncCard({addons:[{name:'sync', active:false, consent:'sync 1.0'}]});
-  assert.equal(text(row), 'Keep a copy of my tickets');
+  assert.equal(text(row), 'Keep a copy of my tickets Off');  // the switch's state in words beside it
   const sw = byKey(row, 'settings-switch-sync-off');
   assert.deepEqual([sw.attrs.role, sw.attrs['aria-checked'], sw.attrs['data-action'], sw.attrs['data-name']], ['switch', false, 'settings-addon', 'sync']);
   assert.equal(all(row, n => n.tag === 'fieldset').length, 0);
@@ -415,7 +415,7 @@ test('fb18: the Sync page shows Where, What and When, then the last syncs', () =
   const rows = all(byKey(page, 'sync-history'), n => n.attrs?.['data-key'] === 'sync-history-row');
   assert.equal(rows.length, 2);
   assert.match(text(rows[0]), /12 tickets, 3 files/);
-  assert.match(text(rows[1]), /could not reach your storage/);
+  assert.match(text(rows[1]), /Could not reach your storage/);
 });
 test('fb18: the storage choice says "Another computer or your own storage" and gives an example address', () => {
   const {page} = syncPage({...BASE, ...INFO});
@@ -478,12 +478,32 @@ test('ORCH-413: the status is read with a GET, never a click: a page without a s
   assert.equal(byKey(card, 'sync-where-remote').checked, true);
 });
 
-test('ORCH-413: a status read that fails keeps the card on its reading line and sends no click', async () => {
+test('ORCH-413: a status read that fails says so with Try again, and sends no click', async () => {
   const {c, calls, ui} = context({settings:{...ON}});
   c.fetch = async () => ({ok:false, status:422, json:async () => { throw new Error('not json'); }});
   ui.card = null;
   await c.syncLoad();
   assert.deepEqual(calls, []);
   assert.equal(ui.card, null);
-  assert.match(text(byKey(c.syncCard(ON), 'sync-unread')), /Reading the sync setting/);
+  // not a "Reading…" line forever: what happened and one button that reads again (a GET, still no click)
+  const card = c.syncCard(ON);
+  assert.match(text(byKey(card, 'sync-unread')), /Can’t read the sync setting right now\. Nothing was changed\./);
+  assert.equal(byKey(card, 'sync-unread').attrs.role, 'alert');
+  c.fetch = async () => ({ok:true, status:200, json:async () => ({...BASE, mode:'local', remote:null})});
+  await click(byKey(card, 'sync-unread-retry'));
+  assert.equal(ui.failed, false);
+  assert.equal(ui.card.mode, 'local');
+  assert.deepEqual(calls, []);
+});
+
+test('Sync page polish: one card heading, no "Last error: none", plurals, history lines start with a capital', () => {
+  const {page} = syncPage({...BASE, ...INFO, counts:{tickets:1, files:1, bytes:900}, history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'nothing new'}]});
+  assert.equal(text(byKey(page, 'sync-where-head')), 'Where to keep a copy');
+  assert.equal(byKey(page, 'sync-status'), undefined, 'synced: the When card already says when');
+  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'fieldset')[0].attrs['aria-labelledby'], 'sync-where-title');
+  assert.equal(byKey(page, 'sync-details'), undefined, 'nothing went wrong: no error line at all');
+  assert.match(text(byKey(page, 'sync-what-info')), /^What 1 ticket · 1 file · 1 KB/);
+  assert.match(text(byKey(page, 'sync-history')), /Nothing new/);
+  const never = syncPage({...BASE, ...INFO, shown:'never'}).page;
+  assert.equal(text(byKey(never, 'sync-status')), 'Not synced yet');
 });

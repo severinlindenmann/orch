@@ -65,8 +65,10 @@ test('every greyed choice says why in one plain sentence', () => {
 });
 
 test('places: plain words with the right singular and plural, a full line says a start waits', () => {
-  const p = S.places({a: {running: true}, b: {running: true, claim: {mode: 'headless'}}}, {live_max: 6}, {waiting: ['t_9']});
+  const p = S.places({a: {running: true}, b: {running: false}}, {live_max: 6}, {waiting: ['t_9']});
   assert.equal(S.placesText(p), 'A start uses 1 of 6 helper places. Now 1 of 6 is in use. 1 ticket waits in line.');
+  // ORCH-1677: a one-step helper holds a place like a live session
+  assert.equal(S.places({a: {running: true}, b: {running: true, claim: {mode: 'oneshot'}}}, {live_max: 2}, {}).full, true);
   assert.deepEqual(S.inLine(p, 't_9'), {at: 1, of: 1});
   const full = S.places({a: {running: true}}, {live_max: 1}, {});
   assert.match(S.placesText(full), /^The one helper place is in use\. A start waits in line/);

@@ -581,3 +581,83 @@ async fn files_original_size_upload_replace_and_lists() {
         }
     }
 }
+
+fn has(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+fn every_file(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            every_file(&p, out);
+        } else {
+            out.push(p);
+        }
+    }
+}
+
+/// R5.1: the key lives only in the link fragment. Even a client that sends the whole link (a Referer
+/// with `#k=`, which browsers never do) leaves no form of the key in a stored file, body or header.
+#[tokio::test]
+async fn files_link_key_never_reaches_storage_or_responses() {
+    use base64::Engine;
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../contracts/vectors/publish-blob-v1.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let k = v["good"]["key_b64url"].as_str().unwrap().to_string();
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&k)
+        .unwrap();
+    let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let std_b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+    let forms = [
+        k.clone().into_bytes(),
+        hex.into_bytes(),
+        std_b64.into_bytes(),
+        raw,
+    ];
+
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let up = t.api(&ws, "POST", "/v1/files?days=7", vector_blob()).await;
+    assert_eq!(up.status, 201, "{}", up.text());
+    let id = up.json()["id"].as_str().unwrap().to_string();
+    let link = format!("https://publish.test/f/{id}#k={k}");
+    let mut seen = vec![up];
+    for p in [
+        format!("/f/{id}"),
+        format!("/f/{id}/blob"),
+        format!("/f/{id}/meta"),
+    ] {
+        let h = [("referer", link.as_str())];
+        let r = call(&t.public, "GET", &p, &h, vec![]).await;
+        assert_eq!(r.status, 200, "{p}");
+        seen.push(r);
+    }
+    seen.push(t.api(&ws, "GET", "/v1/files", vec![]).await);
+    let null = serde_json::Value::Null;
+    seen.push(t.adm("GET", "/admin/api/files", null).await);
+    for r in &seen {
+        for f in &forms {
+            assert!(!has(&r.body, f), "a response body holds the key");
+            for h in r.headers.values() {
+                assert!(!has(h.as_bytes(), f), "a response header holds the key");
+            }
+        }
+    }
+    let mut files = vec![];
+    every_file(t.dir.path(), &mut files);
+    assert!(files.iter().any(|p| p.ends_with(&id)), "the blob is stored");
+    for p in files {
+        let data = std::fs::read(&p).unwrap();
+        for f in &forms {
+            assert!(!has(&data, f), "{} holds the key", p.display());
+        }
+    }
+}

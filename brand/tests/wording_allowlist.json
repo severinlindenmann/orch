@@ -133,7 +133,8 @@
   "agent": 1
  },
  "workspace/src/orch/nextstep.py": {
-  "agent": 1
+  "agent": 4,
+  "agents": 1
  },
  "workspace/src/orch/profile_propose.py": {
   "agent": 1,

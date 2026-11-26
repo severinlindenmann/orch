@@ -7,6 +7,8 @@ let previousOverflow='', locked=false;
 // the page never fires `close`, so every check drops dead entries first and gives the scrolling back when none is left.
 function release(){for(let i=stack.length-1;i>=0;i--)if(!stack[i].isConnected||!stack[i].open)stack.splice(i,1);if(!stack.length&&locked){document.documentElement.style.overflow=previousOverflow;locked=false}if(!stack.length&&document.body?.style?.overflow==='hidden')document.body.style.overflow=''}
 const focusables=d=>[...d.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[inert]')&&n.getClientRects().length);
+/* where focus goes back to: the opener, or, when it was an item of a menu that has closed since, that menu's button */
+const back=t=>{if(!t?.isConnected||t.closest('[inert]'))return null;if(t.getClientRects().length)return t;const s=t.closest('details')?.querySelector(':scope>summary');return s?.getClientRects().length?s:null};
 function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='true';d.setAttribute('aria-modal','true');if(!d.hasAttribute('aria-label')&&!d.hasAttribute('aria-labelledby'))d.setAttribute('aria-label',d.querySelector('h1,h2,h3')?.textContent||'Preview');
  /* class ui-bottom-close: the dialog has its own Cancel/Close row at the bottom, so no top × Close (Esc and a click outside still close it) */
  const x=document.createElement('button');x.type='button';x.className='btn outline sm ui-overlay-close';x.textContent=d.classList.contains('ui-fullscreen')?'× Exit full screen':'× Close';x.setAttribute('aria-label',x.textContent.slice(2));x.onclick=()=>d.close();if(!d.classList.contains('ui-bottom-close'))d.prepend(x);
@@ -39,7 +41,7 @@ const pageFocusables=()=>{const top=UI.overlay.top();return top?focusables(top):
 function neighbours(from){if(!from||from===document.body)return {};const all=pageFocusables(),i=all.indexOf(from),up=[];for(let n=from.parentElement;n&&n!==document.body;n=n.parentElement)up.push(n);return {after:all[i+1],before:all[i-1],up}}
 function giveBack(d){const top=UI.overlay.top(),inside=n=>!top||top.contains(n);let t=d._uiOpener;
  if(t&&!t.isConnected){const k=t.dataset?.key,id=t.id;t=(k&&document.querySelector('[data-key="'+CSS.escape(k)+'"]'))||(id&&document.getElementById(id))||null}
- const near=d._uiNear||{};for(const n of [t,near.after,near.before])if(n&&n!==document.body&&tabbable(n)&&inside(n)){n.focus({preventScroll:true});if(document.activeElement===n)return}
+ const near=d._uiNear||{};for(const n of [t,back(d._uiOpener),near.after,near.before])if(n&&n!==document.body&&tabbable(n)&&inside(n)){n.focus({preventScroll:true});if(document.activeElement===n)return}
  if(top){(focusables(top)[0]||top).focus({preventScroll:true});return}
  const spot=(near.up||[]).find(n=>n.isConnected&&!n.closest('[inert]'))||document.querySelector('main');if(!spot)return;
  if(!spot.hasAttribute('tabindex')){spot.tabIndex=-1;spot.addEventListener('blur',()=>spot.removeAttribute('tabindex'),{once:true})}spot.focus({preventScroll:true})}
