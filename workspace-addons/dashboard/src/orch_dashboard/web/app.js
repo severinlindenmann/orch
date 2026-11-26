@@ -193,10 +193,14 @@ const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
   return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
 };
-// Page header (the one frame): title + one muted line under it, no eyebrow; an optional actions slot at the end.
-const heading = (title, sub = '', {actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
-  h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
-  actions ? h('div', {className:'page-heading-actions'}, actions) : null);
+// Page header: one top for every page (owner D1, ORCH-2282), the master UI.pageTop. Title + one muted line, Settings
+// first on the right and the page's one filled button last; a page inside another page gets `back` ({label, href}),
+// '← Tickets' above its name. The plain frame below only when the kit is not loaded (a test without the master).
+const heading = (title, sub = '', {actions = null, back = null, settings = null} = {}) => window.UI?.pageTop && typeof sub === 'string'
+  ? window.UI.pageTop({title:clean(title), text:sub, back, settings, actions:actions ? [actions] : [], key:'heading'})
+  : h('header', {className:'page-heading', 'data-key':'heading'},
+    h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
+    actions ? h('div', {className:'page-heading-actions'}, actions) : null);
 // Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
@@ -270,8 +274,10 @@ const NAV_ICON = {
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
-  pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
   more:'<path d="m6 9 6 6 6-6"/>',
+  less:'<path d="m6 15 6-6 6 6"/>',
+  edit:'<path d="m4 20 1-4L16 5l3 3L8 19z"/>',
+  done:'<path d="M20 6 9 17l-5-5"/>',
   sideClose:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/>',
   sideOpen:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m4-11 3 3-3 3"/>',
 };
@@ -283,17 +289,19 @@ function navIcon(name) {
 }
 const VIEWS_OPEN = 'orch.nav.views';
 const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
-// The menu's add-ons (ORCH-1184): the person pins the ones they use, the rest wait under Show more. Kept in this browser;
-// a browser that refuses storage still shows the menu with the first add-ons pinned.
+// The menu's add-ons (ORCH-1184, tidied by owner D2 A, ORCH-2283): the person keeps the ones they use in the list, the
+// rest wait under More. They choose in one place, 'Change this list' (no pin on every row). Kept in this browser; a
+// browser that refuses storage still shows the menu with the first add-ons in the list.
 const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', PINNED_FIRST = 6;
 const navMemory = new Map();  // the same choices for this page view when the browser refuses storage
 const navRead = key => { try { const v = localStorage.getItem(key); if (v != null) return v; } catch (_) { /* no storage */ } return navMemory.has(key) ? navMemory.get(key) : null; };
 const navWrite = (key, value) => { navMemory.set(key, value); try { localStorage.setItem(key, value); } catch (_) { /* fine without storage */ } };
 const navList = key => { try { const v = JSON.parse(navRead(key) || 'null'); return Array.isArray(v) ? v : null; } catch (_) { return null; } };
-// The pinned add-ons, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
-// arrives pinned (the person just chose it); only one the person unpinned waits under Show more.
+// The add-ons in the list, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
+// arrives in the list (the person just chose it); only one the person moved out waits under More. A page that lives in
+// Settings (manifest place = "settings") starts under More and goes into the list only when the person puts it there.
 function navPinned(pages) {
-  const names = pages.map(a => a.name), known = navList(NAV_KNOWN);
+  const names = pages.filter(a => a.dashboard?.place !== 'settings').map(a => a.name), known = navList(NAV_KNOWN);
   let pins = navList(NAV_PINS) || names.slice(0, PINNED_FIRST);
   const fresh = known ? names.filter(n => !known.includes(n)) : [];
   if (!known || fresh.length) {
@@ -304,6 +312,10 @@ function navPinned(pages) {
   return pages.filter(a => pins.includes(a.name));
 }
 const navMoreOpen = () => navRead(NAV_MORE) === 'open';
+let navEditing = false;  // 'Change this list' is open: every add-on shows with its In the list switch (this page view only)
+// The add-ons the menu lists: every add-on with a page except Contacts (a top-level entry); pages that live in Settings
+// (place = "settings") wait under More (D2 A: nothing is hidden for good).
+const menuPages = () => addons().filter(a => a.dashboard && a.dashboard.panel !== 'phone');
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
@@ -455,26 +467,31 @@ function followAddress(hash) {
   history.replaceState(null, '', hash);
   renderedRoute = route().hash;
 }
-// Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
-// pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
-// when it is not pinned and Show more is closed.
+// Add-ons in the menu (ORCH-1184, D2 A): the ones in the list, then More (n) that unfolds the rest in place, with
+// 'Change this list' at its end. Changing the list shows every add-on with one switch each, Done closes it. The page that
+// is open stays in the menu even when it is under More and More is closed.
 // stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
 const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
   const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
   const url = a => '#addon/' + encodeURIComponent(a.name);
   const row = a => {
-    const on = pinned.includes(a), label = addonLabel(a);
-    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
-      h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
+    const label = addonLabel(a), link = navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a));
+    if (!navEditing) return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, link);
+    const on = pinned.includes(a);  // changing the list: one switch per add-on, In the list or under More
+    return h('div', {className:'nav-row nav-row-edit', 'data-key':'nav-row-' + a.name}, link,
+      h('button', {type:'button', className:'nav-pin', role:'switch', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-checked':String(on), 'aria-label':label + ' in the list', title:on ? 'In the list' : 'Under More'}, h('i', {className:'nav-pin-sw', 'aria-hidden':'true'})));
   };
-  const shownRest = more ? rest : rest.filter(a => here === url(a));
-  const word = more ? 'Show less' : 'Show more (' + rest.length + ')';
-  return h('div', {className:'nav-addons', 'data-key':'nav-addons'},
+  const open = more || navEditing, shownRest = open ? rest : rest.filter(a => here === url(a));
+  const word = open ? 'Fewer' : 'More (' + rest.length + ')';
+  // 'Change this list' ends the unfolded list; with nothing under More it ends the list itself
+  const change = open || !rest.length ? h('button', {type:'button', className:'nav-item nav-change', 'data-key':'nav-change', 'aria-pressed':String(navEditing)}, navIcon(navEditing ? 'done' : 'edit'), h('span', {className:'nav-label'}, navEditing ? 'Done' : 'Change this list')) : null;
+  return h('div', {className:'nav-addons' + (navEditing ? ' nav-editing' : ''), 'data-key':'nav-addons'},
     h('p', {className:'eyebrow'}, 'Add-ons'),
-    pinned.length ? h('nav', {'aria-label':'Pinned add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
-    rest.length ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(more), 'aria-controls':more ? 'nav-rest' : null, 'aria-label':word}, navIcon('more'), h('span', {className:'nav-label'}, word)) : null,
-    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null);
+    pinned.length ? h('nav', {'aria-label':'Add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
+    rest.length && !navEditing ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(open), 'aria-controls':open ? 'nav-rest' : null, 'aria-label':word}, navIcon(open ? 'less' : 'more'), h('span', {className:'nav-label'}, word)) : null,
+    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null,
+    change);
 }
 function render(arrived = new Set()) {
   if (!state) return;
@@ -537,7 +554,7 @@ function render(arrived = new Set()) {
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
   paintTabbar(here, needCount, needsWords);
-  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
+  const pages = menuPages();  // Contacts is above; a place=settings page waits under More
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
   // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
@@ -1336,12 +1353,20 @@ document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
 }, true);
-// Pin / Unpin and Show more in the menu (ORCH-1184). The keyboard stays on the button pressed; an add-on unpinned while
-// Show more is closed moves under it, so the keyboard lands on Show more.
+// More / Fewer, Change this list / Done and the In the list switches in the menu (ORCH-1184, D2 A). The keyboard stays
+// on the button pressed.
 document.getElementById('side-addons')?.addEventListener('click', event => {
-  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more');
-  if (!pin && !more) return;
-  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a.dashboard.panel !== 'phone');  // as render() lists them
+  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more'), change = event.target.closest?.('.nav-change');
+  if (!pin && !more && !change) return;
+  const pages = menuPages();  // as render() lists them
+  if (change) {
+    navEditing = !navEditing;
+    if (!navEditing) navWrite(NAV_MORE, 'closed');  // Done: the list as chosen, the rest under More again
+    if (navEditing && sideClosed()) setSide(false);
+    render();
+    (document.querySelector('#side-addons .nav-change') || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
+    return;
+  }
   if (pin) {
     navPinned(pages);  // writes the first choice when there is none yet
     const names = navList(NAV_PINS) || [], name = pin.dataset.pin, on = names.includes(name);  // keeps pins of add-ons turned off now
@@ -1351,7 +1376,7 @@ document.getElementById('side-addons')?.addEventListener('click', event => {
     (again || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
     return;
   }
-  // Show more on the closed menu (icons only) opens the menu with the list unfolded
+  // More on the closed menu (icons only) opens the menu with the list unfolded
   if (sideClosed()) { navWrite(NAV_MORE, 'open'); setSide(false); }
   else navWrite(NAV_MORE, navMoreOpen() ? 'closed' : 'open');
   render();

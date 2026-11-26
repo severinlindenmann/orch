@@ -396,7 +396,7 @@
   "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Projects",
+   "label": "Factory",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -465,7 +465,7 @@
       "self"
      ]
     },
-    "title": "Projects"
+    "title": "Factory"
    }
   ],
   "gitignore": [],
@@ -473,7 +473,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Projects",
+   "label": "Open Factory",
    "path": "/"
   },
   "recommended": false,

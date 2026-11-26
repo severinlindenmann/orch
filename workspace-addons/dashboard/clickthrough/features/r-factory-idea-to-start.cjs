@@ -45,7 +45,7 @@ module.exports = {
     orch('factory', 'propose', order, '--file', file, '--json');
     fs.unlinkSync(file);
 
-    // back to the Factory home (the idea opened its order's draft page): it lists the proposal under Waits for you
+    // back to the Factory home (the idea opened its order's draft page): it lists the proposal under Needs you
     await open('#addon/factory');
     const read = frame.getByText('Read proposal').first();
     // poll for it; a home that was still being built says Try again: press it, as a person does

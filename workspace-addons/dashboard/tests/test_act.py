@@ -843,7 +843,9 @@ def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):
 
     for with_addons in (False, True):
         html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(act_orch))
-        assert '"settings"' not in html.replace('"settings": null', "").replace('"settings":null', "")
+        # Inspect exported data, not words in the bundled JavaScript or its comments.
+        data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
+        assert data["settings"] is None
         assert str(ws) not in html and str(ws.parent) not in html
 
 

@@ -861,7 +861,7 @@ function addonDetailPage(addon) {
   const where = live && (live.dashboard || live.page)
     ? h('div', {className:'card'}, row('Open', settingsText('p', {}, 'See what ' + label + ' holds.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(addon.name), 'data-key':'addon-detail-open'}, 'Open ' + label + ' →'), 'addon-detail-open-row')) : null;
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-addon-detail'},
-    heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
+    heading(label, 'Add-on settings', {back:{label:'Add-ons', href:'#settings/addons'}}),
     h('div', {className:'card'}, settingsRows),
     where,
     snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
@@ -1431,6 +1431,8 @@ async function linkConnect(id) {
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
 const sharingOn = () => addons().some(a => a.active !== false && isPublish(a.name));
 const addonTitle = a => a?.dashboard?.title || addonLabel(a);
+// The add-on's part of Settings (the Settings button in its page top), or null where this browser has no Settings.
+const addonSettingsHref = id => snapshot || !state?.settings || !array(state.settings.addons).some(a => a && a.name === id) ? null : '#settings/addons/' + encodeURIComponent(id);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
 function addonHeaderNodes(id) {
@@ -1450,18 +1452,21 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:addonSettingsHref(id)}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
   // The Browser page (panel "browser", ORCH-1494): every helper's browser, drawn here (pages/livebrowse.js).
   if (panelOf(id) === 'browser' && typeof browserListPage === 'function') return browserListPage(addons().find(a => a.name === id));
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
+  // One top for every page (D1, ORCH-2282): Settings first on the right (this add-on's part of Settings), then the
+  // view's own status and link, the one filled button last.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
+  const settings = addonSettingsHref(id);
   if (panelOf(id) === 'repeats') {
-    const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New repeat');
+    const add = snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-native':'repeat'}, iconEl('plus'), 'New repeat');
     if (add) add.onclick = () => repeatsDialog(null, id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {settings, actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
-  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {actions:slot}), addonHost(id));
+  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings, actions:slot}), addonHost(id));
 }
 // The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {

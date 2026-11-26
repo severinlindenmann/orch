@@ -26,7 +26,8 @@ test('the click on a prompt button opens the dialog; the dashboard code never na
   for (const name of ['lessons', 'Lessons']) assert.ok(!settings.includes(name) && !app.includes(name), name);
 });
 
-test('place = settings keeps an add-on out of the nav, its page route stays', () => {
-  assert.match(app, /addons\(\)\.filter\(a => a\.dashboard && a\.dashboard\.place !== 'settings' && a !== contactsAddon\)/);
+test('place = settings: the add-on waits under More (never in the list by itself), its page route stays (D2 A)', () => {
+  assert.match(app, /const menuPages = \(\) => addons\(\)\.filter\(a => a\.dashboard && a\.dashboard\.panel !== 'phone'\)/);
+  assert.match(app, /pages\.filter\(a => a\.dashboard\?\.place !== 'settings'\)\.map\(a => a\.name\)/);
   assert.match(settings, /href:'#addon\/' \+ encodeURIComponent\(addon\.name\), 'data-key':'addon-detail-open'/);
 });

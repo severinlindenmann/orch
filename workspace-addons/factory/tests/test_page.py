@@ -356,7 +356,7 @@ def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(sr
     js = get(srv, "/web/factory.js")[1].decode()
     assert (
         "['drafts', orders.filter(draftWaiting)" in js and "draftActions(o, render)" in js
-    )  # in "Waits for you"
+    )  # in "Needs you"
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
     assert (
@@ -722,7 +722,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Projects"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -895,7 +895,7 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
     assert (
         "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))]"
         in js
-    )  # in "Waits for you": one review per stage
+    )  # in "Needs you": one review per stage
 
 
 def _built(ws, tid, *, picture=True, demo=True, exits=(0,), pulls=(("merged", 1),)):
@@ -1120,7 +1120,7 @@ def test_home_has_no_empty_sections():
         "planned runs are below",
     ):
         assert old not in home, old
-    assert "if (!rows.length) return;" in home and "badge('Waits for you')" in home
+    assert "if (!rows.length) return;" in home and "badge('Needs you')" in home
     assert "'Nothing else in Factory right now: no '" in home and "They show here when they come." in home
     if not shutil.which("node"):
         return

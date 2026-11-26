@@ -123,8 +123,14 @@ the first rows without any extra work.
 - SX-3 Spacing: 4-pt scale; 20 px card padding, 16 px row padding, 24 px between cards, 32 px between sections; the
   shell never shifts (F15) and the sidebar never scrolls at 800 px (F12).
 - SX-4 Page header (UX round 15 Nov): h1 + one muted line (no eyebrow; a date goes into that line), actions right,
-  flush to ONE right edge (`.page-heading` + `.page-heading-actions`); no in-page breadcrumb, no back link, no frame
-  header (Factory, Focus, Sync all break this). Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
+  flush to ONE right edge (`.page-heading` + `.page-heading-actions`); no in-page breadcrumb, no frame header.
+  One top for every page (owner D1 A, 26 Nov, ORCH-2282): `UI.pageTop({title, text, back, settings, actions})` draws it
+  for every page and add-on page; on the right Settings (outline) comes first, the page's one filled button last. A
+  page inside another page (a ticket, New ticket, an add-on's settings, a Factory order) has `← <parent>` above its
+  name (`.page-back`, `UI.pageBack`), the same on the computer and the phone. A switch or setting never sits in the top.
+- Side menu (owner D2 A, 26 Nov, ORCH-2283): Home, Tickets, Review, Chat, Contacts, then Add-ons in one list without
+  pins; `More (n)` / `Fewer` unfolds the rest in place (Lessons too), the page that is open always shows, and
+  `Change this list` (at the end of the unfolded list) shows one switch per add-on, `Done` closes it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
   every page (`.page`, 32 px top). Two widths only: full (default, no max-width) and `.form-width` (`--form-width`,
   1024 px) for a form page such as Settings; both left-aligned. The top bar holds one outlined `New ticket`; the page's
   own main action is the only filled button. Phone mode while on = an outlined chip after the breadcrumb (menu),

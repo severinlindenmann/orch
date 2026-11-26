@@ -2305,10 +2305,13 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(), h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
+// One top for every page (D1, ORCH-2282): a ticket is a page inside Tickets, so '← Tickets' sits above its name, on the
+// computer and on the phone (the phone had no way back). Not in a shared copy, which has no Tickets page of its own.
+const ticketBack = () => !snapshot && window.UI?.pageBack ? window.UI.pageBack({label:'Tickets', href:'#tickets'}) : null;
 // ORCH-2140 W2: no helper tool is set up (the dashboard knows the list of tools). Unknown while settings load: false.
 const ticketNoHelperTool = () => Array.isArray(state?.settings?.agents) && !!window.StartChoiceState?.tools && !window.StartChoiceState.tools(state.settings.agents).tools.length;
 // ORCH-2140 W2 (owner accepted B): a saved ticket no helper can start yet is no dead end. Two ways: set a helper up
@@ -2363,7 +2366,7 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const actions = [focusBtn, typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(), kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
         sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);

@@ -29,7 +29,7 @@ module.exports = {
     await open('#addon/factory');
     const t = await text();
     must(/turned off/i.test(t), 'an old Factory link does not say the add-on is turned off:\n' + t.slice(0, 300));
-    // the button names the add-on by its menu label (Projects since the owner's word list, ORCH-478)
+    // the button names the add-on by its menu label (Factory, owner D3 B, ORCH-2284)
     await page.locator('[data-key="addon-off"] a[href="#settings/addons/factory"]').click();
     await page.waitForFunction(() => location.hash.startsWith('#settings/addons'), null, { timeout: 10000 })
       .catch(() => { throw new Error('"Open Factory settings" did not lead to Settings > Add-ons'); });
