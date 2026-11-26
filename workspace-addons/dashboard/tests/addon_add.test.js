@@ -100,8 +100,8 @@ test('a name the page does not know keeps a plain capitalised name', () => {
 });
 
 test('the pick list puts a needed add-on in front of the one that needs it, and says why', () => {
-  const rows = [{name:'publish', label:'Shared links', requires:['relay']}, {name:'relay', label:'Contacts'}, {name:'browse', label:'Browser'}];
-  assert.deepEqual(M.ajPlan(['publish', 'browse'], rows), {list:['relay', 'publish', 'browse'], why:{relay:'Shared links'}});
+  const rows = [{name:'publish', label:'Publish', requires:['relay']}, {name:'relay', label:'Relay'}, {name:'browse', label:'Browser'}];
+  assert.deepEqual(M.ajPlan(['publish', 'browse'], rows), {list:['relay', 'publish', 'browse'], why:{relay:'Publish'}});
   assert.deepEqual(M.ajPlan(['publish', 'relay'], rows), {list:['relay', 'publish'], why:{}});  // picked itself: no "because"
   assert.deepEqual(M.ajPlan([], rows), {list:[], why:{}});
   const loop = [{name:'a', label:'A', requires:['b']}, {name:'b', label:'B', requires:['a']}];

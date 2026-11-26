@@ -139,9 +139,13 @@ def install_checks(root: Path) -> list[dict]:
         )
     )
     agents = skills.detected_agents(root)
-    for fn in _local_files(agents):
+    for fn in skills.local_instruction_files(agents):
         text = _read_quiet(root / fn)
         has = harness.LOCAL_MARK[0] in text
+        left = None if has else harness.local_file_left(root, fn)
+        if left:  # the team's file (or one git would show): left alone on purpose, nothing to fix
+            rows.append(_row(f"{fn}", True, left))
+            continue
         rows.append(
             _row(
                 f"{fn}",
@@ -161,16 +165,6 @@ def install_checks(root: Path) -> list[dict]:
             )
         )
     return rows
-
-
-def _local_files(agents: list[str]) -> list[str]:
-    """The local instruction files of the agents found here (init writes these)."""
-    out = []
-    for n in agents:
-        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
-            if ".local." in fn and fn not in out:
-                out.append(fn)
-    return out
 
 
 def _read_quiet(p: Path) -> str:
