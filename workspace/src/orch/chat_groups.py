@@ -1635,6 +1635,7 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         if reason == "removed":
             g["members"][ws]["removed_by"] = _changed_by(by, g["host"])  # chat info: who removed it
         notify = _active(g) + ([ws] if reason == "removed" else [])
+        before = _queued_for(root, g, ws)  # the event's send flushes the outbox and may drop some itself
         # the removal and the send intent of its member_left event are saved in ONE write (the event's seq is
         # saved before it is sent): a crash after it still tells everyone on the next sync (replay_pending),
         # and the removed workspace gets nothing new (stale_copy, _gone)
@@ -1649,7 +1650,8 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
             reason=reason,
             removed_by=_changed_by(by, g["host"]) if reason == "removed" else None,
         )
-        dropped = _drop_queued(root, g, ws)
+        _drop_queued(root, g, ws)
+        dropped = len(before - _queued_for(root, g, ws))
     _mirror_by_id(root, "grp_" + tid, by)
     return {"group": "grp_" + tid, "ws": ws, "reason": reason, "dropped": dropped}
 
@@ -1670,6 +1672,21 @@ def _drop_queued(root: Path, g: dict, ws: str) -> int:
         root, lambda m: m.get("to") == ws and _copy_of(g, m) and not _own_leave_news(m, ws)
     )
     return len(gone)
+
+
+def _queued_for(root: Path, g: dict, ws: str) -> set[str]:
+    """Ids of this group's copies for ws still waiting in the outbox (not the news of its own removal)."""
+    from orch import relay
+
+    out = set()
+    for x in relay.outbox_list(root):
+        try:
+            m = json.loads((relay._outbox(root) / f"{x['id']}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(m, dict) and m.get("to") == ws and _copy_of(g, m) and not _own_leave_news(m, ws):
+            out.add(x["id"])
+    return out
 
 
 def _own_leave_news(m: dict, ws: str) -> bool:

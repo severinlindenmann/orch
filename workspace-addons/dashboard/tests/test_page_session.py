@@ -542,6 +542,7 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "reviewer.set": {"on": True},
+    "reviewer_mode.set": {"on": False},
     "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
     "prepare.set": {"on": False},

@@ -1190,6 +1190,12 @@ def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
             assert argv[argv.index("--by") + 1].startswith("human:")
         with pytest.raises(actions.BadRequest):
             build_argv(op, {"on": 1})
+    for on, mode in ((True, "propose"), (False, "accept")):  # owner 25 Nov: nothing closes by itself
+        argv = build_argv("reviewer_mode.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.reviewer_mode", mode]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("reviewer_mode.set", {"on": "yes"})
     argv = build_argv("review.undo", {"ticket": "t_abcdef"})
     assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
     argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})

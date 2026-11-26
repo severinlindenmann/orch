@@ -815,6 +815,20 @@ def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+def decision_first_on(root: Path | None) -> bool:
+    """[workflow] decision_first (default off, ORCH-2182, Focused review A): Review cards put "You decide",
+    "If you wait" and the "What matters" box first, and fold the card's links into one More menu. Only the
+    look of the card; nothing is answered or closed differently."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "decision_first", False) is True
+
+
+def set_decision_first(root: Path, value: bool) -> bool:
+    set_key(root, "workflow", "decision_first", value)
+    return value
+
+
 def prepare_on_save_on(root: Path | None) -> bool:
     """[workflow] prepare_on_save (default ON, owner 19 Nov, ORCH-741): Save without starting prepares the
     ticket with a helper (ORCH-738). Off: a saved ticket stays as the person wrote it until Start."""
