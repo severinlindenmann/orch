@@ -430,7 +430,7 @@ function chatThread(g) {
 }
 const chatHelperBlocked = () => window.DashHelpers?.helperStartReason?.(state?.logins) || '';
 // The message box (option A): the master's composer in its box layout, the same in every chat. Built once per chat
-// after the page is drawn (mountChatBoxes, a mount: polling never replaces it, so typing keeps its focus).
+// after the page is drawn (mountChatBoxes, a mount: polling never replaces it, so typing is not interrupted).
 function chatComposer(g) {
   const id = g?.id || 'chat', blocked = !g ? chatHelperBlocked() : '';
   const banner = blocked ? h('div', {className:'banner error', role:'status', id:'chat-helper-unavailable'}, h('p', {className:'grow'}, blocked), h('a', {className:'btn outline sm', href:'#settings/helper'}, 'See what to fix')) : null;
