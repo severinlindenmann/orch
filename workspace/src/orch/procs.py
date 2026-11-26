@@ -22,6 +22,50 @@ def orch_python_argv(*args: str) -> list[str]:
     return [sys.executable, "-I", "-P", "-m", "orch", *args]
 
 
+SELF = "orch:self"  # an orch_bin that means "this Python's own orch" (pagesession.SELF)
+
+
+def orch_cmd(orch_bin: str | None = None) -> list[str]:
+    """The argv prefix an add-on (or any caller) starts orch with: `orch_bin` (default `$ORCH_BIN`) when it is
+    a test's fake or the orch command on macOS/Linux, else this Python's `-I -P -m orch` (ORCH-2138). On
+    Windows the orch launcher (`orch` / `orch.exe`) is never started: a company computer may block .exe files,
+    and an add-on runs in orch's own Python anyway. Without any orch on the PATH it is this Python as well."""
+    b = os.environ.get("ORCH_BIN") if orch_bin is None else orch_bin
+    if b == SELF:
+        return orch_python_argv()
+    if os.name == "nt":
+        if not b or Path(b.replace("\\", "/")).name.lower() in ("orch", "orch.exe"):
+            return orch_python_argv()
+        return [b]
+    if not b or b == "orch":
+        import shutil
+
+        return ["orch"] if shutil.which("orch") else orch_python_argv()
+    return [b]
+
+
+def python_command_line() -> str:
+    """How a person or a helper types orch without the launcher: `"<python>" -m orch`."""
+    return f'"{sys.executable}" -m orch'
+
+
+def launcher_problem() -> str | None:
+    """Windows only: "missing" when no orch launcher is on the PATH, "blocked" when it is there but does not
+    start (a company rule that blocks .exe files); None when it works, and always None on macOS/Linux."""
+    if os.name != "nt":
+        return None
+    import shutil
+
+    exe = shutil.which("orch")
+    if not exe:
+        return "missing"
+    try:
+        r = _run([exe, "--version"], capture_output=True, timeout=15, stdin=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "blocked"
+    return None if r.returncode == 0 else "blocked"
+
+
 def background_popen_kwargs() -> dict[str, int | bool]:
     """Start a background process without a visible Windows console; callers supply log streams.
 
