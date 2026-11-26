@@ -474,6 +474,7 @@ ADVANCED_TOP = {
     "ref",
     "ext",
     "tokens",
+    "changes",
     "github",
     "manager",
     "session",
@@ -677,6 +678,10 @@ def _leading_parsers(sub, common):
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("tokens", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser(
+        "changes", parents=[common], help="release notes: done tickets by kind, with their links (read-only)"
+    )
+    x.add_argument("--since", required=True, metavar="DATE|TAG", help="a date like 2026-11-01 or a git tag")
     x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
@@ -1360,6 +1365,11 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "changes":
+        from orch import changes
+
+        data = changes.collect(root, changes.since_time(root, args.since))
+        _out(args, data, changes.text(data, args.since))
     elif cmd == "triage":
         from orch import triage
 

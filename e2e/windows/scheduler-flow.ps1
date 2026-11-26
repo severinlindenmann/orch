@@ -38,8 +38,9 @@ L ""
 L "=== scheduler (automation add-on)"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:ORCH_AGENT = ""
-$p = "$env:USERPROFILE\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
-O init | Out-Null
+$p = "$env:USERPROFILE\.orch-test\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+L (O init | Out-String)
+if ($LASTEXITCODE -ne 0) { L "RESULT fail: scheduler workspace init"; return }
 $before = Get-Date; $out = O addon add automation --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add automation"
 Check (WaitFinish $out $before) "automation install finished"

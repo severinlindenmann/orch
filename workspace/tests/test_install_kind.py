@@ -691,6 +691,17 @@ def test_windows_prefix_is_case_insensitive_and_component_wise(win):
     assert not ok(PROFILE, "test", True, "D:\\work\\acme", PROFILE + "\\.orch-test\\evil\\h")
 
 
+@pytest.mark.parametrize("flow", ["standard-user", "scheduler"])
+def test_windows_smoke_workspace_accepts_the_test_install(win, flow):
+    # Exercise the actual flow's workspace against the install policy: a folder
+    # outside .orch-test made ticket creation fail and left the scheduler IDs empty.
+    import re
+
+    script = (Path(__file__).absolute().parents[2] / "e2e" / "windows" / f"{flow}-flow.ps1").read_text()
+    workspace = re.search(r'\$p = "([^";]+)";', script).group(1).replace("$env:USERPROFILE", PROFILE)
+    assert home_mod.home_ok(PROFILE, "test", True, workspace, workspace + "\\.orch-tool")
+
+
 def test_windows_forward_slashes_compare_like_backslashes(win):
     assert home_mod._under("C:/Users/Pat/.orch-test/x", PROFILE + "\\.orch-test")
     assert not home_mod._under("C:\\Users\\Pat\\.orch-test", PROFILE + "\\.orch-test")  # the prefix itself
