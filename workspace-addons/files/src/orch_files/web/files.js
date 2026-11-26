@@ -30,6 +30,7 @@
   const STATUS = {working: ['Working', 'working'], review: ['In review', 'review'], done: ['Done', 'done']};
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const PLACES = {recent: 'Recent', starred: 'Starred', new: 'New for you'};
+  const TICKETS = {label: 'Open tickets', href: '/#tickets', target: '_top'};  // where helpers make files: the one next step of an empty page
   // Folds accents one character at a time, so the folded text keeps its length (marks land on the right letters)
   const fold = s => { let o = ''; for (const ch of String(s)) { const b = ch.normalize('NFD')[0].toLowerCase(); o += ch.length === 1 && b.length === 1 ? b : ch; } return o; };
   const leaf = path => path === '' ? (S.status.workspace || 'Your folders') : path.split('/').pop();
@@ -248,7 +249,8 @@
     if (!S.rows.length) {
       host.removeAttribute('aria-activedescendant');
       host.append(q ? UI.state({title: 'Nothing found for “' + q + '”', text: 'Try fewer letters or another word, for example a customer or a month. Pictures and videos are found by their name only.', action: {label: 'Clear search', onClick: clearSearch}})
-        : UI.state(S.place === 'starred' ? {title: 'No starred files yet', text: 'Star a file in its preview to keep it here.'} : S.place === 'new' ? {title: 'Nothing new', text: 'Files made since you last looked show up here.'} : S.place === 'recent' ? {title: 'No files yet', text: 'Files you change show up here.'} : {title: 'This folder is empty', text: 'Files put into this folder show up here.'}));
+        : UI.state(Object.assign(S.place === 'starred' ? {title: 'No starred files yet', text: 'Star a file in its preview to keep it here.'} : S.place === 'new' ? {title: 'Nothing new', text: 'Files made since you last looked show up here.'} : S.place === 'recent' ? {title: 'No files yet', text: 'Files you change show up here.'} : {title: 'This folder is empty', text: 'Files put into this folder show up here.'},
+          {action: S.place !== 'folder' ? {label: 'Show your folders', onClick: () => openFolder('')} : S.path ? {label: 'Up one folder', onClick: () => openFolder(S.path.split('/').slice(0, -1).join('/'))} : TICKETS})));
       return;
     }
     const box = S.view === 'grid' ? el('div', 'result-grid') : host;
@@ -299,7 +301,7 @@
   function drawGallery() {
     const host = $('#files-gallery'); host.replaceChildren();
     const cur = nodeOf(S.node);
-    if (!cur) { host.append(UI.state({title: 'No files from tickets yet', text: 'Files helpers make for your tickets show up here, one folder per ticket.'})); return; }
+    if (!cur) { host.append(UI.state({title: 'No files from tickets yet', text: 'Files helpers make for your tickets show up here, one folder per ticket.', action: TICKETS})); return; }
     const one = !!cur.tn, top = el('div', 'files-galhead');
     if (!one) {
       const t = el('div', 'files-galtitle'), h = el('h2', '', cur.g.label);
@@ -408,7 +410,7 @@
     $('#files-about-count').textContent = !st.ready ? 'Reading the files for the first time.' : plural(st.total, 'file') + (st.checked_at ? ' · checked ' + when(st.checked_at) : '');
     const empty = st.ready && !st.total && !st.building;
     $('#files').hidden = empty || !st.ready; $('#files-empty').hidden = !empty;
-    if (empty && !$('#files-empty').firstChild) $('#files-empty').append(UI.state({title: 'No files yet', text: 'Files you put into this workspace folder show up under Your folders. Files helpers make for your tickets show up under From tickets.'}));
+    if (empty && !$('#files-empty').firstChild) $('#files-empty').append(UI.state({title: 'No files yet', text: 'Files you put into this workspace folder show up under Your folders. Files helpers make for your tickets show up under From tickets.', action: TICKETS}));
     if (!st.ready || st.unread) {
       const total = st.total || 0, read = Math.max(0, total - (st.unread || 0));
       const box = el('div', 'banner info files-notice');
