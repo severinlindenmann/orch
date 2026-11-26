@@ -10,6 +10,16 @@ function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; 
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
 # stdout only: a note on stderr (e.g. the secret scan's) must not break the JSON a caller parses
 function OJ { cmd /c "orch $($args -join ' ') < NUL 2>NUL" }
+function NewScheduledTicket($title) {
+    $out = OJ ticket new ('"' + $title + '"') --json --by human:owner | Out-String
+    if ($LASTEXITCODE -ne 0) { L $out; throw "ticket creation failed: $title" }
+    try { $tid = ($out | ConvertFrom-Json -ErrorAction Stop).id }
+    catch { L $out; throw "ticket creation returned invalid JSON: $title" }
+    if (-not $tid) { L $out; throw "ticket creation returned no id: $title" }
+    $out = O check add $tid '"Say hello"' --by human:owner | Out-String
+    if ($LASTEXITCODE -ne 0) { L $out; throw "checklist creation failed: $title" }
+    return $tid
+}
 function Results($out) {
     $m = [regex]::Match("$out", 'Log: (\S+)')
     if (-not $m.Success) { return @() }
@@ -40,7 +50,7 @@ L ""
 L "=== scheduler (automation add-on)"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $env:ORCH_AGENT = ""
-$p = "$env:USERPROFILE\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+$p = "$env:USERPROFILE\.orch-test\orch-sched"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 O init | Out-Null
 $before = Get-Date; $out = O addon add automation --yes | Out-String; L $out
 Check ($LASTEXITCODE -eq 0) "orch addon add automation"
@@ -53,13 +63,13 @@ L (cmd /c "orch config agent add fake --command `"$py $agent`" < NUL 2>&1" | Out
 L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
-$rep = ((OJ ticket new '"Scheduled smoke"' --json --by human:owner) | Out-String | ConvertFrom-Json).id
-O check add $rep '"Say hello"' --by human:owner | Out-Null
+try {
+    $rep = NewScheduledTicket "Scheduled smoke"
+    $one = NewScheduledTicket "Wake-up smoke"
+} catch { L "RESULT fail: $_"; return }
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
-$one = ((OJ ticket new '"Wake-up smoke"' --json --by human:owner) | Out-String | ConvertFrom-Json).id
-O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
 L (O automation repeat $one ('"today ' + $at + '"') --tz Europe/Zurich | Out-String)

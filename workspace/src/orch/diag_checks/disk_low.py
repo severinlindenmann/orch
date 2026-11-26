@@ -4,6 +4,10 @@ from orch.diag_checks import data, verdict
 
 NAME = "disk_low"
 LOW_BYTES = 500 * 1024 * 1024
+FIX = (
+    "Free some disk space (empty the trash, delete large files you no longer need), then run orch "
+    "doctor again."
+)
 
 
 def check(snap):
