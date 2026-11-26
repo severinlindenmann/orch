@@ -264,7 +264,7 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch, person_grant
 
 def _two_questions(run, tid):
     for text in ("First?", "Second?"):
-        code, out, err = run("ask", tid, text, "--option", "A", "--option", "B", "--by", "agent:x")
+        code, out, err = run("ask", tid, text, "--option", "A", "--option", "B", "--recommend", "A", "--by", "agent:x")
         assert code == 0, out + err
 
 

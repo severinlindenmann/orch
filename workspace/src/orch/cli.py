@@ -1542,7 +1542,7 @@ def run(args: argparse.Namespace) -> None:
             who = by()
         except Refused:
             who = ""
-        if tickets.needs_pick_up(root, t, who, mark=not args.json):  # R2.6: the agent picks the answer up
+        if tickets.needs_pick_up(root, t, who, mark=not args.json):  # R2.6: the helper picks the answer up
             try:
                 t = tickets.pick_up_answers(root, t["id"], who or tickets.SYSTEM, mark=not args.json)
             except (Refused, OSError):

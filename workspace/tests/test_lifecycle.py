@@ -396,7 +396,7 @@ def test_the_agents_next_show_prints_the_new_answer_first_and_picks_it_up(proj, 
     run("check", "add", tid, "Paint the banner", "--by", "human:t")
     qid = _ask(run, tid, "Which colour?", "Blue", "Red")
     code, out, _ = run("answer", tid, qid, "Blue", "--by", "human:t")
-    assert code == 0 and f"Next: the agent picks the answer up on its next run: orch ticket show {tid}" in out
+    assert code == 0 and f"Next: the helper picks the answer up on its next run: orch ticket show {tid}" in out
     _wait(proj, tid)
     shown = test_run_wrap._lines(log, "show")[0]
     assert shown.startswith(f"New answer: |   {qid}: Which colour? - Blue (")

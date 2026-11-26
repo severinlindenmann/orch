@@ -21,6 +21,7 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
     "init": ("orch init", "orch init --code WEB"),
     "work-check": ("orch work-check",),
     "tokens": ("orch tokens", "orch tokens --days 7"),
+    "changes": ("orch changes --since 2026-11-01", "orch changes --since v1.0"),
     "triage": ("orch triage", "orch triage --start"),
     "update": ("orch update", "orch update --to release"),
     "start": ("orch start", "orch start --no-open"),
@@ -81,6 +82,7 @@ EXAMPLES: dict[str, tuple[str, ...]] = {
     "ticket tree": (f"orch ticket tree {K}",),
     "ticket list": ("orch ticket list", "orch ticket list --status waiting"),
     "ticket show": (f"orch ticket show {K}",),
+    "ticket export": (f"orch ticket export {K}",),
     "ticket status": (f"orch ticket status {K} review", f"orch ticket status {K} done"),
     "ticket edit": (
         f'orch ticket edit {K} --title "Fix the login page"',

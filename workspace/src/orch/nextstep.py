@@ -213,7 +213,7 @@ def _needs(data, args) -> str:
 
 
 def _answer(data, args) -> str:
-    return f"the agent picks the answer up on its next run: orch ticket show {_tid(args)}"  # R2.6
+    return f"the helper picks the answer up on its next run: orch ticket show {_tid(args)}"  # R2.6
 
 
 def _update(data, args) -> str | None:
