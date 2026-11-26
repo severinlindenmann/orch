@@ -12,7 +12,11 @@ FETCH = re.compile(r"\.(dmg|msi|pkg)\b|setup\.exe|Companion|Invoke-WebRequest|St
 
 def test_installers_only_use_uv_and_download_no_app():
     for name in ("install.sh", "install.ps1"):
-        code = [ln for ln in (ROOT / name).read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
+        code = [
+            ln
+            for ln in (ROOT / name).read_text(encoding="utf-8").splitlines()
+            if not ln.lstrip().startswith("#")
+        ]
         assert not [ln for ln in code if FETCH.search(ln)], name
         assert any("uv tool install" in ln for ln in code), name
 
@@ -27,7 +31,9 @@ def test_doctor_does_not_mind_a_missing_companion(proj, run, monkeypatch):
     monkeypatch.setattr(
         adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
     )
-    monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}" if n in ("orch", "uv", "git") else None)
+    monkeypatch.setattr(
+        shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}" if n in ("orch", "uv", "git") else None
+    )
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")
     assert run("init")[0] == 0
     code, out, _ = run("doctor")

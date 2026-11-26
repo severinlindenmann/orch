@@ -1004,5 +1004,5 @@ def test_install_ps1_failed_restore_by_name_when_orch_runs_the_installed_copy(tm
     _code, out, _ = _run_install_ps1(tmp_path, "success", path=[tmp_path / "bin"], restore="fail")
     lines = _lines(out)
     assert _RESTORE_SUMMARY in lines
-    assert lines[-2:] == ["Open a new terminal, go to your project folder and run this to put your add-ons back:",
-                          "  orch update"]  # fmt: skip
+    go = "Open a new terminal, go to your project folder and run this to put your add-ons back:"
+    assert lines[-2:] == [go, "  orch update"]
