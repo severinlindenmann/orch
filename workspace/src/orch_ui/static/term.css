@@ -32,3 +32,13 @@
 .term .xterm .xterm-cursor-pointer,.term .xterm.xterm-cursor-pointer{cursor:pointer}
 .term .xterm .xterm-accessibility:not(.debug),.term .xterm .xterm-message{position:absolute;inset:0;z-index:10;color:transparent;pointer-events:none}
 .term .xterm .live-region{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+/* from xterm.css: the text marks the normal renderer draws as classes, used when WebGL is off (ORCH-2204); its row
+   sizes and colours come from the rules term.js copies into a CSSOM sheet */
+.term .xterm-dim{opacity:.5}
+.term .xterm-underline-1{text-decoration:underline}
+.term .xterm-underline-2{text-decoration:double underline}
+.term .xterm-underline-3{text-decoration:wavy underline}
+.term .xterm-underline-4{text-decoration:dotted underline}
+.term .xterm-underline-5{text-decoration:dashed underline}
+.term .xterm-overline{text-decoration:overline}
+.term .xterm-strikethrough{text-decoration:line-through}

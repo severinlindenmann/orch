@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from pathlib import Path
 
 from orch import adapters
@@ -70,14 +71,17 @@ def _items_turn(ev: dict) -> dict | None:
     return _turn(role, _text(p.get("content")), ev.get("timestamp")) if role else None
 
 
-def read(agent: str, sid: str, environ: dict | None = None, root: Path | None = None) -> dict:
-    """{found, turns[{role: user|helper, text, at}], more} of one session (found False: file gone)."""
+def read(agent: str, sid: str, environ: dict | None = None, root: Path | None = None, last: int = 0) -> dict:
+    """{found, turns[{role: user|helper, text, at}], more} of one session (found False: file gone).
+    `last` > 0 keeps the newest `last` turns instead of the first MAX_TURNS (the Focus chat, ORCH-2204);
+    `more` then says older turns were left out."""
     hit = adapters.history_file(agent, sid, root, environ)
     if hit is None:
         return {"found": False, "turns": [], "more": False}
     f, lines = hit
     pick = _chat_turn if lines == "chat" else _items_turn
-    turns: list[dict] = []
+    turns: list[dict] | deque = deque(maxlen=last) if last > 0 else []
+    seen = 0
     more = False
     try:
         if f.stat().st_size > MAX_BYTES:
@@ -90,13 +94,16 @@ def read(agent: str, sid: str, environ: dict | None = None, root: Path | None = 
                     continue
                 t = pick(ev) if isinstance(ev, dict) else None
                 if t:
-                    if len(turns) >= MAX_TURNS:
+                    if not last and len(turns) >= MAX_TURNS:
                         more = True
                         break
+                    seen += 1
                     turns.append(t)
     except OSError:
         return {"found": False, "turns": [], "more": False}
-    return {"found": True, "turns": turns, "more": more}
+    if last > 0:
+        more = seen > last
+    return {"found": True, "turns": list(turns), "more": more}
 
 
 def sessions(ticket: dict, environ: dict | None = None, root: Path | None = None) -> list[dict]:

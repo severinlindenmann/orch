@@ -12,7 +12,7 @@ const source = fs.readFileSync(path.join(web, 'pages/livechat.js'), 'utf8');
 const model = source.slice(0, source.indexOf('// --- the page ---'));
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(model + '\nthis.api = {liveChatModel, liveChatSplit, liveChatMine, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
+vm.runInContext(model + '\nthis.api = {liveChatModel, liveTalkReal, liveChatSplit, liveChatMine, liveViewRead, liveViewWrite, LIVE_CHAT_MAX, LIVE_CHAT_TEXT, LIVE_VIEW_KEY};', ctx);
 const C = ctx.api;
 const plain = x => JSON.parse(JSON.stringify(x));
 
@@ -156,4 +156,37 @@ test('a Chat line a person wrote shows once, though orch also queued it for the 
   const msg = {id: 'p_123456', by: 'human:lume', text: 'Please check the draft', at: '2026-11-19T12:00:00Z'};
   const rows = C.liveChatModel({history: [{...msg, chat_message: true}]}, 'human:lume', C.liveChatMine({sent_input: [msg]}, []));
   assert.equal(rows.length, 1);
+});
+
+// ORCH-2204: the helper's real conversation, where orch can read it, gives the helper's words
+test('with the real conversation the helper speaks in its own words; the step summary goes, its links stay', () => {
+  const talk = {available: true, turns: [
+    {w: 'h', text: 'I read the ticket and start with the upload.', at: '2026-11-19T14:10:00Z'},
+    {w: 'y', text: 'Typed in the terminal', at: '2026-11-19T14:12:00Z'},
+    {w: 'h', text: 'x'.repeat(2500), at: '2026-11-19T14:20:00Z'},
+    {w: 'e', text: 'not a turn', at: '2026-11-19T14:20:00Z'},
+    {w: 'h', text: 'no time', at: 'nope'},
+  ]};
+  const rows = plain(C.liveChatModel(ticket(), 'human:lume', [], talk));
+  const talked = rows.filter(r => r.talk);
+  assert.deepEqual(talked.map(r => r.w), ['h', 'y', 'h']);
+  assert.equal(talked[0].text, 'I read the ticket and start with the upload.');
+  assert.equal(talked[2].text.length, 2000);
+  assert.ok(talked[2].text.endsWith('…'));
+  assert.ok(!rows.some(r => r.text === 'Uploading works for pictures, pages and tables.'), 'the summary is not the helper talking');
+  const step = rows.find(r => r.step === 'c1');
+  assert.equal(step.text, '');
+  assert.equal(step.links[0].href, 'https://github.com/o/r/pull/12');
+  assert.ok(rows.some(r => r.question && r.text === 'Keep the old file name?'), 'questions stay');
+  assert.ok(rows.some(r => r.w === 'y' && r.text === 'Please also try a PDF.'), 'your Chat lines stay');
+});
+
+test('without a readable conversation the chat is the ticket summary', () => {
+  for (const talk of [null, {available: false, turns: []}, {available: true, turns: []}, {available: true}]) {
+    assert.equal(C.liveTalkReal(talk), false);
+    const rows = plain(C.liveChatModel(ticket(), 'human:lume', [], talk));
+    assert.ok(rows.some(r => r.text === 'Uploading works for pictures, pages and tables.'));
+    assert.ok(!rows.some(r => r.talk));
+  }
+  assert.equal(C.liveTalkReal({available: true, turns: [{w: 'h', text: 'a', at: '2026-11-19T14:10:00Z'}]}), true);
 });
