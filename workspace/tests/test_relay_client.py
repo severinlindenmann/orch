@@ -1070,7 +1070,10 @@ def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
     tries.clear()
     code, out, _ = run("relay", "status")
     assert code == 0 and "2 messages not sent yet" in out and "next orch relay command" in out
+    # status checks the relay once (a relay command may wait once), never once per retry stacked on more waits
+    assert len(tries) <= 1 + len(net.RETRY_DELAYS)
     assert json.loads(run("relay", "status", "--json")[1])["waiting"] == 2
+    tries.clear()
     for cmd in (("ticket", "list"), ("ticket", "show", tid), ("check", "add", tid, "step"), ("status",)):
         assert run(*cmd)[0] == 0, cmd
     assert tries == []
