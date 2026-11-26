@@ -1267,6 +1267,11 @@ button.live-pt:hover{color:var(--brand)}
 .live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
+.live-cmd{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.live-cmd code{font-family:var(--font-mono);overflow-wrap:anywhere;min-width:0}
+.live-cmd .live-run{flex:none}
+.live-cmd .live-run .menu-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:60;min-width:176px}
+.live-cmd .live-run .menu-pop .btn{width:100%;justify-content:flex-start}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
