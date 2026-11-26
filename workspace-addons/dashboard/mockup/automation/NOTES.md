@@ -58,6 +58,15 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - Save in the repeat window keeps the repeat's own saved zone (the automation add-on reads it when the dashboard saves a plan); a new repeat takes the default. With "New repeat" on a ticket that already repeats, the zone beside the time is that repeat's own.
 - automation.html: the Coming up heading names the zone of its times ("13–19 November · CET"; both names in a week that crosses summer time, "CEST / CET"), the status line says "Next: Monday at 08:00 CET", and Once "Starts" ends with the zone like Next time. The zone is always named: the add-on cannot know where the viewer sits.
 
+## Polish (ORCH-2097, 25 Nov)
+
+- automation.html follows the product's block order: Coming up, then Repeating and Once, then Recent starts; the "Compact rows" toggle the product never had is gone.
+- Recent starts has no "Latest activity" line (it repeated the title); its empty text names the next start in plain words, by title, never the ticket number: "<title> starts Monday at 08:00. Use Start now to run one sooner." While automation is stopped it names no time.
+- Empty page (`?state=empty`): the same word as the loaded table, "Repeating" above its card, "No repeats yet"; the one button is New repeat in the page header.
+- Footnote: "Incoming from your phone and other workspaces · On / Off / Can't connect just now, trying again", never "relay" or "listening".
+- Dates in the tables have no leading zero ("Tue 1 Dec"), as the week strip writes them.
+- Product fix behind it: the dashboard no longer swaps every icon in an add-on page for an "open in new tab" arrow (the empty states showed it).
+
 ## Relay off: no incoming footnote (ORCH-2022, 25 Nov)
 
 - automation.html: the footnote "Incoming from your phone and other workspaces · … / Manage incoming work →" is the relay-on demo. `?relay=off` shows the page of a workspace without the relay: no footnote, no link, no phone or relay words (R1.1). The product does the same (`orch automation view` and `status` read `orch addon list`).
