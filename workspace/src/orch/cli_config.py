@@ -75,7 +75,9 @@ TEST_TIMEOUT = 60  # seconds
 
 
 def add_parsers(sub, common) -> None:
-    ag = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS).add_subparsers(dest="sub")
+    shown = "the helpers found here and the one this folder uses"
+    ag = sub.add_parser("agents", parents=[common], help=shown)
+    ag = ag.add_subparsers(dest="sub", metavar="<command>")
     t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
     t.add_argument("name")
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
@@ -84,17 +86,19 @@ def add_parsers(sub, common) -> None:
     pv.add_argument("state", nargs="?", choices=("status", "move", "allow"), default="status")
     pv.add_argument("name", nargs="?", help="allow: the agent name shown by orch private")
     pv.add_argument("--key", help="allow: the key shown by orch private (binds the yes to what you saw)")
-    c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
-    g = c.add_parser("get", parents=[common])
+    c = sub.add_parser("config", help="settings of this workspace and its helpers").add_subparsers(
+        dest="sub", required=True, metavar="<command>"
+    )
+    g = c.add_parser("get", parents=[common], help="show a setting, or all of them")
     g.add_argument("key", nargs="?", choices=(*KEYS, *GET_ALIASES))
-    s = c.add_parser("set", parents=[common])
+    s = c.add_parser("set", parents=[common], help="change a setting")
     s.add_argument("key", choices=KEYS)
     s.add_argument("value")
     s.add_argument(
         "--if-current", dest="if_current", metavar="OLD", help="insights.*: refuse unless it is OLD"
     )
     c.add_parser("propose", parents=[common], help="a proposal for the workspace name, description and tags")
-    a = c.add_parser("agent", parents=[common])
+    a = c.add_parser("agent", parents=[common], help="choose the helper, or add your own command")
     a.add_argument("name_or_add", metavar="add|NAME")
     a.add_argument("name", nargs="?")
     a.add_argument("--command", help="the command that does the work; {prompt} is where the task goes")

@@ -251,3 +251,9 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
 - ticket-review.html (W4): one Result card. The result first, then "What was done" with its evidence, then Looks good
   and Send back under it. No verdict buttons in the header and no Continue in Review.
 - Every ticket page (W5): the step is called Review (pill, stepper, history) and the switch reads "I review the result".
+
+## ORCH-2051: Replaced by, type a key to jump (25 Nov)
+
+- `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
+  (Replaced by, Cancel, Move to Superseded). The dialog opens with focus on the choice. Typing a whole key (ORCH-97)
+  jumps to that ticket; typing never chooses, Enter or a click does. The long title and the long word wrap in full.
