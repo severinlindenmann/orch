@@ -527,7 +527,7 @@ def run_publish(args, root: Path, out) -> None:
         out(args, r, _invite_text(r, "publish server"))
     elif sub == "connect":
         if args.paste:
-            if sys.stdin.isatty():
+            if term.is_terminal(sys.stdin):
                 print(
                     "Paste the text from your admin, then press Ctrl+D (Ctrl+Z, then Enter, on Windows).",
                     file=sys.stderr,

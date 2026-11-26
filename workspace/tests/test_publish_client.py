@@ -644,7 +644,8 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     assert (
         row["title"] == "a.txt" and "link" not in row
     )  # no https link: it is copied by its id, with the key kept here
-    assert row["subtitle"] == "No note" and row["meta"][-1] == "Kept until you delete it"  # the end shown once (the fake has none)
+    # The end is shown once (the fake has none).
+    assert row["subtitle"] == "No note" and row["meta"][-1] == "Kept until you delete it"
     ops = [(a["label"], a["action"]["op"]) for a in row["actions"]]
     assert ops == [("Copy link", "link.copy"), ("Extend", "link.extend"), ("Stop sharing", "link.stop")]
     assert re.fullmatch(r"f_[a-z0-9]+", row["actions"][0]["action"]["args"]["id"])

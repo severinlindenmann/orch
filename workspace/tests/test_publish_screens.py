@@ -70,10 +70,13 @@ def test_a_row_carries_note_ticket_and_when_it_ends(proj, run, pub, new_ticket, 
     connect(run, pub)
     tid = new_ticket("Spring campaign landing page")
     (proj / "plan.txt").write_text("x")
-    fid = json.loads(run("publish", "file", "plan.txt", "--note", "Draft plan", "--ticket", tid, "--json")[1])["id"]
+    fid = json.loads(
+        run("publish", "file", "plan.txt", "--note", "Draft plan", "--ticket", tid, "--json")[1]
+    )["id"]
     import datetime as dt
 
-    end = (dt.datetime.now(dt.UTC) + dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")  # the fake's date is past
+    # The fake server's date is past.
+    end = (dt.datetime.now(dt.UTC) + dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     monkeypatch.setattr(
         publish, "_all_files", lambda *a, **k: [{"id": fid, "name": "plan.txt", "size": 1, "expires_at": end}]
     )
@@ -127,7 +130,9 @@ def _down(monkeypatch):
     return seen
 
 
-def test_offline_the_page_lists_the_local_record_and_says_publish_cannot_be_reached(proj, run, pub, monkeypatch):
+def test_offline_the_page_lists_the_local_record_and_says_publish_cannot_be_reached(
+    proj, run, pub, monkeypatch
+):
     from test_publish_client import connect
 
     connect(run, pub)
@@ -152,9 +157,12 @@ def test_offline_with_nothing_recorded_does_not_claim_there_are_no_links(proj, r
     v = publish.view(proj)
     assert v["blocks"][0]["items"] == [] and "No shared links" not in json.dumps(v)
     assert v["notice"].startswith("Publish can't be reached.")
+    assert v["blocks"][0]["meta"] == "From this workspace's record"
 
 
-def test_the_cli_list_quick_falls_back_and_plain_list_says_publish_cannot_be_reached(proj, run, pub, monkeypatch):
+def test_the_cli_list_quick_falls_back_and_plain_list_says_publish_cannot_be_reached(
+    proj, run, pub, monkeypatch
+):
     from test_publish_client import connect
 
     connect(run, pub)

@@ -705,7 +705,7 @@ LINK_NOTE_WORDS = (
 def view(root: Path) -> dict:
     """`orch publish view --json` (addon-view.schema.json): read-only, links without any key.
     One compact row per shared file: name and your note, the ticket, when it ends, and fixed ops on its id.
-    When publish gives no answer the rows come from this computer's own record, at once, with a notice."""
+    When publish gives no answer the rows come from the workspace's local record, at once, with a notice."""
     import datetime as dt
 
     from orch.cli_clients import _exp
@@ -788,7 +788,7 @@ def view(root: Path) -> dict:
         for a in r["apps"]
     ]
     if down:
-        as_of = f"As of {net.when(r['as_of'])}" if r.get("as_of") else "From this computer's record"
+        as_of = f"As of {net.when(r['as_of'])}" if r.get("as_of") else "From this workspace's record"
         count = None
         empty = {
             "title": "Nothing recorded on this computer",

@@ -1,6 +1,6 @@
 """ORCH-403, changed by ORCH-2170 (RP7): one stalled or refused request to publish must not hold the Publish
-page. `publish view` makes one short try (no waits between tries) and, when there is no answer, lists what this
-computer recorded and says publish can't be reached."""
+page. `publish view` makes one short try (no waits between tries) and, when there is no answer, lists the
+local record and says publish can't be reached."""
 
 import json
 import time
@@ -19,7 +19,7 @@ def test_view_gives_up_on_a_stalled_request_and_lists_the_local_record(proj, run
     connect(run, pub)
     fid = _share(proj, run, pub, "a.txt", "--note", "Draft plan")
     publish._remember(proj, fid, expires_at="2099-01-01T00:00:00Z")  # the fake server's date is long past
-    real, timeouts = net.urllib.request.urlopen, []
+    timeouts = []
     slept = []
     monkeypatch.setattr(net.time, "sleep", lambda s: slept.append(s))
 
@@ -32,7 +32,9 @@ def test_view_gives_up_on_a_stalled_request_and_lists_the_local_record(proj, run
     v = publish.view(proj)
     assert time.monotonic() - t0 < 2  # nothing waited
     assert slept == [] and len(timeouts) == 1 and timeouts[0] <= publish.VIEW_TIMEOUT  # one short try
-    assert v["notice"] == "Publish can't be reached. People may not be able to open your links until it is back."
+    assert (
+        v["notice"] == "Publish can't be reached. People may not be able to open your links until it is back."
+    )
     assert v["button"]["action"] == {"op": "addon.refresh"}
     shared = v["blocks"][0]
     assert [i["actions"][0]["action"]["args"]["id"] for i in shared["items"]] == [fid]
