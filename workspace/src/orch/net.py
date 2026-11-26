@@ -65,9 +65,10 @@ def _open(req, timeout, redirects: bool):
     return opener.open(req, timeout=timeout)
 
 
-def _send(req, timeout, limit=None, redirects: bool = True):
-    """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response."""
-    delays = list(RETRY_DELAYS)
+def _send(req, timeout, limit=None, redirects: bool = True, retry: bool = True):
+    """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response.
+    `retry=False`: one try only (a page that must open at once, publish list)."""
+    delays = list(RETRY_DELAYS) if retry else []
     while True:
         try:
             r = _open(req, timeout, redirects)
@@ -114,6 +115,7 @@ def call(
     timeout: float = 120,
     limit: int | None = None,
     redirects: bool = True,
+    retry: bool = True,
 ) -> tuple[int, bytes]:
     """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message.
     `redirects=False`: a 3xx is refused too (a token in a header must not follow it elsewhere)."""
@@ -127,7 +129,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        return _send(req, timeout, limit, redirects)
+        return _send(req, timeout, limit, redirects, retry)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = _status_text(url, e.code), ""
@@ -163,8 +165,9 @@ def call_json(
     body=None,
     timeout: float = 120,
     redirects: bool = True,
+    retry: bool = True,
 ):
-    status, raw = call(method, url, headers, body, timeout, redirects=redirects)
+    status, raw = call(method, url, headers, body, timeout, redirects=redirects, retry=retry)
     if not raw:
         return status, None
     try:
