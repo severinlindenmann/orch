@@ -215,7 +215,7 @@ NEXT = [
     (["answer", "{t}", "{q}", " "], "orch answer"),
     (["answer", "{t}", "{a}", "yes"], "orch ticket show"),
     (["check", "done", "{t}", "c1", "--file", "nope.txt"], "Check the path"),
-    (["ticket", "attach", "{t}", "--name", "a.txt"], "Pick a file with content"),
+    (["ticket", "attach", "{t}", "--name", "a.txt"], "Pick a file with something in it"),
     (["ref", "add", "{t}", "not a thing"], "Check it and try again"),
 ]
 
