@@ -206,3 +206,18 @@ C. Attention groups and rounds of 5 (tiles over the five lanes), keys 1/2/3 J/K 
 D. Side panel beside the card: Ticket / Chat / Terminal (Focus live session), Run it in the panel. After 3203 + 3175.
 E. Ideas card: Keep / Later / No with partial save.
 F. Phone app and review server page catch up.
+
+## Owner decision on the words, 26 Nov ("take the recommended")
+Approved as recommended (R4.2):
+1. Groups: Quick look / Short decision / Take your time, as tiles on top of the five lanes.
+2. "Test results" replaces "Check result".
+3. "Suggested" stays.
+4. Tab "What the helper does" and More item "Watch the helper" by default; "Terminal" only when the plain terminal
+   setting is on. No "session" on screen.
+5. "You decide:", "If you wait:", "What matters", "Where were we?", "You said on <day>:" (and "You wrote" / "<name>
+   wrote" / "Team rule"), "Since then", "This may be out of date", "Needs more time", "Next deadline:", "More".
+6. One button "Later"; the chips under it are times only (no "Remind me").
+7. "Team rules" as the source label.
+8. Round words: "What you decided", "Still waiting:", "Next N in <group>", "Back to the start".
+Also approved: the other card, state and failure words listed in NOTES.md rounds 1-3, except where this list replaces
+them ("Open the session" becomes "Watch the helper", "Remind me" goes away).
