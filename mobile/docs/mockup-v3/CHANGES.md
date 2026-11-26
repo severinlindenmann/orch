@@ -1,3 +1,7 @@
+# 25 Nov swipe rows and Reduce Motion (ORCH-2049)
+- Needs your OK rows (Hide) and ticket chat rows (Archive / Delete): with Reduce Motion on, the row still follows the finger, but reveal, spring back, close and hide jump to where they end instead of sliding. Buttons, Undo, long-press menu and VoiceOver actions are unchanged; with Reduce Motion off nothing changes.
+- `archive.html` now says what the phone does: a long swipe or fling on a chat only shows its buttons, it never archives or deletes on its own.
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 
