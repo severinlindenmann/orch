@@ -1787,6 +1787,14 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
+def test_attach_refuses_tab_and_line_breaks_in_a_file_name():
+    for name in ("a\tb.md", "a\nb.md", "a\rb.md"):
+        with pytest.raises(actions.BadRequest):
+            actions.attachments(
+                "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": name, "text": "x"}]}
+            )
+
+
 def test_a_voice_note_is_a_ticket_file_like_a_picture():
     """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
     import base64

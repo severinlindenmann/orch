@@ -9,4 +9,6 @@ Work task-based first, then evidence-based, then context-based:
 5. Before you finish run `orch work-check` (it says when files changed with no ticket), then end every run with `orch ticket summary <id> "<what was done and what is left>"`, as a short handover with links that lets a fresh agent go on (no copies of whole files, no secrets), then `orch ticket status <id> done` (orch moves it to Review; never claim it is Done). When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 6. Model: a ticket on Sonnet whose plan shows design, security or several parts, or that failed twice at the same problem, moves up: `orch ticket model <id> up --why "<reason>"`. Your own subagents follow the same rule: the small model first, Opus only where it is needed.
 
+Every `orch` command prints the next step: do it. While you wait for an answer, set `orch ticket status <id> waiting`.
+
 Plans may change. There are no signing or planning gates. Details, notes, files and icon: the orch skill (`.agents/skills/orch/SKILL.md`).
