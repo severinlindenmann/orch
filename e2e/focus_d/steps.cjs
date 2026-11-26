@@ -320,8 +320,8 @@ async function paneData(page, dash) {
   await liveBarState(page);
   await page.goto(dash + '/#home');
   await mainHasText(page);
-  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
-  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="helpers"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const body = '#live-dock .live-pane[data-session="t_bar238"] [data-live-body]';
   await page.waitForFunction(b => /Keep the old file name/.test(document.querySelector(b)?.textContent || ''), body, { timeout: 10000 });
@@ -441,8 +441,8 @@ async function chatView(page, dash) {
   await page.goto(dash + '/#home');
   await mainHasText(page);
   await page.evaluate(() => { try { localStorage.removeItem('orch.live.view'); } catch {} });
-  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
-  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="helpers"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
   await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
@@ -600,7 +600,7 @@ async function shelfView(page, dash, width) {
   await mainHasText(page);
   const open = async id => {
     await page.waitForSelector(`#live-bar :is([data-lbar-open="${id}"], [data-lbar-list])`, { timeout: 10000 });
-    if (!(await page.isVisible(`#live-bar [data-lbar-open="${id}"]`))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+    if (!(await page.isVisible(`#live-bar [data-lbar-open="${id}"]`))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
     await page.click(`#live-bar [data-lbar-open="${id}"]`);
   };
   // a ticket with no results: the shelf says so in one line
@@ -733,9 +733,9 @@ async function voiceBox(page, dash) {
     await page.goto('about:blank');  // the same #home address would not load the page again
     await page.goto(dash + '/#home');
     await mainHasText(page);
-    await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
+    await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="helpers"])', { timeout: 10000 });
     if (!(await page.$(pane))) {
-      if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+      if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
       await page.click('#live-bar [data-lbar-open="t_bar238"]');
     }
     await page.waitForSelector(box, { timeout: 10000 });
@@ -875,8 +875,8 @@ async function messageBox(page, dash) {
   await page.route(/\/api\/artifacts\/t_bar238/, route => route.fulfill({ json: { files: attached.map(n => ({ name: n, size: /\.png$/.test(n) ? 52163 : 12, mtime: new Date().toISOString() })) } }));
   await page.goto(dash + '/#home');
   await mainHasText(page);
-  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
-  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+  await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="helpers"])', { timeout: 10000 });
+  if (!(await page.$('#live-bar [data-lbar-open="t_bar238"]'))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', box = `${pane} [data-key="live-msg-box"]`, tiles = `${box} .attachment-tile`;
   const chat = `${pane} [data-live-chat]`;
@@ -1869,16 +1869,12 @@ async function noTicket(page, dash, width) {
     if (await page.$(`#live-dock .live-pane[data-session="${id}"] [data-key="live-open-ticket"]`)) throw new Error(`the ${title} offers Open ticket`);
   }
   if (calls.join() !== 'empty,chat,terminal,manager') throw new Error(`the start calls were ${calls.join()}`);
-  // the bar shows them as pinned sessions: chips by name on a wide screen, the pinned count on a phone
-  const barText = await page.textContent('#live-bar');
-  if (phone) {
-    const pinned = await page.getAttribute('#live-bar [data-lbar-list="pin"]', 'aria-label');
-    if (pinned !== 'Pinned: 4 sessions') throw new Error(`the bar says "${pinned}", not 4 pinned sessions`);
-  } else {
-    for (const [, title] of NO_TICKET) {
-      if (!barText.includes(title) && !await page.$('#live-bar [data-lbar-list="pin"]')) throw new Error(`the bar does not show the ${title}`);
-    }
-  }
+  // the bar's Helpers menu lists them by name (ORCH-2198), on a wide screen and on a phone
+  await page.click('#live-bar [data-lbar-list="helpers"]');
+  await page.waitForSelector('#live-bar [data-key="lbar-pop"]', { timeout: 5000 });
+  const barText = await page.textContent('#live-bar [data-key="lbar-pop"]');
+  for (const [, title] of NO_TICKET) if (!barText.includes(title)) throw new Error(`the Helpers menu does not show the ${title}`);
+  await page.keyboard.press('Escape');
   // the menu now offers to go to the open ones; a second New starts nothing
   const again = await menu();
   if (!again.every(x => /Already open: go to it/.test(x[1]))) throw new Error(`the New menu does not say they are open: ${again.map(x => x[1]).join(' | ')}`);
@@ -2155,16 +2151,15 @@ async function pinName(page, dash, width) {
   // the page is drawn again when the server answers; the keyboard is back on the pin button within a frame
   await page.waitForFunction(i => document.activeElement?.dataset.wallPin === i, id, { timeout: 2000 }).catch(() => { throw new Error('pinning moved the keyboard place'); });
   if (await page.getAttribute(`${tileOf(id)} [data-wall-pin]`, 'aria-pressed') !== 'true') throw new Error('the pin button does not say pinned');
-  // the bar: a chip with the pinned ones, or (folded) the pinned count, or (folded further) inside More
-  const barPinned = async () => {
-    if (await page.$('#live-bar [data-g="pin"]')) return !!(await page.$(`#live-bar [data-g="pin"] [data-lbar-open="${id}"]`));
-    if (await page.$('#live-bar [data-lbar-list="pin"]')) return (await page.getAttribute('#live-bar [data-lbar-list="pin"]', 'aria-label')) === 'Pinned: 2 sessions';
-    await page.click('#live-bar [data-lbar-list="more"]');
-    const there = !!(await page.waitForSelector(`#live-bar [data-lbar-open="${id}"]`, { timeout: 5000 }).catch(() => null));
+  // the bar: its row in the Helpers menu (ORCH-2198), the text of that row or null
+  const barRow = async () => {
+    await page.click('#live-bar [data-lbar-list="helpers"]');
+    const el = await page.waitForSelector(`#live-bar [data-lbar-open="${id}"]`, { timeout: 5000 }).catch(() => null);
+    const text = el ? (await el.textContent()).trim() : null;
     await page.keyboard.press('Escape');
-    return there;
+    return text;
   };
-  if (!(await barPinned())) throw new Error('the bar does not show the pinned session');
+  if ((await barRow()) === null) throw new Error('the bar\'s Helpers menu does not show the pinned session');
   // the name: in the pane header of the open session (draft D: click the name, type, Enter)
   await page.click(`${tileOf(id)} [data-wall-open]`);
   const pane = `#live-dock .live-pane[data-session="${id}"]`;
@@ -2180,14 +2175,14 @@ async function pinName(page, dash, width) {
   const shown = async () => ({
     tile: (await page.textContent(`${tileOf(id)} .wall-tt`)).trim(),
     pane: await page.$(`${pane} [data-key="live-rename"]`) ? (await page.textContent(`${pane} [data-key="live-rename"]`)).trim() : '',
-    chip: await page.$(`#live-bar [data-lbar-open="${id}"]`) ? (await page.textContent(`#live-bar [data-lbar-open="${id}"]`)).trim() : null,
+    chip: await barRow(),
   });
   const check = async when => {
     const got = await shown();
     if (got.tile !== NAME) throw new Error(`${when}: the tile says "${got.tile}"`);
     if (got.pane !== NAME) throw new Error(`${when}: the pane says "${got.pane}"`);
-    if (got.chip !== null && !got.chip.includes(NAME)) throw new Error(`${when}: the chip says "${got.chip}"`);
-    if (got.chip === null && !(await page.$('#live-bar :is([data-lbar-list="pin"], [data-lbar-list="more"])'))) throw new Error(`${when}: the bar shows no pinned session`);
+    if (got.chip === null) throw new Error(`${when}: the bar's Helpers menu shows no row for the pinned session`);
+    if (!got.chip.includes(NAME)) throw new Error(`${when}: its row in the Helpers menu says "${got.chip}"`);
     if (await band() !== 'pin') throw new Error(`${when}: the session is not in the Pinned band`);
   };
   await check('after saving');
@@ -2856,7 +2851,7 @@ const STEPS = [
   {
     n: 7, pic: 'fd-07-pin-name', area: 'wall', title: 'Pin a session and give it your own name', feature: [9],
     do: ['Pin a working session.', 'Click its name, type a new one and press Enter.'],
-    see: ['The pinned session moves to the Pinned band and gets a chip in the bar.', 'The new name shows on its tile, its pane and its chip.',
+    see: ['The pinned session moves to the Pinned band and comes first in its group of the bar\'s Helpers menu.', 'The new name shows on its tile, its pane and its row in the Helpers menu.',
       'Both stay after a reload; Unpin moves it back.'],
     async run({ page, dash, width }) {
       await pinName(page, dash, width);
@@ -2875,10 +2870,10 @@ const STEPS = [
   },
   {
     n: 9, pic: 'fd-09-bar', area: 'bar', title: 'The bar under every page', feature: [7, 11],
-    do: ['Open Home, then Tickets, then Review.', 'Press the "in line" count in the bar.', 'Type in the list\'s search.'],
+    do: ['Open Home, then Tickets, then Review.', 'Press Helpers in the bar.', 'Type in the menu\'s search.'],
     see: ['The bar is under every page, calm, on one line that never wraps.',
-      'Chips only for sessions that need you and pinned ones; the rest are counts such as "9 in line".',
-      'A count opens a list you can search.'],
+      'One Helpers menu (ORCH-2198) instead of chips and counts; a ◆ on it when something needs you.',
+      'The menu groups the sessions as Needs you, Working and Quiet with their counts, opens inside the window and has a search.'],
     async run({ page, dash }) {
       await liveBarState(page);
       for (const where of ['#home', '#tickets', '#review']) {
@@ -2889,15 +2884,15 @@ const STEPS = [
         await noSideways(page);
         await extraShot(page, 'page-' + where.slice(1), page.viewportSize().width);  // ORCH-1643: Home, Tickets and Review under the bar
       }
-      // ORCH-1643: on a phone the ◆ count carries the Review badge's number and says "Needs you" in its name
-      const words = await page.evaluate(() => { const b = document.getElementById('live-bar'); return b.textContent + ' ' + [...b.querySelectorAll('[aria-label]')].map(x => x.getAttribute('aria-label')).join(' '); });
-      if (!/ORCH-238|Needs you/.test(words)) throw new Error('the bar does not show the sessions that need you');
-      // the "in line" count, or the More count it folded into when the row is short
-      const count = (await page.$('#live-bar [data-lbar-list="queue"]')) ? 'queue' : 'more';
-      await page.click(`#live-bar [data-lbar-list="${count}"]`);
+      // ORCH-2198: the Helpers button says something needs you; its menu groups the sessions with their counts
+      const name = await page.getAttribute('#live-bar [data-lbar-list="helpers"]', 'aria-label');
+      if (name !== 'Helpers: something needs you') throw new Error(`the Helpers button says "${name}"`);
+      await page.click('#live-bar [data-lbar-list="helpers"]');
       await page.waitForSelector('#live-bar .lbar-pop .lbar-row', { timeout: 5000 });
-      const head = await page.textContent('#live-bar .lbar-pop-h');
-      if (count === 'queue' && head.trim() !== 'In line (9)') throw new Error(`the list says "${head}", not "In line (9)"`);
+      const heads = await page.$$eval('#live-bar .lbar-gh > span', els => els.map(e => e.textContent.trim()));
+      if (heads[0] !== 'Needs you' || !heads.includes('Quiet')) throw new Error(`the Helpers menu groups read "${heads.join(' | ')}"`);
+      const box = await page.$eval('#live-bar .lbar-pop', el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, h: innerHeight }; });
+      if (box.top < 0 || box.bottom > box.h + 1) throw new Error(`the Helpers menu is not inside the window (${JSON.stringify(box)})`);
       await page.fill('#live-bar [data-lbar-q]', 'logo');
       await page.waitForFunction(() => document.querySelectorAll('#live-bar .lbar-row').length === 1, null, { timeout: 5000 });
       if (!/New logo on every page/.test(await page.textContent('#live-bar .lbar-list'))) throw new Error('the search does not find "logo"');
@@ -2905,7 +2900,7 @@ const STEPS = [
       await page.waitForFunction(n => document.querySelectorAll('#live-bar .lbar-row').length >= n, 9, { timeout: 5000 });
       await noSideways(page);
     },
-    draft: { q: '?page=home&many=1&list=queue' },
+    draft: { q: '?page=home&many=1&list=helpers' },
   },
   {
     n: 10, pic: 'fd-10-layer', area: 'layer', title: 'The layer at the bottom, on the right, full screen, to the bar, to the side',
