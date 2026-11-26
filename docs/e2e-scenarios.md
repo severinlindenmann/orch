@@ -14,6 +14,9 @@ Format: steps → expected result.
 - W5 Agent asks q1 with options + recommendation, status waiting; human answers via CLI → answer, `answered_by`, `via: cli` set.
 - W6 3 references (Jira and Teams by address, a plain one) + `orch ref list` + `orch ext set` → kept; a hand-added unknown field survives the next CLI write.
 - W7 Same flow in Home with codex exec and no git → works the same; ticket file in local git and remote git (Reports) also works.
+- W8 Item checked without evidence → `ticket status done` refused naming it; fitting evidence (commit, command) → clean, ticket finishes.
+- W9 `orch ask` → `waiting_on` question; agent finishes an independent item while waiting (still waiting); person answers → `waiting_on` cleared, the answer is in `ticket show` for the next run, the dependent item is done.
+- W10 Every F2 command (`ticket new/show/list/summary/wait`, `check add/done`, `ask`) prints a `Next:` line in text mode; `--json` stays free of it (R2.7).
 
 ## Add-ons (A)
 - A0 `orch addon add dashboard --yes` + `add scheduler --yes` → `orch addon list --json` shows both active (built-in); skills, `<!-- orch:addon:<name> -->` blocks, `.orch/addons.json`, `.orch/.local-id`, install registry and consent record (under `ORCH_HOME`); `remove scheduler` → its skill and block gone, dashboard's stay.
