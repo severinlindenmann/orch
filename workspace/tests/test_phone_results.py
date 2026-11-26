@@ -931,11 +931,16 @@ def test_ordinary_text_is_not_a_file_hit():
 VALUE = "Xk93-pq7Lm-aa21"  # a stored key value, written in prose without any label
 
 
-def test_h5_stored_values_never_leave_in_any_text_of_the_view(proj, run, new_ticket, conn):  # noqa: F811
+def test_h5_stored_values_never_leave_in_any_text_of_the_view(proj, run, new_ticket, conn, plant_raw):  # noqa: F811
     keystore.add(proj, "db-cred", "token", VALUE)
-    tid = new_ticket(f"Rotate {VALUE} today")
-    run("check", "add", tid, f"Use {VALUE} for the db")
-    run("log", tid, f"Rotated the DB credentials, new value {VALUE}")
+    tid = new_ticket("Rotate it today")
+    run("check", "add", tid, "Use it for the db")
+    run("log", tid, "Rotated the DB credentials")
+    t = tickets.load(proj, tid)
+    t["title"] = f"Rotate {VALUE} today"
+    t["checklist"][0]["text"] = f"Use {VALUE} for the db"
+    t["history"][-1]["text"] = f"Rotated the DB credentials, new value {VALUE}"
+    tickets._write(proj, t)
     # evidence and artifact files: covered by the backlog upload-gate PR (phone_view.attachments), not #497
 
     def op(t):
@@ -1160,9 +1165,10 @@ def test_short_flag_cluster_only_of_boolean_letters(text, want):
     assert phone_view.redact(text) == want
 
 
-def test_update_title_is_a_fixed_point_and_cleaned_first(proj, new_ticket):
+def test_update_title_is_a_fixed_point_and_cleaned_first(proj, new_ticket, plant_raw):
     keystore.add(proj, "db-cred", "token", "Xk93-pq7Lm-aa21")
-    tid = new_ticket("Rotate Xk93-pq7\u200bLm-aa21 and tok<!---->en=hunter2 today")
+    tid = new_ticket("Rotate it today")
+    plant_raw(tid, title="Rotate Xk93-pq7\u200bLm-aa21 and tok<!---->en=hunter2 today")
     title = relay._update_title(proj, tid)
     assert title is not None
     assert "Xk93" not in title and "hunter2" not in title and "pq7Lm" not in title
@@ -1322,9 +1328,10 @@ def test_r3_l2_light_status_text_is_a_contract_status(proj, new_ticket, monkeypa
     assert sent == ["Status: open"]
 
 
-def test_r3_l3_review_question_title_is_scrubbed_and_value_hidden(proj, new_ticket, conn):  # noqa: F811
+def test_r3_l3_review_question_title_is_scrubbed_and_value_hidden(proj, new_ticket, conn, plant_raw):  # noqa: F811
     keystore.add(proj, "db-cred", "token", VALUE)
-    tid = new_ticket(f"Rotate {VALUE} and password=hunter2")
+    tid = new_ticket("Rotate it")
+    plant_raw(tid, title=f"Rotate {VALUE} and password=hunter2")
     msg = relay.send_review_question(proj, tickets.load(proj, tid), 1, relay.new_id())
     title = msg["body"]["title"]
     assert VALUE not in title and "hunter2" not in title and "[hidden: db-cred]" in title, title

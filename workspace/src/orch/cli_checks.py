@@ -28,6 +28,8 @@ def add_parsers(sub, common) -> None:
     )
     ap.add_argument("name")
     ap.add_argument("--hash", help="the short content hash shown next to the check (refused when it changed)")
+    sh = acts.add_parser("show", parents=[common], help="print a check file and its script with their hash")
+    sh.add_argument("name")
     r = acts.add_parser("remove", parents=[common], help="delete a check file and forget it was approved")
     r.add_argument("name")
     run = acts.add_parser("run", parents=[common], help="run the checks now (or one)")
@@ -100,11 +102,29 @@ def dispatch(args, root) -> bool:
             text += f"\n{note}" if note else ""
         else:
             text = "\n".join(_list_line(x) for x in rows) or "No checks yet. Add one: orch checks templates"
+        skipped = checkfiles.skipped(root)
+        if skipped:
+            text += f"\nIgnored (a check's name is small letters, digits and dashes): {', '.join(skipped)}"
         out(
             args,
-            {"present": checkfiles.present(root), "checks": rows, "notice": checkfiles.notice(root)},
+            {
+                "present": checkfiles.present(root),
+                "checks": rows,
+                "notice": checkfiles.notice(root),
+                "skipped": skipped,
+            },
             text,
         )
+        return True
+    if action == "show":
+        res = checkfiles.show(root, args.name)
+        text = f"{res['name']}.json (content {res['digest']}):\n{res['file'].rstrip()}"
+        if res["script"]:
+            body = res["script_text"]
+            text += f"\n\n{res['script']}:\n" + (body.rstrip() if body is not None else "(missing)")
+        approve = checkfiles.approve_command(res["name"], res["digest"])
+        text += f"\n\nIf this is what you want to run: {approve}"
+        out(args, res, text)
         return True
     if action == "init":
         res = checkfiles.init(root)
@@ -157,4 +177,4 @@ def dispatch(args, root) -> bool:
         rows = [x for x in doc["items"] if not args.name or x.get("name") == args.name]
         out(args, doc, "\n".join(cli_health.line(x) for x in rows) or cli_health.NONE_SET)
         return True
-    raise Refused("Use one of: orch checks list | init | templates | add | approve | remove | run")
+    raise Refused("Use one of: orch checks list | init | templates | add | show | approve | remove | run")

@@ -7,6 +7,8 @@ let previousOverflow='', locked=false;
 // the page never fires `close`, so every check drops dead entries first and gives the scrolling back when none is left.
 function release(){for(let i=stack.length-1;i>=0;i--)if(!stack[i].isConnected||!stack[i].open)stack.splice(i,1);if(!stack.length&&locked){document.documentElement.style.overflow=previousOverflow;locked=false}if(!stack.length&&document.body?.style?.overflow==='hidden')document.body.style.overflow=''}
 const focusables=d=>[...d.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[inert]')&&n.getClientRects().length);
+/* where focus goes back to: the opener, or, when it was an item of a menu that has closed since, that menu's button */
+const back=t=>{if(!t?.isConnected||t.closest('[inert]'))return null;if(t.getClientRects().length)return t;const s=t.closest('details')?.querySelector(':scope>summary');return s?.getClientRects().length?s:null};
 function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='true';d.setAttribute('aria-modal','true');if(!d.hasAttribute('aria-label')&&!d.hasAttribute('aria-labelledby'))d.setAttribute('aria-label',d.querySelector('h1,h2,h3')?.textContent||'Preview');
  /* class ui-bottom-close: the dialog has its own Cancel/Close row at the bottom, so no top × Close (Esc and a click outside still close it) */
  const x=document.createElement('button');x.type='button';x.className='btn outline sm ui-overlay-close';x.textContent=d.classList.contains('ui-fullscreen')?'× Exit full screen':'× Close';x.setAttribute('aria-label',x.textContent.slice(2));x.onclick=()=>d.close();if(!d.classList.contains('ui-bottom-close'))d.prepend(x);
@@ -15,7 +17,7 @@ function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='tru
  d.addEventListener('cancel',e=>{e.preventDefault();e.stopImmediatePropagation();d.close()},true);
  d.addEventListener('click',e=>{if(e.target!==d)return;const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){e.stopImmediatePropagation();d.close()}},true);
  d.addEventListener('submit',e=>{if((e.submitter?.formMethod||e.target.method)==='dialog'){e.preventDefault();d.close(e.submitter?.value||'')}},true);
- d.addEventListener('close',()=>{const i=stack.indexOf(d);if(i!==-1)stack.splice(i,1);d.classList.remove('ui-closing');release();UI.placePreview?.();const target=d._uiOpener;if(target?.isConnected&&!target.closest('[inert]'))target.focus({preventScroll:true});else document.querySelector('main')?.focus({preventScroll:true});});
+ d.addEventListener('close',()=>{const i=stack.indexOf(d);if(i!==-1)stack.splice(i,1);d.classList.remove('ui-closing');release();UI.placePreview?.();const target=back(d._uiOpener);if(target)target.focus({preventScroll:true});else document.querySelector('main')?.focus({preventScroll:true});});
 }
 HTMLDialogElement.prototype.showModal=function(){prepare(this);if(this.open)return;this._uiOpener=document.activeElement;release();if(!locked){previousOverflow=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';locked=true}stack.push(this);nativeShow.call(this);this.classList.remove('ui-closing');UI.placePreview?.();};
 HTMLDialogElement.prototype.close=function(value){if(!this.open||this.classList.contains('ui-closing'))return;this.classList.add('ui-closing');const d=this;setTimeout(()=>nativeClose.call(d,value),reduced()?0:100)};

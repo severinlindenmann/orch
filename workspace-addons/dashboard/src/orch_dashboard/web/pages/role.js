@@ -153,7 +153,7 @@ function roleOverview(t, data, openQs) {
     h('section', {className:'story-section', 'data-key':'role-last'},
       h('div', {className:'section-head'}, h('h2', {}, 'Last run'), runs.length ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'runs'}, runs.length === 1 ? 'See it in Runs' : 'All ' + runs.length + ' runs') : null),
       last ? roleRunCard(t, last, {primary:true, next:roleNextStep(last), extra:ticketButton('Open the chat', 'ghost sm', () => selectTicketTab(t.id, 'chat'), {'data-key':'role-open-chat'})})
-        : data === null ? roleLoadFailed(t) : h('p', {className:'muted'}, data ? 'It has not run yet.' : 'Loading the runs…')),
+        : data === null ? roleLoadFailed(t) : data ? stateNote('It has not run yet', 'Its first run shows up here once it wakes up.') : skeletonFor('section')),
     roleNextStrip(t, data?.schedule),
     h('p', {className:'meta role-more'}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'tasks', 'data-key':'role-to-tasks'}, 'All tasks'), ' · ',
       h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'activity', 'data-key':'role-to-activity'}, 'Everything that happened'))];
@@ -164,7 +164,7 @@ function roleRunsPanel(t, data) {
   return [h('h2', {}, 'Runs'),
     h('p', {className:'muted'}, 'Every time it woke up, newest first. Click a run to see what it checked.' + (runs.length ? ' ' + runs.length + (runs.length === 1 ? ' run' : ' runs') + cost + '.' : '')),
     runs.length ? h('section', {className:'card', 'data-key':'role-runs'}, runs.slice(0, 100).map((r, i) => roleRunRow(t, r, i === 0 && r.outcome !== 'skipped')))
-      : data === null ? roleLoadFailed(t) : h('p', {className:'muted'}, data ? 'No runs yet.' : 'Loading the runs…')];
+      : data === null ? roleLoadFailed(t) : data ? stateNote('No runs yet', 'Every time it wakes up, the run is listed here.') : skeletonFor('section')];
 }
 // The runs did not load (no answer, an error): say so with one Try again, never "Loading" for ever (R7.2, R8.4).
 function roleLoadFailed(t) {
