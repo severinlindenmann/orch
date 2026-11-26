@@ -293,6 +293,14 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
   `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).
 
+## Plain terminal switch in People, description once (ORCH-1684, 25 Nov)
+
+The plain terminal is a shell with the owner's logins and keys, so its switch "Let me type into the plain terminal"
+moved from the Focus add-on page to the People tab (`settings-people.html`, a "Plain terminal" card under the list,
+"Only the owner can change this."); the server refuses it from a token-login browser. The Focus add-on page
+(`addon-detail-focus.html`) says its description once, in the Add-on row: "About this add-on" shows only when there is
+a connection address to show.
+
 ## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
 
 - "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.
