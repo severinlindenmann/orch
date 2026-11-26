@@ -42,6 +42,7 @@ class FakeTerminal {
   write(b) { this.written.push(Buffer.from(b).toString('utf8')); }
   focus() { this.textarea.focus(); }
   paste(t) { this.pasted.push(t); if (!this.options.disableStdin) this.data(t); }
+  onSelectionChange(f) { this.selChanged = f; }
   hasSelection() { return !!this.sel; }
   getSelection() { return this.sel; }
   dispose() { this.disposed = true; }
@@ -61,6 +62,7 @@ const T = window.UI.term;
 const byKey = (root, k) => root.find(n => n.attrs['data-key'] === k);
 const byClass = (root, c) => root.find(n => String(n.className).split(' ').includes(c));
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const ESC_GAP = 560;  // a little more than term.js waits for a second Esc
 const b64 = s => Buffer.from(s, 'utf8').toString('base64');
 const SCREEN = {cols: 80, rows: 24, data: b64('\x1b[31mhello\x1b[0m\r\n$ ')};
 function live(opts = {}, allowed = true) {
@@ -71,10 +73,10 @@ function live(opts = {}, allowed = true) {
   return {ui, sent, sizes, xt: terms[terms.length - 1]};
 }
 
-test('pure parts: paste question, base64 to bytes, sizes the bridge takes', () => {
-  assert.equal(T.pasteAsk('one line'), '');
-  assert.match(T.pasteAsk('rm -rf x\n'), /1 line and press Enter/);
-  assert.match(T.pasteAsk('a\r\nb\nc'), /3 lines/);
+test('pure parts: what a paste hands over, base64 to bytes, sizes the bridge takes', () => {
+  assert.equal(T.pasteText('one line'), 'one line');
+  assert.equal(T.pasteText('rm -rf x\n'), 'rm -rf x', 'no Enter at the end (ORCH-2199)');
+  assert.equal(T.pasteText('a\r\nb\nc\r\n\n'), 'a\nb\nc', 'line ends inside stay, those at the end go');
   assert.equal(Buffer.from(T.bytes(b64('grün ✓'))).toString('utf8'), 'grün ✓');
   assert.equal(T.bytes('%%%').length, 0);
   assert.deepEqual(T.clamp({cols: 1000, rows: 1}), {cols: 500, rows: 3});
@@ -94,26 +96,40 @@ test('the screen from the bridge is written to the terminal at the helper\'s siz
   assert.equal(markup.length, 0);
 });
 
-test('watching only by default: keys and pastes send nothing until Let me type is on', async () => {
+test('ORCH-2199: no switch; a click into the screen types there, a drag only selects, Esc twice stops', async () => {
   const {ui, sent, xt} = live();
   assert.equal(ui.el.dataset.typing, 'off');
-  assert.match(byClass(ui.el, 'term-say').textContent, /Watching/);
+  assert.equal(byClass(ui.el, 'term-sw'), null, 'no Let me type switch');
+  assert.equal(byClass(ui.el, 'term-say').hidden, true, 'no explaining line while watching');
   xt.type('x');
-  const p = ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'ls'}});
   await wait(40);
-  assert.deepEqual(sent, []);
-  assert.ok(p.defaultPrevented, 'a paste while watching is stopped');
-  byKey(ui.el, 'term-type').click();
-  assert.equal(ui.typing(), true);
+  assert.deepEqual(sent, [], 'keys before a click send nothing');
+  const screen = byClass(ui.el, 'term-screen');
+  screen.fire('pointerdown', {button: 0, clientX: 10, clientY: 10});
+  screen.fire('pointerup', {clientX: 60, clientY: 30});
+  assert.equal(ui.typing(), false, 'a drag selects, it does not start typing');
+  screen.fire('pointerdown', {button: 0, clientX: 10, clientY: 10});
+  screen.fire('pointerup', {clientX: 11, clientY: 10});
+  assert.equal(ui.typing(), true, 'a click types');
   assert.equal(xt.options.disableStdin, false);
-  assert.equal(byKey(ui.el, 'term-type').getAttribute('aria-checked'), 'true');
+  assert.equal(byKey(ui.el, 'term-type').getAttribute('aria-pressed'), 'true', 'the keyboard sign is lit');
   xt.type('l'); xt.type('s'); xt.type('\r');
   await wait(40);
   assert.deepEqual(sent, ['ls\r'], 'typed data goes out in one request');
-  const stop = {type: 'keydown', key: 'Tab', shiftKey: true, preventDefault() {}};
-  assert.equal(xt.keys(stop), false);
-  assert.equal(ui.typing(), false, 'Shift+Tab stops typing');
+  assert.equal(xt.keys({type: 'keydown', key: 'Tab', shiftKey: true, preventDefault() {}}), true, 'Shift+Tab goes to the helper');
+  assert.equal(ui.typing(), true);
+  const esc = {type: 'keydown', key: 'Escape', preventDefault() {}};
+  assert.equal(xt.keys(esc), false);
+  await wait(ESC_GAP);
+  assert.deepEqual(sent.at(-1), '\x1b', 'one Esc goes to the helper a moment later');
+  assert.equal(ui.typing(), true);
+  xt.keys(esc); xt.keys(esc);
+  assert.equal(ui.typing(), false, 'Esc twice stops typing');
+  await wait(ESC_GAP);
+  assert.equal(sent.filter(x => x === '\x1b').length, 1, 'the two Escs that stopped typing are not sent');
   assert.equal(xt.options.disableStdin, true);
+  assert.equal(xt.keys({type: 'keydown', key: 'Enter', preventDefault() {}}), false);
+  assert.equal(ui.typing(), true, 'Enter on the screen types there too (the keyboard way in)');
 });
 
 test('Ctrl+C or Cmd+C with a selection copies it and is not sent; without a selection Ctrl+C goes to the helper', () => {
@@ -142,7 +158,7 @@ test('Copy copies the selection, or the whole screen', async () => {
 
 test('typing stays off when the workspace setting is off, and a refused request turns it off', async () => {
   const off = live({}, false);
-  assert.equal(byClass(off.ui.el, 'term-sw').hidden, true);
+  assert.equal(byKey(off.ui.el, 'term-type').hidden, true);
   off.ui.setTyping(true);
   assert.equal(off.ui.typing(), false);
   assert.match(byClass(off.ui.el, 'term-say').textContent, /typing is off/);
@@ -151,27 +167,18 @@ test('typing stays off when the workspace setting is off, and a refused request 
   xt.type('a');
   await wait(40);
   assert.equal(ui.typing(), false);
-  assert.equal(byClass(ui.el, 'term-sw').hidden, true, 'no switch once the server said no');
+  assert.equal(byKey(ui.el, 'term-type').hidden, true, 'no keyboard sign once the server said no');
 });
 
-test('a paste with a line end asks once; Cancel sends nothing, Paste hands it to the terminal', async () => {
+test('ORCH-2199: a paste goes in as one block without a question and never presses Enter by itself', async () => {
   const {ui, sent, xt} = live();
-  ui.setTyping(true);
-  const ask = byClass(ui.el, 'term-ask');
   const p = ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'echo hi\nrm x\n'}});
   assert.ok(p.defaultPrevented);
-  assert.equal(ask.hidden, false);
-  assert.match(ask.textContent, /2 lines/);
-  byKey(ui.el, 'term-paste-no').click();
+  assert.equal(byClass(ui.el, 'term-ask'), null, 'no paste question');
+  assert.equal(ui.typing(), true, 'a paste into the screen types there');
   await wait(40);
-  assert.deepEqual(sent, []);
-  ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'echo hi\n'}});
-  byKey(ui.el, 'term-paste-go').click();
-  await wait(40);
-  assert.deepEqual(xt.pasted, ['echo hi\n']);
-  assert.deepEqual(sent, ['echo hi\n']);
-  ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'plain'}});
-  assert.equal(xt.pasted.at(-1), 'plain', 'one line without a line end goes in without asking');
+  assert.deepEqual(xt.pasted, ['echo hi\nrm x']);
+  assert.deepEqual(sent, ['echo hi\nrm x'], 'the last line end is dropped');
 });
 
 test('nothing typed before typing was turned off goes out later', async () => {
@@ -226,15 +233,13 @@ test('the screen closing ends typing and says so; no screen says why; no WebGL s
   delete globalThis.noGL;
 });
 
-test('a redraw gives the keyboard back to the paste question, never away from another field', () => {
+test('a redraw gives the keyboard back to the screen while typing, never away from another field', () => {
   const {ui, xt} = live();
   ui.setTyping(true);
-  ui.el.fire('paste', {target: xt.textarea, clipboardData: {getData: () => 'a\nb'}});
-  const go = byKey(ui.el, 'term-paste-go');
-  assert.equal(document.activeElement, go);
+  assert.equal(document.activeElement, xt.textarea);
   document.activeElement = null;  // the pane was drawn again
   ui.back();
-  assert.equal(document.activeElement, go);
+  assert.equal(document.activeElement, xt.textarea);
   const other = new Node_('textarea');
   document.activeElement = other;
   ui.back();
@@ -302,10 +307,20 @@ test('a paste never carries control characters: no early end of the bracketed pa
 });
 
 test('a plain terminal says this terminal, not the helper', () => {
-  assert.match(T.pasteAsk('a\nb', 'this terminal'), /2 lines into this terminal\?/);
   const ui = T({label: 'Plain terminal', plain: true, onInput: async () => ({ok: true})});
   ui.hello({typing_allowed: true}); ui.screen(SCREEN); ui.setTyping(true);
-  assert.match(byClass(ui.el, 'term-say').textContent, /go to this terminal/);
+  assert.match(byKey(ui.el, 'term-type').getAttribute('title'), /into this terminal/);
+});
+
+test('ORCH-2199: Copy says what it copies; a page can put the tools in its own header', () => {
+  const {ui, xt} = live();
+  const copy = byKey(ui.el, 'term-copy');
+  assert.equal(copy.textContent, 'Copy all');
+  xt.sel = 'ell'; xt.selChanged?.();
+  assert.equal(copy.textContent, 'Copy selection');
+  const out = T({label: 'ORCH-1', toolsOut: true});
+  assert.equal(byClass(out.el, 'term-bar'), null, 'no row on top of the screen');
+  assert.ok(byKey(out.tools, 'term-copy'), 'the tools are handed to the page');
 });
 
 test('Copy gives the lines without the spaces a program pads them with, wrapped lines joined (ORCH-885)', async () => {
@@ -414,14 +429,14 @@ test('another page takes the typing: this one goes back to watching and says so;
   assert.equal(ui.typing(), true, 'its own claim changes nothing');
   ui.typingBy('other');
   assert.equal(ui.typing(), false);
-  assert.match(byClass(ui.el, 'term-say').textContent, /another page is typing/);
+  assert.match(byClass(ui.el, 'term-say').textContent, /Another page is typing/);
   assert.deepEqual(turned, [[true, false], [false, true]]);
   byKey(ui.el, 'term-type').click();
   assert.equal(ui.typing(), true);
-  assert.match(byClass(ui.el, 'term-say').textContent, /^Typing/);
+  assert.match(byKey(ui.el, 'term-type').getAttribute('title'), /^Typing/);
   ui.setTyping(false);
   ui.typingBy('none');
-  assert.match(byClass(ui.el, 'term-say').textContent, /^Watching · select/);
+  assert.equal(byClass(ui.el, 'term-say').hidden, true, 'nothing to say while watching');
 });
 
 test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings; it hides once typing is allowed', () => {
@@ -431,7 +446,7 @@ test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings
   const a = byKey(ui.el, 'term-settings');
   assert.equal(a.hidden, false);
   assert.equal(a.getAttribute('href'), '#settings/addons/focus');
-  assert.equal(byClass(ui.el, 'term-say').textContent, 'Watching only');  // said once: the link says the rest
+  assert.equal(byClass(ui.el, 'term-say').textContent, 'Watch only');  // said once: the link says the rest
   ui.hello({typing_allowed: true});
   assert.equal(a.hidden, true);
   assert.equal(byKey(live().ui.el, 'term-settings'), null);  // no address given: no link

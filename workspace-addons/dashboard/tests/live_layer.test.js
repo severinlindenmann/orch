@@ -288,15 +288,19 @@ test('a split, narrow or small pane is compact: its title gets a row of its own'
   assert.equal(L.liveLayerCompact('bottom', 1, 390, true), true, 'a phone');
 });
 
-test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
+test('ORCH-2199 (owner pick G a): full screen, split, pin and close are visible; More keeps Stop, End, History and the place', () => {
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
-  for (const w of ['Pin', 'Add beside', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
-  // ORCH-1616: the header keeps pin, Add beside and close; the rest (full screen, minimise, the place) is in More
-  const more = source.slice(source.indexOf('function liveMoreMenu('), source.indexOf('// Stop and End session in More'));
-  for (const w of ['Full screen', 'Minimise to the bar', 'At the bottom', 'On the right', 'Open ticket']) assert.match(more, new RegExp(`'${w}'`), w);
-  assert.doesNotMatch(pane, /'data-key':'live-min'|'data-key':'live-pane-place'|livePaneBtn\('full'/, 'no full screen, minimise or place button in the header');
+  for (const w of ['Full screen', 'Split', 'Pin', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  const more = source.slice(source.indexOf('function liveMoreMenu('), source.indexOf('// The status pill of a pane'));
+  for (const w of ['At the bottom', 'On the right', 'Bar only', 'Closed to the side']) assert.match(more, new RegExp(`'${w}'`), w);
+  assert.match(more, /liveMoreEnd\(key\)/, 'Stop and End session');
+  assert.match(more, /liveHistMenuItem\(key\)/, 'History');
+  assert.doesNotMatch(more, /'Open ticket'/, 'Open ticket moved to the status popover');
+  assert.match(more, /'data-fold-item':''/, 'pin and split come into More only in a narrow pane');
+  assert.match(pane, /'data-key':'live-pin', 'data-fold':''/);
+  assert.doesNotMatch(pane, /liveHistButton|liveModelRow|livePermPaneRow/, 'no row above the screen, no History word');
   assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
-  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
+  assert.match(pane, /livePaneBtn\('menu', besideWhy, 'split-right', 'Split', \{'data-menu':besideMenu/);
   assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
   assert.doesNotMatch(source, /act === 'beside'\)/, 'no click adds a session unasked');
   const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
@@ -315,8 +319,8 @@ test('a button with a word is named by the word unless its label starts with it'
 
 test('ORCH-817, ORCH-1616: every pane has Stop and End session in its More menu; the old body Stop is gone', () => {
   assert.doesNotMatch(source, /data-live-stop/);
-  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, true\) : \[\]\)/);
-  assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label\) : \[\]\)/);
+  assert.match(source, /\[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\]/);
   assert.match(source, /sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
   assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
 });
@@ -347,7 +351,7 @@ test('the pane shows the waiting question with its options and answers it there 
 
 test('the waiting question shows once: the now line steps back while the question box shows it (ORCH-708)', () => {
   // ORCH-817 adds the idle note between the fill and the hide; the now line still steps back for the question box
-  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);[^]{0,300}?now\.hidden = \(?!!askBox && !askBox\.hidden\)?/,
+  assert.match(source, /liveAskFill\(askBox, body\.dataset\.liveBody\);[^]{0,300}?now\.hidden = live\?\.status !== 'needs-you' \|\| \(!!askBox && !askBox\.hidden\)/,
     'the fill hides the now line after the question box is written');
 });
 

@@ -452,27 +452,51 @@ function liveBesideMenu(key, label, others, note) {
         h('span', {className:'live-opt-t'}, h('span', {}, o ? (o.key ? h('span', {className:'key'}, o.key + ' ') : null) : null, o ? o.title : id), word ? h('span', {className:'meta'}, word) : null));
     }));
 }
-// The More menu of every pane (ORCH-1616): history, full screen, minimise, the place, Open ticket, Stop and End
-// session; pin and Add beside only for a pane too tight to keep them in its header.
-function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow, beside = '') {
+// The More menu of every pane (ORCH-2199, owner pick G a): only Stop, End session, History and Where it sits (Bar only
+// is the old Minimise). Pin and Split sit in the header; a pane under LIVE_FOLD_W px folds them into here (CSS
+// container query on .live-pane: [data-fold] hides in the header, [data-fold-item] shows here). A phone pane keeps
+// Chat | Terminal here too.
+function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
   const sess = liveLayerSession(key), phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
   return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
     h('p', {className:'live-pop-h'}, 'More for ' + label),
-    tight || beside ? item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin'}) : null,
-    beside ? h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':beside, 'data-key':'live-more-beside', 'aria-haspopup':'true'}, liveIc('plus'), h('span', {}, 'Add beside')) : null,
-    typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
-    where === 'full' ? null : item('full', 'full-screen', 'Full screen', {'data-key':'live-more-full'}),
-    minHere ? item('min', 'chevron-down', 'Minimise to the bar', {'data-key':'live-more-min'}) : null,
+    phone ? null : item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold-item':''}),
+    phone || !besideMenu ? null : h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':besideMenu, 'data-key':'live-more-beside', 'aria-haspopup':'true', 'data-fold-item':''}, liveIc('split-right'), h('span', {}, 'Split')),
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
-    // ORCH-1663: Open ticket is one of this session's actions, not a place; Stop and End come before the places, so a
-    // menu taller than the room never scrolls them out of sight
-    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
     sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
-    where === 'full' ? null : h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
-    where === 'full' ? null : liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
-    where === 'full' || phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
-    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'));
+    typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
+    h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
+    liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
+    phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
+    where === 'full' ? null : liveOpt('full', 'full-screen', 'Full screen', false),
+    liveOpt('bar', 'chevron-down', 'Bar only', false),
+    liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'));
+}
+// The status pill of a pane opens what used to fill lines above the screen (ORCH-2199, owner picks A a, H a): model,
+// step, open time, how long it stays, permissions (they restart the helper) and Open ticket. A plain terminal has none.
+function liveStatusPill(sess, key, open, label) {
+  if (!sess || sess.kind === 'terminal') return null;
+  const live = sess.live, word = live?.status === 'needs-you' ? 'Needs you' : clean(live?.word || '') || (sess.running ? 'Working' : 'Ended');
+  const pill = sess.pill || (window.UI?.ticketPill ? window.UI.ticketPill({pill:live?.status === 'needs-you' ? 'needs' : live?.status === 'working' ? 'working' : 'todo', word}) : h('span', {className:'pill'}, word));
+  return h('button', {type:'button', className:'live-stat', 'data-live':'menu', 'data-menu':'status:' + key, 'data-key':'live-status',
+    'aria-expanded':String(open), 'aria-haspopup':'true', title:'About ' + label}, pill);
+}
+function liveStatusMenu(sess, key, label) {
+  const live = sess.live, rows = [], row = (k, name, v) => rows.push(h('div', {className:'live-stat-row', 'data-key':'live-status-' + k}, h('span', {className:'meta'}, name), v));
+  const model = typeof window.liveModelChoices === 'function' && (!sess.kind || sess.kind === 'empty') ? window.liveModelChoices(sess) : null;
+  if (model) row('model', 'Model', model);
+  else if (live?.model) row('model', 'Model', h('span', {}, live.model));
+  const step = live && typeof liveNow === 'function' ? liveNow(live) : '';
+  if (step) row('step', 'Step', h('span', {}, step));
+  if (Number.isFinite(live?.open_seconds) && typeof liveDur === 'function') row('open', 'Open', h('span', {}, liveDur(live.open_seconds)));
+  const warm = live && typeof liveWarm === 'function' ? liveWarm(live) : '';
+  const perm = sess.kind && typeof window.livePermChoices === 'function' ? window.livePermChoices(sess) : null;
+  return h('div', {className:'live-pop live-stat-pop', 'data-down':'', role:'group', 'aria-label':'About ' + label, 'data-key':'live-status-menu'},
+    rows,
+    warm ? h('p', {className:'meta live-stat-warm'}, warm.charAt(0).toUpperCase() + warm.slice(1)) : null,
+    perm,
+    sess.kind ? null : h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, liveIc('ticket'), h('span', {}, 'Open ticket')));
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
@@ -485,8 +509,10 @@ function liveMoreEnd(key) {
 }
 // ORCH-817: Stop (the current step) and End session (asks once) of every kind of session: pages/live-end.js. In a
 // narrow pane (a phone) they sit in More; a compact one keeps them in its header; the End question then opens under the header.
-const liveEndHere = (key, label, narrow) => typeof window.liveEndButtons !== 'function' ? []
-  : narrow ? [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null] : window.liveEndButtons(key, label);
+const liveEndHere = (key, label) => typeof window.liveEndButtons !== 'function' ? []
+  : [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null];
+// ORCH-2199: a pane narrower than this folds Pin and Split into More (owner pick G a; widgets.css container query)
+const LIVE_FOLD_W = 480;
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n, compact = o.compact;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
@@ -496,36 +522,37 @@ function livePane(key, where, s, o) {
   const leave = where !== 'full' ? null : signin
     ? h('button', {type:'button', className:'btn sm outline', 'data-live':'leave-full', 'data-key':'live-full', title:'Leave full screen'}, 'Back to the ticket')
     : livePaneBtn('leave-full', 'Leave full screen', 'full-exit', 'Leave full screen', {'data-key':'live-full'});
-  const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Add beside: ' + besideNone : 'Add beside: pick a session to show next to this one';
+  const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Split: ' + besideNone : 'Split: pick a session to show next to this one';
+  const statusMenu = 'status:' + key, plain = sess?.kind === 'terminal';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
     'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'data-tight':o.tight ? '' : null,
     'data-fold-left':liveFold().left ? '' : null, 'data-fold-right':liveFold().right ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
-    liveIconRow(h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
-      o.narrow ? null : sess?.pill || null,
+    liveIconRow(h('header', {className:'live-ph', 'data-compact':''},
+      // ORCH-2199 (owner picks A a, G a, H a): the header is the pane's only row above the screen: status pill (its
+      // popover holds model, step, open time and Open ticket) · key · title · Chat | Terminal · the screen's tools ·
+      // full screen · split · pin · close · More. A plain terminal reads ">_ Plain terminal · <folder>".
+      plain ? h('span', {className:'live-plain-ic', 'aria-hidden':'true'}, liveIc('terminal')) : liveStatusPill(sess, key, s.menu === statusMenu, label),
+      sess && s.menu === statusMenu && !plain ? liveStatusMenu(sess, key, label) : null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       n > 1 && !on
         ? h('button', {type:'button', className:'live-pt', 'data-live':'select', 'data-session':key, title, 'aria-label':'Select the pane of ' + label}, title)
         : sess && liveRen === key ? liveRenForm(key, title)
         : sess?.live ? h('button', {type:'button', className:'live-pt', 'data-live':'rename', 'data-session':key, 'data-key':'live-rename', title:'Click to rename', 'aria-label':'Rename ' + title}, title)
         : h('span', {className:'live-pt', title}, title),
-      o.narrow || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
-      // ORCH-1616 (owner's look stop: about 8 icons were too many): as in draft D, three buttons (pin, add beside,
-      // close) and More for the rest: history, full screen, minimise, the place, Stop and End session, Open ticket
+      plain && state?.workspace ? h('span', {className:'meta live-pfolder', title:String(state.workspace)}, '\u00b7 ' + state.workspace) : null,
+      o.phone || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
+      h('span', {className:'live-term-tools', 'data-live-term-tools':key}),  // the screen's keyboard sign and Copy (pages/liveterm.js)
       h('span', {className:'live-ctl'},
-        // History stays a word beside Chat and Terminal in a wide pane, as in draft D
-        compact || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
-        ...(sess ? liveEndHere(key, label, true) : []),
-        leave,
-        o.tight || o.crowded ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
-        o.phone || o.crowded ? null : livePaneBtn('menu', besideWhy, 'plus', 'Add beside', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside'}),
+        ...(sess ? liveEndHere(key, label) : []),
+        leave || (o.phone ? null : livePaneBtn('full', 'Full screen', 'full-screen', 'Full screen', {'data-key':'live-full'})),
+        o.phone ? null : livePaneBtn('menu', besideWhy, 'split-right', 'Split', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside', 'data-fold':''}),
+        o.phone ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold':''}),
         livePaneBtn('close', o.total > 1 ? 'Close this pane' : 'Close (the bar stays)', 'x', 'Close', {'data-session':key, 'data-key':'live-close'}),
         livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}),
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
-        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)), compact),
-    sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
-    sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.phone, besideMenu) : null)), true),
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
       : liveShelfWrap(livePaneBody(key, sess, label), sess, label, n));
 }
@@ -572,12 +599,9 @@ function livePaneBody(key, sess, label) {
       : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, liveEndedNote(sess), window.liveStartBody(sess))
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
-      h('p', {className:'live-now', 'data-live-now':''}),
-      // tool, model, open time and Open ticket in one line at the top, as in draft D: the room above the message box
-      // stays the chat's, so its newest message is whole (ORCH-1361)
-      h('div', {className:'live-info'},
-        h('p', {className:'meta live-meta', 'data-live-meta':''}),
-        sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket')),
+      // ORCH-2199 (owner picks A a, H a): no lines about the session above the screen; tool, model, open time and Open
+      // ticket are in the status pill's popover. The line stays only for a waiting question the card cannot show.
+      h('p', {className:'live-now', 'data-live-now':'', hidden:true}),
       sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', role:'group', 'aria-label':'Question for you', hidden:true}),
       sess.kind === 'terminal' ? null : h('div', {className:'live-end-idle', 'data-live-idle':'', role:'status', hidden:true}),
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
@@ -706,7 +730,7 @@ function liveAskFill(box, id) {
 function liveLayerFill() {
   for (const body of document.querySelectorAll('#live-dock [data-live-body]')) {
     const live = window.LiveSessions?.get(body.dataset.liveBody) || null;
-    const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]'), meta = body.querySelector('[data-live-meta]');
+    const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]');
     const kind = body.dataset.liveKind || '';  // a session without a ticket (ORCH-364)
     // a sign-in card's window in front (ORCH-865): the pane is titled Sign-in and needs no line about the terminal
     const text = kind === 'terminal' ? (live?.signin ? '' : 'A plain terminal in this workspace, no helper.')
@@ -718,7 +742,7 @@ function liveLayerFill() {
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');
     if (idle && typeof window.liveEndIdleFill === 'function') window.liveEndIdleFill(idle, body.dataset.liveBody, text);
-    now.hidden = (!!askBox && !askBox.hidden) || (!!idle && !idle.hidden);  // the question card or the idle note says it already (ORCH-687)
+    now.hidden = live?.status !== 'needs-you' || (!!askBox && !askBox.hidden) || (!!idle && !idle.hidden);  // only a question the card does not show (ORCH-2199)
     if (!text) now.hidden = true;  // a sign-in in front: no line about the terminal (ORCH-865)
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
@@ -728,9 +752,6 @@ function liveLayerFill() {
     }
     pre.hidden = !lines;
     if (typeof liveViewApply === 'function') liveViewApply(body);
-    const m = live && kind !== 'terminal' ? liveMeta(live).join(' · ') : '';
-    if (meta.textContent !== m) { meta.textContent = m; meta.title = m; }  // a split pane shortens it to one row (ORCH-1568)
-    meta.hidden = !m;
     if (typeof liveTermApply === 'function') liveTermApply(body, live);  // the real screen (pages/liveterm.js)
   }
 }
@@ -928,7 +949,7 @@ function liveLayerTake() {
   if (!pane) return;
   const a = document.activeElement, ask = liveLayerWant.ask && pane.querySelector('[data-live-ask]:not([hidden]) :is(button, input):not(:disabled)');
   if (a && a !== document.body && pane.contains(a) && !(ask && a.matches('[data-live-ask]'))) return;
-  (ask || pane.querySelector('[data-key="live-open-ticket"]') || pane).focus({preventScroll:true});
+  (ask || pane.querySelector('[data-key="live-status"]') || pane).focus({preventScroll:true});
 }
 for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => { liveLayerWant = null; }, true);
 // Full screen covers the page: the page behind leaves the Tab order and the screen reader (inert), so the keyboard

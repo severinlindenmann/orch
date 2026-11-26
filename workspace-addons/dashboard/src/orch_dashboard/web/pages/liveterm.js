@@ -1,7 +1,8 @@
 'use strict';
 // The terminal view of a session in the layer (ORCH-744, draft D feature 5): the helper's real screen in the master
-// terminal (kit term.js, UI.term) where the pane shows Terminal. Watching only by default: nothing is typed until the
-// person turns on "Let me type", and the server checks again (the typing setting and the sign-in).
+// terminal (kit term.js, UI.term) where the pane shows Terminal. No switch (ORCH-2199, owner pick B a): a click into the
+// screen types there, Esc twice or a click outside stops; the server checks again (the typing setting and the
+// sign-in). The screen's tools (keyboard sign, Copy) sit in the pane header, so the screen gets the pane's height.
 // The screen comes from the terminal bridge (ORCH-743) as server-sent events, GET /api/term/stream?ticket=<id>:
 // hello {typing_allowed, page}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, typing {by}, end
 // {state}. One page types at a time (ORCH-883): "Let me type" claims it with POST /api/term/typing {ticket, page, on}
@@ -46,7 +47,7 @@ function liveTermFor(id, label, plain) {
   if (t) return t;
   const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
-    label, plain,
+    label, plain, toolsOut:true,
     settingsHref: page ? '#settings/addons/' + encodeURIComponent(page) : null,  // ORCH-1600: the typing switch is there
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
@@ -132,7 +133,7 @@ function liveTermApply(body, live) {
   if (!on) {
     const t = liveTerms.get(id);
     // this body showed it, or the layer drew the pane again and it sits in the old one: out, typing off, stream closed
-    if (t && (t.ui.el.parentNode === body || !document.contains(t.ui.el))) { t.ui.setTyping(false); t.ui.el.remove(); liveTermClose(t); }
+    if (t && (t.ui.el.parentNode === body || !document.contains(t.ui.el))) { t.ui.setTyping(false); t.ui.el.remove(); t.ui.tools?.remove(); liveTermClose(t); }
     return;
   }
   const label = body.closest('.live-pane')?.querySelector('.live-pt')?.textContent || 'the helper';
@@ -143,6 +144,8 @@ function liveTermApply(body, live) {
     t.ui.back();
   }
   if (pre) pre.hidden = true;
+  const slot = body.closest('.live-pane')?.querySelector('[data-live-term-tools]');
+  if (slot && t.ui.tools && t.ui.tools.parentNode !== slot) slot.append(t.ui.tools);
   liveTermOpen(id, t);
 }
 // A terminal no pane shows stops typing and closes its stream; after a while it is dropped.
