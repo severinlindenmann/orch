@@ -167,17 +167,55 @@ def _when(at) -> str:
 # ------------------------------------------------------------------ cards for `orch ask`
 
 
-def _read_small(root: Path, tid: str | None, src: str) -> bytes | None:
+TEXT_MAX = 64 * 1024  # a text or glance card shows at most this much of its file
+
+
+def _read_small(root: Path, tid: str | None, src: str, where: str = "file") -> bytes:
     """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
-    and pages are), anything else a file in the workspace. None when missing, too large or not allowed."""
+    and pages are), anything else a file in the workspace. The path `orch ticket artifacts-dir` prints
+    (.orch/tickets/<this ticket>/artifacts/<name>, also with backslashes) counts as artifacts/<name>
+    (ORCH-1777); any other .orch or .git path is refused. Each refusal names its cause and the next step."""
+    path = src.strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    own = f".orch/tickets/{tid}/artifacts/" if tid else None
+    if own and path.startswith(own) and len(path) > len(own):
+        path = "artifacts/" + path[len(own) :]
+    shown = src[:120]
+    parts = safefile._parts(path)
+    if parts is None:
+        raise Refused(
+            f"{where}: '{shown}' is not a plain path inside the workspace; "
+            "give it like docs/x.md or artifacts/<name>."
+        )
+    inside = next(
+        (p.rstrip(". ").lower() for p in parts if p.rstrip(". ").lower() in (".orch", ".git")), None
+    )
+    if inside:
+        raise Refused(
+            f"{where}: '{shown}' is inside a {inside} folder a card does not read; "
+            "give a file of this ticket as artifacts/<name>."
+        )
     try:
-        if src.startswith("artifacts/"):
+        if parts[0] == "artifacts" and len(parts) > 1:
             if tid is None:
-                return None
-            return safefile.read_ticket_file(root, tid, "artifacts", src[len("artifacts/") :], 64 * 1024)
-        return safefile.open_file_ref(root, src, 64 * 1024)
+                raise Refused(f"{where}: artifacts/<name> needs a ticket; give the ticket id to `orch ask`.")
+            checked = f".orch/tickets/{tid}/{path}"
+            data = safefile.read_ticket_file(root, tid, "artifacts", "/".join(parts[1:]), TEXT_MAX)
+        else:
+            checked = path
+            data = safefile.open_file_ref(root, path, TEXT_MAX)
     except safefile.TooLarge:
-        return None
+        raise Refused(
+            f"{where}: '{shown}' is over the {TEXT_MAX // 1024} KB limit for a text card; "
+            "shorten it or show it as a page (.html)."
+        ) from None
+    if data is None:
+        raise Refused(
+            f"{where}: '{shown}' was not found (checked {checked}); "
+            f"put the file there or check the name with `orch ticket artifacts-dir {tid or '<ticket>'}`."
+        )
+    return data
 
 
 def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> dict:
@@ -186,20 +224,22 @@ def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> d
     if kind in ("img", "page"):
         return {"type": kind, "src": src}
     if ext in (".md", ".txt"):
-        data = _read_small(root, tid, src)
-        if data is None:
-            raise Refused(f"{where}: '{src}' was not found or is too large for a text card.")
+        data = _read_small(root, tid, src, where)
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
-        return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
+        return {
+            "type": "doc",
+            "heading": re.split(r"[\\/]", src.strip())[-1],
+            "paras": [p[:2000] for p in paras],
+        }
     if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
-        data = _read_small(root, tid, src)
+        data = _read_small(root, tid, src, where)
         try:
-            pv = json.loads(data.decode("utf-8")) if data is not None else None
+            pv = json.loads(data.decode("utf-8"))
         except ValueError:
             pv = None
         if not isinstance(pv, dict):
-            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+            raise Refused(f"{where}: '{src}' is not a JSON object; a card file holds one {{...}} object.")
         return {"type": "doc", **pv}
     raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 

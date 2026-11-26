@@ -281,6 +281,40 @@ def test_services_with_the_same_name_each_get_their_own_question(cli, fake, ws, 
     assert fake.entries["quick1"]["running"] is False and fake.entries["quick2"]["running"] is True
 
 
+def test_a_question_asked_before_a_crash_is_taken_over_not_asked_again(cli, fake, ws, clock, orch):
+    # #1401: the pass stopped between `orch ask` and saving the id; the next pass (one failure more, so other
+    # words) asked a second question on the ticket
+    _make_failing(cli, fake, clock)
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1"]
+    state = ws / ".orch/addons/services/state/budget.json"
+    d = _state(ws)
+    d["watch"]["question"] = None  # as if the pass had ended right after asking
+    state.write_text(json.dumps(d), encoding="utf-8")
+    clock["t"] = T0 + 240
+    _crash(fake)
+    res = _check(cli)
+    assert res["failing"] is True
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1"] and len(orch.asks()) == 1
+    assert _state(ws)["watch"]["question"]["id"] == "q1"
+    orch.answer("DM1-12", "q1", "Stop")  # the answer to the taken-over question is acted on
+    clock["t"] = T0 + 300
+    assert "Stopped" in _check(cli)["did"] and fake.entries["budget"]["running"] is False
+
+
+def test_an_answered_question_is_not_taken_over(cli, fake, ws, clock, orch):
+    _make_failing(cli, fake, clock)
+    orch.answer("DM1-12", "q1", "Look into it")
+    state = ws / ".orch/addons/services/state/budget.json"
+    d = _state(ws)
+    d["watch"]["question"] = None
+    state.write_text(json.dumps(d), encoding="utf-8")
+    clock["t"] = T0 + 240
+    _crash(fake)
+    _check(cli)
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1", "q2"]
+    assert _state(ws)["watch"]["question"]["id"] == "q2"
+
+
 def test_state_and_question_never_carry_log_text(cli, fake, ws, clock, orch):
     log = ws / ".orch/addons/services/logs/budget.log"
     _make_failing(cli, fake, clock)
@@ -596,9 +630,25 @@ def test_only_a_listener_the_probe_reaches_counts():
     from orch_services import watch
 
     text = "p4242\nn[::1]:5173\np9999\nn127.0.0.1:5173\np7000\nn*:5173\np7001\nn192.168.1.5:5173\nn*:80\n"
-    assert watch.parse_lsof(text, 5173) == {9999, 7000}
+    assert watch.parse_lsof(text, 5173) == {9999}  # the exact 127.0.0.1 listener takes the connect
+    assert watch.parse_lsof("p7000\nn*:5173\np7001\nn192.168.1.5:5173\n", 5173) == {7000}
     assert watch.parse_lsof("p1\nn[::]:8000\n", 8000) == {1}
     assert watch.parse_lsof("", 8000) == set()
+
+
+def test_a_service_on_ipv6_only_does_not_answer_for_another_program_on_ipv4():
+    # #2301: lsof shows both wildcards as `*`; the service on IPv6 only made health pass while another program
+    # answered on 127.0.0.1
+    from orch_services import watch
+
+    both = "p4242\nf3\ntIPv6\nn*:5173\np9999\nf4\ntIPv4\nn127.0.0.1:5173\n"
+    assert watch.parse_lsof(both, 5173) == {9999}
+    wild = "p4242\nf3\ntIPv6\nn*:5173\np9999\nf4\ntIPv4\nn*:5173\n"
+    assert watch.parse_lsof(wild, 5173) == {9999}
+    alone = "p4242\nf3\ntIPv6\nn*:5173\n"  # dual stack takes the IPv4 connect when nobody else listens
+    assert watch.parse_lsof(alone, 5173) == {4242}
+    mixed = "p4242\nf3\ntIPv6\nn*:5173\nf4\ntIPv4\nn*:5173\n"  # one process, both families
+    assert watch.parse_lsof(mixed, 5173) == {4242}
 
 
 def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):

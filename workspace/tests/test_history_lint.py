@@ -50,6 +50,10 @@ ALLOW = {
     ): "file marks, no author",
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "add_artifact_marks"): "links, no author",
     (
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "_drop_addon_names",
+    ): "drops the add-on name, no author",
+    (
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
