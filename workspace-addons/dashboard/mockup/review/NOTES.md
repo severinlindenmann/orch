@@ -146,3 +146,9 @@ both to the right at 1280 to 1920). Two or more cards show the list in the left 
   wait:" (`orch ask --if-wait`), one "What matters" box with up to 4 facts (`--fact`), the answers in the bar, and the
   card's links and Open ticket in one More menu. Empty fields are left out; with the switch off the card is as before.
   The run card "Turn on the Reviewer's second look?" carries both fields.
+- 26 Nov (ORCH-2183, Focused review B): with `?decide=1` the run card also shows what the person said, one line under
+  "What matters": "You said on 21 Nov: “…” · open" (open = the ticket beside the card). orch copies the words from a
+  stable reference the helper names (`orch ask --said m_…|history:<time>|rules:<line>`): "You said" for your chat line,
+  "You wrote" for your comment, "<name> wrote", "Team rule, <day>:" for `.orch/ask-when.md`. When the words or the
+  ticket's goal changed after the quote: "This may be out of date"; words taken away or changed are not shown, and the
+  card has no filled answer (it asks again).

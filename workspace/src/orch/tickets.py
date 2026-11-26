@@ -4447,8 +4447,12 @@ def ask(
     because: str | None = None,
     if_wait: str | None = None,
     facts: list[str] | None = None,
+    said: str | None = None,
 ) -> tuple[dict, dict]:
-    """if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
+    """said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
+    history:<at>, rules:<n>); orch copies the words, author and day from that record (orch/cardcontext.py) and
+    refuses a reference that is not a person's words. No reference, no quote.
+    if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
     answers) and up to FACTS_MAX "What matters" lines. One line each; an empty one is left out, never guessed.
     because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
@@ -4541,12 +4545,20 @@ def ask(
 
     preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
 
+    said_ref = (said or "").strip() or None
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
             if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
                 return old
         if check is not None:
             _item(ticket, check)
+        quoted = None
+        if said_ref:  # copied from the record itself, on the locked ticket (ORCH-2183)
+            from orch import cardcontext
+
+            quoted = cardcontext.quote(root, ticket, said_ref)
+            no_secret(root, {"said": quoted["words"]}, "question")
         q = {
             "id": _next_id(ticket["questions"], "q"),
             "text": text.strip(),
@@ -4570,6 +4582,8 @@ def ask(
             q["if_wait"] = if_wait
         if facts:
             q["facts"] = facts
+        if quoted:  # RULE A, as because (ORCH-2183)
+            q["said"] = quoted
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4608,6 +4622,7 @@ def question_digest(q) -> str:
         "because",
         "if_wait",
         "facts",
+        "said",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]

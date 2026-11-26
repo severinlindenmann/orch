@@ -2862,3 +2862,9 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .swipe-facts li{overflow-wrap:anywhere}
 .swipe-more>.menu{top:auto;bottom:calc(100% + 4px);min-width:200px}
 @media (max-width:720px){.swipe-fact{margin:0 var(--s4) var(--s3)}}
+/* Focused review B (ORCH-2183): the person's quoted words under "What matters", one line; out of date in warning ink */
+.swipe-said{display:grid;gap:var(--s1);margin:0 var(--s5) var(--s4);min-width:0;font-size:15px;line-height:22px;color:var(--text)}
+.swipe-said p{margin:0;max-width:70ch;overflow-wrap:anywhere}
+.swipe-said-open{color:var(--brand);text-decoration:underline;text-underline-offset:2px}
+.swipe-said-stale{color:var(--warning);font-weight:600}
+@media (max-width:720px){.swipe-said{margin:0 var(--s4) var(--s3)}}

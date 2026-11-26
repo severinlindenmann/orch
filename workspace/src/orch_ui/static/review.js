@@ -75,6 +75,15 @@ const fmtTime=(v,now)=>{const d=toDate(v);if(!d)return '';now=now||new Date();co
  if(diff>1&&diff<7)return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+hm;
  return d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]};
 
+/* "today", "yesterday", "on 21 Nov": the day a person's quoted words are from (ORCH-2183) */
+const fmtDay=(v,now)=>{const d=toDate(v);if(!d)return '';now=now||new Date();const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime(),diff=Math.round((day(now)-day(d))/864e5);
+ if(diff===0)return 'today';if(diff===1)return 'yesterday';return 'on '+d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]};
+const SAID_WHO=new Set(['you','person','rule']),SAID_STALE=new Set(['gone','changed','goal','newer']);
+/* orch's copy of a person's words (`said` in review list): who, the day, the words; out of date by gone/changed has no words */
+const mapSaid=(s,now)=>{if(!s||typeof s!=='object'||!SAID_WHO.has(s.who))return undefined;const stale=SAID_STALE.has(s.stale)?s.stale:'';
+ const words=typeof s.words==='string'&&!(stale==='gone'||stale==='changed')?s.words.slice(0,163):'';
+ return {who:s.who,name:typeof s.name==='string'?s.name.slice(0,60):'',src:s.src==='history'?'history':s.src==='rules'?'rules':'chat',day:fmtDay(s.at,now),words,stale}};
+
 /* ---------- card JSON -> the widget's item ---------- */
 const refOf=p=>p&&(p.src||p.ref||p.file);
 const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};const q=Object.assign({},p);
@@ -92,7 +101,7 @@ const resultTitle=k=>k.kind==='check'&&k.preview&&typeof k.preview.headline==='s
 const mapCard=(c,api,now)=>{const k0=c.card||{},head=resultTitle(k0),k=head?Object.assign({},k0,{title:head,preview:Object.assign({},k0.preview,{headline:undefined})}):k0,ck=cardKindOf(c),pr=c.proposal&&typeof c.proposal==='object'&&(c.proposal.verdict==='accept'||c.proposal.verdict==='back')?c.proposal:null;
  return {id:c.id,kind:k.kind,kindLabel:ck.name,icon:ck.icon,lane:ck.lane,laneName:LANES[ck.lane],proposal:pr?{verdict:pr.verdict,why:typeof pr.why==='string'?pr.why.slice(0,300):''}:undefined,ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runLogin:c.run_login&&typeof c.run_login==='object'?c.run_login:undefined,
-  text:typeof c.text==='string'?c.text:'',ifWait:typeof c.if_wait==='string'?c.if_wait.slice(0,200):'',facts:(Array.isArray(c.facts)?c.facts:[]).filter(f=>typeof f==='string'&&f.trim()).slice(0,4).map(f=>f.slice(0,200)),links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
+  text:typeof c.text==='string'?c.text:'',ifWait:typeof c.if_wait==='string'?c.if_wait.slice(0,200):'',said:mapSaid(c.said,now),facts:(Array.isArray(c.facts)?c.facts:[]).filter(f=>typeof f==='string'&&f.trim()).slice(0,4).map(f=>f.slice(0,200)),links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;

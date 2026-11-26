@@ -217,6 +217,8 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    o.decisionFirst (true, or a function read at each draw; ORCH-2182 Focused review A): the card says "You decide: <the
        question>" first, then "If you wait: <item.ifWait>" and one "What matters" box with item.facts (up to 4 lines),
        each only when given; the card's links and Open fold into one More menu. Off: the card as before
+       With it, item.said ({who: you|person|rule, name, src, day, words, stale}, ORCH-2183) draws one line under the box:
+       "You said on 21 Nov: “…” · open" (open = o.ticketLink), "This may be out of date" when stale
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -418,8 +420,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   if(df)moreMenu(row);/* ORCH-2182: the card's links and Open sit in one More menu; the answers stay in the bar */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
-  c.append(...(it.kind==='check'?[h,fx,fl,pv,rb,ft]:[h,fx,pv,rb,fl,ft]).filter(Boolean));return c};
+  const sd=df&&it.said?saidLine(it):null;/* ORCH-2183: what the person said, copied by orch from its record */
+  c.append(...(it.kind==='check'?[h,fx,sd,fl,pv,rb,ft]:[h,fx,sd,pv,rb,fl,ft]).filter(Boolean));return c};
  const decisionFirst=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
+ /* ORCH-2183 (Focused review B): "You said on 21 Nov: “…” · open", "<name> wrote ...", "Team rule, 21 Nov: ...";
+    orch copied the words from a chat line, a history line or the team rules file. Out of date: one plain line under
+    it; words taken away or changed are never shown (item.said.words is empty then). */
+ const saidLine=it=>{const s=it.said,b=el('div','swipe-said');
+  const day=s.day||'',who=s.who==='rule'?'Team rule'+(day?', '+day.replace(/^on /,''):'')+':':(s.who==='you'?(s.src==='chat'?'You said':'You wrote'):(s.name||'')+' wrote')+(day?' '+day:'')+':';
+  if(s.words){const p=el('p','swipe-said-q');p.append(el('span','swipe-lead-word',who+' '),'\u201c'+s.words+'\u201d');
+   const tl=typeof o.ticketLink==='function'?o.ticketLink(it):'';
+   if(tl){const a=el('a','swipe-said-open','open');a.href=tl;a.addEventListener('pointerdown',e=>e.stopPropagation());p.append(' \u00b7 ',a)}b.append(p)}
+  if(s.stale)b.append(el('p','swipe-said-stale',s.who==='you'?'This may be out of date: things changed after you said this.':'This may be out of date.'));
+  return b.children.length?b:null};
  const factBox=fs=>{const b=el('section','swipe-fact');b.setAttribute('aria-label','What matters');b.append(el('p','swipe-fact-h','What matters'));
   const ul=el('ul','swipe-facts');fs.slice(0,4).forEach(f=>{if(typeof f==='string'&&f.trim())ul.append(el('li','',f))});b.append(ul);return b};
  const moreMenu=row=>{const items=[...row.children].filter(x=>x.matches('a'));if(!items.length)return;

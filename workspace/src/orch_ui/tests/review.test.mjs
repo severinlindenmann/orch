@@ -82,6 +82,19 @@ test('ORCH-2182: mapCard carries If you wait and the facts, and leaves out what 
   const none = UI.review.mapCard(card('g'), fakeApi([[]]), NOW);
   assert.equal(none.ifWait, ''); assert.equal(none.facts.length, 0);
 });
+test('ORCH-2183: mapCard carries the quote with its day; words taken away or changed are dropped', () => {
+  const {UI} = load();
+  const at = new Date(NOW.getTime() - 5 * 864e5);
+  const it = UI.review.mapCard(card('s', {said: {who: 'person', name: 'Lea', src: 'chat', at: at.toISOString(), words: 'Keep it.', stale: null}}), fakeApi([[]]), NOW);
+  assert.equal(it.said.who, 'person'); assert.equal(it.said.name, 'Lea'); assert.equal(it.said.words, 'Keep it.');
+  assert.match(it.said.day, /^on \d+ [A-Z][a-z]{2}$/); assert.equal(it.said.stale, '');
+  const today = UI.review.mapCard(card('t', {said: {who: 'you', src: 'history', at: NOW.toISOString(), words: 'x'}}), fakeApi([[]]), NOW);
+  assert.equal(today.said.day, 'today');
+  const gone = UI.review.mapCard(card('g', {said: {who: 'you', src: 'chat', at: NOW.toISOString(), words: 'old', stale: 'changed'}}), fakeApi([[]]), NOW);
+  assert.equal(gone.said.words, ''); assert.equal(gone.said.stale, 'changed');
+  assert.equal(UI.review.mapCard(card('n', {said: {who: 'agent', words: 'made up'}}), fakeApi([[]]), NOW).said, undefined);
+  assert.equal(UI.review.mapCard(card('m'), fakeApi([[]]), NOW).said, undefined);
+});
 test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
   const {UI} = load();
   const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};

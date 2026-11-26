@@ -1770,8 +1770,13 @@ def stack(root: Path) -> list[dict]:
     from orch import runs
 
     every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
-    shown = history.shown_json(root, _stack_tickets(root))
-    from orch import counts  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+    stored = _stack_tickets(root)
+    raw = {t.get("id"): t for t in stored if isinstance(t, dict)}  # cardcontext reads the stored ticket
+    shown = history.shown_json(root, stored)
+    from orch import (
+        cardcontext,  # ORCH-2183: the person's quoted words on a card
+        counts,  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+    )
 
     hidden = counts.quiet(root, shown)
     skip = set(hidden["queue"]) | set(hidden["folded"])
@@ -1798,6 +1803,9 @@ def stack(root: Path) -> list[dict]:
                     card = _with_plan(card, q, t, (every or {}).get(t["id"], []))
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
+                # ORCH-2183: the quoted words; out of date asks again (no suggested answer, no one tap)
+                said = cardcontext.shown(root, raw.get(t["id"], t), q) if "said" in q else None
+                again = bool(said and said.get("stale"))
                 out.append(
                     {
                         **base,
@@ -1809,9 +1817,9 @@ def stack(root: Path) -> list[dict]:
                         "digest": tickets.question_digest(q),
                         "since": needs._asked_at(root, t, q["id"]),
                         "options": list(q.get("options") or []),
-                        "recommended": q.get("recommended"),
+                        "recommended": None if again else q.get("recommended"),
                         "text": q.get("text") or "",
-                        "one_tap": one_tap(t, q),
+                        "one_tap": False if again else one_tap(t, q),
                         "card_kind": cardkinds.look(
                             card,
                             question_kind=q.get("kind") if isinstance(q.get("kind"), str) else None,
@@ -1826,6 +1834,7 @@ def stack(root: Path) -> list[dict]:
                             if isinstance(q.get("facts"), list)
                             else {}
                         ),
+                        **({"said": said} if said else {}),
                         **run_last(t, q, card, root),
                     }
                 )

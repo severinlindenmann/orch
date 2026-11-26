@@ -488,6 +488,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         links=links,
         if_wait=getattr(args, "if_wait", None),
         facts=getattr(args, "fact", None),
+        said=getattr(args, "said", None),
     )
 
 

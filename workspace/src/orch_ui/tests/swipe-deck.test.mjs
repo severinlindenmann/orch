@@ -539,3 +539,28 @@ test('switch off: the card as before, even when the fields are there', () => {
   for (const c of ['.swipe-decide', '.swipe-wait', '.swipe-fact', '.swipe-more']) assert.equal(card.querySelector(c), null, c);
   assert.equal(card.querySelector('.swipe-head').children.find(x => x.tag === 'h3').textContent, 'Release 0.42');
 });
+
+// ORCH-2183 (Focused review B): the person's quoted words under What matters, only behind decisionFirst.
+test('decision first: the quote says who and when, with open; out of date adds one line', () => {
+  const {host} = deck([asked({said: {who: 'person', name: 'Lea', src: 'chat', day: 'on 21 Nov', words: 'Keep Windows 10 until March.', stale: ''}})], {decisionFirst: true, ticketLink: () => '#ticket/t_1'});
+  const card = host.querySelector('.swipe-card'), said = card.querySelector('.swipe-said');
+  assert.equal(card.children.indexOf(said), card.children.indexOf(card.querySelector('.swipe-fact')) + 1, 'right under What matters');
+  assert.equal(words(said.querySelector('.swipe-said-q')), 'Lea wrote on 21 Nov: \u201cKeep Windows 10 until March.\u201d \u00b7 open');
+  assert.equal(said.querySelector('.swipe-said-open').href, '#ticket/t_1');
+  assert.equal(said.querySelector('.swipe-said-stale'), null);
+});
+test('decision first: You said / You wrote / Team rule, and stale words are not shown', () => {
+  const one = s => deck([asked({said: s})], {decisionFirst: true}).host.querySelector('.swipe-said');
+  assert.equal(words(one({who: 'you', src: 'chat', day: 'today', words: 'Ship it.', stale: ''}).querySelector('.swipe-said-q')), 'You said today: \u201cShip it.\u201d');
+  assert.equal(words(one({who: 'you', src: 'history', day: 'on 2 Nov', words: 'Ship it.', stale: ''}).querySelector('.swipe-said-q')), 'You wrote on 2 Nov: \u201cShip it.\u201d');
+  assert.equal(words(one({who: 'rule', name: 'Team rules', src: 'rules', day: 'on 2 Nov', words: 'Ask before money.', stale: ''}).querySelector('.swipe-said-q')), 'Team rule, 2 Nov: \u201cAsk before money.\u201d');
+  const newer = one({who: 'you', src: 'chat', day: 'today', words: 'Ship it.', stale: 'newer'});
+  assert.equal(words(newer.querySelector('.swipe-said-stale')), 'This may be out of date: things changed after you said this.');
+  const gone = one({who: 'person', name: 'Lea', src: 'chat', day: 'today', words: '', stale: 'gone'});
+  assert.equal(gone.querySelector('.swipe-said-q'), null);
+  assert.equal(words(gone.querySelector('.swipe-said-stale')), 'This may be out of date.');
+});
+test('switch off: no quote line', () => {
+  const {host} = deck([asked({said: {who: 'you', src: 'chat', day: 'today', words: 'x', stale: ''}})]);
+  assert.equal(host.querySelector('.swipe-said'), null);
+});

@@ -978,6 +978,12 @@ def _remaining_parsers(sub, common):
         help="a fact that decides it, one line (up to 4; shown first on the card: What matters)",
     )
     x.add_argument(
+        "--said",
+        metavar="REF",
+        help="quote the person on the card: a chat message id (m_...), history:<time of their line> or "
+        "rules:<line of .orch/ask-when.md>; orch copies their words from there",
+    )
+    x.add_argument(
         "--take-back",
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
@@ -1781,6 +1787,7 @@ def run(args: argparse.Namespace) -> None:
             or args.because is not None
             or args.if_wait is not None
             or args.fact
+            or args.said is not None
             or args.kind
             or args.action
             or args.check
@@ -1800,6 +1807,7 @@ def run(args: argparse.Namespace) -> None:
             or args.because is not None
             or args.if_wait is not None
             or args.fact
+            or args.said is not None
             or args.kind
             or args.action
             or args.check
@@ -1858,6 +1866,7 @@ def run(args: argparse.Namespace) -> None:
                 because=args.because,
                 if_wait=args.if_wait,
                 facts=args.fact,
+                said=args.said,
             )
         if card:
             pass
