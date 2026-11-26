@@ -613,6 +613,30 @@ def _back_or_leave(why: str, sent_back: int) -> dict:
 # ------------------------------------------------------------------ the pass
 
 
+# Reviewer mode "propose" (owner, 25 Nov 2026): the verdict is one history line; the card stays on Review.
+PROPOSE_LINES = {
+    "accept": "The Reviewer proposes to accept: ",
+    "back": "The Reviewer proposes to send it back: ",
+}
+PROPOSAL_WHY_MAX = 300
+
+
+def _one_line(text) -> str:
+    return " ".join(str(text or "").split())[:PROPOSAL_WHY_MAX]
+
+
+def proposal(hist: list) -> dict | None:
+    """{verdict: accept|back, why} when a ticket's newest history line is a Reviewer proposal, else None (the
+    ticket moved on after the Reviewer looked, or its newest word was not a proposal)."""
+    last = next((h for h in reversed(hist or []) if isinstance(h, dict)), None)
+    if not last or last.get("by") != BY or not isinstance(last.get("text"), str):
+        return None
+    for verdict, head in PROPOSE_LINES.items():
+        if last["text"].startswith(head):
+            return {"verdict": verdict, "why": _one_line(last["text"][len(head) :])}
+    return None
+
+
 def _state_path(root: Path) -> Path:
     return runs.run_dir(root) / "reviewer.json"
 
@@ -675,7 +699,8 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     from orch import lookreview
 
     now_mode = autoreview.mode(root)
-    look = plain and lookreview.on(root)
+    propose = config.reviewer_mode(root) == "propose"
+    look = plain and lookreview.on(root) and not propose  # its second look accepts too: never in propose mode
     own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
@@ -732,7 +757,12 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         try:
-            if res.get("auto"):
+            if (
+                propose and res["verdict"] in PROPOSE_LINES
+            ):  # nothing closes by itself: one line, the card stays
+                after = tickets.log(root, tid, PROPOSE_LINES[res["verdict"]] + _one_line(res["why"]), BY)
+                row["proposed"] = True
+            elif res.get("auto"):
                 after = autoreview.act(root, t, res)
                 if res["verdict"] == "back":
                     mine["back"] = back + 1

@@ -8,6 +8,8 @@ $fails = @()
 function L($m) { Add-Content -Path $log -Value $m }
 function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; $script:fails += $what } }
 function O { cmd /c "orch $($args -join ' ') < NUL 2>&1" }
+# stdout only: a note on stderr (e.g. the secret scan's) must not break the JSON a caller parses
+function OJ { cmd /c "orch $($args -join ' ') < NUL 2>NUL" }
 function Results($out) {
     $m = [regex]::Match("$out", 'Log: (\S+)')
     if (-not $m.Success) { return @() }
@@ -51,12 +53,12 @@ L (cmd /c "orch config agent add fake --command `"$py $agent`" < NUL 2>&1" | Out
 L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
-$rep = ((O ticket new '"Scheduled smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$rep = ((OJ ticket new '"Scheduled smoke"' --json --by human:owner) | Out-String | ConvertFrom-Json).id
 O check add $rep '"Say hello"' --by human:owner | Out-Null
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
-$one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$one = ((OJ ticket new '"Wake-up smoke"' --json --by human:owner) | Out-String | ConvertFrom-Json).id
 O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
