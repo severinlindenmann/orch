@@ -175,6 +175,7 @@ switches when its turn ends.
 
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
+    orch ask <id> "<question>" ... --if-wait "<what happens while nobody answers>" --fact "<a fact that decides it>"  # optional, one line each, up to 4 --fact
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
     orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 

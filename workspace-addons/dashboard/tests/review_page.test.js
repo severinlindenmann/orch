@@ -103,6 +103,15 @@ test('the page keeps its host and side list out of the reconcile (mounted once),
   assert.ok(c.mounts.has(host) && c.mounts.has(side));
   c.mounts.get(host).destroy(); assert.equal(calls.at(-1), 'destroy');
 });
+test('ORCH-2182: the page passes the decision-first switch to the deck, read from the settings at each draw', () => {
+  const calls = [];
+  const c = ctx({settings:{decision_first_on:false}}, {window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), side = h('aside'), queue = h('div');
+  c.mountReview({querySelectorAll: sel => sel === '[data-review-host]' ? [host] : sel === '[data-review-side]' ? [side] : [], querySelector: () => queue});
+  assert.equal(calls[0].decisionFirst(), false);
+  c.state.settings.decision_first_on = true;
+  assert.equal(calls[0].decisionFirst(), true);
+});
 // ---- Home and ticket ----
 function home(state, tickets = [], rows = []) {
   const c = ctx(state, {tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id), href:id => '#ticket/' + id, needsList:() => rows});

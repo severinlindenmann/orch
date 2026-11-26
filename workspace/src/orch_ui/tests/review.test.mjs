@@ -74,6 +74,14 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
 });
+test('ORCH-2182: mapCard carries If you wait and the facts, and leaves out what is empty or not text', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('f', {if_wait: 'The release waits.', facts: ['14 links point at it', '', 7, 'a', 'b', 'c']}), fakeApi([[]]), NOW);
+  assert.equal(it.ifWait, 'The release waits.');
+  assert.deepEqual([...it.facts], ['14 links point at it', 'a', 'b', 'c']);
+  const none = UI.review.mapCard(card('g'), fakeApi([[]]), NOW);
+  assert.equal(none.ifWait, ''); assert.equal(none.facts.length, 0);
+});
 test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
   const {UI} = load();
   const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};
@@ -195,6 +203,18 @@ test('other errors show the message and bring the card back', async () => {
   assert.equal(toasts[0].m, 'Not allowed.'); assert.equal(decks.length, 2);
 });
 
+test('ORCH-2182: the deck is drawn again when the decision-first switch changes (settings that came late too)', async () => {
+  let on = false;
+  const api = fakeApi([[card('a')]]);
+  const {decks, page} = await mount(api, {decisionFirst: () => on});
+  await page.tick(); await flush();
+  assert.equal(decks.length, 1, 'same stack, same switch: no rebuild');
+  on = true;
+  await page.tick(); await flush();
+  assert.equal(decks.length, 2, 'the switch turned on: drawn again');
+  await page.tick(); await flush();
+  assert.equal(decks.length, 2);
+});
 test('polling keeps the deck while nothing changed and while a sheet is open', async () => {
   const api = fakeApi([[card('a')], [card('a')], [card('a'), card('b')], [card('a'), card('b')]]);
   const {decks, page} = await mount(api);

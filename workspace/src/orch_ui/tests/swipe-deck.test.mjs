@@ -504,3 +504,38 @@ test('Reviewer mode propose: the card says what the Reviewer proposes', () => {
   const {host} = deck([check('a', {proposal: {verdict: 'back', why: 'a part is open'}, suggest: 'no'}), check('b')]);
   assert.ok(host.querySelectorAll('.swipe-why').some(n => n.textContent === 'The Reviewer proposes to send it back: a part is open'));
 });
+
+// ORCH-2182 (Focused review A): behind decisionFirst the card leads with "You decide:" and "If you wait:", one
+// "What matters" box holds the facts, and the links fold into one More menu. Without the switch: as before.
+const asked = extra => ({id: 'q1', kind: 'plan', kindLabel: 'Question', ticket: 'REL-4', title: 'Release 0.42', text: 'Put release 0.42 live for everyone?',
+  ifWait: '41 changes wait in develop.', facts: ['All checks are green', 'Nobody outside has it yet'], open: 'https://example.com/pr/1', links: [{label: 'Mockup', url: 'https://example.com/m'}], ...extra});
+const words = n => n.textContent;
+test('decision first: You decide, If you wait and What matters lead the card; links sit in More', () => {
+  const {host} = deck([asked()], {decisionFirst: true});
+  const card = host.querySelector('.swipe-card'), head = card.querySelector('.swipe-head');
+  assert.equal(words(head.querySelector('.swipe-decide')), 'You decide: Put release 0.42 live for everyone?');
+  assert.equal(words(head.querySelector('.swipe-wait')), 'If you wait: 41 changes wait in develop.');
+  const box = card.querySelector('.swipe-fact');
+  assert.equal(box.getAttribute('aria-label'), 'What matters');
+  assert.deepEqual(box.querySelectorAll('li').map(words), ['All checks are green', 'Nobody outside has it yet']);
+  assert.equal(card.children.indexOf(box), card.children.indexOf(head) + 1, 'the facts come right under the decision');
+  const more = card.querySelector('.swipe-more');
+  assert.ok(more, 'one More menu');
+  assert.deepEqual(more.querySelectorAll('.menu-item').map(words).map(s => s.trim()), ['Mockup', 'Open']);
+  assert.equal(card.querySelector('.swipe-foot-row').children.filter(x => x.tag === 'a').length, 0, 'no loose link buttons');
+  assert.ok(host.querySelector('.swipe-act.ok'), 'the answers stay in the bar');
+});
+test('decision first: empty fields are left out, never guessed', () => {
+  const {host} = deck([asked({ifWait: '', facts: [], open: undefined, links: []})], {decisionFirst: () => true});
+  const card = host.querySelector('.swipe-card');
+  assert.equal(card.querySelector('.swipe-wait'), null);
+  assert.equal(card.querySelector('.swipe-fact'), null);
+  assert.equal(card.querySelector('.swipe-more'), null);
+  assert.equal(words(card.querySelector('.swipe-decide')), 'You decide: Put release 0.42 live for everyone?');
+});
+test('switch off: the card as before, even when the fields are there', () => {
+  const {host} = deck([asked()]);
+  const card = host.querySelector('.swipe-card');
+  for (const c of ['.swipe-decide', '.swipe-wait', '.swipe-fact', '.swipe-more']) assert.equal(card.querySelector(c), null, c);
+  assert.equal(card.querySelector('.swipe-head').children.find(x => x.tag === 'h3').textContent, 'Release 0.42');
+});

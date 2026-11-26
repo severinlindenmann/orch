@@ -14,7 +14,7 @@ window.SWIPE_ITEMS=[
   href:'../ticket/ticket.html',preview:{type:'doc'}},
  /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
  {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer\'s second look?',
-  text:'Turn on the Reviewer\'s second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+  text:'Turn on the Reviewer\'s second look?',ifWait:'Bigger finished work is accepted after one look only.',facts:['Only bigger finished work gets the second look','One command turns it on, one turns it off again'],okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
   run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
  /* A sign-in (ORCH-865): Run it now opens the plain terminal with the sign-in started there; the card answers itself once
     the sign-in ended and its login check is green (here it only shows the waiting state). */

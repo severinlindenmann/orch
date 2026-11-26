@@ -594,7 +594,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id)});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }

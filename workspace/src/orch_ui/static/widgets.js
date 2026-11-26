@@ -214,6 +214,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
        Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
    item.hint: one plain line in the foot saying what the card's own buttons do
+   o.decisionFirst (true, or a function read at each draw; ORCH-2182 Focused review A): the card says "You decide: <the
+       question>" first, then "If you wait: <item.ifWait>" and one "What matters" box with item.facts (up to 4 lines),
+       each only when given; the card's links and Open fold into one More menu. Off: the card as before
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -379,9 +382,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   /* title first, then ONE quiet line: type · deadline · ticket key (ORCH-477 round 2: no routine time stamp, no group, no
      "Suggested" here; the one filled answer button is the suggestion) */
-  const h=el('header','swipe-head'),m=metaLine(it);
+  const h=el('header','swipe-head'),m=metaLine(it),df=!layer&&decisionFirst();
   const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once, in the title's place */
-  if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3,m);if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text))}
+  /* ORCH-2182 (Focused review A, behind o.decisionFirst): the decision first ("You decide:" the question, else the
+     title), then "If you wait:" when the helper gave it; the title stays as one quiet line when it says more */
+  if(df){const d=el('h3','swipe-decide'),q=it.text||it.title||'';d.append(el('span','swipe-lead-word','You decide: '),q);d.title=q;h.append(m,d);
+   if(it.text&&it.title&&!cut&&it.text!==it.title)h.append(el('p','swipe-ticket',it.title));
+   if(it.ifWait){const w=el('p','swipe-wait');w.append(el('span','swipe-lead-word','If you wait: '),it.ifWait);h.append(w)}}
+  else if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3,m);if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text))}
   else h.append(el('p','swipe-text swipe-lead',it.text),m);
   /* a one-tap question answers without opening the ticket: say which ticket, as Home does (ORCH-1847) */
   if(oneTap(it)&&it.ticketTitle&&it.ticketTitle!==it.title)h.append(el('p','swipe-ticket',it.ticketTitle));
@@ -389,6 +397,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.why)h.append(el('p','swipe-why',it.why));
   if(it.proposal){const p=it.proposal;h.append(el('p','swipe-why',(p.verdict==='accept'?'The Reviewer proposes to accept':'The Reviewer proposes to send it back')+(p.why?': '+p.why:'.')))}/* Reviewer mode "propose": its verdict, your click */
   if(it.blocked&&it.kind==='check'){const b=el('div','banner slim attn swipe-open'),g=el('div','grow');g.append(el('strong','','Still open'),el('p','',it.blocked));b.append(g);h.append(b)}/* R6 A: an open part sits on top, never only in the footer */
+  /* ORCH-2182: the facts that decide it, in one box right under the decision; no facts, no box (never a guess) */
+  const fx=df&&Array.isArray(it.facts)&&it.facts.length?factBox(it.facts):null;
   const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
   if(pv){pv.dataset.type=it.preview.type;pv.append(buildPreview(it,false));
   if(visual(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
@@ -406,8 +416,17 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const tl=!layer&&typeof o.ticketLink==='function'?o.ticketLink(it):'';
   if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
+  if(df)moreMenu(row);/* ORCH-2182: the card's links and Open sit in one More menu; the answers stay in the bar */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
-  c.append(...(it.kind==='check'?[h,fl,pv,rb,ft]:[h,pv,rb,fl,ft]).filter(Boolean));return c};/* R6 A: a result shows its pictures first */
+  c.append(...(it.kind==='check'?[h,fx,fl,pv,rb,ft]:[h,fx,pv,rb,fl,ft]).filter(Boolean));return c};
+ const decisionFirst=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
+ const factBox=fs=>{const b=el('section','swipe-fact');b.setAttribute('aria-label','What matters');b.append(el('p','swipe-fact-h','What matters'));
+  const ul=el('ul','swipe-facts');fs.slice(0,4).forEach(f=>{if(typeof f==='string'&&f.trim())ul.append(el('li','',f))});b.append(ul);return b};
+ const moreMenu=row=>{const items=[...row.children].filter(x=>x.matches('a'));if(!items.length)return;
+  const d=el('details','dropdown swipe-more'),s=el('summary','btn ghost sm','More'),mn=el('div','menu');s.setAttribute('aria-haspopup','menu');mn.setAttribute('role','menu');
+  items.forEach(a=>{a.className='menu-item';a.setAttribute('role','menuitem');a.addEventListener('click',()=>{d.open=false});mn.append(a)});
+  d.addEventListener('pointerdown',e=>e.stopPropagation());d.addEventListener('keydown',e=>{if(e.key==='Escape'&&d.open){e.stopPropagation();d.open=false;s.focus()}});
+  d.append(s,mn);row.append(d)};/* R6 A: a result shows its pictures first */
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
     other files, with "Open in new tab" in the viewer (UI.reviewViewer, ORCH-477). A PDF tile shows its first page through
     the browser's own PDF view, small and without its toolbar (FileViewer.thumb); without a PDF view the icon stays. */

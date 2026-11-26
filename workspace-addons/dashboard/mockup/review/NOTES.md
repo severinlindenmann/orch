@@ -141,3 +141,8 @@ column pushed both to the right). Master rule in `widgets.css`, no page CSS.
 rail the page is one column; the switch and the card line up with the heading (before: an empty left column pushed
 both to the right at 1280 to 1920). Two or more cards show the list in the left column as before. Same master rule in
 `widgets.css` as ORCH-2024, no longer tied to the empty state.
+- 26 Nov (ORCH-2182, Focused review A): `review.html?decide=1` shows the decision-first card (kit deck option
+  `decisionFirst`, product switch `orch config set workflow.decision_first on`): "You decide:" the question, "If you
+  wait:" (`orch ask --if-wait`), one "What matters" box with up to 4 facts (`--fact`), the answers in the bar, and the
+  card's links and Open ticket in one More menu. Empty fields are left out; with the switch off the card is as before.
+  The run card "Turn on the Reviewer's second look?" carries both fields.

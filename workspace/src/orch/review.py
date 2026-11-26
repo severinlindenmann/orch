@@ -1819,6 +1819,13 @@ def stack(root: Path) -> list[dict]:
                         ),
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
+                        # ORCH-2182: the decision-first card's "If you wait" and "What matters" lines
+                        **({"if_wait": q["if_wait"]} if isinstance(q.get("if_wait"), str) else {}),
+                        **(
+                            {"facts": [f for f in q["facts"] if isinstance(f, str)]}
+                            if isinstance(q.get("facts"), list)
+                            else {}
+                        ),
                         **run_last(t, q, card, root),
                     }
                 )

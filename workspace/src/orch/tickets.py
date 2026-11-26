@@ -4445,8 +4445,12 @@ def ask(
     links: list[dict] | None = None,
     add_workspace: str | None = None,
     because: str | None = None,
+    if_wait: str | None = None,
+    facts: list[str] | None = None,
 ) -> tuple[dict, dict]:
-    """because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
+    """if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
+    answers) and up to FACTS_MAX "What matters" lines. One line each; an empty one is left out, never guessed.
+    because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
     when it has one.
     card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
@@ -4471,6 +4475,14 @@ def ask(
             )
         if len(because) > BECAUSE_MAX:
             raise Refused(f"--because is one line of at most {BECAUSE_MAX} characters.")
+    if_wait = " ".join((if_wait or "").split()) or None
+    if if_wait and len(if_wait) > BECAUSE_MAX:
+        raise Refused(f"--if-wait is one line of at most {BECAUSE_MAX} characters.")
+    facts = [f for f in (" ".join(str(x or "").split()) for x in facts or []) if f] or None
+    if facts and len(facts) > FACTS_MAX:
+        raise Refused(f"Give at most {FACTS_MAX} --fact lines: the few that decide it.")
+    if facts and any(len(f) > BECAUSE_MAX for f in facts):
+        raise Refused(f"A --fact is one line of at most {BECAUSE_MAX} characters.")
     if kind is not None and not KIND_RE.fullmatch(kind):
         raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
     act = None
@@ -4493,7 +4505,14 @@ def ask(
     _guard_question(root, text, options, recommended, check)
     no_secret(
         root,
-        {"text": text, "options": list(options), "recommended": recommended, "because": because},
+        {
+            "text": text,
+            "options": list(options),
+            "recommended": recommended,
+            "because": because,
+            "if_wait": if_wait,
+            "facts": facts,
+        },
         "question",
     )
     for part in (
@@ -4501,6 +4520,8 @@ def ask(
         *options,
         *([recommended] if recommended else []),
         *([because] if because else []),
+        *([if_wait] if if_wait else []),
+        *(facts or []),
         *_labels(act),
     ):
         if _asks_for_secret(part):
@@ -4545,6 +4566,10 @@ def ask(
             q["check"] = check
         if because:  # RULE A: only when given (old digests stay the same); part of what the person is shown
             q["because"] = because
+        if if_wait:  # RULE A, as because (ORCH-2182)
+            q["if_wait"] = if_wait
+        if facts:
+            q["facts"] = facts
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4566,6 +4591,7 @@ def ask(
 
 GROUP_MAX = 80
 BECAUSE_MAX = 200
+FACTS_MAX = 4
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -4580,6 +4606,8 @@ def question_digest(q) -> str:
         "shown",
         "links",
         "because",
+        "if_wait",
+        "facts",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]

@@ -965,6 +965,19 @@ def _remaining_parsers(sub, common):
         help="with --recommend: the reason for the answer you suggest, one line (shown under the question)",
     )
     x.add_argument(
+        "--if-wait",
+        dest="if_wait",
+        metavar="LINE",
+        help="what happens while nobody answers, one line (shown first on the card: If you wait)",
+    )
+    x.add_argument(
+        "--fact",
+        action="append",
+        default=[],
+        metavar="LINE",
+        help="a fact that decides it, one line (up to 4; shown first on the card: What matters)",
+    )
+    x.add_argument(
         "--take-back",
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
@@ -1766,6 +1779,8 @@ def run(args: argparse.Namespace) -> None:
             or args.option
             or args.recommend
             or args.because is not None
+            or args.if_wait is not None
+            or args.fact
             or args.kind
             or args.action
             or args.check
@@ -1783,6 +1798,8 @@ def run(args: argparse.Namespace) -> None:
             or args.option
             or args.recommend
             or args.because is not None
+            or args.if_wait is not None
+            or args.fact
             or args.kind
             or args.action
             or args.check
@@ -1839,6 +1856,8 @@ def run(args: argparse.Namespace) -> None:
                 args.action,
                 args.check,
                 because=args.because,
+                if_wait=args.if_wait,
+                facts=args.fact,
             )
         if card:
             pass
