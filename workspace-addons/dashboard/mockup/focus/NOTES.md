@@ -161,3 +161,11 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## Chat shows the real talk or says it is a summary (ORCH-2204, 26 Nov)
+
+The Chat view shows the helper's real conversation (the newest turns of the session in use, read from the tool's own
+saved conversation) with the ticket's steps, questions and your messages around it. Where orch cannot read the
+conversation (a tool that keeps none, or the file is not on this computer), the chat is the ticket's summary and one
+small line at its top says so: "Summary from the ticket" with Open terminal (`.live-chat-src`). Here ORCH-232 shows it.
+The terminal opens without WebGL too: xterm's normal renderer draws it.

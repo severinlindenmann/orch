@@ -70,7 +70,7 @@ def _api_reads():
     """Every /api/ address the dashboard reads, taken from its own GET code (a new one is covered by itself)."""
     src = inspect.getsource(server.Handler.do_GET)
     found = set(re.findall(r'"(/api/[a-z/-]+)"', src))
-    found |= {"/api/sessions/t_abcdef", "/api/artifacts/t_abcdef", "/api/chat/day/2026-11-18"}
+    found |= {"/api/sessions/t_abcdef", "/api/talk/t_abcdef", "/api/artifacts/t_abcdef", "/api/chat/day/2026-11-18"}
     found |= {"/api/chat/thread/ws_abcdefghij", "/api/addon/focus"}
     found |= {"/addon/focus/api/live", "/addon/focus/", "/view/t_abcdef/artifacts/page.html", "/styleguide/"}
     found.discard("/api/session-state")  # the sign-in chip's own state, no data: answered without it (below)

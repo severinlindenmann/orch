@@ -33,7 +33,7 @@ class Node_ {
 const terms = [];
 class FakeTerminal {
   constructor(options) { this.options = {...options}; this.written = []; this.sizes = []; this.pasted = []; this.sel = ''; terms.push(this); }
-  loadAddon(a) { a.term = this; }
+  loadAddon(a) { a.term = this; (this.addons ||= []).push(a); }
   open(host) { this.host = host; this.textarea = new Node_('textarea'); host.append(this.textarea); }
   onData(f) { this.data = f; }
   attachCustomKeyEventHandler(f) { this.keys = f; }
@@ -208,7 +208,7 @@ test('the size: sent while typing when the box differs, never while watching or 
   delete globalThis.fitSize;
 });
 
-test('the screen closing ends typing and says so; no screen says why; no WebGL says so', () => {
+test('the screen closing ends typing and says so; no screen says why; no xterm says so', () => {
   const {ui} = live();
   ui.setTyping(true);
   ui.end('none');
@@ -219,11 +219,67 @@ test('the screen closing ends typing and says so; no screen says why; no WebGL s
   const none = T({label: 'ORCH-2'});
   none.end('oneshot');
   assert.equal(none.el.dataset.state, 'oneshot');
-  globalThis.noGL = true;
+  const saved = globalThis.Terminal;
+  globalThis.Terminal = undefined;
   const gl = T({label: 'ORCH-3'});
   gl.hello({typing_allowed: true}); gl.screen(SCREEN);
   assert.equal(gl.el.dataset.state, 'nogl');
+  globalThis.Terminal = saved;
+});
+
+// ORCH-2204: WebGL off, failing or lost: the normal renderer draws the screen, its rules copied into a CSSOM sheet
+test('without WebGL the terminal still opens, drawn by the normal renderer', () => {
+  globalThis.noGL = true;
+  const n = terms.length;
+  const {ui, xt} = live();
+  assert.equal(ui.el.dataset.state, 'live');
+  assert.equal(ui.el.dataset.renderer, 'dom');
+  assert.equal(terms.length, n + 1);
+  assert.ok(!xt.addons?.some(a => a.onContextLoss), 'no WebGL addon loaded');
+  assert.match(xt.written.join(''), /hello/);
   delete globalThis.noGL;
+});
+
+test('a WebGL addon that fails opens the normal renderer instead', () => {
+  const Saved = globalThis.WebglAddon;
+  globalThis.WebglAddon = {WebglAddon: class { onContextLoss() { throw new Error('no context'); } }};
+  const {ui} = live();
+  assert.equal(ui.el.dataset.state, 'live');
+  assert.equal(ui.el.dataset.renderer, 'dom');
+  globalThis.WebglAddon = Saved;
+});
+
+test('a lost WebGL context draws the next screen with the normal renderer', () => {
+  const {ui, xt} = live();
+  assert.equal(ui.el.dataset.renderer, undefined);
+  const gl = xt.addons.find(a => a.lost);
+  gl.lost();
+  assert.equal(xt.disposed, true);
+  ui.screen(SCREEN);
+  assert.equal(ui.el.dataset.state, 'live');
+  assert.equal(ui.el.dataset.renderer, 'dom');
+});
+
+test('domSheet copies the renderer\'s blocked style elements into an adopted sheet and follows changes', async () => {
+  class Sheet { replaceSync(t) { this.text = t; } }
+  const els = [{textContent: '.a{color:red}'}, {textContent: '.b{width:9px}'}];
+  const host = {querySelectorAll: () => els};
+  const doc = {adoptedStyleSheets: ['page']};
+  const savedSheet = globalThis.CSSStyleSheet, savedMO = globalThis.MutationObserver;
+  let fire = null;
+  globalThis.CSSStyleSheet = Sheet;
+  globalThis.MutationObserver = class { constructor(f) { fire = f; } observe() {} disconnect() { this.off = true; } };
+  const stop = T.domSheet(host, doc);
+  assert.equal(doc.adoptedStyleSheets.length, 2);
+  const sheet = doc.adoptedStyleSheets[1];
+  assert.equal(sheet.text, '.a{color:red}\n.b{width:9px}');
+  els[1].textContent = '.b{width:10px}';
+  fire();
+  assert.match(sheet.text, /width:10px/);
+  stop();
+  assert.deepEqual(doc.adoptedStyleSheets, ['page']);
+  assert.equal(typeof T.domSheet({querySelectorAll: () => []}, {}), 'function', 'no adoptedStyleSheets: nothing to do');
+  globalThis.CSSStyleSheet = savedSheet; globalThis.MutationObserver = savedMO;
 });
 
 test('a redraw gives the keyboard back to the paste question, never away from another field', () => {
