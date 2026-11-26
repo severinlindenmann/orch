@@ -213,7 +213,7 @@ test('ORCH-2155: Actions > Move to offers every place, Waiting and Superseded as
   assert.deepEqual(moves.map(n => n.attrs['data-key']), ['open', 'ready', 'active', 'blocked', 'review', 'done', 'dropped', 'superseded'].map(l => 'ticket-move-' + l));
   assert.deepEqual(moves.filter(n => n.attrs['aria-checked'] === 'true').map(n => n.attrs['data-key']), ['ticket-move-ready']);
   assert.ok(moves.every(n => n.attrs.role === 'menuitemradio'));
-  assert.deepEqual(moves.map(text), ['Backlog', 'checkTo do', 'Working', 'Waiting…', 'Check', 'Done', "Won't do", 'Superseded…']);
+  assert.deepEqual(moves.map(text), ['Backlog', 'checkTo do', 'Working', 'Waiting…', 'Review', 'Done', "Won't do", 'Superseded…']);
   // the state word above the title opens the same list (a second way in)
   const pill = all.find(n => n.attrs['data-key'] === 'ticket-pill-menu-t_one');
   assert.equal(pill.tag, 'details');
