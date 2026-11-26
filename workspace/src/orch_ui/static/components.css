@@ -94,13 +94,16 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-head>.side-toggle{display:none}
 .nav-addons{display:grid;gap:4px}
 .nav-row{position:relative;display:grid}
-.nav-row>.nav-item{padding-right:40px}
-.nav-row>.nav-pin{position:absolute;right:4px;top:0;bottom:0;margin-block:auto;height:fit-content;opacity:.4;transition:opacity var(--dur-fast) var(--ease-move)}
-.nav-row:is(:hover,:focus-within) .nav-pin{opacity:1}
-.nav-pin[aria-pressed=true] svg{fill:currentColor}
-.nav-more{width:100%;font:inherit;font-size:14px;cursor:pointer}
-.nav-more .ic{transition:transform var(--dur-base) var(--ease-move)}
-.nav-more[aria-expanded=true] .ic{transform:rotate(180deg)}
+/* The menu's add-ons (D2 A, ORCH-2283): plain rows; 'Change this list' shows one small switch per row (In the list or
+   under More), Done hides them again. More (n) / Fewer unfolds the rest in place. */
+.nav-row-edit>.nav-item{padding-right:52px}
+.nav-row>.nav-pin{position:absolute;right:8px;top:0;bottom:0;margin-block:auto;display:grid;place-items:center;width:36px;height:28px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
+.nav-pin:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.nav-pin-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);transition:background var(--dur-fast) var(--ease-move)}
+.nav-pin-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform var(--dur-fast) var(--ease-move)}
+.nav-pin[aria-checked=true] .nav-pin-sw{background:var(--brand)}
+.nav-pin[aria-checked=true] .nav-pin-sw:after{transform:translateX(12px);background:var(--on-brand)}
+:is(.nav-more,.nav-change){width:100%;font:inherit;font-size:14px;cursor:pointer}
 @media(min-width:1280px){.side-head>.side-toggle{display:inline-flex}}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
@@ -181,6 +184,12 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .page-heading h1{margin:0}
 .page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
 .page-heading-actions>.btn.ghost:last-child{padding-right:0}
+/* One top for every page (D1, ORCH-2282): '← parent' above the name on a page inside another page; Settings first in the
+   actions, the one filled button last (UI.pageTop). On a phone the buttons go under the sentence, left-aligned. */
+.page-back{display:inline-flex;align-items:center;gap:6px;min-height:24px;width:max-content;max-width:100%;margin:0 0 4px;font-size:13px;line-height:18px;color:var(--text-muted);text-decoration:none;border-radius:6px}
+.page-back:hover{color:var(--text)}
+.page-back:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.page-back .ic{width:14px;height:14px}
 .page-header p,.page-heading p{color:var(--text-muted)}
 .page-heading p{margin:0}
 .page-header p{margin-top:8px}
@@ -498,8 +507,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar .side-foot{margin:0}
 .btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
-.nav-pin{opacity:1}
-.nav-row>.nav-item{padding-right:52px}
+.nav-row>.nav-pin{width:44px;height:44px;right:4px}
+.page-back{min-height:44px;margin:-10px 0 -6px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
 /* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
@@ -515,7 +524,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .switch:before{content:"";position:absolute;inset:-12px -4px}
 dialog.sheet{width:100%}
 }
-@media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
+@media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.page-heading-actions{margin-left:0;width:100%;flex-wrap:wrap}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
 @media(forced-colors:active){.btn,.badge,.switch,.phase{border:1px solid ButtonText}.nav-item[aria-current=page]{outline:1px solid Highlight}.progress>span{background:Highlight}.skeleton{border:1px solid GrayText}:focus-visible{outline:2px solid Highlight}.dot{border:1px solid CanvasText}}
 
 /* compat for the question card, evidence tiles and demo pages */

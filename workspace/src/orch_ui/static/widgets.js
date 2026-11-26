@@ -163,6 +163,22 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
  if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
  return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
+/* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
+   then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
+   the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
+   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'};
+const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
+/* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
+UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
+UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
+ if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
+ const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
+ if(st&&(st.href||st.onClick)){const b=el(st.href?'a':'button','btn outline sm page-settings');if(st.href)b.href=st.href;else b.type='button';if(st.onClick)b.addEventListener('click',st.onClick);b.dataset.key='page-settings';b.append(topIcon('settings'),el('span','',st.label||'Settings'));acts.push(b)}
+ (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
+ if(acts.length){const r=el('div','page-heading-actions');r.append(...acts);head.append(r)}
+ return head};
 /* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}

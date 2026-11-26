@@ -1648,7 +1648,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "factory",
    "icon": "hammer",
-   "title": "Projects",
+   "title": "Factory",
    "one": "A big idea becomes a planned run. You press Start; you judge each stage.",
    "steps": [
     {

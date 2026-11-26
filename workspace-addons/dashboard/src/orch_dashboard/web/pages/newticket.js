@@ -135,7 +135,8 @@ function ticketFormPage(host) {
   actions.append(button('Cancel', 'ghost', back));
   let done = false;
   const close = () => { if (done) return; done = true; d.dispatchEvent(new Event('close')); };
-  host.append(d);
+  // D1 (ORCH-2282): New ticket is a page inside Tickets: '← Tickets' above it, the same place as on every inner page
+  host.append(...(window.UI?.pageBack ? [window.UI.pageBack({label:'Tickets', href:'#tickets'})] : []), d);
   return {d, actions, close};
 }
 // The due date uses the shared date picker (kit/date.js: UI.date); a hidden input keeps the chosen day for the form.

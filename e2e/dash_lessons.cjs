@@ -59,12 +59,14 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
     await page.goto(BASE + '/#settings/addons');
     await page.getByRole('link', {name: 'Lessons settings'}).waitFor();
-    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'no nav entry');
+    // D2 A (ORCH-2283): Lessons waits under the menu's More (closed here), so it shows only once More is opened
+    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'Lessons is not under the closed More');
     await page.screenshot({path: path.join(OUT, 'lessons-settings-addons.png')});
     await page.getByRole('link', {name: 'Lessons settings'}).click();
     await page.getByRole('link', {name: /^Open Lessons/}).click();
     await page.getByText('Run the web tests with npm run test:web').first().waitFor();
-    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'still no nav entry');
+    // the page that is open always shows in the menu, marked, even under a closed More (D2 A)
+    assert.equal(await page.locator('#side-addons a[aria-current="page"]').filter({hasText: 'Lessons'}).count(), 1, 'the open Lessons page is not marked in the menu');
     await page.screenshot({path: path.join(OUT, 'lessons-page.png')});
     await page.locator('.acc summary').first().click();   // a row opens with one click: Edit and Delete sit inside
     await page.screenshot({path: path.join(OUT, 'lessons-page-open.png')});
