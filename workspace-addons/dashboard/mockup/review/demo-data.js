@@ -206,3 +206,25 @@ window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket
   if(it.kind==='check'&&it.preview&&it.preview.headline){it.title=it.preview.headline;delete it.preview.headline}});
  put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
  window.SWIPE_ITEMS=window.SWIPE_ITEMS.map((it,i)=>[it,i]).sort((a,b)=>ORDER.indexOf(a[0].lane)-ORDER.indexOf(b[0].lane)||a[1]-b[1]).map(x=>x[0])})();
+
+/* Focused review C (ORCH-2184, owner's words of 26 Nov): each card's attention group as orch/attention.py gives it
+   (Take your time: puts something live, you try it yourself, or its words name money, deleting, sending out, logins;
+   Quick look: only a passed test result, the Reviewer's proposed accept or a one-tap question; Short decision: the
+   rest, and anything unknown). One card has a deadline (orch ask --due) for the tile's "Next deadline". */
+(()=>{const G={quick:'Quick look',short:'Short decision',time:'Take your time'};
+ const RISK=/(€|\$|\bprice|\bpay|\bbuy|\bcost|delet|remov|publish|send\b|\bmail\b|customers|everyone|\blive\b|sign in|login|password|\bkey\b)/i;
+ const PROPOSED=['d5','x5','x4','d2'],NAMES=['o2','o3'];/* the Reviewer checked these (Reviewer mode propose); two are about words */
+ const of=it=>{const words=[it.title,it.text,it.ifWait].concat(it.facts||[]).filter(Boolean).join(' ');
+  if(NAMES.includes(it.id))return ['time','it is about words or names'];
+  if(PROPOSED.includes(it.id)&&it.kind==='check')return ['quick','the Reviewer proposes to accept'];
+  if(it.kindLabel==='Put it live')return ['time','it puts something live'];
+  if(it.kindLabel==='Try it yourself')return ['time','you try it yourself'];
+  if(RISK.test(words))return ['time','goes live or out to others'];
+  if(it.kindLabel==='Test results'&&!(it.preview&&it.preview.status&&it.preview.status.tone==='failed'))return ['quick','small and tested'];
+  if(it.proposal&&it.proposal.verdict==='accept')return ['quick','the Reviewer proposes to accept'];
+  if(it.oneTap)return ['quick','one tap, and you can undo it'];
+  if(it.kindLabel==='Document'&&!it.files)return ['quick','small and tested'];
+  return ['short',it.kindLabel==='Question'||it.kindLabel==='Choice'?'one clear question':'needs a look']};
+ const put=list=>list.forEach(it=>{const [g,why]=of(it);it.attention={group:g,name:G[g],why}});
+ put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
+ const t=new Date();t.setDate(t.getDate()+1);t.setHours(9,0,0,0);const d8=window.SWIPE_ITEMS.find(it=>it.id==='d8');if(d8)d8.due=t.toISOString()})();

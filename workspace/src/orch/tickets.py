@@ -4453,8 +4453,12 @@ def ask(
     if_wait: str | None = None,
     facts: list[str] | None = None,
     said: str | None = None,
+    due: str | None = None,
 ) -> tuple[dict, dict]:
-    """said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
+    """due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
+    stored as UTC (`due`), shown as "Next deadline" on Review and counted when it passes unanswered
+    (attention.week).
+    said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
     history:<at>, rules:<n>); orch copies the words, author and day from that record (orch/cardcontext.py) and
     refuses a reference that is not a person's words. No reference, no quote.
     if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
@@ -4551,6 +4555,7 @@ def ask(
     preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
 
     said_ref = (said or "").strip() or None
+    due_at = parse_time(due) if due and due.strip() else None
 
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
@@ -4589,6 +4594,8 @@ def ask(
             q["facts"] = facts
         if quoted:  # RULE A, as because (ORCH-2183)
             q["said"] = quoted
+        if due_at:  # RULE A (ORCH-2184)
+            q["due"] = due_at
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4628,6 +4635,7 @@ def question_digest(q) -> str:
         "if_wait",
         "facts",
         "said",
+        "due",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]

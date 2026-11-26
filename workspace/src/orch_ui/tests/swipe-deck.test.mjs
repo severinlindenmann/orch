@@ -564,3 +564,73 @@ test('switch off: no quote line', () => {
   const {host} = deck([asked({said: {who: 'you', src: 'chat', day: 'today', words: 'x', stale: ''}})]);
   assert.equal(host.querySelector('.swipe-said'), null);
 });
+
+// ORCH-2184 (Focused review C): behind decisionFirst the keys are 1 2 3 (the answers left to right, digits on the
+// buttons), J / K next and card before, M More, U undo, Esc o.onEscape; o.endView replaces the summary.
+const key = (host, k) => host.listeners.keydown.forEach(f => f({key: k, target: host, repeat: false, preventDefault() {}}));
+test('decision first: 1 2 3 answer, digits show on the buttons, J and K move, U takes back', async () => {
+  const {d, host, decided, talkBtn, noBtn, okBtn} = deck([draft('a'), draft('b'), draft('c')], {decisionFirst: true, canUndo: () => true, onUndo() {}});
+  assert.deepEqual([talkBtn, noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['1', '2', '3']);
+  key(host, 'j'); assert.equal(d.index, 1);
+  key(host, 'K'); assert.equal(d.index, 0);
+  key(host, '3'); await wait(160);
+  assert.deepEqual(decided.map(x => [x.id, x.v]), [['a', 'ok']]);
+  key(host, 'u');
+  assert.equal(d.index, 0, 'U brings the card back');
+  key(host, '2'); await wait(160);
+  assert.deepEqual(decided.map(x => x.v), ['ok', 'no']);
+});
+test('decision first: a Check card has two answers, so 1 and 2; M opens More; Esc goes to o.onEscape', () => {
+  let esc = 0;
+  const {host, noBtn, okBtn} = deck([check('a', {open: 'https://example.com/pr/1'}), check('b')], {decisionFirst: true, onEscape: () => { esc++; }});
+  assert.deepEqual([noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['1', '2']);
+  const sm = host.querySelector('.swipe-more summary');
+  let opened = 0; sm.onclick = () => { opened++; };
+  key(host, 'm'); assert.equal(opened, 1);
+  key(host, 'Escape'); assert.equal(esc, 1);
+});
+test('switch off: the keys stay the arrows; digits and J do nothing', async () => {
+  const {d, host, decided, okBtn} = deck([draft('a'), draft('b')]);
+  assert.equal(okBtn.querySelector('kbd').textContent, '→');
+  key(host, '3'); key(host, 'j'); await wait(160);
+  assert.equal(decided.length, 0); assert.equal(d.index, 0);
+});
+test('o.endView shows in place of the summary when every card is answered', async () => {
+  const end = new N('div'); end.className = 'attn-end';
+  const {host, okBtn} = deck([draft('a')], {decisionFirst: true, endView: () => end});
+  okBtn.click(); await wait(160);
+  assert.ok(host.querySelector('.attn-end'));
+  assert.equal(host.querySelector('.tally'), null);
+});
+
+// UI.attentionTiles (ORCH-2184): three tile buttons, an empty one says so and does nothing; no minutes
+test('attention tiles: counts, holds up work, the next deadline, and an empty tile', () => {
+  const UI = {}; const window = {UI};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const picked = [];
+  const row = UI.attentionTiles([
+    {group: 'quick', name: 'Quick look', count: 3, hold: 0},
+    {group: 'short', name: 'Short decision', count: 4, hold: 1, deadline: 'Next deadline: Release 0.42 · tomorrow 09:00'},
+    {group: 'time', name: 'Take your time', count: 0, hold: 0},
+  ], {onPick: g => picked.push(g)});
+  const tiles = row.querySelectorAll('.attn-tile');
+  assert.deepEqual(tiles.map(t => t.tag), ['button', 'button', 'button']);
+  assert.deepEqual(tiles.map(t => t.querySelector('.stat-label').textContent), ['Quick look', 'Short decision', 'Take your time']);
+  assert.equal(tiles[1].querySelector('.attn-tile-line').textContent, '1 holds up work');
+  assert.match(tiles[1].querySelector('.attn-due').textContent, /^Next deadline: Release 0\.42/);
+  assert.equal(tiles[2].querySelector('.stat-delta').textContent, 'Nothing waits here');
+  assert.equal(tiles[2].getAttribute('aria-disabled'), 'true');
+  assert.ok(!/min/.test(row.textContent), 'no minutes');
+  tiles[2].click(); tiles[0].click();
+  assert.deepEqual(picked, ['quick']);
+});
+test('a deck built again on the same host: only the newest one answers a key (ORCH-2184)', async () => {
+  const {host, decided} = deck([draft('a'), draft('b')]);
+  const UI2 = {toast() {}, statusIcon: () => new N('span'), reviewViewer() {}};
+  vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window: {UI: UI2}, document: doc, setTimeout, clearTimeout, performance, console, Promise});
+  const again = [];
+  UI2.swipeDeck(host, [draft('c')], {mode: 'desk', voice: false, onDecide: (it, v) => again.push([it.id, v])});
+  key(host, 'ArrowRight'); await wait(160);
+  assert.deepEqual(decided, [], 'the old deck stays quiet');
+  assert.deepEqual(again, [['c', 'ok']]);
+});

@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from orch import (
+    attention,
     cardkinds,
     dashshots,
     ghmerge,
@@ -57,6 +58,16 @@ def add_parsers(sub, common) -> None:
     s = r.add_subparsers(dest="sub", metavar="<command>")
     x = s.add_parser("list", parents=[common], help="what waits for an answer (or --answered)")
     x.add_argument("--answered", action="store_true", help="the answers already given, newest first")
+    x.add_argument(
+        "--group",
+        choices=("quick", "short", "time"),
+        help="only Quick look, Short decision or Take your time",
+    )
+    x.add_argument(
+        "--week",
+        action="store_true",
+        help="this week's undos, work sent back after an accept and missed deadlines",
+    )
 
     x = s.add_parser("answer", parents=[common], help="answer one card")
     x.add_argument("ticket")
@@ -488,6 +499,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         links=links,
         if_wait=getattr(args, "if_wait", None),
         facts=getattr(args, "fact", None),
+        due=getattr(args, "due", None),
         said=getattr(args, "said", None),
     )
 
@@ -558,7 +570,20 @@ def _answered(root: Path, limit: int | None = None) -> list[dict]:
     return out if limit is None else out[:limit]
 
 
+def _week(args, root: Path) -> None:
+    w = attention.week(root)
+    _out(
+        args,
+        w,
+        f"Last 7 days: {w['undos']} taken back, {w['sent_back_later']} sent back after an accept, "
+        f"{w['missed_deadlines']} missed deadline{'' if w['missed_deadlines'] == 1 else 's'}.\n"
+        "Next: if these grow, answer Quick look cards one at a time: orch review list --group quick",
+    )
+
+
 def _list(args, root: Path) -> None:
+    if getattr(args, "week", False):
+        return _week(args, root)
     if args.answered:
         rows = _answered(root)
         lines = [
@@ -569,6 +594,9 @@ def _list(args, root: Path) -> None:
         _out(args, rows, "\n".join(["Answered (newest first)", *lines]) if rows else "Nothing answered yet.")
         return
     cards = review.stack(root)
+    group = getattr(args, "group", None)
+    if group:  # ORCH-2184: the same groups the Review page's tiles show
+        cards = [c for c in cards if (c.get("attention") or {}).get("group") == group]
     n = len(cards)
     lines, lane = [], None
     for c in cards:  # grouped as on the Review page (R2 A): what holds up work first, then by what you do
@@ -580,10 +608,11 @@ def _list(args, root: Path) -> None:
         lines.append(
             f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{name}]  {c['card'].get('title', '')}"
         )
+    where = f" in {attention.GROUPS[group]}" if group else ""
     text = (
-        "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.", *lines])
+        "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you{where}.", *lines])
         if cards
-        else "Nothing waits for you."
+        else f"Nothing waits for you{where}."
     )
     _out(args, {"workspace": root.name, "cards": cards}, text)
 

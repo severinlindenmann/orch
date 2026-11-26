@@ -2868,3 +2868,20 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .swipe-said-open{color:var(--brand);text-decoration:underline;text-underline-offset:2px}
 .swipe-said-stale{color:var(--warning);font-weight:600}
 @media (max-width:720px){.swipe-said{margin:0 var(--s4) var(--s3)}}
+/* Attention tiles and rounds (ORCH-2184, Focused review C; UI.attentionTiles, UI.reviewPage with decisionFirst). A tile is a
+   .stat-tile that is a button; the round's bar names the group and leads back; the round's end is the deck's done view. */
+.review-attn{display:grid;gap:var(--s2);margin-bottom:var(--s3)}
+.review-attn .attn-h{margin:0;font-size:16px;line-height:24px}
+.stat-tile.attn-tile{font:inherit;color:inherit;text-align:left;cursor:pointer;align-content:start;transition:border-color var(--dur-fast) var(--ease-out)}
+.stat-tile.attn-tile:hover{border-color:var(--border-strong)}
+.stat-tile.attn-tile:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.stat-tile.attn-tile.is-empty{cursor:default}.stat-tile.attn-tile.is-empty:hover{border-color:var(--border)}.stat-tile.attn-tile.is-empty .stat-value{color:var(--text-muted)}
+.attn-tile-line{display:flex;align-items:center;gap:6px;font-size:var(--fs-meta);line-height:18px;color:var(--text-muted)}.attn-tile-line.attn-due{color:var(--warning)}
+.attn-round{display:flex;align-items:center;gap:var(--s2)}.attn-round .attn-round-h{margin:0;font-size:16px;line-height:24px}
+.review-attn .attn-keys{margin:0}
+@media(max-width:720px){.review-attn .attn-keys{display:none}.attn-tiles{grid-template-columns:1fr}}
+.swipe-done.attn-end{position:relative;inset:auto;justify-items:stretch;text-align:left;place-content:start stretch;max-width:560px;margin:0 auto}
+.attn-decided{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid var(--border)}
+.attn-decided-row{display:flex;gap:var(--s2);align-items:baseline;padding:var(--s2) 0;border-bottom:1px solid var(--border)}
+.swipe-done.attn-end .attn-still{margin:0;color:var(--text)}
+.attn-end-acts{flex-wrap:wrap}

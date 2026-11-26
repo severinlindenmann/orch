@@ -11,7 +11,11 @@
            hold (ms an answer waits before it is saved, default 6000, a little longer than the Undo toast: Undo takes it back for real until then, ORCH-183),
            ticketHref (ticket id -> link; the Answered list links each card's ticket key and title),
            ticketPanel (ticket id -> link; ORCH-1804: every waiting card gets "Open ticket", which shows its ticket beside the deck),
-           decisionFirst (true or a function: the decision-first card, ORCH-2182; see UI.swipeDeck)}
+           decisionFirst (true or a function: the decision-first card, ORCH-2182; see UI.swipeDeck). With it and more than 5
+               cards (ORCH-2184, Focused review C) three tiles sit over the deck: Quick look, Short decision, Take your
+               time (each card's attention.group from orch review list). A tile starts a round of up to 5 cards of that
+               group; the round ends on "What you decided", "Still waiting:", "Next N in <group>" and "Back to the start"
+               (also Esc). Groups only order the cards: nothing is answered by itself.}
    UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
    UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now, ticketHref, showTicket (false on the ticket's own page)}
    UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
@@ -65,6 +69,9 @@ const cardKindOf=c=>{const ck=c&&c.card_kind&&typeof c.card_kind==='object'?c.ca
  if(ck&&typeof ck.name==='string'&&ck.name&&LANES[ck.lane])return {name:ck.name.slice(0,40),icon:CARD_ICON[ck.kind]||kd[1],lane:ck.lane};
  return {name:kd[0],icon:kd[1],lane:PLAIN_LANE[k]||'look'}};
 const laneRank=it=>{const i=LANE_ORDER.indexOf(it&&it.lane);return i<0?0:i};
+/* ORCH-2184: attention groups (orch/attention.py). An item without a known group is a Short decision, never a Quick look */
+const GROUPS={quick:'Quick look',short:'Short decision',time:'Take your time'},GROUP_ORDER=Object.keys(GROUPS),ROUND=5;
+const attentionOf=c=>{const a=c&&c.attention&&typeof c.attention==='object'?c.attention:null,g=a&&GROUPS[a.group]?a.group:'short';return {group:g,name:GROUPS[g],why:a&&g===a.group&&typeof a.why==='string'?a.why.slice(0,120):''}};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -74,6 +81,9 @@ const fmtTime=(v,now)=>{const d=toDate(v);if(!d)return '';now=now||new Date();co
  if(diff===0)return 'today '+hm;if(diff===1)return 'yesterday '+hm;
  if(diff>1&&diff<7)return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+hm;
  return d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]};
+/* a deadline ahead: "today 09:00", "tomorrow 09:00", "Fri 09:00", else the day; one that passed reads as fmtTime */
+const fmtDue=(v,now)=>{const d=toDate(v);if(!d)return '';now=now||new Date();const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime(),ahead=Math.round((day(d)-day(now))/864e5),hm=pad(d.getHours())+':'+pad(d.getMinutes());
+ if(ahead<=0)return fmtTime(d,now);if(ahead===1)return 'tomorrow '+hm;if(ahead<7)return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+hm;return fmtTime(d,now)};
 
 /* "today", "yesterday", "on 21 Nov": the day a person's quoted words are from (ORCH-2183) */
 const fmtDay=(v,now)=>{const d=toDate(v);if(!d)return '';now=now||new Date();const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime(),diff=Math.round((day(now)-day(d))/864e5);
@@ -101,7 +111,7 @@ const resultTitle=k=>k.kind==='check'&&k.preview&&typeof k.preview.headline==='s
 const mapCard=(c,api,now)=>{const k0=c.card||{},head=resultTitle(k0),k=head?Object.assign({},k0,{title:head,preview:Object.assign({},k0.preview,{headline:undefined})}):k0,ck=cardKindOf(c),pr=c.proposal&&typeof c.proposal==='object'&&(c.proposal.verdict==='accept'||c.proposal.verdict==='back')?c.proposal:null;
  return {id:c.id,kind:k.kind,kindLabel:ck.name,icon:ck.icon,lane:ck.lane,laneName:LANES[ck.lane],proposal:pr?{verdict:pr.verdict,why:typeof pr.why==='string'?pr.why.slice(0,300):''}:undefined,ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runLogin:c.run_login&&typeof c.run_login==='object'?c.run_login:undefined,
-  text:typeof c.text==='string'?c.text:'',ifWait:typeof c.if_wait==='string'?c.if_wait.slice(0,200):'',said:mapSaid(c.said,now),facts:(Array.isArray(c.facts)?c.facts:[]).filter(f=>typeof f==='string'&&f.trim()).slice(0,4).map(f=>f.slice(0,200)),links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
+  attention:attentionOf(c),due:typeof c.due==='string'&&toDate(c.due)?c.due:'',text:typeof c.text==='string'?c.text:'',ifWait:typeof c.if_wait==='string'?c.if_wait.slice(0,200):'',said:mapSaid(c.said,now),facts:(Array.isArray(c.facts)?c.facts:[]).filter(f=>typeof f==='string'&&f.trim()).slice(0,4).map(f=>f.slice(0,200)),links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
@@ -231,12 +241,13 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const deckEl=el('section'),ansEl=el('section');deckEl.id='deck';deckEl.setAttribute('aria-label','Review deck');ansEl.id='answered';ansEl.hidden=true;ansEl.setAttribute('aria-label','Answered');
  const mkBtn=(label,view)=>{const b=el('button','btn sm');b.type='button';b.dataset.show=view;b.append(label,' ',el('span','meta',''));return b};
  const bWait=mkBtn('Waiting','deck'),bAns=mkBtn('Answered','answered'),nav=el('nav','segmented');nav.setAttribute('aria-label','Show');nav.append(bWait,bAns);
- if(o.nav)o.nav.append(nav);else host.append(nav);host.append(deckEl,ansEl);
+ const attnEl=el('div','review-attn');attnEl.hidden=true;/* ORCH-2184: the tiles, or the round's bar */
+ if(o.nav)o.nav.append(nav);else host.append(nav);host.append(attnEl,deckEl,ansEl);
  let deck=null,view='deck',timer=null,alive=true,dirty=false,loading=false;const gone=new Set();/* id@digest answered here */
  const holdMs=o.hold==null?6000:o.hold,held=new Map();/* id -> {body, it, t}: answers not saved yet */
  const sig=it=>it.id+'@'+it.digest;
  const waitCount=n=>{bWait.lastChild.textContent=n?String(n):'';bWait.setAttribute('aria-pressed',String(view==='deck'))};
- const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';if(v==='answered')drawAnswered();else if(deck)deckEl.focus({preventScroll:true})};
+ const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';attnEl.hidden=v!=='deck'||!attnEl.childElementCount;if(v==='answered')drawAnswered();else if(deck)deckEl.focus({preventScroll:true})};
  const signIn=()=>{deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}));waitCount(0)};
  const isAuth=e=>e&&(e.code==='needs_person'||e.status===401||e.status===403);
  const err=e=>{if(isAuth(e))return signIn();deck=null;deckEl.replaceChildren(UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:()=>load(true)}}));waitCount(0)};
@@ -247,13 +258,14 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
   const w=note&&note.changes,files=w&&Array.isArray(w.files)?w.files:[];if(w&&(w.text||(w.pins||[]).length||files.length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
   if(files.length)Object.defineProperty(body,'files',{value:files,enumerable:false});/* uploaded at save time (after Undo), never sent with the answer */
+  if(round&&round.ids.has(it.id)){round.decided=round.decided.filter(x=>x.id!==it.id);round.decided.push({id:it.id,title:it.title,word:verdict==='ok'?(it.okLabel||'Looks good'):verdict==='no'?(it.noLabel||(it.kind==='check'?'Send back':"Don't do")):'Comment'})}
   gone.add(sig(it));if(api.hold)api.hold(it,verdict);/* ORCH-548: the page shows the outcome at once, not after the save */
   /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
      or a newer answer saves it at once */
   const k=it.id;if(held.has(k))flushOne(k);held.set(k,{body,it,t:setTimeout(()=>flushOne(k),holdMs)})};
  const flushOne=k=>{const h=held.get(k);if(!h)return;held.delete(k);clearTimeout(h.t);post(h.it,h.body);if(deck&&deck.syncUndo)deck.syncUndo()};
  const flushAll=()=>[...held.keys()].forEach(flushOne);
- const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));if(api.release)api.release(h.it);return true};
+ const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);if(round)round.decided=round.decided.filter(x=>x.id!==it.id);clearTimeout(h.t);gone.delete(sig(h.it));if(api.release)api.release(h.it);return true};
  const named=(text,names)=>{const n=names.length,line='I added '+(n===1?'a file':n+' files')+' to this ticket: '+names.join(', ')+'.';return text?text+'\n\n'+line+' Read '+(n===1?'it':'them')+' first.':line+' Read '+(n===1?'it':'them')+' and carry on.'};
  const upload=(it,body)=>{const files=body.files;if(!files||!files.length||!api.attach)return Promise.resolve({ok:true});
   return Promise.resolve().then(()=>api.attach({ticket:it.ticketId,files})).then(r=>{if(!r||!r.ok)return r||{ok:false};
@@ -274,10 +286,11 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  let dfDrawn=false;const dfNow=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
  const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  dfDrawn=dfNow();deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,decisionFirst:o.decisionFirst,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  dfDrawn=dfNow();deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,decisionFirst:o.decisionFirst,...(round?{endView:roundEnd,onEscape:toStart}:{}),start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
- const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
+ const apply=(cards,force)=>{lastCards=cards;const all=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
+  if(round&&!dfNow())round=null;lastItems=all;const items=round?all.filter(i=>round.ids.has(i.id)):all;drawAttn(all);
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.',...(typeof o.empty==='function'?o.empty()||{}:{})}));waitCount(0);if(o.onChange)o.onChange(null);return}
   if(!items.length)return;/* everything answered here: keep the summary */
   const df=dfNow(),dfFlip=df!==dfDrawn;/* ORCH-2182: the switch changed (or the settings came after the first draw): draw again */
@@ -288,6 +301,31 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   const later=deck?[...deck.later].filter(id=>items.some(i=>i.id===id)):[];
   let first=-1;if(!deck&&o.startId){first=items.findIndex(i=>i.id===o.startId);o.startId=null}/* opened for one card (the ticket page's Look and answer) */
   build(items,at>0?at:first>0?first:0,later,pins)};
+ /* ---- ORCH-2184 (Focused review C, behind o.decisionFirst): tiles over the deck, rounds of up to 5 ---- */
+ let round=null,lastCards=[],lastItems=[],attnSig='';
+ const groupOf=it=>(it.attention&&it.attention.group)||'short';
+ const waitingNow=()=>lastItems.filter(i=>!gone.has(sig(i)));
+ const tileData=list=>{const due=list.filter(i=>i.due).sort((a,b)=>String(toDate(a.due).toISOString()).localeCompare(toDate(b.due).toISOString()))[0];
+  return GROUP_ORDER.map(g=>{const mine=list.filter(i=>groupOf(i)===g);return {group:g,name:GROUPS[g],count:mine.length,hold:mine.filter(i=>i.lane==='holds_up').length,
+   deadline:due&&groupOf(due)===g?'Next deadline: '+String(due.title||'').slice(0,48)+' · '+fmtDue(due.due,o.now):''}})};
+ const drawAttn=all=>{const on=dfNow()&&(round||all.length>ROUND);
+  const key=!on?'':round?'round:'+round.group:'tiles:'+JSON.stringify(tileData(all));if(key===attnSig)return;const was=attnSig;attnSig=key;
+  attnEl.replaceChildren();attnEl.hidden=!on||view!=='deck';if(!on)return;
+  if(round){const b=el('div','attn-round'),h=el('h2','attn-round-h',GROUPS[round.group]),back=el('button','btn ghost sm','Back to the start');back.type='button';back.onclick=toStart;
+   b.append(h,el('span','grow'),back);attnEl.append(b,el('p','meta attn-keys','Keys: the numbers answer, J next card, K card before, U undo, Esc close'))}
+  else attnEl.append(el('h2','attn-h','Pick where to start'),UI.attentionTiles(tileData(all),{onPick:startRound}));
+  if(was.split(':')[0]!==key.split(':')[0]&&window.orch&&window.orch.enter)window.orch.enter(attnEl)};
+ const startRound=g=>{const ids=waitingNow().filter(i=>groupOf(i)===g).slice(0,ROUND).map(i=>i.id);if(!ids.length)return;
+  flushAll();round={group:g,ids:new Set(ids),decided:[]};deck=null;apply(lastCards,true);if(deck){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
+ const toStart=()=>{flushAll();round=null;deck=null;apply(lastCards,true);const t=attnEl.querySelector('.attn-tile:not(.is-empty)');if(t)t.focus({preventScroll:true})};
+ const roundEnd=()=>{const d=el('div','swipe-done attn-end'),h=el('h3','','What you decided');h.tabIndex=-1;d.append(h);
+  if(round&&round.decided.length){const ul=el('ul','attn-decided');round.decided.forEach(x=>{const li=el('li','attn-decided-row');li.dataset.row='';li.append(el('span','grow',x.title),el('span','meta',x.word));ul.append(li)});d.append(ul)}
+  const rest=waitingNow(),left=GROUP_ORDER.map(g=>[g,rest.filter(i=>groupOf(i)===g).length]).filter(x=>x[1]);
+  if(left.length)d.append(el('p','attn-still','Still waiting: '+left.map(([g,n])=>n+' in '+GROUPS[g]).join(', ')));
+  const row=el('div','row attn-end-acts'),nx=left.find(x=>round&&x[0]===round.group)||left[0];
+  if(nx){const b=el('button','btn primary','Next '+Math.min(ROUND,nx[1])+' in '+GROUPS[nx[0]]);b.type='button';b.onclick=()=>startRound(nx[0]);row.append(b)}
+  const back=el('button','btn outline','Back to the start');back.type='button';back.onclick=toStart;row.append(back);d.append(row);
+  setTimeout(()=>{if(window.orch&&window.orch.enter)window.orch.enter(d);if(d.isConnected&&view==='deck')h.focus({preventScroll:true})});return d};
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
  const ANS_STEP=50;let ansShown=ANS_STEP;
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
@@ -305,5 +343,5 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  if(typeof window.addEventListener==='function'){window.addEventListener('pagehide',flushAll);window.addEventListener('visibilitychange',onHide)}
  return {reload:()=>load(true),show:setView,destroy:()=>{flushAll();alive=false;clearInterval(timer);if(typeof window.removeEventListener==='function'){window.removeEventListener('pagehide',flushAll);window.removeEventListener('visibilitychange',onHide)}},get deck(){return deck},tick,get held(){return held.size}};
 };
-UI.review={mapCard,verdictWord,fmtTime,mapPreview,recordTitle,ticketLine,LANES,laneRank};
+UI.review={mapCard,verdictWord,fmtTime,fmtDue,mapPreview,recordTitle,ticketLine,LANES,laneRank,GROUPS,ROUND};
 })();

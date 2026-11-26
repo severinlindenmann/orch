@@ -21,6 +21,7 @@ class N {
   fire(t, e = {}) { (this.listeners[t] || []).forEach(f => f({preventDefault() {}, ...e})); }
   all(pred, out = []) { if (pred(this)) out.push(this); this.children.forEach(c => c.all(pred, out)); return out; }
   byClass(c) { return this.all(n => n.className.split(' ').includes(c)); }
+  querySelector(sel) { const c = /\.([\w-]+)/.exec(sel)?.[1]; return c ? this.byClass(c)[0] || null : null; }
 }
 
 function load() {
@@ -600,4 +601,72 @@ test('Reviewer mode propose: the card carries the proposal and suggests its butt
   assert.deepEqual({...it.proposal}, {verdict: 'accept', why: 'every part has evidence'});
   assert.equal(it.suggest, 'ok');
   assert.equal(UI.review.mapCard(card('z', {proposal: {verdict: 'merge'}}), fakeApi([[]]), NOW).proposal, undefined);
+});
+
+// ORCH-2184 (Focused review C): attention groups, tiles over the deck, rounds of up to 5, behind decisionFirst
+const grp = (id, g, extra = {}) => card(id, {attention: {group: g, why: 'x'}, ...extra});
+const mountTiles = async (stack, o = {}) => {
+  const env = load(), host = new N('main');
+  env.UI.attentionTiles = (groups, to) => { const n = new N('div'); n.className = 'attn-tiles'; n.groups = groups; n.pick = to.onPick; return n; };
+  const answers = [];
+  const api = fakeApi([stack], async b => { answers.push(b); return {ok: true}; });
+  const page = env.UI.reviewPage(host, api, {poll: 0, now: NOW, hold: 0, decisionFirst: true, ...o});
+  await flush();
+  const attn = () => host.byClass('review-attn')[0];
+  return {...env, host, page, attn, answers};
+};
+test('ORCH-2184: mapCard carries the group (unknown is a Short decision, never quick) and a real due time', () => {
+  const {UI} = load(), m = c => JSON.parse(JSON.stringify(UI.review.mapCard(c, fakeApi([[]]), NOW)));
+  assert.deepEqual(m(grp('a', 'quick')).attention, {group: 'quick', name: 'Quick look', why: 'x'});
+  assert.equal(m(grp('a', 'fast')).attention.group, 'short');
+  assert.equal(m(card('a')).attention.group, 'short');
+  assert.equal(m(card('a', {due: '2026-11-16T08:00:00Z'})).due, '2026-11-16T08:00:00Z');
+  assert.equal(m(card('a', {due: 'Friday'})).due, '');
+  assert.equal(UI.review.fmtDue('2026-11-16T08:00:00', NOW), 'tomorrow 08:00');
+});
+test('ORCH-2184: more than 5 cards: three tiles over the deck; a tile starts a round of up to 5 of its group', async () => {
+  const stack = [grp('q1', 'quick'), grp('q2', 'quick'), grp('s1', 'short'), grp('s2', 'short'), grp('s3', 'short'), grp('s4', 'short'), grp('s5', 'short'), grp('s6', 'short'),
+    grp('t1', 'time', {due: '2026-11-16T08:00:00', card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}})];
+  const {decks, attn} = await mountTiles(stack);
+  assert.equal(attn().hidden, false);
+  assert.equal(decks.at(-1).items.length, 9, 'the deck and the list keep every card');
+  const tiles = attn().byClass('attn-tiles')[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(tiles.groups.map(g => [g.group, g.count, g.hold]))), [['quick', 2, 0], ['short', 6, 0], ['time', 1, 1]]);
+  assert.equal(tiles.groups[2].deadline, 'Next deadline: Home block t1 · tomorrow 08:00');
+  tiles.pick('short');
+  const d = decks.at(-1);
+  assert.deepEqual([...d.items.map(i => i.id)], ['s1', 's2', 's3', 's4', 's5'], 'a round of 5');
+  assert.match(attn().textContent, /Short decision.*Back to the start/);
+  assert.match(attn().textContent, /Keys: the numbers answer, J next card, K card before, U undo, Esc close/);
+  assert.equal(typeof d.o.onEscape, 'function');
+  d.o.onEscape();
+  assert.equal(decks.at(-1).items.length, 9, 'Esc: back to the start');
+  assert.ok(attn().byClass('attn-tiles')[0]);
+});
+test('ORCH-2184: the round ends on What you decided, Still waiting and Next N; nothing is answered by itself', async () => {
+  const stack = [grp('q1', 'quick'), grp('q2', 'quick'), grp('q3', 'quick'), grp('s1', 'short'), grp('s2', 'short'), grp('s3', 'short')];
+  const {decks, attn, answers} = await mountTiles(stack);
+  attn().byClass('attn-tiles')[0].pick('quick');
+  const d = decks.at(-1);
+  assert.equal(answers.length, 0, 'starting a round answers nothing');
+  d.o.onDecide(d.items[0], 'ok'); d.o.onDecide(d.items[1], 'no'); d.o.onDecide(d.items[2], 'ok');
+  await flush();
+  assert.equal(answers.length, 3, 'only the three answers the person gave');
+  const end = d.o.endView();
+  assert.match(end.textContent, /^What you decided/);
+  assert.deepEqual(end.byClass('attn-decided-row').map(r => r.textContent), ['Home block q1Build it', "Home block q2Don't do", 'Home block q3Build it']);
+  assert.equal(end.byClass('attn-still')[0].textContent, 'Still waiting: 3 in Short decision');
+  const [next, back] = end.byClass('attn-end-acts')[0].children;
+  assert.equal(next.textContent, 'Next 3 in Short decision');
+  assert.equal(back.textContent, 'Back to the start');
+  next.onclick();
+  assert.deepEqual(decks.at(-1).items.map(i => i.id), ['s1', 's2', 's3']);
+});
+test('ORCH-2184: 5 cards or fewer, or the switch off: no tiles, the deck as today', async () => {
+  const few = await mountTiles([grp('a', 'quick'), grp('b', 'short')]);
+  assert.equal(few.attn().hidden, true);
+  const many = Array.from({length: 7}, (_, i) => grp('c' + i, 'short'));
+  const off = await mountTiles(many, {decisionFirst: false});
+  assert.equal(off.attn().hidden, true);
+  assert.equal(off.decks.at(-1).items.length, 7);
 });

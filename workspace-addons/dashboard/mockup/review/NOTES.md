@@ -152,3 +152,11 @@ both to the right at 1280 to 1920). Two or more cards show the list in the left 
   "You wrote" for your comment, "<name> wrote", "Team rule, <day>:" for `.orch/ask-when.md`. When the words or the
   ticket's goal changed after the quote: "This may be out of date"; words taken away or changed are not shown, and the
   card has no filled answer (it asks again).
+- 26 Nov (ORCH-2184, Focused review C): with `?decide=1` and more than 5 cards, three tiles sit over the deck: "Pick
+  where to start", Quick look / Short decision / Take your time (kit `UI.attentionTiles`, each card's group from
+  `orch review list` `attention`). A tile counts its cards, says how many hold up work, and the tile with the next
+  deadline (`orch ask --due`) says "Next deadline: <card> · <time>"; an empty one says "Nothing waits here". A tile
+  starts a round of up to 5 (the All cards list shows only those); the bar names the group with "Back to the start"
+  and the keys line. Keys: 1 2 3 the answers (digits on the buttons), J next card, K card before, M More, U undo, Esc
+  back to the start. The round ends on "What you decided", "Still waiting: …", "Next N in <group>" and "Back to the
+  start". Motion: the kit's page enter (`orch.enter`) for the tiles, a new card and the round's end. No minutes.

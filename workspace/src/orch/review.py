@@ -1835,6 +1835,8 @@ def stack(root: Path) -> list[dict]:
                             else {}
                         ),
                         **({"said": said} if said else {}),
+                        # ORCH-2184: the deadline the helper gave (orch ask --due), for "Next deadline"
+                        **({"due": q["due"]} if isinstance(q.get("due"), str) else {}),
                         **run_last(t, q, card, root),
                     }
                 )
@@ -1874,7 +1876,10 @@ def stack(root: Path) -> list[dict]:
             r["id"],
         )
     )
-    return out
+    # ORCH-2184: Quick look / Short decision / Take your time (only orders the work)
+    from orch import attention
+
+    return attention.tag(out)
 
 
 # ---------------------------------------------------------------- what a helper reads

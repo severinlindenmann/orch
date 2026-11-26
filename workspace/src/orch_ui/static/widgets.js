@@ -219,6 +219,10 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
        each only when given; the card's links and Open fold into one More menu. Off: the card as before
        With it, item.said ({who: you|person|rule, name, src, day, words, stale}, ORCH-2183) draws one line under the box:
        "You said on 21 Nov: “…” · open" (open = o.ticketLink), "This may be out of date" when stale
+       With it (ORCH-2184, Focused review C) the keys are 1 2 3 (the answers in the bar, left to right, the digits show
+       on the buttons), J next card, K card before, M opens More, U undo, Esc o.onEscape (a round: back to the start);
+       the arrow keys stay. A new card comes in with the kit's page motion (orch.enter). o.endView(): the element shown
+       when every card is answered, in place of the summary (a round's "What you decided")
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -467,12 +471,15 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
   count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';syncTop();
   ticked=ticked.filter(r=>parseRef(r));if(!pairRefs())showing=false;const pr=pairNow();host.classList.toggle('pairing',!!pr);syncJump(pr);
-  if(idx>=n&&!pr){acts.hidden=true;stage.append(summary());change();return}
+  if(idx>=n&&!pr){acts.hidden=true;stage.append(typeof o.endView==='function'?o.endView():summary());change();return}
   /* two side by side: each side has its own answers, the shared bar steps aside (ORCH-477) */
   if(pr){acts.hidden=true;stage.append(pairView(pr));change();return}acts.hidden=false;
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
-  stage.append(cur);syncWords();wire(cur);change()};
+  stage.append(cur);syncWords();numKeys();wire(cur);if(decisionFirst()&&shownId!==items[idx].id&&window.orch&&window.orch.enter)window.orch.enter(cur);shownId=items[idx].id;change()};
+ /* ORCH-2184: with decisionFirst the answers in the bar are 1 2 3 (left to right) and their digits show on them */
+ let shownId=null;const keyed=()=>acts.hidden?[]:[talkBtn,noBtn,okBtn,...(ownRow.hidden?[]:ownRow.children)].filter(b=>!b.hidden&&!b.disabled);
+ const numKeys=()=>{if(!decisionFirst())return;keyed().forEach((b,i)=>{let k=b.querySelector('.act-label kbd');if(!k){k=el('kbd');b.querySelector('.act-label').append(k)}k.textContent=String(i+1)})};
  const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If it looks good: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
@@ -707,12 +714,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (pins[it.id]||[]).forEach((pn,i)=>zm.append(pinEl(pn,i)));
   foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);const cw=zm.querySelector('.swipe-compare');if(side&&cw)cw.view(side);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
  /* keys: only when the deck itself or the card has focus (a focused button keeps its own Space / Enter) */
- host.addEventListener('keydown',e=>{if(e.key==='Tab')return;const t=e.target;
+ const gen=host.__deckGen=(host.__deckGen||0)+1;/* a deck built again on the same host: only the newest one answers keys (ORCH-2184) */
+ host.addEventListener('keydown',e=>{if(host.__deckGen!==gen)return;if(e.key==='Tab')return;const t=e.target;
   if(overlay){if(e.key==='Escape'){e.preventDefault();const wasViewer=overlay.classList.contains('swipe-viewer');closeOverlay();wasViewer?render():reset(cur);return}
    if((e.key==='b'||e.key==='B')&&!t.closest('input,textarea')){const w=overlay.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}return}
   if(e.repeat)return;if(t!==host&&t.closest('button,a,input,textarea,select'))return;
   const k=e.key;/* side by side: the arrows do not answer (which side?); Esc goes back to one card */
   if(pairNow()){if(k==='Escape'){e.preventDefault();compare([])}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}return}
+  if(decisionFirst()){const lk=k.length===1?k.toLowerCase():k;/* ORCH-2184: 1 2 3 J K M U Esc */
+   if(/^[1-9]$/.test(k)){const b=keyed()[+k-1];if(b){e.preventDefault();b.click()}return}
+   if(lk==='j'){e.preventDefault();step(1);return}if(lk==='k'){e.preventDefault();step(-1);return}if(lk==='u'){e.preventDefault();undo();return}
+   if(lk==='m'){const sm=cur&&cur.querySelector('.swipe-more summary');if(sm){e.preventDefault();sm.click();sm.focus()}return}
+   if(k==='Escape'&&typeof o.onEscape==='function'){e.preventDefault();o.onEscape();return}}
   if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
   else if(k===' '){e.preventDefault();cur&&hasPreview(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
@@ -720,6 +733,20 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
+/* Attention tiles (ORCH-2184, Focused review C; owner's words of 26 Nov). UI.attentionTiles(groups, o) -> .stat-row of three
+   tile buttons: Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
+   deadline ("Next deadline: <card> · <time>", only on the tile that holds the next one)}]. A tile with nothing in it
+   says "Nothing waits here" and does nothing. o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
+UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken back afterwards.',short:'One clear question each.',time:'Big, public or hard to take back.'};
+ const row=el('div','stat-row attn-tiles');row.setAttribute('role','group');row.setAttribute('aria-label','Pick where to start');
+ (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0),b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
+  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
+  if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
+  if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
+  b.setAttribute('aria-label',g.name+', '+n+' waiting'+(n&&g.deadline?', '+g.deadline:''));
+  if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
+  b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
+ return row};
 })();
 /* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, commands, error, notice}) is the full-page login card
    ("Welcome", one token field, Log in) plus the way in for someone without a token (ORCH-1851): ask the person who
