@@ -929,3 +929,26 @@ def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
     assert check_view(page) is not None
     page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
     assert check_view(page) is None
+
+
+def test_conversations_block_is_checked_by_the_view_contract():
+    from orch_dashboard import views
+
+    msg = {
+        "id": "m_1",
+        "who": "you",
+        "at": "today 18:09",
+        "text": "Hi",
+        "state": {"label": "Not sent yet", "tone": "warn"},
+    }
+    conv = {
+        "id": "ws_abcde12345",
+        "name": "Sales",
+        "messages": [msg],
+        "offline": "Not sent yet: 1 message to Sales.",
+    }
+    base = {"schema": "orch.addon-view/1", "generated_at": "2026-11-25T10:00:00Z"}
+    ok = views.check_view({**base, "blocks": [{"type": "conversations", "items": [conv]}]})
+    assert ok and ok["blocks"][0]["items"][0]["messages"][0]["state"]["label"] == "Not sent yet"
+    bad = {**conv, "messages": [{**msg, "text": "<b>x</b>"}]}
+    assert views.check_view({**base, "blocks": [{"type": "conversations", "items": [bad]}]}) is None

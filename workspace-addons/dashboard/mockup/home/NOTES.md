@@ -99,3 +99,11 @@ Home: the question is body text; answering moves the card out, the next one in, 
   Needs you badge, and the quiet button under the tiles sits on the left edge at phone width.
 - Finished: the title, result and time sit close together (8 px), as drawn; links keep their 44 px touch area
   without stretching the line. No change to this page's markup was needed.
+
+## 26 Nov 2026 (ORCH-2169, RP8 B, RP4)
+
+- Menu labels follow the owner's naming: "Relay" (was Contacts) and "Publish" (was Shared / Shared links).
+- Home needs area: one quiet notice line "New contact: Marketing, connected by your admin. Their messages are on the
+  Relay page." with source "Relay" and a quiet "OK" button (same row pattern as `need-notice`). Added because RP8 B
+  lets a contact the admin connected show up without a click. Relay task questions use the RP4 words
+  ("Allow this task", "Always allow tasks from <name>", "Decline"); see `relay/relay.html`.

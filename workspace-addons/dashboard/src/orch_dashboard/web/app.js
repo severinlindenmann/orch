@@ -246,7 +246,7 @@ function offAddonName(hash) {
   const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
   return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
 }
-// The name a person sees for an add-on row: its menu label (Contacts), not its folder name (relay).
+// The name a person sees for an add-on row: its menu label (Relay), not its folder name (relay).
 function addonRowLabel(row) {
   return String(row?.label || '').trim() || capitalise(row?.name || '');
 }
@@ -542,7 +542,7 @@ function render(arrived = new Set()) {
   reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
     snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
-    // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
+    // Relay (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
   paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
@@ -1110,14 +1110,12 @@ main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
+  const convSend = event.target.closest('[data-conv-send]');
+  if (convSend) { convSendClick(convSend); return; }
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
   // checked id, the fingerprint that was shown and the name typed beside it.
-  const acceptControl = event.target.closest('[data-contact-accept]');
-  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
-  const withdrawControl = event.target.closest('[data-contact-withdraw]');
-  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
@@ -1220,6 +1218,7 @@ main.addEventListener('click', async event => {
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'relay-connect') { await relayConnect(); return; }
+  if (action === 'relay-note') { await relayNote(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
