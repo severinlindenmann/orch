@@ -105,14 +105,20 @@ def _take_secret(key: str) -> str:
     return plain
 
 
+def not_helper(by: str | None = None) -> None:
+    """Refuse an agent actor, an agent tool's environment and a process inside a helper run. No grant needed:
+    for steps a person may also do at a terminal (stored keys, a tool-check recipe)."""
+    if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
+        raise Refused(PERSON_ONLY)
+
+
 def person_only(root: Path, by: str | None = None, reading: bool = False) -> None:
     """THE person check for renewing a login, pasting a code and replacing a key, on every path. The one proof
     accepted: a one-time grant the dashboard's signed-in page session handed this call (kept as a hash in the
     guarded orch home, see grant). Refused for an agent actor, an agent tool's environment, a process inside
     a helper run, and every call without a grant, whatever its --by says. A terminal is no proof (a helper can
     fake one), so there is no terminal way in: a person at a terminal signs in with the tool itself."""
-    if (by or "").startswith("agent:") or tickets.agent_tool() or any(os.environ.get(k) for k in RUN_MARKS):
-        raise Refused(PERSON_ONLY)
+    not_helper(by)
     key = str(Path(root).resolve())
     if key in _GRANTED:
         return

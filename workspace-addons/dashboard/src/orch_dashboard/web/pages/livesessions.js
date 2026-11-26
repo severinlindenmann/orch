@@ -164,10 +164,18 @@ if (typeof module === 'object' && module.exports) {
           const marked = mark(list), sig = JSON.stringify([marked, groups]), first = !store.ready;
           store.list = marked; store.groups = groups; store.ready = true; store.windows = body.windows === true;
           if (first) setTimeout(moveOldPins, 0);
-          if (sig !== store.sig || first) { store.sig = sig; window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:list}})); }
-        }
-      } catch { /* offline or the server restarts: the next read tries again */ }
+          const was = store.failed;
+          store.failed = false;
+          if (sig !== store.sig || first || was) { store.sig = sig; window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:list}})); }
+        } else fail();
+      } catch { fail(); /* offline or the server restarts: the next read tries again */ }
       finally { store.busy = false; }
+    }
+    // A read that failed: the wall says so instead of loading for ever (the next tick tries again by itself)
+    function fail() {
+      if (store.failed) return;
+      store.failed = true;
+      window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:store.list}}));
     }
     function tick() {
       clearTimeout(store.timer);
@@ -188,6 +196,7 @@ if (typeof module === 'object' && module.exports) {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)
       get ready() { return store.ready; },
+      get failed() { return store.failed === true; },  // the last read did not answer (the wall's error state)
       get windows() { return store.windows === true; },  // no live screen backend there: one-step helpers show their log (ORCH-1797)
       get(ref) { return store.list.find(x => x.id === ref || (x.key && String(x.key).toLowerCase() === String(ref || '').toLowerCase())) || null; },
       refresh: read,
