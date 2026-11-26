@@ -477,7 +477,9 @@ function navAddons(pages, here, navLink) {
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
+  // ORCH-2159: changing Tickets filters is an in-page update. Keep the search input, caret and scroll.
+  const r = route(), sameTickets = r.kind === 'tickets' && renderedRoute.split('?')[0] === '#tickets' && ticketAddressKey === ticketAddressPart();
+  const changed = !!renderedRoute && renderedRoute !== r.hash && !sameTickets, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
