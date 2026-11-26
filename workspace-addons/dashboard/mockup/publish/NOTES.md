@@ -2,6 +2,7 @@
 
 ## publish.html — Shared links
 
+- `?state=empty&server=none` (ORCH-2017): no publish server yet. One master empty state (no Share a file, which would only fail) with its one next step, Shared link settings (R7.2).
 - The existing survey-results.html appears once, with HTML type, 319 bytes and a consistent expiry date (SN-11).
 - Share a file is a clear primary action; stopping sharing names the file and asks once (SN-11; BP-48).
 - Connection details move to add-on settings and the file gets a preview entry point (SN-03, SN-11).
