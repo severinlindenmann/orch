@@ -978,8 +978,8 @@ def _find(ticket: dict, qid: str) -> dict:
 
 
 def check_digest(ticket: dict, root: Path | None = None) -> str:
-    """What a person is shown of a Test results card: exactly check_card(ticket) (title, steps with their done and
-    won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
+    """What a person is shown of a Test results card: exactly check_card(ticket) (title, steps with their done
+    and won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
     shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket, root)}
     return _sha(_canon(shown).encode())
 
@@ -1211,7 +1211,7 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
-    """A Test results card as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
+    """A Test results card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
     and the parent. No preview when there is nothing to show (an empty box)."""
     rows, done, total = [], 0, 0
@@ -1530,8 +1530,8 @@ _LEFT_REVIEW = re.compile(
 
 
 def not_in_review(root: Path, ticket: dict) -> str:
-    """Why a Test results card cannot be answered any more (ORCH-548), in one line with what to do: who moved the
-    ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
+    """Why a Test results card cannot be answered any more (ORCH-548), in one line with what to do: who moved
+    the ticket out of Review and when. A Looks good that arrives after the Reviewer, another tab or the phone
     decided
     then says what happened, never only "not waiting for your review"."""
     from orch.net import when
