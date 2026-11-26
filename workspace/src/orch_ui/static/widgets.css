@@ -1326,6 +1326,11 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
    phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
+/* ORCH-2202 (owner pick I a): the ticket page beside Focus goes to one column: Properties under Progress, in the page
+   (not the sticky side column), so no step text is cut; the side menu folds to its icon rail and Focus takes that room */
+body[data-live-narrow] .ticket-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .ticket-layout>.rail-sheet{position:static;max-height:none;overflow:visible;padding:var(--s4) 0 0;border-left:0;border-top:1px solid var(--border)}
+body[data-live-rail] .live-dock{--live-w:clamp(320px,calc(100vw - var(--sidebar-width) - 600px),760px)}
 body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */

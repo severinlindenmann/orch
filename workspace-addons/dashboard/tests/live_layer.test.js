@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy, liveLayerBottomCap, liveTreeLeaves, liveTreeSplit, liveTreeDrop, liveTreeSize, liveTreeEqual, liveTreeOk, liveTreeAt};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy, liveLayerBottomCap, liveTreeLeaves, liveTreeSplit, liveTreeDrop, liveTreeSize, liveTreeEqual, liveTreeOk, liveTreeAt, liveLayerRailWanted};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -586,4 +586,16 @@ test('the bottom panel keeps a card and its answers in reach while the page has 
   assert.equal(cap(900, true), 405);
   assert.equal(cap(1080, true), 486, 'tall windows keep the usual 45 %');
   assert.equal(cap(600, true), 340, 'never so small that a question card and the message box do not fit');
+});
+
+test('ORCH-2202 (owner pick I a): beside Focus on the right the side menu folds to its rail when the page would get under 560 px', () => {
+  assert.equal(L.liveLayerRailWanted(1280, 232, 620, true), true, '1280 x 772: the menu folds, Focus gets its room');
+  assert.equal(L.liveLayerRailWanted(1680, 232, 620, true), false, '1680 x 920: the page keeps more than 560 px, nothing folds');
+  assert.equal(L.liveLayerRailWanted(1280, 232, 620, false), false, 'only with Focus on the right');
+  assert.equal(L.liveLayerRailWanted(1100, 232, 620, true), false, 'under 1280 the menu is a rail already');
+  assert.equal(L.liveLayerRailWanted(1440, 232, 400, true), false, 'a narrower Focus the person dragged leaves the menu open');
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(css, /body\[data-live-narrow\] \.ticket-layout\{grid-template-columns:minmax\(0,1fr\)\}/, 'the ticket goes to one column');
+  const comp = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/components.css'), 'utf8');
+  assert.match(comp, /\.shell:is\(\[data-side=rail\],\[data-live-rail\]\)\{--sidebar-width:64px\}/, 'the same icon rail as Close menu');
 });

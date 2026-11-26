@@ -370,6 +370,15 @@ const LIVE_FOLD_KEY = 'orch.live.fold';
 function liveFoldRead(store) {
   try { const v = JSON.parse(store?.getItem(LIVE_FOLD_KEY) || '{}'); return {left:v?.left === true, right:v?.right === true}; } catch { return {left:false, right:false}; }
 }
+// ORCH-2202 (owner pick I a): the layer on the right beside a page at 1280 x 772. When the page would get under
+// LIVE_PAGE_FIT px with the layer at its wanted width (LIVE_LAYER_WANT, or the width the person dragged), the side menu
+// folds to its icon rail (the same rail as its own Close menu button, .shell[data-live-rail]) and the layer takes the room;
+// the page beside then goes to one column (body[data-live-narrow]: the ticket's Properties under its Progress). At
+// 1680 the page keeps more than that, so nothing folds. Only from 1280 px: narrower windows have the rail already.
+const LIVE_PAGE_FIT = 560, LIVE_LAYER_WANT = 620;
+function liveLayerRailWanted(win, side, want, right) {
+  return !!right && (Number(win) || 0) >= 1280 && (Number(win) || 0) - (Number(side) || 0) - (Number(want) || LIVE_LAYER_WANT) < LIVE_PAGE_FIT;
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -1142,6 +1151,7 @@ function liveLayerPad() {
   const tabbar = document.getElementById('tabbar'), tb = tabbar && getComputedStyle(tabbar).display !== 'none' ? tabbar.offsetHeight : 0;
   host.style.setProperty('--live-bottom', tb + 'px');
   const where = host.dataset.mode, panel = host.querySelector('.live-panel');
+  liveLayerRail(where === 'right' && !!panel);
   const pad = where === 'side' || where === 'full' ? 0 : host.offsetHeight;
   document.body.style.setProperty('--live-pad', pad + 'px');
   document.body.style.setProperty('--live-padr', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
@@ -1162,8 +1172,18 @@ function liveLayerPad() {
   }
   window.UI?.toastPlace?.();  // a toast already shown moves with the bar and the message box (ORCH-1359)
 }
+function liveLayerRail(right) {
+  const shell = document.querySelector('.shell');
+  if (!shell) return;
+  const wide = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width')) || 232;
+  const on = shell.dataset.side !== 'rail' && liveLayerRailWanted(document.documentElement.clientWidth, wide, liveLayerModel().width || LIVE_LAYER_WANT, right && !liveLayerPhone());
+  if (on === shell.hasAttribute('data-live-rail')) return;
+  shell.toggleAttribute('data-live-rail', on);
+  document.body.toggleAttribute('data-live-rail', on);
+}
 function liveLayerOff() {
   liveLayerInert(false);
+  liveLayerRail(false);
   document.getElementById('live-dock')?.remove();
   delete document.body.dataset.liveLayer;
   document.body.style.removeProperty('--live-pad');
