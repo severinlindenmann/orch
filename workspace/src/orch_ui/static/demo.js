@@ -10,6 +10,7 @@
     {label: 'Suggested answer', title: 'Send the report on Friday this week?', text: 'Task: Send the weekly report to the team leads.', options: [{text: 'No'}, {text: 'Yes', suggested: true}]},
     {label: 'Answered on another device', title: 'Include the draft invoices?', text: 'Task: Choose which invoices belong in the export.', options: [{text: 'Yes', suggested: true}, {text: 'No'}], result: {status: 409, other: {text: 'No', who: 'Marco', via: 'phone'}}},
     {label: 'Try again after an error', title: 'Save a copy of the report?', text: 'Task: Keep a copy with this week’s invoices.', options: [{text: 'Yes', suggested: true}, {text: 'No'}], result: {status: 503, message: 'Could not save your answer. Try again.'}},
+    {label: 'Plain: under a question the page already shows (ticket page)', title: 'The supplier can deliver on Tuesday or Thursday. Which day?', text: '', plain: true, options: [{text: 'Tuesday', suggested: true}, {text: 'Thursday'}]},
     {label: 'Long answers', title: 'Who should receive the invoice summary?', text: 'Task: Share the export. Some invoices include private customer details.', options: [
       {text: 'Send only to the finance team, with customer details included for reconciliation.', suggested: true},
       {text: 'Share with all team leads, with customer names and email addresses removed.'},
@@ -24,12 +25,13 @@
     reset.setAttribute('aria-label', 'Reset: ' + item.label);
     header.append(make('span', '', item.label), reset);
     const host = make('div');
-    wrapper.append(header, host);
+    wrapper.append(header, ...(item.plain ? [make('h3', '', item.title)] : []), host);
     document.getElementById('questions').append(wrapper);
     // A fresh state per reset also isolates any already-in-flight fake response.
     let controller;
     function mount() {
       controller = window.QuestionCard.mount(host, {ticket: 'demo-' + (i + 1), id: 'answer', title: item.title, text: item.text, options: item.options}, {
+        plain: item.plain === true,
         send: () => new Promise(resolve => setTimeout(() => resolve(item.result || {status: 200, who: 'Marco', via: 'dashboard'}), 300))
       });
     }
