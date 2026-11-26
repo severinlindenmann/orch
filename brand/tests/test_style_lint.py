@@ -1,5 +1,6 @@
 """R6.2 style lint: the repo is clean against the allowlist, and planted violations are caught."""
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,6 +17,14 @@ def test_repo_matches_allowlist():
 def test_count_hex_and_style():
     assert cs.count("a{color:#fff;background:#12ab34}") == {"hex": 2, "style": 0}
     assert cs.count("<style>x</style><STYLE>") == {"hex": 0, "style": 2}
+
+
+def test_scan_includes_tracked_non_ascii_paths(tmp_path):
+    name = "caf\u00e9 page.html"
+    (tmp_path / name).write_text("<style>x</style>", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", name], check=True)
+    assert cs.scan(tmp_path) == {name: {"hex": 0, "style": 1}}
 
 
 def test_false_positives_not_counted():
