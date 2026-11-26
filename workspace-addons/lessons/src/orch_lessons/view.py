@@ -71,6 +71,7 @@ def build(root) -> dict:
         "empty": {
             "title": "No lessons yet",
             "text": "Your helper adds a lesson when it learns something the next helper should know.",
+            "link": {"label": "Open tickets", "to": "app:tickets"},
         },
     }
     view = {
