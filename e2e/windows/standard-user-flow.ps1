@@ -17,7 +17,18 @@ Check (-not (Get-Command git -ErrorAction SilentlyContinue)) "git is not on PATH
 
 L "--- install"
 $env:ORCH_INSTALL_KIND = "test"   # a TEST install, like lane C's test network (install.ps1 reads it)
-try { Get-Content $env:ORCH_INSTALL_PS1 -Raw | Invoke-Expression *>&1 | Out-String | % { L $_ } } catch { L "install threw: $_" }
+$inst = ""
+try { $inst = Get-Content $env:ORCH_INSTALL_PS1 -Raw | Invoke-Expression *>&1 | Out-String; L $inst } catch { L "install threw: $_" }
+# The init line the installer printed (plain orch, or the installed orch.exe by its full path) must start the orch it
+# installed, in a fresh PowerShell with this window's Path (ORCH-2109).
+$exe = Join-Path "$(uv tool dir --bin)" "orch.exe"
+$line = ([regex]::Match($inst, '(?m)^\s+(.+?) init\s+local tickets: enough to start')).Groups[1].Value
+# Plain orch: where PowerShell finds it. A full path: the quoted path as PowerShell reads it back.
+$where = if ($line -eq "orch") { "(Get-Command orch).Source" } else { $line.TrimStart("&").Trim() }
+$probe = "$line --version; $where"
+$ran = @(powershell -NoProfile -NonInteractive -Command $probe 2>&1 | % { "$_" })
+L "printed: $line init  ->  $($ran -join ' | ')"
+Check ($line -and "$($ran[0])" -match "^orch " -and $ran[-1] -eq $exe) "the printed init line starts the orch just installed ($exe)"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $v = orch --version 2>&1
 L "version: $v"
