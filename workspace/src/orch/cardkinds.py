@@ -7,7 +7,7 @@ that fit any work (taxes, a campaign, a trip, code): a person in marketing reads
 Families and kinds (`card_kind` on every `orch review list` item, additive):
 
 - answer (you decide): question, choice
-- look (you judge a result): before_after, pictures, document, changed_words, numbers, check_result
+- look (you judge a result): before_after, pictures, document, changed_words, numbers, test_results
 - click (only you may press it): put_live, run_it
 - help (the work needs you in person): try_yourself, stuck
 
@@ -35,7 +35,7 @@ KINDS = {  # kind -> (family, the name on the card)
     "document": ("look", "Document"),
     "changed_words": ("look", "Changed words"),
     "numbers": ("look", "Numbers"),
-    "check_result": ("look", "Check result"),
+    "test_results": ("look", "Test results"),
     "put_live": ("click", "Put it live"),
     "run_it": ("click", "Run it"),
     "try_yourself": ("help", "Try it yourself"),
@@ -74,7 +74,7 @@ def _of_preview(pv) -> str | None:
         if pv.get("diff"):
             return "changed_words"
         if pv.get("status") or pv.get("flow"):
-            return "check_result"
+            return "test_results"
         return "document"
     return None
 
@@ -109,7 +109,7 @@ def kind_of(card, *, question_kind: str | None = None, merge: bool = False) -> s
         if got:
             return got
         pv = card.get("preview") if isinstance(card.get("preview"), dict) else {}
-        return "check_result" if pv.get("chips") or pv.get("status") else "document"
+        return "test_results" if pv.get("chips") or pv.get("status") else "document"
     got = _of_preview(card.get("preview")) or _of_files(card.get("files"))
     if got:
         return got

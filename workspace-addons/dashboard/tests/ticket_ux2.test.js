@@ -301,11 +301,11 @@ test('ORCH-1716: the Needs you button counts tickets like its group, even when o
   assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
   assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
 });
-test('ORCH-1716: a result to check says Check result on the phone too, not the session Start', () => {
+test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});
-  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Check result');
+  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Test results');
   assert.equal(text(c.shortSide({id:'o', status:'open'}, {}, 'open')), 'Start', 'other rows keep the session button');
-  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Check result', 'the computer row says the same');
+  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Test results', 'the computer row says the same');
 });
 test('ORCH-1716: the Person choice lists each person once; picking one keeps every spelling of them', () => {
   const rows = [{id:'a', owner:'Severin'}, {id:'b', owner:'severin'}, {id:'c', owner:'lume'}, {id:'d', owner:'owner'}, {id:'e', owner:'human:Anna'}, {id:'f', owner:'agent:claude'}];

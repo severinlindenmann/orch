@@ -212,7 +212,7 @@ rules hold for any work: taxes, a campaign, a trip, a website. Ask yourself what
 |---|---|---|
 | an answer | 2 to 4 `--option`, one `--recommend` | Question (Decide, on top: it holds up work) |
 | a pick between ways they must see | `--choose` with a picture or line per option, `--suggest` | Choice |
-| a look at a result | `--before`/`--after`, pictures, a document, changed words (`diff`), numbers (`chart`, a table), what a check found (`status`, chips) | Before and after, Pictures, Document, Changed words, Numbers or Check result (Look at the result) |
+| a look at a result | `--before`/`--after`, pictures, a document, changed words (`diff`), numbers (`chart`, a table), what a check found (`status`, chips) | Before and after, Pictures, Document, Changed words, Numbers or Test results (Look at the result) |
 | a click only they may make | `--link --open <address>` (with `--merge` for a release), `--run "<orch setting>"` | Put it live or Run it |
 | them to do something in person | `--run "<a sign-in or a command only they can run>"` | Try it yourself |
 | nothing: you only report | nothing | no card: `orch ticket summary` |

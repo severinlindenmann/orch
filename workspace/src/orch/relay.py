@@ -1372,7 +1372,7 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
         "review": True,
     }
     rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
-    try:  # what the person is shown of the Check result; the phone echoes it in a verdict
+    try:  # what the person is shown of the Test results card; the phone echoes it in a verdict
         body["digest"] = rec["digest"] = review.check_digest(ticket, root)
         with contextlib.suppress(Refused):  # the Check card; one that fails the wire check goes without it
             wire = review.wire_card(review.check_card(ticket, root), {})

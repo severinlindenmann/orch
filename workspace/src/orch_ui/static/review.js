@@ -48,7 +48,7 @@
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
      hold(item, verdict) / release(item)  optional (ORCH-548): an answer was made (it waits o.hold ms for Undo, then
                   saves) / it was taken back (Undo) or not saved. The dashboard shows a Looks good ticket as Done meanwhile.
-   answer() error code 'decided': the Check result, or a question (ORCH-921), was decided elsewhere; the message says who and when.
+   answer() error code 'decided': the Test results card, or a question (ORCH-921), was decided elsewhere; the message says who and when.
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};

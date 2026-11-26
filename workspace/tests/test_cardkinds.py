@@ -38,7 +38,7 @@ PR = "https://github.com/acme/app/pull/12"
         ({"kind": "draft", "preview": {"type": "doc", "diff": [["-", "a"]]}}, {}, "changed_words"),
         ({"kind": "plan", "preview": {"type": "doc", "chart": {"bars": [1]}}}, {}, "numbers"),
         ({"kind": "draft", "preview": {"type": "table"}}, {}, "numbers"),
-        ({"kind": "draft", "preview": {"type": "doc", "status": {"tone": "done"}}}, {}, "check_result"),
+        ({"kind": "draft", "preview": {"type": "doc", "status": {"tone": "done"}}}, {}, "test_results"),
         ({"kind": "link"}, {}, "put_live"),
         ({"kind": "draft"}, {"merge": True}, "put_live"),
         ({"kind": "run", "run": {"class": "orch"}}, {}, "run_it"),
@@ -51,7 +51,7 @@ PR = "https://github.com/acme/app/pull/12"
         (
             {"kind": "check", "preview": {"type": "doc", "chips": [{"text": "All checks passed"}]}},
             {},
-            "check_result",
+            "test_results",
         ),
         ({"kind": "check", "preview": {"type": "doc"}}, {}, "document"),
     ],
@@ -64,10 +64,11 @@ def test_twelve_kinds_in_four_families_with_plain_names():
     assert len(cardkinds.KINDS) == 12
     assert {f for f, _ in cardkinds.KINDS.values()} == set(cardkinds.FAMILIES)
     # orch is for any work (owner, 25 Nov): no developer words on a card
+    # ("Test results" is the owner-picked name for the result card, 26 Nov, ORCH-2178)
     words = " ".join(
         [*cardkinds.FAMILIES.values(), *(n for _, n in cardkinds.KINDS.values()), *cardkinds.LANES.values()]
     )
-    for dev in ("merge", "pull request", "deploy", "CI", "test", "code", "commit", "diff"):
+    for dev in ("merge", "pull request", "deploy", "CI", "code", "commit", "diff"):
         assert dev.lower() not in words.lower().split()
 
 
