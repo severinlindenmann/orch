@@ -44,9 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -64,9 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       # The cross-tree scan lives in the workspace tests but also reads workspace-addons/, so it must run on
       # add-on-only changes, where the workspace job is skipped.
       - name: "tool-name-scan"
@@ -183,9 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -200,9 +194,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -223,9 +215,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -281,9 +271,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -309,9 +297,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - uses: actions/cache@v4
         with:
@@ -338,9 +324,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
   page-smoke:
     # Runs whenever this workflow is called, also on a develop push that a green group proved (suites and
@@ -361,7 +345,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: false  # as before on orch mac
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -392,7 +378,9 @@ jobs:
         with:
           fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: false  # as before on orch mac
       - uses: actions/setup-node@v4
         with:
           node-version: 20

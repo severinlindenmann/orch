@@ -113,9 +113,7 @@ jobs:
         if: runner.os == 'macOS'
       - uses: ./.github/actions/edge-job-home
         if: runner.os == 'Linux'
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       # Windows: orch's safe git runs the python of the virtual environment as its `true` and refuses a python
       # inside the project folder, so every git test failed. Keep the environment outside the project (ORCH-32).
       - name: Virtual environment outside the project (Windows)
