@@ -40,7 +40,7 @@ module.exports = {
 
     await open('#addon/relay');
     const asks = page.locator('.trust-asks');
-    await asks.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Needs your Accept on Contacts:\n' + (await text()).slice(0, 800)); });
+    await asks.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Needs your Accept on Relay:\n' + (await text()).slice(0, 800)); });
     const card = id => page.locator(`article[data-contact="${id}"]`);
     const row = id => page.locator(`tr[data-contact="${id}"]`);
     // every state the page can show today, each with its fingerprint (8 groups of 4)

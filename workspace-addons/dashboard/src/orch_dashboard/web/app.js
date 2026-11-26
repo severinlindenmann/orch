@@ -238,7 +238,7 @@ function offAddonName(hash) {
   const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
   return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
 }
-// The name a person sees for an add-on row: its menu label (Contacts), not its folder name (relay).
+// The name a person sees for an add-on row: its menu label (Relay), not its folder name (relay).
 function addonRowLabel(row) {
   return String(row?.label || '').trim() || capitalise(row?.name || '');
 }
@@ -533,7 +533,7 @@ function render(arrived = new Set()) {
   reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
     snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
-    // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
+    // Relay (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
   paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons

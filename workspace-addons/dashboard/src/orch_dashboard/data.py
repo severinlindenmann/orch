@@ -1653,7 +1653,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "addons": [
             {
                 "name": r["name"],
-                "label": _label(r),  # the menu name (Shared links, Contacts), same as the sidebar
+                "label": _label(r),  # the menu name (Publish, Relay), same as the sidebar
                 "description": str(r.get("description") or "")[:200],
                 "active": r.get("active") is True,
                 "consent": _consent(r),
@@ -2270,7 +2270,7 @@ def _update_check() -> dict | None:
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
-    """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
+    """No sharing set up: the Publish tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
     if not tabs or publish_set_up(root):
         return addons

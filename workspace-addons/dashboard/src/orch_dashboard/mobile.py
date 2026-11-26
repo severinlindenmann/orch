@@ -234,7 +234,7 @@ MOBILE_OPS = {
     "message.send": _relay_send,
     "contact.accept": _contact_accept,  # the Contacts block (ORCH-1203)
     "contact.withdraw": _contact_withdraw,
-    "relay.connect": _relay_connect,  # Settings > Contacts paste (ORCH-1693)
+    "relay.connect": _relay_connect,  # Settings > Relay paste (ORCH-1693)
 }
 
 

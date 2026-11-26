@@ -131,12 +131,12 @@ function chatList() {
 // group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
 // let: pages/ticketchat.js adds the ticket chats
 let chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
-// The Contacts link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
+// The Relay link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
 // add-ons, so while it is off there is no link at all (R1.1: the relay stays invisible until turned on).
 function chatPhoneLink() {
   if (snapshot) return null;
   const phone = chatObjects(state?.addons).find(a => a?.dashboard?.panel === 'phone' && a.name);
-  return phone ? h('a', {className:'chat-phone-link', href:'#addon/' + phone.name, 'data-key':'phone-link'}, 'Contacts') : null;
+  return phone ? h('a', {className:'chat-phone-link', href:'#addon/' + phone.name, 'data-key':'phone-link'}, 'Relay') : null;
 }
 function chatOpenAgent() {
   if (snapshot) return;
@@ -560,7 +560,7 @@ const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false
 const CHAT_DM_POLL = 2000;
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
-// "Send a message" on Contacts already knows the name: the thread opens with it, before the contacts have loaded.
+// "Send a message" on Relay already knows the name: the thread opens with it, before the contacts have loaded.
 const chatDmNames = new Map();
 const chatDmHint = (ws, name) => { if (chatDmId(ws) && typeof name === 'string' && name.trim()) chatDmNames.set(ws, name.trim().slice(0, 80)); };
 // A contact's name for a raw workspace id ("agent:ws_..." as who answered): known contacts first, read once if none is

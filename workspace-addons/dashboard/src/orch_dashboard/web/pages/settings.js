@@ -781,7 +781,7 @@ function phonePanel(phoneAddon, settings) {
   const mm = snapshot ? null : window.OrchMobileMode?.settingsSection(h);
   const rowOf = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
   const btn = (label, cls, name, extra = {}) => snapshot ? null : h('button', {type:'button', className:'btn sm ' + cls, 'data-action':name, 'data-key':'phone-' + name, ...extra}, label);
-  const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Phone link'), h('div', {className:'card'},
+  const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay'), h('div', {className:'card'},
     rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
       settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No phone link connected')],
       h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
@@ -1439,7 +1439,7 @@ function shownAddon() {
   const r = route();
   return r.kind === 'addon' && !(r.id === SYNC && syncNative()) && panelOf(r.id) !== 'browser' ? r.id : null;
 }
-// The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
+// The address names a tab like its label: Helper is #settings/helper, Relay is #settings/relay.
 const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
 // Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> (one history entry, so Back returns to the tab before).
 function settingsGo(tab) {
