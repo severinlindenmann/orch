@@ -958,4 +958,6 @@ struct AnswerRequest: Codable, Sendable, Equatable {
     let questionMessageId: String; let answer: String; let clientId: String
     /// Review stack swipe (phone-api.schema.json answer_request.verdict). `answer` stays the plain summary line.
     var verdict: ReviewVerdict? = nil
+    /// The phone's signature over the answer (ORCH-1204), only for a question that came signed; nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 }

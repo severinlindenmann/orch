@@ -14,7 +14,7 @@ window.SWIPE_ITEMS=[
   href:'../ticket/ticket.html',preview:{type:'doc'}},
  /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
  {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer\'s second look?',
-  text:'Turn on the Reviewer\'s second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+  text:'Turn on the Reviewer\'s second look?',ifWait:'Bigger finished work is accepted after one look only.',facts:['Only bigger finished work gets the second look','One command turns it on, one turns it off again'],said:{who:'you',src:'chat',day:'on 21 Nov',words:'Bigger changes should get a second look before they are accepted.',stale:''},okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
   run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
  /* A sign-in (ORCH-865): Run it now opens the plain terminal with the sign-in started there; the card answers itself once
     the sign-in ended and its login check is green (here it only shows the waiting state). */
@@ -186,3 +186,54 @@ window.SWIPE_ITEMS=[
    ticket answer in one tap, Undo while it is held. Shown alone with review.html?one=1. */
 window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-70',ticketId:'DT-70',ticketTitle:'Answer the supplier about the delivery date',oneTap:true,when:'today 11:20',
  title:'The supplier can deliver on Tuesday or Thursday. Which day?',preview:{type:'options',options:[{id:'Tuesday',title:'Tuesday',suggested:true},{id:'Thursday',title:'Thursday'}]}};
+
+/* Review overhaul (owner's picks 25 Nov 2026): every card carries the name orch gives its kind and its lane (as
+   orch/cardkinds.py and UI.review.mapCard do), and the list shows what holds up work first, then by what you do. */
+(()=>{const LANE={holds_up:'Holds up work now',click:'Only you can press it',help:'Needs you in person',look:'Look at the result'},ORDER=Object.keys(LANE);
+ const of=it=>{const p=it.preview||{},files=it.files||[];
+  if(it.kind==='stuck')return ['Stuck','pause','holds_up'];
+  if(it.kind==='link')return ['Put it live','link','click'];
+  if(it.kind==='run')return it.run&&it.run.class==='orch'?['Run it','code','click']:['Try it yourself','user','help'];
+  if(p.type==='options')return p.before||(p.options||[]).some(o=>o.preview)?['Choice','cards','holds_up']:['Question','comment','holds_up'];
+  if(it.kind==='question')return ['Question','comment','holds_up'];
+  if(p.type==='compare')return ['Before and after','compare','look'];
+  if(p.type==='img'||p.type==='page'||files.some(f=>f.type==='img'||f.type==='page'))return ['Pictures','image','look'];
+  if(p.type==='table'||p.chart)return ['Numbers','chart','look'];
+  if(p.diff)return ['Changed words','diff','look'];
+  if(p.status||(p.chips||[]).length)return ['Test results','check','look'];
+  return ['Document','file','look']};
+ const put=list=>list.forEach(it=>{const [n,i,l]=of(it);it.kindLabel=n;it.icon=i;it.lane=l;it.laneName=LANE[l];
+  if(it.kind==='check'&&it.preview&&it.preview.headline){it.title=it.preview.headline;delete it.preview.headline}});
+ put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
+ window.SWIPE_ITEMS=window.SWIPE_ITEMS.map((it,i)=>[it,i]).sort((a,b)=>ORDER.indexOf(a[0].lane)-ORDER.indexOf(b[0].lane)||a[1]-b[1]).map(x=>x[0])})();
+
+/* Focused review C (ORCH-2184, owner's words of 26 Nov): each card's attention group as orch/attention.py gives it
+   (Take your time: puts something live, you try it yourself, or its words name money, deleting, sending out, logins;
+   Quick look: only a passed test result, the Reviewer's proposed accept or a one-tap question; Short decision: the
+   rest, and anything unknown). One card has a deadline (orch ask --due) for the tile's "Next deadline". */
+(()=>{const G={quick:'Quick look',short:'Short decision',time:'Take your time'};
+ const RISK=/(€|\$|\bprice|\bpay|\bbuy|\bcost|delet|remov|publish|send\b|\bmail\b|customers|everyone|\blive\b|sign in|login|password|\bkey\b)/i;
+ const PROPOSED=['d5','x5','x4','d2'],NAMES=['o2','o3'];/* the Reviewer checked these (Reviewer mode propose); two are about words */
+ const of=it=>{const words=[it.title,it.text,it.ifWait].concat(it.facts||[]).filter(Boolean).join(' ');
+  if(NAMES.includes(it.id))return ['time','it is about words or names'];
+  if(PROPOSED.includes(it.id)&&it.kind==='check')return ['quick','the Reviewer proposes to accept'];
+  if(it.kindLabel==='Put it live')return ['time','it puts something live'];
+  if(it.kindLabel==='Try it yourself')return ['time','you try it yourself'];
+  if(RISK.test(words))return ['time','goes live or out to others'];
+  if(it.kindLabel==='Test results'&&!(it.preview&&it.preview.status&&it.preview.status.tone==='failed'))return ['quick','small and tested'];
+  if(it.proposal&&it.proposal.verdict==='accept')return ['quick','the Reviewer proposes to accept'];
+  if(it.oneTap)return ['quick','one tap, and you can undo it'];
+  if(it.kindLabel==='Document'&&!it.files)return ['quick','small and tested'];
+  return ['short',it.kindLabel==='Question'||it.kindLabel==='Choice'?'one clear question':'needs a look']};
+ const put=list=>list.forEach(it=>{const [g,why]=of(it);it.attention={group:g,name:G[g],why}});
+ put(window.SWIPE_ITEMS);if(window.SWIPE_ONE)put([window.SWIPE_ONE]);
+ const t=new Date();t.setDate(t.getDate()+1);t.setHours(9,0,0,0);const d8=window.SWIPE_ITEMS.find(it=>it.id==='d8');if(d8)d8.due=t.toISOString()})();
+
+/* Focused review E (ORCH-2186): with ?decide=1 one ideas card (orch ask --idea): Keep / Later / No per idea, Save in the
+   bar; saving part is fine. In Take your time (you sort the ideas yourself), in the Look at the result lane. */
+(()=>{if(!/[?&]decide\b/.test(location.search))return;const L=window.SWIPE_ITEMS,at=L.findIndex(it=>it.lane==='proposed');
+ const ideas=['One winter with a heat pump: the Meier family, 3 short posts','Advent calendar with 24 saving tips','Answer the 5 most asked questions, one per week','60-second video with an installer (CHF 900 for the filming)','Live question hour on LinkedIn'];
+ L.splice(at<0?L.length:at,0,{id:'i1',kind:'draft',kindLabel:'Document',icon:'file',lane:'look',laneName:'Look at the result',ticket:'NOR-76',ticketId:'t_nor76',ticketTitle:'Content ideas for December',
+  title:'Content ideas for December',text:'Which content ideas should the helper work out?',ifWait:'Nothing is held up. December planning starts next week.',
+  facts:['Posts with a real customer got 3 times more clicks than product posts in October','Video is missing: 0 of 22 posts last month','Three ideas need no budget'],
+  ideas,preview:{type:'doc',steps:ideas},attention:{group:'time',name:'Take your time',why:'you sort the ideas yourself'}})})();
