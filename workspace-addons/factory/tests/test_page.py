@@ -834,7 +834,9 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea()")
+    early = js.index(
+        "view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea()"
+    )
     assert early < js.index("await read('/api/home', signal)")
     # the same box (and its typed text) stays when the list comes
     assert "const box = theIdea()" in js and "view.append(box, askRow(auto))" in js
