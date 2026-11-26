@@ -127,6 +127,16 @@
   focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
 
 
+## Visual polish (25 Nov 2026, ORCH-2094)
+
+- The mockup draws the page as the product does: the rail first (`stack review-rail`: Auto Reviewer, All cards, What the
+  Reviewer did), then `review-main` (tabs, deck, answered); All cards is the kit's own list (`deck.drawList`).
+- The card lines up with the heading and the tabs, and has 24 px inside every edge. A rail with nothing to show (one card,
+  no Auto Reviewer, nothing the Reviewer did) is hidden and the card column starts at the page edge.
+- One card says "1 thing waits on you." (no "most urgent first").
+- `review.html?empty=1`: nothing waits. The master empty state "You're up to date" sits in the card column with one next
+  step, See answers; the heading line keeps "Nothing waits for you." so no sentence shows twice.
+
 ## Nothing to review (25 Nov 2026, ORCH-2024)
 
 `review.html?empty=1` is the product's empty Review page: subtitle "Nothing waits for you.", the Waiting / Answered
