@@ -66,6 +66,7 @@ HUMAN_ONLY = {
     "run stop",
     "run event",
     "run _wrap",
+    "run _resume",  # internal: detached agent start after a person answers (runs_live.resume_soon)
     "publish view",  # feeds the dashboard's Shared tab
     "dev-mark",  # test installs only: the e2e harness marks a demo workspace (never in an agent skill)
     "dev-proof",  # test installs only: the e2e harness's scripted test human (never in an agent skill)
