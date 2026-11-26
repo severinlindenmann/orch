@@ -426,8 +426,8 @@ def i1(e):
     rc, out, err = run("addon", "add", "automation", "--yes")
     check(rc == 0, f"add automation --yes: {(err or out)[-300:]}")
     lst = {x["name"]: x["active"] for x in json.loads(run("addon", "list", "--json")[1])}
-    check(lst.get("dashboard") is True and lst.get("automation") is True and lst.get("publish") is False
-          and lst.get("relay") is False, f"addon list {lst}")
+    check(lst.get("dashboard") is True and lst.get("automation") is True
+          and "publish" not in lst and "relay" not in lst, f"addon list {lst}")
     tools = (d / "uvtools" / "orch-workspace" / "uv-receipt.toml").read_text()
     check(tools.count(sha) >= 3 and "@main" not in tools, f"orch and add-ons not all from {sha[:8]}: {tools[-400:]}")
     rc, out, _ = run("automation", "--help")
