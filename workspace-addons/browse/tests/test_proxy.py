@@ -1,4 +1,5 @@
 import base64
+import json
 import socket
 
 from world import World
@@ -119,3 +120,60 @@ def test_one_checked_request_per_plain_connection(monkeypatch):
     finally:
         f.stop()
         w.stop()
+
+
+def _start(monkeypatch, mapping: str = ""):
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("ORCH_BROWSE_TEST_MAP", mapping)
+    f = Filter(lambda: ["site.test", "down.test"])
+    return f, f.start()
+
+
+def test_odd_requests_get_a_plain_refusal_and_reach_no_one(monkeypatch, tmp_path):
+    f, port = _start(monkeypatch)
+    try:
+        assert _ask(port, b"GARBAGE\r\n\r\n").startswith(b"HTTP/1.1 400")
+        assert _ask(port, b"CONNECT site.test:https HTTP/1.1\r\n" + _auth(f) + b"\r\n").startswith(
+            b"HTTP/1.1 400"
+        )
+        for target in (b"ftp://site.test/x", b"file:///etc/passwd", b"/relative"):
+            got = _ask(port, b"GET " + target + b" HTTP/1.1\r\n" + _auth(f) + b"\r\n")
+            assert got.startswith(b"HTTP/1.1 403") and b"not a web address" in got, target
+        chunked = b"Transfer-Encoding: chunked\r\n"
+        got = _ask(port, b"POST http://down.test/ HTTP/1.1\r\n" + chunked + _auth(f) + b"\r\n")
+        assert got.startswith(b"HTTP/1.1 403") and b"sends nothing" in got
+        assert f.blocked_hosts == {
+            "site.test": "not a web address",
+            "down.test": "this browser sends nothing",
+        }
+    finally:
+        f.stop()
+
+
+def test_a_huge_head_is_refused(monkeypatch):
+    f, port = _start(monkeypatch)
+    try:
+        big = b"GET http://site.test/ HTTP/1.1\r\nX-Fill: " + b"a" * (70 * 1024)
+        assert _ask(port, big).startswith(b"HTTP/1.1 431")
+    finally:
+        f.stop()
+
+
+def test_a_listed_site_that_does_not_answer_is_a_502_and_logged(monkeypatch, tmp_path):
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    closed = s.getsockname()[1]
+    s.close()
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("ORCH_BROWSE_TEST_MAP", f"down.test=127.0.0.1:{closed}")
+    log = tmp_path / "Netz Protokoll ä" / "net.jsonl"
+    log.parent.mkdir()
+    f = Filter(lambda: ["down.test"], log)
+    port = f.start()
+    try:
+        got = _ask(port, b"CONNECT down.test:443 HTTP/1.1\r\n" + _auth(f) + b"\r\n")
+        assert got.startswith(b"HTTP/1.1 502") and b"did not answer" in got
+    finally:
+        f.stop()
+    lines = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
+    assert [(x["host"], x["verdict"]) for x in lines] == [("down.test", "allowed")]

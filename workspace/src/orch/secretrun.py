@@ -161,11 +161,32 @@ def _write_record(root, ev):
 _TOO_MANY = "Refused: too many key uses outside a run today."
 
 
+def _shared_link_needles(root) -> dict:
+    """R5.1: the keys of shared links this workspace keeps (publish.share_file / deploy: the file keys behind
+    `#k=` and the app link tokens behind `?token=`). They are no stored keys of the key store, but an agent's
+    `orch publish file` output holds one, so the record hides them like one. Read here (not by importing
+    orch.publish) so a hook stays fast; nothing is read when nothing was ever shared."""
+    from orch import net
+
+    out = {}
+    for name, path in (
+        ("shared link key", net.secrets_dir(root) / "files" / "keys.json"),
+        ("app link", net.secrets_dir(root) / "apps" / "view-tokens.json"),
+    ):
+        saved = net.read_json(path, {}) if path.is_file() else {}
+        if not isinstance(saved, dict):
+            continue
+        values = sorted({v for v in saved.values() if isinstance(v, str) and len(v) >= 8})
+        if values:
+            out[name] = values
+    return out
+
+
 def record_writer(root):
     """The record writer with a hider built from THIS workspace's key store (the one place that wires it)."""
     from orch import record
 
-    needles = keystore.all_needles(root)
+    needles = {**keystore.all_needles(root), **_shared_link_needles(root)}
     if not needles:
         # ORCH-297: a workspace with no stored key has nothing to hide, but an empty hider counts as "key
         # hiding not ready" and recording stayed off for good (issue 1200). A random value nobody holds keeps
