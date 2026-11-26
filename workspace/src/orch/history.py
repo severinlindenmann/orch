@@ -48,6 +48,7 @@ RESERVED_AGENT_LABELS = ("sync",)
 OWN_LINES = (".orch", "run", "own-lines")  # local-only (run/ is never synced); one MAC'd file per ticket
 SYNC_REPO = (".orch", ".git")  # the sync add-on's state repository
 SYNC_RUN = (".orch", "run", "sync")  # the sync add-on's local records
+SYNC_CHOICE_ONLY = frozenset({"idle", "settings.json"})  # written while sync is left off; never shows use
 ENABLED_DIR = "sync-enabled"  # guarded orch home: <sha256("path:"+realpath)>.json and <sha256("ws:"+id)>.json
 OWN_MAX = 20_000  # digests kept per kind and ticket (the oldest go first)
 OWN_BYTES = 4 * 1024 * 1024  # a larger store file verifies nothing for THAT ticket only
@@ -313,10 +314,27 @@ def _state_key(root: Path) -> tuple:
     return tuple(out)
 
 
+def sync_run_used(root: Path) -> bool:
+    """The sync add-on's local records show it was used. A folder holding only the person's choice (sync left
+    off: SYNC_CHOICE_ONLY) does not: nothing was ever fetched (ORCH-2114). Anything else (an empty folder
+    too) or a folder that cannot be listed counts (fail closed)."""
+    p = Path(root, *SYNC_RUN)
+    if not os.path.lexists(p):
+        return False
+    try:
+        if os.path.islink(p) or not p.is_dir():
+            return True
+        names = os.listdir(p)
+    except OSError:
+        return True
+    return not names or not set(names) <= SYNC_CHOICE_ONLY
+
+
 def sync_enabled(root: Path) -> bool:
     """Is sync enabled for this workspace (now or ever)? Any of: the sync repository (.orch/.git), the sync
-    add-on's local records (.orch/run/sync), the enabled record (keyed by real path AND workspace id), or a
-    ticket showing sync's traces. Only "none of these" is sync-free. `root` is required."""
+    add-on's local records (.orch/run/sync, beyond a left-off choice), the enabled record (keyed by real path
+    AND workspace id), or a ticket showing sync's traces. Only "none of these" is sync-free. `root` is
+    required."""
     if root is None:
         raise TypeError("history.sync_enabled needs the workspace root")
     root = Path(root)
@@ -325,7 +343,7 @@ def sync_enabled(root: Path) -> bool:
         return True
     # The two sync folders are checked every time: the cached "no" is keyed on folder times, and on Windows a
     # folder made within the same clock tick does not move them (winvm red on develop e38df1fc).
-    if os.path.lexists(Path(root, *SYNC_REPO)) or os.path.lexists(Path(root, *SYNC_RUN)):
+    if os.path.lexists(Path(root, *SYNC_REPO)) or sync_run_used(root):
         _ENABLED[rp] = True
         return True
     state = _state_key(root)

@@ -7,7 +7,7 @@
   .ticket-filters input,.ticket-select{min-height:36px}
   .ticket-row h3 a{min-height:0}
   .home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:32px}
-  .home-columns .ticket-title a,.home-columns .home-need>p a,.home-columns .see-all{min-height:0}
+  .home-columns .see-all{min-height:0}
   .message-field input,.message-field textarea,.notes-tools input{min-height:36px}
   .ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}
   .ticket-page .input{min-height:36px}
@@ -21,5 +21,4 @@
   /* Board: columns are lanes, cards carry a state accent (accepted Tickets draft) */
   /* Ticket: Progress and What was asked read as plain sections, not boxed cards (accepted Ticket draft) */
   .ticket-page .progress-card,.ticket-page .card.asked{background:none;border:0;padding:0}
-  .settings .switch{border-color:transparent}
 }

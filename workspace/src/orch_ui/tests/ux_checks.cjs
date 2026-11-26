@@ -8,6 +8,10 @@
 //   H10    an animation or transition still running when the person asked for reduced motion;
 //   H6     a control whose aria-label does not contain its visible text (label in name, WCAG 2.5.3);
 //   H1     text below 4.5:1 (3:1 at 24 px, or 18.66 px bold) against the colour behind it (logo tiles .li exempt);
+//   H6     a control with no name (an icon-only button needs aria-label);
+//   H3     the keyboard path: a modal dialog takes focus, keeps Tab and Shift+Tab inside, shows the focus mark there,
+//          closes on Escape and gives focus back to the button that opened it; a menu opens with Enter, moves into its
+//          items with the arrow keys, closes on Escape (focus back on its button) and on Tab; arrow keys move between tabs;
 //   a console error, an uncaught exception or a failed request.
 // Token contrast is checked without a browser in brand/tests/test_contrast.py; page-local colours by
 // scripts/check_style.py (A1). Everything else on the checklist is checked by eye (DESIGN.md says which).
@@ -116,6 +120,21 @@ function layoutProblems() {
     const px = parseFloat(s.fontSize); const large = px >= 24 || (px >= 18.66 && parseInt(s.fontWeight, 10) >= 700);
     if (ratio < (large ? 3 : 4.5) - 0.01) out.push(`text contrast ${ratio.toFixed(2)}:1 under ${large ? 3 : 4.5}:1: ${label(el)}`);
   }
+  // H6: every control has a name: its text, aria-label(ledby), a <label>, title or placeholder. Icons (aria-hidden) are no name.
+  const named = el => {
+    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    if (by.some(id => (document.getElementById(id)?.textContent || '').trim())) return true;
+    if (['aria-label', 'title', 'placeholder', 'alt'].some(a => (el.getAttribute(a) || '').trim())) return true;
+    if (el.labels && [...el.labels].some(l => l.textContent.trim())) return true;
+    if (el.tagName === 'INPUT' && ['submit', 'reset', 'button'].includes(el.type) && el.value.trim()) return true;
+    const text = n => [...n.childNodes].some(c => (c.nodeType === 3 && c.textContent.trim()) || (c.nodeType === 1
+      && c.getAttribute('aria-hidden') !== 'true' && ((c.tagName === 'IMG' && (c.alt || '').trim()) || text(c))));
+    return text(el);
+  };
+  for (const el of document.querySelectorAll(controls)) {
+    if (!shown(el) || el.closest('[aria-hidden=true]') || el.tabIndex < 0 && !el.matches('[role=tab]')) continue;
+    if (!named(el)) out.push(`control has no name (icon-only? add aria-label): ${el.outerHTML.slice(0, 80)}`);
+  }
   return out;
 }
 
@@ -130,6 +149,85 @@ function focusMark() {
     return (c.boxShadow && c.boxShadow !== 'none') || (n !== el && c.outlineStyle !== 'none' && parseFloat(c.outlineWidth) > 0); });
   const name = `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : ''} "${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}"`;
   return { name, ok: outline || ring };
+}
+
+// H3: the keyboard path through dialogs, menus and tabs, by real key presses.
+const KEY_WAIT = 260; // the overlay closes after its 100 ms fade
+async function keyboardPath(page, note) {
+  const where = () => page.evaluate(() => { const a = document.activeElement; return a ? a.outerHTML.slice(0, 60) : 'nothing'; });
+  // Dialogs: a button opens each closed dialog with Enter, as a person would.
+  const dialogs = await page.evaluate(() => { const ds = [...document.querySelectorAll('dialog')].filter(d => !d.open);
+    ds.forEach((d, i) => { d.dataset.uxcDialog = i; }); return ds.map(d => d.getAttribute('aria-label') || d.id || d.className || 'dialog'); });
+  for (let i = 0; i < Math.min(dialogs.length, 8); i++) {
+    const name = `dialog "${dialogs[i]}"`;
+    await page.evaluate(i => { const b = document.createElement('button'); b.type = 'button'; b.id = 'uxc-opener'; b.textContent = 'Open';
+      b.onclick = () => document.querySelector(`[data-uxc-dialog="${i}"]`)?.showModal(); document.body.prepend(b); b.focus(); }, i);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(KEY_WAIT);
+    const inside = () => page.evaluate(i => { const d = document.querySelector(`[data-uxc-dialog="${i}"]`); return !!d && d.open && d.contains(document.activeElement); }, i);
+    if (!(await inside())) note(`${name}: focus did not move into the dialog when it opened (on ${await where()})`);
+    if (!(await page.evaluate(i => !!document.querySelector(`[data-uxc-dialog="${i}"]`), i))) { await page.evaluate(() => document.getElementById('uxc-opener')?.remove()); continue; }
+    const stops = await page.evaluate(i => document.querySelector(`[data-uxc-dialog="${i}"]`).querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex]').length, i);
+    for (const key of [...Array(Math.min(stops + 2, 24)).fill('Tab'), 'Shift+Tab', 'Shift+Tab']) {
+      await page.keyboard.press(key);
+      if (!(await inside())) { note(`${name}: ${key} let focus leave the open dialog (focus trap) to ${await where()}`); break; }
+      const f = await page.evaluate(focusMark);
+      if (f && !f.ok) { note(`${name}: no focus mark on ${f.name}`); break; }
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(KEY_WAIT);
+    const after = await page.evaluate(i => ({ open: document.querySelector(`[data-uxc-dialog="${i}"]`)?.open,
+      back: document.activeElement === document.getElementById('uxc-opener') }), i);
+    if (after.open) note(`${name}: Escape did not close the dialog`);
+    else if (!after.back) note(`${name}: Escape did not give focus back to the button that opened the dialog (on ${await where()})`);
+    await page.evaluate(i => { const d = document.querySelector(`[data-uxc-dialog="${i}"]`); if (d?.open) HTMLDialogElement.prototype.close.call(d); document.getElementById('uxc-opener')?.remove(); }, i);
+    await page.waitForTimeout(KEY_WAIT);
+  }
+  // Menus: details with a .menu / .menu-pop (the master's menu button).
+  const menus = await page.evaluate(() => { const ms = [...document.querySelectorAll('details')].filter(d => !d.open && d.querySelector(':scope>summary')
+      && (d.querySelector('.menu,.menu-pop') || d.matches('.dropdown,.menu')) && d.querySelector(':scope>summary').getClientRects().length
+      && d.querySelector(':scope>summary').tabIndex >= 0 && d.querySelector(':scope>summary').getAttribute('aria-disabled') !== 'true');
+    ms.forEach((d, i) => { d.dataset.uxcMenu = i; }); return ms.map(d => d.querySelector(':scope>summary').textContent.trim().slice(0, 30) || d.className); });
+  for (let i = 0; i < Math.min(menus.length, 10); i++) {
+    const name = `menu "${menus[i]}"`;
+    // a page that draws itself again may replace the menu mid-check: then there is nothing left to check
+    const state = () => page.evaluate(i => { const d = document.querySelector(`[data-uxc-menu="${i}"]`); if (!d) return { gone: true }; const s = d.querySelector(':scope>summary');
+      return { open: d.open, inItem: d.contains(document.activeElement) && document.activeElement !== s, onButton: document.activeElement === s }; }, i);
+    const open = async () => { const on = await page.evaluate(i => { const s = document.querySelector(`[data-uxc-menu="${i}"]>summary`); s?.focus(); return !!s && document.activeElement === s; }, i);
+      if (!on) return { gone: true }; // never press Enter on whatever else has focus
+      await page.keyboard.press('Enter'); await page.waitForTimeout(50); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(50); return state(); };
+    let s = await open();
+    if (s.gone) continue;
+    // a menu the page fills only when it opens (the board's Move menu) has nothing to check in the gallery
+    const items = await page.evaluate(i => [...document.querySelectorAll(`[data-uxc-menu="${i}"] :is(a[href],button,input,select,textarea)`)]
+      .filter(n => !n.disabled && n.getClientRects().length).length, i);
+    if (!items) { await page.evaluate(i => { const d = document.querySelector(`[data-uxc-menu="${i}"]`); if (d) d.open = false; }, i); continue; }
+    if (!s.open || !s.inItem) { note(`${name}: Enter then ArrowDown did not move focus into the open menu (on ${await where()})`); }
+    else {
+      const f = await page.evaluate(focusMark);
+      if (f && !f.ok) note(`${name}: no focus mark on ${f.name}`);
+      await page.keyboard.press('Escape'); await page.waitForTimeout(50); s = await state();
+      if (!s.gone && (s.open || !s.onButton)) note(`${name}: Escape did not close the menu and give focus back to its button`);
+      s = await open();
+      if (s.inItem) { await page.keyboard.press('Tab'); await page.waitForTimeout(50); s = await state();
+        if (!s.gone && s.open && !s.inItem) note(`${name}: Tab moved focus out of the menu but left it open`); }
+    }
+    await page.evaluate(i => { const d = document.querySelector(`[data-uxc-menu="${i}"]`); if (d) d.open = false; }, i);
+  }
+  // Tabs: the arrow keys move to the next tab and choose it.
+  const lists = await page.evaluate(() => { const ls = [...document.querySelectorAll('[role=tablist]')].filter(l => l.querySelectorAll('[role=tab]').length > 1 && l.getClientRects().length);
+    ls.forEach((l, i) => { l.dataset.uxcTabs = i; }); return ls.length; });
+  for (let i = 0; i < Math.min(lists, 6); i++) {
+    const ok = await page.evaluate(i => { const l = document.querySelector(`[data-uxc-tabs="${i}"]`); if (!l) return null; const t = l.querySelector('[role=tab][aria-selected=true]') || l.querySelector('[role=tab]');
+      t.focus(); window.__uxcTab = t; return document.activeElement === t; }, i);
+    if (ok === null) continue;
+    if (!ok) { note(`tabs ${i + 1}: the chosen tab cannot take focus`); continue; }
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(50);
+    const moved = await page.evaluate(() => { const a = document.activeElement; return a !== window.__uxcTab && a?.getAttribute('role') === 'tab' && a.getAttribute('aria-selected') === 'true'; });
+    if (!moved) note(`tabs ${i + 1}: ArrowRight did not move to and choose the next tab`);
+    await page.evaluate(() => { window.__uxcTab?.click(); });
+  }
 }
 
 async function run(root, pages) {
@@ -160,6 +258,7 @@ async function run(root, pages) {
             seen.add(f.name);
             if (!f.ok) note(`no focus mark on ${f.name}`);
           }
+          await keyboardPath(page, note);
         }
         await ctx.close();
       }
@@ -179,9 +278,11 @@ async function run(root, pages) {
 }
 
 // --selftest: a page with one known fault of each kind must trip every check (a check that finds nothing is broken).
-const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion', 'contrast', 'label in name', 'console error'];
+const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion', 'contrast', 'label in name', 'console error', 'no name',
+  'focus trap', 'into the open menu', 'tabs'];
 
-(async () => {
+module.exports = { layoutProblems, focusMark, keyboardPath };
+if (require.main === module) (async () => {
   if (args.includes('--selftest')) {
     const found = (await run(path.join(__dirname, 'fixtures/ux_checks'), ['bad.html'])).join('\n');
     const missed = SELFTEST.filter(k => !found.includes(k));
@@ -194,5 +295,5 @@ const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion
     console.error(`UX CHECKS FAILED (${unique.length}):\n` + unique.map(x => '  - ' + x).join('\n'));
     process.exit(1);
   }
-  console.log(`ux checks ok: ${PAGES.join(', ')} at ${WIDTHS.join('/')} px, focus, reduced motion, contrast, label in name`);
+  console.log(`ux checks ok: ${PAGES.join(', ')} at ${WIDTHS.join('/')} px, focus, names, label in name, keyboard path, reduced motion, contrast`);
 })().catch(e => { console.error(e); process.exit(1); });

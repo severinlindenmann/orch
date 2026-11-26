@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-TOKENS = json.loads((Path(__file__).resolve().parents[1] / "tokens.json").read_text())["color"]
+_RAW = json.loads((Path(__file__).resolve().parents[1] / "tokens.json").read_text())
+TOKENS = {**_RAW["color"], **_RAW["code"]}
 
 SURFACES = ["bg", "sidebar", "surface", "surface-2", "surface-3"]
 TEXT = ["text", "text-muted", "text-faint", "brand", "info", "warning", "success", "danger", "chart-4"]
@@ -65,6 +66,39 @@ def test_text_on_filled_buttons():
     for bg in ("brand", "brand-strong"):
         r = ratio("on-brand", bg)
         assert r >= 4.5, f"--on-brand on --{bg}: {r:.2f}:1, needs 4.5:1"
+
+
+SOFT = ["brand-soft", "info-soft", "warning-soft", "success-soft", "danger-soft"]
+CODE = list(_RAW["code"])  # syntax colours in .code-block (surface-2) and folded code (sidebar)
+# Named pairs the master uses together (alias tokens resolve through hex_of).
+PAIRS = [
+    ("brand-strong", "brand-soft"),  # selected chip
+    ("disabled-text", "disabled-bg"),
+    ("addon-text", "addon-soft"),
+    ("on-addon", "addon"),
+    ("brand-chip-text", "brand-soft"),
+    ("text", "nav-selected"),
+    ("text", "add-bg"),
+    ("text", "del-bg"),
+    ("ink", "paper"),
+] + [(s, "surface") for s in ("working", "needs-you", "review", "done", "paused", "failed")]
+
+
+@pytest.mark.parametrize("bg", SOFT)
+@pytest.mark.parametrize("fg", ["text", "text-muted", "text-faint"])
+def test_neutral_text_on_every_soft_background(fg, bg):
+    assert ratio(fg, bg) >= 4.5, f"--{fg} on --{bg}: {ratio(fg, bg):.2f}:1, needs 4.5:1"
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+@pytest.mark.parametrize("fg", CODE + ["brand-strong"])
+def test_code_and_strong_text_on_surfaces(fg, surface):
+    assert ratio(fg, surface) >= 4.5, f"--{fg} on --{surface}: {ratio(fg, surface):.2f}:1, needs 4.5:1"
+
+
+@pytest.mark.parametrize("fg,bg", PAIRS)
+def test_named_pairs(fg, bg):
+    assert ratio(fg, bg) >= 4.5, f"--{fg} on --{bg}: {ratio(fg, bg):.2f}:1, needs 4.5:1"
 
 
 @pytest.mark.parametrize("surface", SURFACES)

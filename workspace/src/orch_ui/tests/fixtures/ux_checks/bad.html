@@ -10,6 +10,10 @@
 <p><button id="nofocus" style="outline:none;box-shadow:none">No focus mark</button></p>
 <p><button aria-label="Switch person">Pick your name</button></p>
 <p><span id="spin" style="display:inline-block">moving</span></p>
+<p><button style="width:32px;height:32px"><svg aria-hidden="true" width="16" height="16"><circle cx="8" cy="8" r="6"></circle></svg></button></p>
+<dialog><p>No focus trap</p><button>One</button><button>Two</button></dialog>
+<details class="menu"><summary>No arrow keys</summary><div class="menu-pop"><button>Item one</button><button>Item two</button></div></details>
+<div role="tablist"><button role="tab" aria-selected="true">Tab one</button><button role="tab" aria-selected="false">Tab two</button></div>
 <script>
   // keeps moving although the person asked for reduced motion
   document.getElementById('spin').animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 1000, iterations: Infinity });

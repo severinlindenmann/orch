@@ -134,3 +134,24 @@ def test_uninstall_removes_only_the_untouched_check_template(proj, run):
     assert run("uninstall")[0] == 0
     assert (checks / "_template.json").read_text(encoding="utf-8") == '{"label": "mine"}\n'
     assert (checks / "gh.json").is_file()  # the workspace's own checks stay
+
+
+def test_uninstall_prints_no_line_from_an_add_on_stop_hook(proj, capfd, tmp_path, monkeypatch):
+    """ORCH-2116: the stop hook of a background add-on ran after its process was already stopped and printed
+    'The dashboard was not running.' above the summary; uninstall prints only its own Removed/Kept lines."""
+    from orch import addons, cli
+
+    assert cli.main(["init"]) == 0
+    mods = tmp_path.parent / f"{tmp_path.name}_mods"
+    mods.mkdir()
+    (mods / "fakebg.py").write_text("print('The fakebg was not running.')\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(mods))
+    addons._save_active(proj, {"fakebg": {}})
+    monkeypatch.setattr(addons, "consented", lambda root, name: True)
+    man = {"name": "fakebg", "background": True, "run": "fakebg"}
+    monkeypatch.setattr(addons, "discover", lambda: {"fakebg": man})
+    capfd.readouterr()
+    code = cli.main(["uninstall"])
+    out = capfd.readouterr().out
+    assert code == 0 and "Add-on fakebg" in out
+    assert "was not running" not in out

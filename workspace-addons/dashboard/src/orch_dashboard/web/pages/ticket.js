@@ -1911,8 +1911,8 @@ function ticketStripModel(t, run, fresh) {
   }
   if (q) {
     const ask = clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text || '') : q.text || '').replace(/\s+/g, ' ').trim();
-    // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
-    const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
+    // who asked: the agent stored on the question, else the agent on the ticket (as Home says it), else "Helper"
+    const asker = window.DashHelpers?.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, (run || state?.runs?.[t.id])?.claim) : 'Helper';
     return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
   }
   // ORCH-235: a dated or outside wait says what it waits for and until when, never "Needs you"
