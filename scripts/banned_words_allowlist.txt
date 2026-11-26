@@ -55,3 +55,4 @@ relay/tests/push_signed.rs
 scripts/mac-runner/setup.sh          # reads GitHub's fork setting; its API path and field name contain the word
 companion/mac/*                      # Apple code signing and notarization of the Mac app (Developer ID, ORCH-1497); "gate" = the agreement check
 workspace-addons/personal/tests/test_companion_update.py  # tests the Apple code-signing rule of orch Companion updates (ORCH-1497)
+e2e/scenarios_msgsig.py              # ORCH-1206: the end-to-end test of signed messages (R19)
