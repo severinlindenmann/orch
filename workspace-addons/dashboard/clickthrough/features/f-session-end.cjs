@@ -1,6 +1,6 @@
 // Stop and End session for every kind of session (ORCH-817): the Manager, the empty helper, the chat helper and the
-// plain terminal, from the pane header, a wall tile's More menu and the bar (a list row's More, a right-click on a
-// chip). The page's state is told the live-session add-on and the Preview switch are on. The plain terminal is real
+// plain terminal, from the pane header, a wall tile's More menu and the bar's Helpers menu (a row's More, a right-click
+// on a row). The page's state is told the live-session add-on and the Preview switch are on. The plain terminal is real
 // (`orch session new terminal`; End really ends it). No real helper can run here, so the three helpers are stand-ins
 // in the page's state and sessions answer, under made-up ids: their End goes to the real server (`orch session end
 // <kind>`, which answers that nothing is open), and their Stop goes to the real server too, which refuses it in plain
@@ -125,8 +125,9 @@ module.exports = {
     await act('session.end', () => page.locator('main [data-key="live-end-yes"]').click());
     ended.add('empty'); await seen(IDS.empty, false);
 
-    // 4. The bar: the plain terminal's chip (right-click), End session for real; no Stop for a terminal.
+    // 4. The bar: the plain terminal's row in the Helpers menu (right-click), End session for real; no Stop for a terminal.
     await open('#home');
+    await page.locator('#live-bar [data-lbar-list="helpers"]').click();
     const chip = page.locator(`#live-bar [data-lbar-open="${term.id}"]`);
     await chip.first().waitFor({ timeout: 15000 });
     await chip.first().click({ button: 'right' });
@@ -140,13 +141,11 @@ module.exports = {
     const after = JSON.parse(orch('session', 'list', '--json')).sessions.find(s => s.kind === 'terminal');
     must(after && !after.open, 'orch still lists the plain terminal as open after End session');
 
-    // 5. The bar's list row More: the Manager again (started), Stop from the bar.
+    // 5. The Helpers menu row's More: the Manager again (started), Stop from the bar.
     ended.delete('manager'); await seen(IDS.manager, true);
     await page.evaluate(() => window.paintLiveBar?.(true));
-    const row = page.locator(`#live-bar [data-key="bar-end-${IDS.manager}"]`);
-    if (!(await row.count())) {  // pinned: a chip, so its list is the Pinned count when the bar is folded; else right-click
-      await page.locator(`#live-bar [data-lbar-open="${IDS.manager}"]`).first().click({ button: 'right' });
-    } else await row.click();
+    await page.locator('#live-bar [data-lbar-list="helpers"]').click();
+    await page.locator(`#live-bar [data-key="bar-end-${IDS.manager}"]`).click();
     await act('run.interrupt', () => page.locator('#live-bar [data-key="live-end-menu"] [data-key="live-end-stop"]').click(), { refused: true });
   },
 };
