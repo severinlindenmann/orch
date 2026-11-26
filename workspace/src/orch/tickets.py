@@ -1422,8 +1422,8 @@ def _check_can_finish(ticket: dict, root: Path | None = None) -> None:
         hints = evidence_hints(root, ticket, bad)
         source = "" if hints[0].endswith('"<what shows it is done>"') else " (a suggestion: check it fits)"
         raise Refused(
-            f"Not done: {', '.join(bad)} is checked without evidence. Add evidence that fits each step{source}:\n"
-            + "\n".join(hints)
+            f"Not done: {', '.join(bad)} is checked without evidence. "
+            f"Add evidence that fits each step{source}:\n" + "\n".join(hints)
         )
 
 

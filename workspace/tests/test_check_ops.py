@@ -1020,9 +1020,7 @@ def _done_without_evidence(proj, tid):
 
 def test_done_without_evidence_prints_a_ready_line_per_step(proj, run, new_ticket):
     tid = with_checks(proj, run, new_ticket, n=2)
-    tickets.apply_op(
-        proj, tid, lambda t: [c.update(done=True) for c in t["checklist"]], by=tickets.SYSTEM
-    )
+    tickets.apply_op(proj, tid, lambda t: [c.update(done=True) for c in t["checklist"]], by=tickets.SYSTEM)
     key = tickets.load(proj, tid).get("key") or tid
     code, _, err = run("ticket", "status", tid, "done", "--by", "agent:claude")
     assert code == 2 and "c1, c2 is checked without evidence" in err
@@ -1036,7 +1034,9 @@ def test_evidence_line_suggests_the_last_commit(proj, run, new_ticket):
            "GIT_COMMITTER_EMAIL": "t@x"}  # fmt: skip
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "x"], cwd=proj, check=True, env=env)
-    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=proj, capture_output=True, text=True).stdout.strip()
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=proj, capture_output=True, text=True
+    ).stdout.strip()
     tid = with_checks(proj, run, new_ticket, n=1)
     _done_without_evidence(proj, tid)
     key = tickets.load(proj, tid).get("key") or tid

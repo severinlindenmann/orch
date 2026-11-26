@@ -51,12 +51,19 @@ L (cmd /c "orch config agent add fake --command `"$py $agent`" < NUL 2>&1" | Out
 L (O config agent fake | Out-String)
 Check ($LASTEXITCODE -eq 0) "a custom agent (the fake one) is chosen"
 
-$rep = ((O ticket new '"Scheduled smoke"' --json --by human:owner) | ConvertFrom-Json).id
+# Keep the complete creation response in the log before parsing it; never schedule an empty ticket ID.
+$out = O ticket new '"Scheduled smoke"' --json --by human:owner | Out-String; L $out
+$rep = ($out | ConvertFrom-Json).id
+Check ($LASTEXITCODE -eq 0 -and $rep) "created the repeat ticket"
+if (-not $rep) { L "RESULT fail: could not create the repeat ticket"; return }
 O check add $rep '"Say hello"' --by human:owner | Out-Null
 L (O automation repeat $rep '"every 5 minutes"' | Out-String)
 Check ($LASTEXITCODE -eq 0) "a repeat: every 5 minutes"
 
-$one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-Json).id
+$out = O ticket new '"Wake-up smoke"' --json --by human:owner | Out-String; L $out
+$one = ($out | ConvertFrom-Json).id
+Check ($LASTEXITCODE -eq 0 -and $one) "created the wake-up ticket"
+if (-not $one) { L "RESULT fail: could not create the wake-up ticket"; return }
 O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
