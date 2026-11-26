@@ -318,7 +318,7 @@
       ...(b.warn ? [meta('The time limit is nearly used up. Open the order to decide what happens next.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
-  // The page never writes by itself. "Ask me at every pause" goes to your helper in Chat as typed text (you press Send
+  // The page never writes by itself. "Change in Chat" (Pauses) opens Chat with a suggestion in the draft (you press Send
   // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
   // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
@@ -444,15 +444,25 @@
   // stays when the list arrives.
   let idea = null;
   const theIdea = () => idea || (idea = ideaBox());
+  // Pauses (ORCH-2065): the row says what the record says today and saves nothing. Change in Chat only opens Chat with
+  // a suggestion; the dashboard keeps a draft you already typed there (then the suggestion is not added) and never sends.
+  // An active Autopilot has limits (routine pauses only, its own orders and end date; never putting it live or
+  // anything that can't be undone), so the row never says an order runs without pauses.
   function askRow(auto) {
-    const asks = !auto?.on, row = group('setting-row f-ask');
-    const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every pause');
-    const word = node('span', asks ? 'On' : 'Off', 'meta');
-    input.addEventListener('change', () => { input.checked = asks; toChat(asks ? 'Factory: run to the end with Autopilot' : 'Factory: ask me at every stop again'); });
-    const label = node('label', null, 'row'); label.append(word, input);
-    row.append(node('div', 'Ask me at every pause', 'row-label'),
-      group('row-value', document.createTextNode('Factory waits for your OK after each step'), meta('Turn off to let it run to the end.')),
-      group('row-action', label));
+    const on = !!auto?.on, row = group('setting-row f-pauses');
+    const hint = meta('Opens Chat. Nothing is sent until you press Send.'); hint.id = 'f-pauses-hint';
+    const value = on
+      ? group('row-value', p('Autopilot may answer routine pauses until ' + when(auto.until) + '.'),
+        meta("Putting it live, and anything that can't be undone, still waits for your OK."), hint)
+      : group('row-value', p('Factory waits for your OK at every pause.'), hint);
+    let change;
+    if (embedded()) {
+      change = node('button', 'Change in Chat', 'btn outline sm f-btn'); change.type = 'button';
+      change.addEventListener('click', () => toChat(on ? 'Factory: I would like to be asked at every pause again.'
+        : 'Factory: I would like Autopilot to answer routine pauses. What would it cover?'));
+    } else change = link('Change in Chat', '/#chat');
+    change.setAttribute('aria-describedby', hint.id);
+    row.append(node('div', 'Pauses', 'row-label'), value, group('row-action', change));
     return group('card', row);
   }
   // Every card of one order on home carries its id, so a background update can find your place again, and its
@@ -506,7 +516,6 @@
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
         meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
-        meta('Your helper answers routine pauses. Putting it live still asks you.'),
         tail(link('What it decided', '#/autopilot')));
       autoCard.classList.add('f-autopilot'); view.append(autoCard);
     } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
