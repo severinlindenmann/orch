@@ -1254,3 +1254,13 @@ def test_a_newer_change_takes_back_the_older_one(ws, run):
     assert [q["id"] for q in run("show", order)["questions"] if q["kind"] == "factory:change"] == [second]
     run("change", order, "--file", "-", data=change_file(adds_min=40))  # the same change again: nothing more
     assert sum(q["answer"] is None for q in core(ws, "ticket", "show", order)["questions"]) == 1
+
+
+def test_a_crew_ticket_tells_its_agent_to_use_the_workspace_look_by_default(ws, run):
+    """#952: built apps use the workspace's own branding unless the order says otherwise; the agent reads the look
+    itself with plain orch commands, so a later change of the look counts."""
+    order, _ = started(ws, run)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    note = core(ws, "ticket", "show", tid)["note"]
+    assert note == flow.CREW_NOTE
+    assert "orch look show" in note and "orch look list" in note and "What the order says wins" in note
