@@ -11,10 +11,11 @@ The receiver is the decisive gate. It never trusts the relay's own check:
   and
   the replay list, and for a group copy the author's own signature.
 - First contact is trusted (RP3 A, 25 Nov 2026): the relay delivers only between workspaces the admin paired,
-  so a valid signature from the key the relay lists for a workspace nobody accepted yet is accepted on the spot
-  (by `relay-pairing`) and the message goes through the same checks. A key that CHANGES later, or a contact a
-  person took back (`withdraw`), is still held inert in the guarded home until a person presses Accept
-  (`accept`). A wrong, missing or invalid signature is never held: refused, counted and shown as Not valid.
+  so a valid signature from the key the relay lists for a workspace nobody accepted yet is accepted
+  on the spot (by `relay-pairing`) and the message goes through the same checks. A key that CHANGES later,
+  or a contact a person took back (`withdraw`), is still held inert in the guarded home until a person
+  presses Accept (`accept`). A wrong, missing or invalid signature is never held:
+  refused, counted and shown as Not valid.
 - Everything lives in the guarded orch home (keys/<workspace>/trust.json and held/), outside the workspace
   folder, so no helper, sync or relay can change who is accepted. Seen ids are kept 30 days.
 
@@ -541,7 +542,9 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
             # just verified with that key; the same checks (to, freshness, replay) run on it below.
             hint = _hint_key(root, frm)
             c = _contact(st, frm)
-            c["keys"] = [{"pub": hint.hex(), "accepted_at": _iso(now_ms), "by": "relay-pairing", "via": "pairing"}]
+            c["keys"] = [
+                {"pub": hint.hex(), "accepted_at": _iso(now_ms), "by": "relay-pairing", "via": "pairing"}
+            ]
             c["accepted_after_bad"] = int(c.get("not_valid", 0))
             try:
                 s = _check(root, st, m, env, {frm: [hint]}, now_ms, me)

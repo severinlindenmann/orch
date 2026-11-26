@@ -2996,7 +2996,9 @@ def test_relay_status_not_connected_says_how_to_connect(proj, run, rel):
     assert run("addon", "add", "relay", "--yes")[0] == 0
     code, out, _ = run("relay", "status")
     assert code == 0 and out.startswith("Not connected yet.")
-    assert "Next: run the lines from the text your admin gave you (they start with: orch relay connect)." in out
+    assert (
+        "Next: run the lines from the text your admin gave you (they start with: orch relay connect)." in out
+    )
 
 
 def test_addon_add_relay_says_it_is_not_connected_and_how_to_connect(proj, run, rel):
@@ -3004,7 +3006,9 @@ def test_addon_add_relay_says_it_is_not_connected_and_how_to_connect(proj, run, 
     assert code == 0 and "relay is turned on in this workspace." in out
     assert "It is not connected yet." in out
     last = out.strip().splitlines()[-1]
-    assert last == "Next: run the lines from the text your admin gave you (they start with: orch relay connect)."
+    assert last == (
+        "Next: run the lines from the text your admin gave you (they start with: orch relay connect)."
+    )
     assert "orch addon list" not in out
 
 
