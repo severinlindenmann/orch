@@ -115,6 +115,8 @@ async function screens() {
     at(`UX checks of the master gallery${extra.length ? ' (self-test)' : ''}`);
     if (await run([ux, ...extra]) !== 0) return false;
   }
+  at('Dialog close lifecycle (ORCH-2060): Cancel, Escape, nested, trigger gone, next dialog, file viewer');
+  if (await run([path.join(__dirname, '../workspace/src/orch_ui/tests/dialog_close.cjs')]) !== 0) return false;
   return true;
 }
 
