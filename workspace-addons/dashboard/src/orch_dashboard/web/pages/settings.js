@@ -234,7 +234,7 @@ const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-peopl
 // Shown when an add-on with live sessions is on and the core has the setting.
 function terminalTypingCard(settings) {
   const on = settings?.terminal_typing_on;
-  if (typeof on !== 'boolean' || !addons().some(a => a.active && a.page?.live_session === true)) return null;
+  if (typeof on !== 'boolean' || !addons().some(a => a.page?.live_session === true)) return null;
   return h('div', {className:'stack', 'data-key':'settings-terminal-typing'}, h('h2', {className:'set-sub'}, 'Plain terminal'),
     h('div', {className:'card'}, h('div', {className:'card-row name-row', 'data-key':'settings-terminal-typing-row'},
       h('div', {className:'grow'}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it. Only the owner can change this.')),

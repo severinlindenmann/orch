@@ -180,11 +180,10 @@ if (typeof module === 'object' && module.exports) {
       const head = l === 'pin' ? iconEl('pinned') : l === 'more' ? null : sym(l, LIVEBAR_LISTS[l].sym);
       const name = liveBarCountName(l, n, own, compact);
       const body = [compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact, words)), compact ? null : iconEl('up')];
-      const tag = compact && !words;  // the number alone: the name says what it counts
       // nothing that waits is a session here: the number leads to the Review page, where it is
-      if (l === 'wait' && !own) return h('a', {className:'lbar-cnt', href:'#review', 'data-key':'lbar-cnt-' + l, 'aria-label':compact && words ? null : name, title:name}, ...body);
+      if (l === 'wait' && !own) return h('a', {className:'lbar-cnt', href:'#review', 'data-key':'lbar-cnt-' + l, 'aria-label':name, title:name}, ...body);
       return h('button', {type:'button', className:'lbar-cnt', 'data-lbar-list':l, 'data-key':'lbar-cnt-' + l, 'aria-expanded':String(bar.list === l),
-        'aria-haspopup':'true', 'aria-label':tag || (!compact && (l === 'pin' || l === 'more')) ? name : null, title:compact ? name : null}, ...body);
+        'aria-haspopup':'true', 'aria-label':compact || l === 'pin' || l === 'more' ? name : null, title:compact ? name : null}, ...body);
     }
     function group(a, g, text, list) {
       return h('span', {className:'lbar-g', 'data-g':g, role:'group', 'aria-label':g === 'pin' ? 'Pinned' : text},
