@@ -58,7 +58,7 @@ const nodesOf = n => n && typeof n === 'object' ? [n, ...(n.children || []).flat
 test('in Check each step shows its evidence: completion note, what ran, the pull request link', () => {
   const ev = [{type:'command', ref:'pr-green.sh 1012', exit:0}, {type:'note', summary:'Merged on green CI.', ref:'pr-green: GREEN, 4 checks SUCCESS; merged as 0c49e136'},
     {type:'pr', ref:'https://github.com/o/r/pull/1012'}, {type:'command', ref:'pytest', exit:1}];
-  const t = {id:'t_1', status:'review', checklist:[{id:'c1', text:'Ship it', done:true, evidence:ev}], proof:{line:'1 check passed', level:'ok', uncovered:[], per_item:{c1:'passed'}}};
+  const t = {id:'t_1', status:'review', checklist:[{id:'c1', text:'Ship it', done:true, evidence:ev}], proof:{line:'1 task with evidence', level:'ok', uncovered:[], per_item:{c1:'passed'}}};
   const out = line(t), all = text(out);
   for (const bit of ['Merged on green CI.', 'merged as 0c49e136', 'Ran: pr-green.sh 1012', 'Ran: pytest (failed, exit 1)', 'PR #1012']) assert.ok(all.includes(bit), bit);
   const a = nodesOf(out).find(n => n.tag === 'a');

@@ -42,6 +42,8 @@ ask; its list replaces the one above.
 **Start or resume work**
 
     orch ticket list                      # pick the ticket that fits
+    orch ticket list --search "<words>"   # find one by words in its title, tasks or note, or its number (--all: finished too)
+    orch ticket list --waiting            # waiting on a person (a question); --blocked: on a time, a ticket or the outside
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
@@ -301,6 +303,7 @@ by itself. It is not your ticket's work: do not stop to wait for it, and do not 
     orch checks init                                   # the folder .orch/checks with a documented template
     orch checks run [<name>]                           # check now
     orch checks remove <name>
+    orch checks show <name>                            # the check file, its script and hash, and the approve line
     orch checks approve <name> --hash <h>              # the PERSON only, in their own terminal
 
 Only what the workspace added is checked, plus the login of the helper it uses: a tool that is merely set up on
@@ -308,8 +311,8 @@ this computer is not checked. Add a tool only when the person said the helpers u
 
 Your own check (any command or a small script, for example an API call with a key) goes in
 `.orch/checks/<name>.json`, written from `_template.json`. A new or changed check file runs only after the person
-approved it; you cannot approve it. Tell them to look at the file and run the approve command that
-`orch checks list` prints (it carries the file's short hash; a file changed after they looked is refused).
+approved it; you cannot approve it. Tell them to look at the file (`orch checks show <name>`) and run the approve
+command that `orch checks list` prints (it carries the file's short hash; a file changed after they looked is refused).
 
 Updates of these tools: `orch tools list` (installed and newest version) and `orch tools notes <name>`. Only the
 person updates a tool (Settings > About & updates); a check file may add an `update` block for its tool.

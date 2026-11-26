@@ -1,6 +1,6 @@
 /* Home cards share the shell's dark theme tokens. */
 .home-columns{align-items:start}
-.home-need,.home-work,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px}
+.home-need,.home-work,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:16px}
 .home-columns .ticket-title h3{margin:0;line-height:1.5}
 .home-columns p{margin:0}
 .home-columns summary,#connection .btn,#connection summary{min-height:44px}
@@ -15,8 +15,9 @@
 #connection{flex-wrap:wrap}#connection details{max-width:100%}#connection summary{display:flex;align-items:center;cursor:pointer}
 @keyframes home-shimmer{50%{opacity:.45}}
 .home-section>h2{font-size:14px;margin:0 0 12px}
-.home-columns .ticket-title a{text-decoration:none;display:inline-block;padding:11px 0}
-.home-columns .home-need>p a{display:inline-flex;align-items:center;min-height:44px}
+/* Inline padding: a 44 px touch target that never stretches the line (no gap under a title, no tall meta line). */
+.home-columns .ticket-title a{text-decoration:none;padding:12px 0}
+.home-columns .home-need>p a{padding:14px 0}
 
 .ticket-title .mono{white-space:nowrap;flex:none}
 .chip.attn{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
@@ -42,7 +43,7 @@
 .answer-option:hover{background:var(--surface-3)}
 .answer-option:disabled{opacity:.6;cursor:default}
 .answer-option .badge{padding:0 4px;background:var(--brand-soft);color:var(--brand);border:0;font-size:12px}
-.home-need>.btn.ghost{align-self:flex-start;color:var(--text-muted)}
+.home-columns .home-need>.btn.ghost{align-self:flex-start;color:var(--text-muted);margin-left:0}
 .working-row{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:68px;color:var(--text);text-decoration:none}
 .working-row+.working-row{border-top:1px solid var(--border)}
 .working-row:hover{background:var(--surface-2)}
@@ -57,9 +58,8 @@
 @media(max-width:900px){.home-columns{grid-template-columns:minmax(0,1fr)}}
 /* Second pass: tiles for the answers, header meta, Check result button, Working now header (accepted Home draft) */
 .home-need .answer-options{display:flex;flex-wrap:wrap;gap:8px}
-.answer-option{flex:0 1 auto;min-width:150px;max-width:100%}
-.answer-option>span:first-child{display:flex;flex-wrap:wrap;flex-direction:column;align-items:flex-start;gap:6px}
-.home-need .choose-line{margin-top:4px}
+.answer-option{flex:1 1 150px;min-width:0;max-width:400px}
+.answer-option>span:first-child{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .home-card>.card-h{padding:12px 16px}
 .home-card>.card-h+.card-row{border-top:1px solid var(--border)}
 .home-section-head{align-items:center;justify-content:space-between;margin-bottom:12px}.home-section-head h2{margin:0}
