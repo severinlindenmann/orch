@@ -61,7 +61,7 @@ module.exports = {
       });
       must(!overlap, `expand overlaps progress at ${width}`);
     }
-    // ORCH-2316: at 390 the pinned answer bar never covers the card's Open ticket (it sits under the title on a phone)
+    // ORCH-2316: on a phone the pinned answer bar never covers the card's Open ticket (under the title; above it at 360 and less)
     for (const [width, height] of [[390,844], [320,844]]) {
       await page.setViewportSize({width,height});
       await page.evaluate(() => window.scrollTo(0,0));
@@ -69,8 +69,11 @@ module.exports = {
       const tl = card.locator('a.swipe-ticket').first();
       if (await tl.count()) {
         const hit = await tl.evaluate(b => { const r=b.getBoundingClientRect(), e=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-          return {visible:r.top>=0&&r.bottom<=innerHeight&&b.contains(e),top:r.top,bottom:r.bottom}; });
-        must(hit.visible, `Open ticket covered at ${width}x${height}: ${JSON.stringify(hit)}`);
+          const bar=document.querySelector('.swipe-actions:not([hidden])');
+          return {visible:r.top>=0&&r.bottom<=innerHeight&&b.contains(e),top:r.top,bottom:r.bottom,on:e&&(e.closest('[class]')||e).className,
+            barTop:bar&&Math.round(bar.getBoundingClientRect().top)}; });
+        // a margin, not a 1 px touch: fonts on Linux wrap wider than on a Mac
+        must(hit.visible && (hit.barTop == null || hit.bottom <= hit.barTop - 24), `Open ticket covered at ${width}x${height}: ${JSON.stringify(hit)}`);
       }
     }
     await page.setViewportSize({width:1280,height:800});
