@@ -110,9 +110,14 @@ def add_parsers(sub, common) -> None:
         dest="sub", required=True
     )
     x = pub.add_parser("connect", parents=[common], help="connect this folder to a publish server")
-    x.add_argument("url")
-    x.add_argument("--workspace", required=True)
-    x.add_argument("--token", required=True)
+    x.add_argument("url", nargs="?")
+    x.add_argument("--workspace")
+    x.add_argument("--token")
+    x.add_argument(
+        "--paste",
+        action="store_true",
+        help="read the whole text from your admin on standard input; orch finds the connect line itself",
+    )
     _add_invite(pub, common, "publish server")
     pub.add_parser("whoami", parents=[common], help="show who you are and what you may share")
     _add_profile(pub)
@@ -122,6 +127,7 @@ def add_parsers(sub, common) -> None:
     x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
     x.add_argument("--note", help="a short message for the person who opens the link (up to 280 characters)")
+    x.add_argument("--ticket", help="the ticket this file belongs to (key or id), shown on the Publish page")
     x.add_argument(
         "--replace", metavar="ID", help="swap the content of this file (f_...), the link stays the same"
     )
@@ -148,8 +154,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--lang", choices=templates.LANGS, default="python", help="docker only: rust starts a Rust app"
     )
-    pub.add_parser("list", parents=[common], help="list shared files and apps")
-    pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
+    x = pub.add_parser("list", parents=[common], help="list shared files and apps")
+    x.add_argument(
+        "--quick",
+        action="store_true",
+        help="try once; when publish can't be reached, list what this computer recorded",
+    )
+    pub.add_parser("view", parents=[common], help="the Publish page of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
         x = pub.add_parser(n, parents=[common], help=f"{n} a deployed app")
         x.add_argument("name")
@@ -518,11 +529,23 @@ def run_publish(args, root: Path, out) -> None:
         r = publish.invite(root, args.name, args.folder, args.admin_url, _admin_token("publish"))
         out(args, r, _invite_text(r, "publish server"))
     elif sub == "connect":
+        if args.paste:
+            if term.is_terminal(sys.stdin):
+                print(
+                    "Paste the text from your admin, then press Ctrl+D (Ctrl+Z, then Enter, on Windows).",
+                    file=sys.stderr,
+                )
+            args.url, args.workspace, args.token = publish.parse_connect_text(sys.stdin.read())
+        elif not (args.url and args.workspace and args.token):
+            raise Refused(
+                "To connect, give the address, --workspace and --token from your admin, "
+                "or paste the admin's whole text with: orch publish connect --paste"
+            )
         who = publish.connect(root, args.url, args.workspace, args.token)
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.",
+            f"Connected to {_host(args.url)} as {who['name']}. Next: orch publish file <path> shares a file.",
         )
     elif sub == "whoami":
         w = publish.whoami(root)
@@ -536,7 +559,9 @@ def run_publish(args, root: Path, out) -> None:
         )
     elif sub == "file":
         with net.working(f"Encrypting and uploading {Path(args.path).name}"):
-            r = publish.share_file(root, Path(args.path), args.days, args.permanent, args.note, args.replace)
+            r = publish.share_file(
+                root, Path(args.path), args.days, args.permanent, args.note, args.replace, args.ticket
+            )
         out(
             args,
             r,
@@ -556,7 +581,7 @@ def run_publish(args, root: Path, out) -> None:
             if b["type"] == "list"
             for i in b["items"]
         ]
-        out(args, v, "\n".join(rows) or "Nothing shared yet.")
+        out(args, v, "\n".join(rows) or "Nothing shared yet. Next: orch publish file <path>")
     elif sub == "app":
         reach = "public" if args.public else "private" if args.private else None
         auth = True if args.auth else False if args.no_auth else None
@@ -585,8 +610,13 @@ def run_publish(args, root: Path, out) -> None:
             f"Created a {r['stack']} app in {args.folder}.",
         )
     elif sub == "list":
-        r = publish.list_all(root)
+        r = publish.list_all(root, quick=args.quick)
         lines = []
+        if r.get("unreachable"):
+            lines.append(
+                "Publish can't be reached. This is what this computer recorded; "
+                "people may not be able to open these links until it is back."
+            )
         for f in r["files"]:
             nm = f.get("name") or "(unnamed file)"
             lines.append(f"file  {nm}  {_size(f['size'])}  {_exp(f['expires_at'])}  [{f['id']}]")

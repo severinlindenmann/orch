@@ -246,7 +246,10 @@ const OrchBlocks = (() => {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
     const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
-    row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
+    if (it.subtitle) { const main = el('div', 'li-main'); main.append(t, el('small', 'li-sub', it.subtitle)); row.append(main); }   // a note under the name (publish rows)
+    else row.append(t);
+    for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
+    for (const c of arr(it.chips).slice(0, 1)) row.append(toneChip(c.tone, String(c.label)));   // e.g. "Ends tomorrow", marked
     const box = el('div', 'compact-actions');
     for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(...openFirst(b)); }
     row.append(box); li.append(row);
