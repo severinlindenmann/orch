@@ -1,4 +1,5 @@
 import XCTest
+import Security
 @testable import OrchMobile
 
 @MainActor
@@ -13,6 +14,15 @@ final class FreshInstallTests: XCTestCase {
         return AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: dir, speechCache: dir.appendingPathComponent("sp"), systemAudioControls: false, defaults: d)
     }
     override func tearDown() { Keychain.delete() }
+
+    func testTokenSaveReplacesInPlaceAndStaysOnThisDevice() {
+        Keychain.delete()
+        XCTAssertTrue(Keychain.save(creds))
+        let next = Credentials(relay: creds.relay, phoneId: creds.phoneId, token: "orn_y", phoneName: "P")
+        XCTAssertTrue(Keychain.save(next))
+        XCTAssertEqual(Keychain.load(), next)
+        XCTAssertEqual(Keychain.accessibility(), kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String, "never in a backup or iCloud Keychain")
+    }
 
     func testNoMarkerClearsStaleKeychainAndShowsOnboarding() {
         Keychain.save(creds)

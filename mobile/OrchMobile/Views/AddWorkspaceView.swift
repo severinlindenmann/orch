@@ -49,7 +49,7 @@ struct AddWorkspaceView: View {
                     Button { scanner = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
                         .buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-scan")
                     Button("Paste link") {
-                        if let value = UIPasteboard.general.string, let parsed = try? PairingLink(value) {
+                        if let value = InvitePaste.take(), let parsed = try? PairingLink(value) {
                             link = parsed; error = nil
                         } else { showField = true }
                     }.buttonStyle(SecondaryButtonStyle()).accessibilityIdentifier("invite-paste")

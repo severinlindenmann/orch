@@ -189,3 +189,9 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Owner comment: the helper list names only the helpers this workspace has, without "good at …" lines.
 - Preview "No helper" (`?helper=none`): no helper box and no Start now; Optional takes the right column and holds the
   plan choice.
+
+## Tickets page polish (ORCH-2091)
+
+- `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
+  the view chips (All … Done this week) on their own row under it; the table starts one gap below.
+- An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.

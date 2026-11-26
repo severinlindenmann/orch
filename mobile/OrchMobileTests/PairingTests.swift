@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import OrchMobile
 
 final class PairingTests: XCTestCase {
@@ -14,6 +15,25 @@ final class PairingTests: XCTestCase {
             XCTAssertThrowsError(try PairingLink(bad), bad)
         }
     }
+    func testRelayMustBeHttpsOrThisDevice() throws {
+        for bad in ["http%3A%2F%2Frelay.severin.io", "http%3A%2F%2F192.168.1.20%3A8080", "http%3A%2F%2Fmac.local"] {
+            XCTAssertThrowsError(try PairingLink("orch://pair?relay=\(bad)&code=pc_abcdefgh"), bad)
+        }
+        XCTAssertNoThrow(try PairingLink("orch://pair?relay=http%3A%2F%2F127.0.0.1%3A8080&code=pc_abcdefgh"))
+        XCTAssertNoThrow(try PairingLink("orch://pair?relay=HTTPS%3A%2F%2Frelay.severin.io&code=pc_abcdefgh"))
+    }
+
+    @MainActor func testPastedInvitationLeavesTheClipboard() {
+        let board = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: board.name) }
+        board.string = "not an invitation"
+        XCTAssertNil(InvitePaste.take(from: board))
+        XCTAssertEqual(board.string, "not an invitation", "other clipboard text is left alone")
+        board.string = PairingLink.sample.link
+        XCTAssertEqual(InvitePaste.take(from: board), PairingLink.sample.link)
+        XCTAssertNil(board.string, "the one-time code does not stay on the clipboard")
+    }
+
     func testDecodesContractExampleLink() throws {
         let ex = try Example.find("POST", "/admin/api/phones")
         let link = (try JSONSerialization.jsonObject(with: ex.responseData) as! [String: Any])["link"] as! String
