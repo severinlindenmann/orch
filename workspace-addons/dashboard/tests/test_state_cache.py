@@ -259,3 +259,33 @@ def test_outside_change_reaches_open_page_before_slow_full_build(act_server, ws,
         finally:
             release.set()
         assert revision() != quick and finished.is_set()
+
+
+def test_two_clicks_at_once_keep_both_quick_changes(ws):
+    """ORCH-2034: several tickets changed together from the list: each click's quick copy builds on the other's."""
+    cache = state_cache.StateCache(ws, None)
+    ids = [t["id"] for t in cache.get()[0]["tickets"][:2]]
+    cache.kick = lambda: None  # no full build in between: only the two quick copies count
+    both = threading.Barrier(2, timeout=5)
+
+    def change(tid):
+        def apply(held):
+            try:
+                both.wait(0.3)  # without the lock both read the same old copy here
+            except threading.BrokenBarrierError:
+                pass
+            return {
+                **held,
+                "tickets": [{**t, "seen": True} if t["id"] == tid else t for t in held["tickets"]],
+            }
+
+        cache.patch(apply)
+
+    threads = [threading.Thread(target=change, args=(tid,)) for tid in ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    held = {t["id"]: t for t in cache.state["tickets"]}
+    assert all(held[tid].get("seen") for tid in ids)
+    cache.close()
