@@ -47,7 +47,7 @@ function meter(cdp) {
     let p = u; try { p = new URL(u).pathname; } catch (_) { /* data: urls */ }
     m.byPath[p] = (m.byPath[p] || 0) + e.encodedDataLength;
     // when each read and page began and ended, so a slow page shows what it waited for (ORCH-2288)
-    if (/^\/(api|addon)\//.test(p) && !/\/(kit|web)\//.test(p)) m.reads.push([p, began.get(e.requestId), Date.now()]);
+    if (/^\/(api|addon)\//.test(p)) m.reads.push([p, began.get(e.requestId), Date.now()]);
   });
   cdp.on('Network.webSocketFrameReceived', e => { m.enc += (e.response.payloadData || '').length; m.dec += (e.response.payloadData || '').length; });
   // an event stream never finishes loading, so loadingFinished never counts it: count each message as it arrives
@@ -56,6 +56,8 @@ function meter(cdp) {
     m.dec += n; m.enc += n;
     let p = urls.get(e.requestId) || ''; try { p = new URL(p).pathname; } catch (_) { /* keep */ }
     m.byPath[p] = (m.byPath[p] || 0) + n;
+    const t = Date.now();
+    m.reads.push(['event ' + (e.eventName || '') + ' ' + (e.data || '').slice(0, 120), t, t]);  // what the page was told
   });
   return m;
 }
