@@ -128,9 +128,21 @@ def agent_tool() -> str | None:
     return adapters.detect_env(os.environ)
 
 
-def require_human(question: str, what: str) -> None:
+def _helper_tool() -> str | None:
+    """For the actor label only: the detected agent tool, else `unknown` inside an orch run (a helper whose
+    tool orch does not recognise is still a helper, never the person)."""
+    return agent_tool() or ("unknown" if os.environ.get("ORCH_RUN") else None)
+
+
+def attended() -> bool:
+    """A person at an interactive terminal runs this command (stdin is a terminal). Not an identity check:
+    only the default label for a caller that names nobody (R4.3)."""
+    return term.is_terminal(sys.stdin)
+
+
+def require_human(question: str, what: str, by: str | None = None) -> None:
     """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
-    if agent_tool() is None:
+    if acting_actor(by).startswith("human:"):
         return
     if term.is_terminal(sys.stdin):
         sys.stderr.write(f"{question} [y/N] ")
@@ -142,11 +154,13 @@ def require_human(question: str, what: str) -> None:
 
 
 def current_actor(explicit: str | None = None) -> str:
-    """--by, else the agent tool seen in the environment, else human:<os user>."""
+    """An explicit label, otherwise the detected helper or the person at an interactive terminal."""
     if explicit:
         who = explicit
-    elif agent_tool():
-        who = "agent:" + str(agent_tool())
+    elif tool := _helper_tool():
+        who = "agent:" + tool
+    elif not attended():
+        who = "agent:unknown"
     else:
         try:
             user = getpass.getuser()
@@ -160,13 +174,16 @@ def current_actor(explicit: str | None = None) -> str:
     return who
 
 
-def acting_by(args) -> str:
-    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
-    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
-    tool = agent_tool()
+def acting_actor(explicit: str | None = None) -> str:
+    """A detected helper keeps its own identity even when a different --by was supplied."""
+    tool = _helper_tool()
     if tool:
         return "agent:" + str(tool)
-    return current_actor(getattr(args, "by", None))
+    return current_actor(explicit)
+
+
+def acting_by(args) -> str:
+    return acting_actor(getattr(args, "by", None))
 
 
 def tickets_dir(root: Path) -> Path:
