@@ -74,10 +74,10 @@ module.exports = {
     must(/helper/.test(await chat.locator('.thread-line', { hasText: 'The draft price list is ready.' }).locator('.thread-line-head').innerText()), "your own helper's line has no name");
 
     // the person writes to everyone in the chat
-    const draft = chat.locator('.chat-draft');
+    const draft = chat.locator('textarea[data-thread]');
     must(/everyone/.test(await draft.getAttribute('placeholder')), 'the chat box does not say it goes to everyone');
     await draft.fill('Thanks, Kitchen. I send it on Friday.');
-    await act('group.say', () => chat.locator('[data-key="ticket-chat-send"]').click());
+    await act('group.say', () => chat.locator('[data-key="send"]').click());
     await reload();
     must((await chat.innerText()).includes('Thanks, Kitchen. I send it on Friday.'), 'your message is gone after a reload');
 
