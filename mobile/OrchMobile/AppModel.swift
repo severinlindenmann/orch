@@ -836,7 +836,15 @@ final class AppModel {
                 takenBackRefused.insert(qid); applyTakenBack()
                 message = text; errorTick += 1; announcement = text
             case .sent: sendTick += 1; announcement = "Message sent"
-            case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
+            case .failed(let cid, let status, _):
+                // ORCH-1942: never the relay's own text; the bubble keeps the sentence after this goes.
+                let item = outbox.item(clientId: cid)
+                if item?.kind == .answer { message = NotSentNote.answer; announcement = NotSentNote.answer }
+                else {
+                    message = NotSentNote.banner(workspace: item.flatMap { workspace($0.workspace) }.map { displayName($0.name) })
+                    announcement = NotSentNote.spoken(NotSentNote.text(status: status))
+                }
+                errorTick += 1
             case .unauthorized: handle(RelayError.unauthorized)
             case .throttled: announcement = "Try again later"
             case .offline: break
