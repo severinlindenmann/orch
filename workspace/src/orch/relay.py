@@ -666,6 +666,8 @@ def _message(
     from orch import msgtrust
 
     sealed = msgtrust.seal_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
+    if type_ == "question" and isinstance(sealed.get("envelope"), dict):
+        _note_signed_question(root, msg["id"], sealed["envelope"])
     raw = json.dumps(sealed).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
@@ -1341,6 +1343,8 @@ def send_question(
         "to": "phones",
         "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
     }
+    if sha := _SIGNED_QUESTIONS.pop(str(msg.get("id")), None):
+        rec["question_sha256"] = sha  # a signed answer must name exactly these signed bytes
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     with contextlib.suppress(
         Refused, OSError
@@ -2092,6 +2096,25 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False
 # ---- inbox --------------------------------------------------------------------------------------
 
 
+# message id -> SHA-256 of a question's signed bytes, for a caller that writes its asked record after the send
+# (send_question); taken out by that caller within the same call.
+_SIGNED_QUESTIONS: dict[str, str] = {}
+
+
+def _note_signed_question(root: Path, mid: str, env: dict) -> None:
+    """Keep the SHA-256 of a question's signed bytes in its asked record, so a signed answer is acted on only
+    when it names exactly this question (contracts/msgsig.md question_sha256). A record written before the
+    send gets it at once; send_question picks it up from _SIGNED_QUESTIONS."""
+    from orch import msgsig
+
+    with contextlib.suppress(msgsig.SigError, KeyError, TypeError, ValueError):
+        sha = hashlib.sha256(msgsig.read_envelope(env).signed).hexdigest()
+        if len(_SIGNED_QUESTIONS) > 256:
+            _SIGNED_QUESTIONS.clear()  # never grows: a leftover only means no hash on that record
+        _SIGNED_QUESTIONS[mid] = sha
+        _set_asked(root, mid, question_sha256=sha)
+
+
 def _asked_path(root: Path) -> Path:
     return net.secrets_dir(root) / "questions-sent.json"
 
@@ -2121,6 +2144,11 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
         return None, f"ignored: {frm} was not asked"
     if b.get("question_id") != asked["question_id"]:
         return None, "ignored: answer is for another question"
+    sig = msg.get("signed")  # set only by msgtrust.check_incoming after the signature checked out
+    want = asked.get("question_sha256")
+    if msg.get("type") == "answer" and isinstance(sig, dict) and isinstance(want, str) and want:
+        if sig.get("question_id") != asked["question_id"] or sig.get("question_sha256") != want:
+            return None, "refused: the signed answer names another question"
     if asked.get("group"):  # a question we asked a group member: only a current member of an open group
         from orch import chat_groups
 
@@ -2146,6 +2174,12 @@ def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -
     # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
     # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
     ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
+    if frm.startswith("ph_") and by == f"human:{frm}" and root is not None:
+        # a signed phone answer names the phone by its id (relay-api.md /v1/phone/answer): show its name
+        name = (_paired_phone(root, frm) or {}).get("name")
+        name = " ".join(clean_untrusted(name, 100).split()) if isinstance(name, str) else ""
+        if name:
+            by = f"human:{name[:64]}"
     if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
         asked is not None and asked.get("group") and not frm.startswith("ph_")
     ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says

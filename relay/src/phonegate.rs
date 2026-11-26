@@ -4,6 +4,8 @@
 //! stores the person's own words), keeps the signed message id, and hands the envelope to the workspace unchanged.
 //! The workspace checks it again itself (the decisive gate) and never trusts the relay for it.
 //!
+//! `POST /v1/phone/answer` may carry one too (`check_answer`): the answer then names the question's signed bytes.
+//!
 //! Without an envelope the old path stays until the hard cut turns on "signed only" (ORCH-1205).
 use crate::error::*;
 use crate::msgsig::{self, RelayOutcome, SigError};
@@ -71,20 +73,112 @@ pub fn check(
     let Some(env) = env else {
         return Ok(Gate::Unsigned);
     };
+    let (m, signed) = match verify(c, pid, &env)? {
+        Ok(v) => v,
+        Err(old) => return Ok(Gate::Duplicate(old)),
+    };
+    same_message(c, pid, &m, "text", to, ticket, reply_to, body, blobs)?;
+    if m.contains_key("question_id") || m.contains_key("question_sha256") {
+        return Err(mismatch("type"));
+    }
+    Ok(signed_gate(&m, env, &signed))
+}
+
+/// The same for `POST /v1/phone/answer` (ORCH-1204 step c9): a signed answer names the question it answers by
+/// its `question_id` and the SHA-256 of the question's signed bytes. The relay compares that hash with the one it
+/// stored when the workspace's signed question passed its gate; an answer to an unsigned question cannot be
+/// signed. `body` is the answer body the relay builds (`answered_by` is `human:<phone id>` when signed: the one
+/// name a phone can sign without trusting a label it picked itself).
+#[allow(clippy::too_many_arguments)]
+pub fn check_answer(
+    c: &Connection,
+    pid: &str,
+    env: Option<Value>,
+    question: &crate::store::Msg,
+    question_id: &Value,
+    body: &Value,
+    blobs: &[String],
+) -> Res<Gate> {
+    let Some(env) = env else {
+        return Ok(Gate::Unsigned);
+    };
+    let (m, signed) = match verify(c, pid, &env)? {
+        Ok(v) => v,
+        Err(old) => return Ok(Gate::Duplicate(old)),
+    };
+    same_message(
+        c,
+        pid,
+        &m,
+        "answer",
+        &question.from,
+        question.ticket.as_deref(),
+        Some(question.id.as_str()),
+        body,
+        blobs,
+    )?;
+    if m.get("question_id") != Some(question_id) || question_id.as_str().is_none() {
+        return Err(mismatch("question_id"));
+    }
+    let stored: String = c
+        .query_row(
+            "SELECT COALESCE(sig_digest, '') FROM messages WHERE id=?1",
+            [&question.id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or_default();
+    if stored.is_empty()
+        || m.get("question_sha256").and_then(Value::as_str) != Some(stored.as_str())
+    {
+        return Err(mismatch("question_sha256"));
+    }
+    Ok(signed_gate(&m, env, &signed))
+}
+
+/// The phone's signature checked against its paired key: Ok((signed message, signed bytes)), or Err(stored id)
+/// when the same signed bytes came before (a retry).
+/// A checked signature: the signed message and its bytes.
+type Checked = (Map<String, Value>, Vec<u8>);
+
+fn verify(c: &Connection, pid: &str, env: &Value) -> Res<Result<Checked, String>> {
     let key = crate::phonekeys::raw_key(c, pid).ok_or_else(|| refused(SigError::UnknownKey))?;
     let read_err = std::cell::RefCell::new(None);
     let lookup = |id: &str| -> Option<String> { crate::msgsig::stored_digest(c, id, &read_err) };
-    let (outcome, ver) = msgsig::relay_check(&env, pid, &[key], lookup).map_err(refused)?;
+    let (outcome, ver) = msgsig::relay_check(env, pid, &[key], lookup).map_err(refused)?;
     // a read error is never "not seen before" (fail closed)
     if let Some(e) = read_err.into_inner() {
         return Err(e.into());
     }
-    let m = &ver.msg;
-    let id = m["id"].as_str().unwrap_or_default().to_string();
     if matches!(outcome, RelayOutcome::Duplicate) {
-        return Ok(Gate::Duplicate(id));
+        return Ok(Err(ver.msg["id"].as_str().unwrap_or_default().to_string()));
     }
-    if m.get("type").and_then(Value::as_str) != Some("text") {
+    Ok(Ok((ver.msg, ver.signed)))
+}
+
+fn signed_gate(m: &Map<String, Value>, envelope: Value, signed: &[u8]) -> Gate {
+    Gate::Signed {
+        id: m["id"].as_str().unwrap_or_default().to_string(),
+        envelope,
+        digest: hex::encode(Sha256::digest(signed)),
+    }
+}
+
+/// The request says exactly what the signed message says: type, a person's origin, to, ticket, reply_to, body,
+/// and every file the request names listed with the stored size and hash, and nothing else.
+#[allow(clippy::too_many_arguments)]
+fn same_message(
+    c: &Connection,
+    pid: &str,
+    m: &Map<String, Value>,
+    typ: &str,
+    to: &str,
+    ticket: Option<&str>,
+    reply_to: Option<&str>,
+    body: &Value,
+    blobs: &[String],
+) -> Res<()> {
+    if m.get("type").and_then(Value::as_str) != Some(typ) {
         return Err(mismatch("type"));
     }
     if m.get("origin").and_then(Value::as_str) != Some("person") {
@@ -102,7 +196,6 @@ pub fn check(
     if m.get("body") != Some(body) {
         return Err(mismatch("body"));
     }
-    // Every file the request names is listed in the signed bytes with the stored size and hash, and nothing else.
     let signed_files: Vec<&Value> = m
         .get("files")
         .and_then(Value::as_array)
@@ -130,12 +223,7 @@ pub fn check(
             return Err(mismatch("files"));
         }
     }
-    let digest = hex::encode(Sha256::digest(&ver.signed));
-    Ok(Gate::Signed {
-        id,
-        envelope: env,
-        digest,
-    })
+    Ok(())
 }
 
 pub fn mark(c: &Connection, id: &str, digest: &str) -> rusqlite::Result<()> {

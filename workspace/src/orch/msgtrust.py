@@ -539,6 +539,9 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
         out["signed"] = {"origin": s["origin"], "created_ms": s["created_ms"], "key_id": env.get("key_id")}
         if "expires_ms" in s:
             out["signed"]["expires_ms"] = s["expires_ms"]
+        if s["type"] == "answer":  # the question it answers, by id and signed bytes (relay._answer_asked)
+            out["signed"]["question_id"] = s.get("question_id")
+            out["signed"]["question_sha256"] = s.get("question_sha256")
         key = f"{frm}/{s['id']}"
         old = st["seen"].get(key)
         if old is not None:

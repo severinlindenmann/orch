@@ -805,3 +805,83 @@ def test_a_host_cannot_drop_or_bend_the_members_fields(ws, person):
         msgtrust.check_incoming(ws, signed_msg(SEED_PEER, body=body, ticket="t_abc123")).code
         == "author_mismatch"
     )
+
+
+# ---------------------------------------------------------------- a phone's signed answer (ORCH-1204 c9)
+
+PHONE = "ph_iphone0001"
+SEED_PHONE = bytes.fromhex("44" * 32)
+
+
+def _phone_question(ws, rel) -> tuple[str, str, str]:
+    """A paired phone with a key the person accepted, and a signed question sent to the phones.
+    Returns (ticket id, question message id, sha256 of the question's signed bytes)."""
+    import hashlib
+
+    from orch import relay, tickets
+
+    signkey.ensure(ws)
+    p = ws / ".agents/skills/orch-relay/workspaces.json"
+    d = json.loads(p.read_text())
+    d["phones"] = [{**_dir_entry(PHONE, SEED_PHONE, "Severin's iPhone"), "id": PHONE}]
+    p.write_text(json.dumps(d))
+    accept(ws, PHONE)
+    tid = tickets.create(ws, "Backups", "human:tester")["id"]
+    tickets.ask(ws, tid, "Delete the old backups?", ["yes", "no"], "no", "agent:claude")
+    t = tickets.load(ws, tid)
+    qmid = relay.send_question(ws, t, t["questions"][0])["id"]
+    sent = next(m for m in rel.sent if m["id"] == qmid)
+    sha = hashlib.sha256(msgsig.read_envelope(sent["envelope"]).signed).hexdigest()
+    return tid, qmid, sha
+
+
+def _phone_answer(tid: str, qmid: str, sha: str, answer: str = "yes", qid: str = "q1") -> dict:
+    body = {"question_id": "q1", "answer": answer, "answered_by": f"human:{PHONE}"}
+    return signed_msg(
+        SEED_PHONE,
+        frm=PHONE,
+        type_="answer",
+        body=body,
+        origin="person",
+        ticket=tid,
+        reply_to=qmid,
+        question_id=qid,
+        question_sha256=sha,
+    )
+
+
+def test_the_workspace_keeps_the_hash_of_each_signed_question(ws, run, rel, person):
+    from orch import relay
+
+    _tid, qmid, sha = _phone_question(ws, rel)
+    assert json.loads(relay._asked_path(ws).read_text())[qmid]["question_sha256"] == sha
+
+
+def test_a_signed_phone_answer_naming_the_question_is_applied_with_the_phones_name(ws, run, rel, person):
+    from orch import tickets
+
+    tid, qmid, sha = _phone_question(ws, rel)
+    rel.inbox.append(_phone_answer(tid, qmid, sha))
+    inbox(run)
+    q = tickets.load(ws, tid)["questions"][0]
+    assert q["answer"] == "yes"
+    assert q["answered_by"] == "human:Severin's iPhone"  # the phone's id in the signed answer, shown by name
+
+
+@pytest.mark.parametrize("bad", ["hash", "question"])
+def test_a_signed_phone_answer_naming_another_question_is_never_applied(ws, run, rel, person, bad):
+    from orch import tickets
+
+    tid, qmid, sha = _phone_question(ws, rel)
+    wrong = (
+        _phone_answer(tid, qmid, "0" * 64)
+        if bad == "hash"  # signed for other question bytes (the relay changed the question on the way)
+        else _phone_answer(tid, qmid, sha, qid="q2")
+    )
+    rel.inbox.append(wrong)
+    inbox(run)
+    assert tickets.load(ws, tid)["questions"][0]["answer"] is None
+    # the question stays open: the right signed answer is still applied
+    rel.inbox.append(_phone_answer(tid, qmid, sha, answer="no"))
+    inbox(run)
+    assert tickets.load(ws, tid)["questions"][0]["answer"] == "no"
