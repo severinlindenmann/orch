@@ -57,6 +57,18 @@ function liveStartFresh(ticket, pick, usualTool, model) {
 function liveStartLast(rows) {
   return (Array.isArray(rows) ? rows : []).find(r => r.reopen) || null;
 }
+// ORCH-2201 (owner, ORCH-2188 K a): why a ticket without a helper waits for the person, said before Start: its open
+// question (with options), else the result that waits for review. null when nothing waits on the person.
+function liveStartWhy(t) {
+  const q = (Array.isArray(t?.questions) ? t.questions : []).find(x => x && x.answer == null && x.kind == null);
+  const text = q ? String(q.text || '').split(/\s+/).join(' ').trim() : '';
+  if (q && text) {
+    const options = (Array.isArray(q.options) ? q.options : []).filter(o => typeof o === 'string' && o.trim()).slice(0, 6);
+    return {question:{id:q.id, digest:q.digest, text, options}, review:null, href:'#ticket/' + encodeURIComponent(t.id)};
+  }
+  if (t?.status === 'review') return {question:null, review:{text:'Waits for your review'}, href:'#ticket/' + encodeURIComponent(t.id)};
+  return null;
+}
 // A start that orch put in line answers with a refusal saying so: that is not a failure.
 function liveStartQueued(text) {
   return /waits in line/i.test(String(text || ''));
@@ -64,7 +76,7 @@ function liveStartQueued(text) {
 
 if (typeof module === 'object' && module.exports) {
   module.exports = {LIVE_START_MODELS, liveStartPlaces, liveStartPlacesText, liveStartInLine, liveStartTools,
-    liveStartModel, liveStartFresh, liveStartLast, liveStartQueued};
+    liveStartModel, liveStartFresh, liveStartLast, liveStartQueued, liveStartWhy};
 } else {
   // --- the page ---
   // ORCH-475: the pane shows the kit's Start choice itself (UI.startButton inline, kit/start-choice.js; facts from
@@ -84,7 +96,8 @@ if (typeof module === 'object' && module.exports) {
     document.querySelectorAll('#live-dock [data-live-start-host]').forEach(host => {
       const t = ticketOfId(host.dataset.liveStartHost);
       if (!t) return;
-      const facts = {...startFacts(t), running:false};  // the pane shows only while no helper runs on it
+      const why = liveStartWhy(t);
+      const facts = {...startFacts(t), running:false, why:why && {...why, answer:text => act('answer', {ticket:t.id, question:why.question?.id, digest:why.question?.digest, answer:text}, {quiet:true})}};  // the pane shows only while no helper runs on it
       const w = built.get(host);
       if (w) { w.update(facts); return; }
       // after a press the choice shows from its top, so the title and Starting… are seen, never under the pane header
