@@ -1114,25 +1114,27 @@ function ticketChangesDialog(t) {
   const {d, actions} = dialog('What the copy changed');
   const body = el('div', 'stack'), diffBox = el('pre', 'preserve-lines copy-diff');
   diffBox.hidden = true; diffBox.tabIndex = 0;
-  body.append(el('p', 'meta', 'Reading the copy…'));
   const showDiff = async file => {
     diffBox.hidden = false; diffBox.textContent = 'Loading…';
     try {
       const r = await fetch('/api/copy-changes?t=' + encodeURIComponent(t.id) + '&path=' + encodeURIComponent(file.path), {cache:'no-store'});
       const data = r.ok ? await r.json() : null;
       diffBox.replaceChildren();
-      if (!data) { diffBox.textContent = 'This file could not be shown.'; return; }
+      if (!data) { diffBox.textContent = 'This file could not be shown. Choose it again to retry.'; return; }
       String(data.diff).split('\n').forEach(line => {
         const row = el('span', /^\+(?!\+\+)/.test(line) ? 'diff-add' : /^-(?!--)/.test(line) ? 'diff-del' : '', line + '\n');
         diffBox.append(row);
       });
       if (data.cut) diffBox.append(el('span', 'meta', '\n(The rest of this file is not shown.)'));
-    } catch (_) { diffBox.textContent = 'This file could not be shown.'; }
+    } catch (_) { diffBox.textContent = 'This file could not be shown. Choose it again to retry.'; }
   };
-  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : {files:[]}).catch(() => ({files:[]})).then(data => {
-    const files = array(data.files);
+  const loadFiles = () => {
+  body.replaceChildren(window.UI?.state ? window.UI.state({kind:'loading'}) : el('p', 'meta', 'Reading the copy…'));
+  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     body.replaceChildren();
-    if (!files.length) { body.append(el('p', 'muted', 'No changed files could be listed.')); return; }
+    if (!data) { body.append(stateNote('The changes did not load', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:loadFiles})); return; }
+    const files = array(data.files);
+    if (!files.length) { body.append(stateNote('Nothing changed in the copy', 'When your helper changes a file in the copy, it is listed here.')); return; }
     const list = el('ul', 'copy-files');
     files.forEach(f => {
       const li = el('li'), b = button('', 'ghost sm copy-file', () => showDiff(f));
@@ -1142,6 +1144,8 @@ function ticketChangesDialog(t) {
     body.append(list);
     if (data.more) body.append(el('p', 'meta', 'and ' + data.more + ' more files'));
   });
+  };
+  loadFiles();
   d.append(body, diffBox, actions);
   actions.firstChild.textContent = 'Close';
   window.orch.open(d);
@@ -1910,8 +1914,8 @@ function ticketStripModel(t, run, fresh) {
   }
   if (q) {
     const ask = clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text || '') : q.text || '').replace(/\s+/g, ' ').trim();
-    // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
-    const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
+    // who asked: the agent stored on the question, else the agent on the ticket (as Home says it), else "Helper"
+    const asker = window.DashHelpers?.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, (run || state?.runs?.[t.id])?.claim) : 'Helper';
     return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
   }
   // ORCH-235: a dated or outside wait says what it waits for and until when, never "Needs you"

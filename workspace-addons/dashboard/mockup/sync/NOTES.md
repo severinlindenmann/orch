@@ -54,3 +54,12 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## Polish pass (25 Nov, ORCH sync page polish)
+
+- The choice card has its own card heading "Where to keep a copy" (same size and rule as Where / What / When), no
+  "Current setting" row: the selected choice already says it.
+- The status line shows on this page only when it adds something (not synced yet, syncing, paused, files not synced):
+  "Last synced …" is already in the When card. No "Last error: none" line.
+- `?state=empty` shows the unreadable state: the choices stay visible but disabled, one plain line and Try again
+  ("Can’t read the sync setting right now. Nothing was changed."), instead of a "Reading…" line that never ends.

@@ -9,9 +9,9 @@ const S = require(path.join(__dirname, '../src/orch_dashboard/web/pages/live-sta
 
 const run = (mode = 'live') => ({running:true, claim:{mode}});
 
-test('places count the live helpers, the limit and the line', () => {
+test('places count every working helper (live and one-step), the limit and the line', () => {
   const p = S.liveStartPlaces({a:run(), b:run(), c:{running:false}, d:run('oneshot')}, {live_max:3}, {waiting:['t_x']});
-  assert.deepEqual({...p, waiting:[...p.waiting]}, {used:2, max:3, waiting:['t_x'], full:false});
+  assert.deepEqual({...p, waiting:[...p.waiting]}, {used:3, max:3, waiting:['t_x'], full:true});
   assert.equal(S.liveStartPlaces({a:run(), b:run()}, {live_max:2}, null).full, true);
   assert.equal(S.liveStartPlaces({}, {live_max:null}, null).max, null);  // no limit (the default)
   assert.equal(S.liveStartPlaces(null, null, null).used, 0);

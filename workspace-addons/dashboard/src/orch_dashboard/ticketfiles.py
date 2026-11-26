@@ -11,7 +11,9 @@ import hashlib
 import hmac
 import re
 import secrets
+import unicodedata
 from pathlib import Path
+from urllib.parse import quote
 
 from .data import run_orch
 
@@ -206,6 +208,16 @@ def read_reviewed(root: Path, tid: str, name) -> tuple[int, bytes, str, dict]:
     return 200, data, ctype, {}
 
 
+def download_disposition(name: str) -> str:
+    """The Content-Disposition of a download. The browser saves under this name (it wins over the page's
+    `download` attribute), so the real name with its spaces and umlauts goes in `filename*` (RFC 6266/5987);
+    `filename` is a plain ASCII stand-in for old clients. Characters no file system takes become `_`."""
+    real = unicodedata.normalize("NFC", re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', "_", name)).strip(" .")[:100]
+    real = real or "file"
+    plain = re.sub(r"[^A-Za-z0-9._ -]", "_", real) or "file"
+    return f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(real, safe='')}"
+
+
 def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> tuple[int, bytes, str, dict]:
     """(status, body, content type, extra headers). Anything outside the rules is a plain 404. The read itself is
     orch's one hardened reader (orch.safefile: no links, no hard links, no FIFOs, folders opened one by one)."""
@@ -235,13 +247,7 @@ def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> 
     if data is None:
         return nope
     if download:
-        safe = re.sub(r"[^A-Za-z0-9._-]", "_", last)[:100] or "file"
-        return (
-            200,
-            data,
-            "application/octet-stream",
-            {"Content-Disposition": f'attachment; filename="{safe}"'},
-        )
+        return 200, data, "application/octet-stream", {"Content-Disposition": download_disposition(last)}
     if ext == "pdf":
         return 200, data, PDF, {}
     if ext in AUDIO:

@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+NONBLOCK = getattr(os, "O_NONBLOCK", 0)  # opening a planted FIFO never waits for a writer or reader
 WINDOWS = os.name == "nt"
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
@@ -200,7 +201,7 @@ def read_json(p: Path) -> dict | None:
     if p.is_symlink():
         return None
     try:
-        fd = os.open(p, os.O_RDONLY | NOFOLLOW)
+        fd = os.open(p, os.O_RDONLY | NOFOLLOW | NONBLOCK)
     except OSError:
         return None
     try:
@@ -225,13 +226,23 @@ def write_json(p: Path, data: dict) -> None:
 
 
 def open_append(p: Path):
-    """Append to a log file; refuses a symlink."""
+    """Append to a log file; refuses a symlink and anything that is not a regular file."""
+    not_file = RuntimeError(f"{p} is not a regular file; orch does not write to it. Remove it and try again.")
     try:
         if p.is_symlink():
             raise RuntimeError(f"{p} is a symbolic link; orch does not write to it.")
-        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
+        if p.is_dir():  # Windows opens a folder with PermissionError: not the administrator case
+            raise not_file
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW | NONBLOCK, 0o600)
     except PermissionError as e:
         raise _denied(p.parent, e) from e
+    except OSError as e:  # a FIFO with no reader (ENXIO) or a folder (EISDIR)
+        raise not_file from e
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise not_file
+    if NONBLOCK:
+        os.set_blocking(fd, True)
     return os.fdopen(fd, "a", encoding="utf-8")
 
 
