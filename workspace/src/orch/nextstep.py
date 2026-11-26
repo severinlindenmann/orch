@@ -290,7 +290,6 @@ def _ref_wait(data, args) -> str:
     return "NOT green or not merged (see the line above): fix it, push, then run orch ref wait again"
 
 
-
 # ---- relay: lines that say what is true now (RP9, 25 Nov 2026) ----
 
 RELAY_HOW = "run the lines from the text your admin gave you (they start with: orch relay connect)."
@@ -351,6 +350,7 @@ def _addon_add(d, args) -> str:
     if len(names) == 1 and names[0] in ("relay", "publish") and not configured(args.orch_root, names[0]):
         return RELAY_HOW if names[0] == "relay" else PUBLISH_HOW
     return "orch addon list"
+
 
 HINTS = {
     "init": _init,
