@@ -546,10 +546,13 @@ def _unreachable(e: Refused) -> bool:
     return status is None or status >= 500 or status in (408, 429)
 
 
+POST_TIMEOUT = 15  # seconds; a message is small (files go as blobs) and stays in the outbox when cut
+
+
 def _post_message(root: Path, raw: bytes) -> None:
     cfg = _cfg(root)
     headers = {**net.auth_headers(cfg), "Content-Type": "application/json"}
-    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, 60)
+    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, POST_TIMEOUT)
 
 
 def _outbox(root: Path) -> Path:
@@ -666,11 +669,15 @@ def _message(
     from orch import msgtrust
 
     sealed = msgtrust.seal_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
+    if type_ == "question" and isinstance(sealed.get("envelope"), dict):
+        _note_signed_question(root, msg["id"], sealed["envelope"])
     raw = json.dumps(sealed).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
 
     relay_view.record_sent(root, msg)
+    if any(x["id"] != msg["id"] for x in outbox_list(root)):
+        return _send_after_older(root, msg)
     try:
         _post_message(root, raw)
     except Refused as e:
@@ -782,14 +789,61 @@ def drop_from_outbox(root: Path, drop) -> list[str]:
     return gone
 
 
+def _send_after_older(root: Path, msg: dict) -> dict:
+    """Older messages wait in the outbox: a new one never overtakes them (R3.1, the receiver gets them in the
+    order they were written). The whole outbox goes out in order; the result is this message's own."""
+    res, errors = _flush_outbox(root)
+    mid = msg["id"]
+    if mid in errors:
+        raise errors[mid]  # the relay said no to this very message, as a direct post would
+    for d in res["dropped"] + res["failed"]:
+        if d["id"] == mid:
+            raise Refused(d["reason"])
+    if mid in res["sent"] or mid in posted_ids(root):  # posted_ids: another command sent it meanwhile
+        return {**msg, "sent": True}
+    if res.get("problem"):
+        return {**msg, "sent": False, "problem": res["problem"]}
+    return {**msg, "sent": False}
+
+
+def _not_sent_path(root: Path) -> Path:
+    return _outbox(root) / ".not-sent.json"
+
+
+def not_sent(root: Path) -> dict[str, str]:
+    """{id: reason} of saved messages that were taken out of the outbox without going out (the relay refused
+    one, a secret was found): what Chat shows as "Not sent." long after the command that found it."""
+    p = _not_sent_path(root)
+    data = net.read_json(p, {}) if not p.is_symlink() else {}
+    return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
+
+
+def _record_not_sent(root: Path, mid: str, reason: str) -> None:
+    """Bookkeeping like _record_posted: never fails the flush."""
+    with contextlib.suppress(Exception):
+        p = _not_sent_path(root)
+        if _outbox(root).is_symlink() or p.is_symlink():
+            return
+        with tickets._locked(root, "relay-not-sent"):
+            data = {k: v for k, v in not_sent(root).items() if k != mid}
+            data[mid] = clean_untrusted(reason, 200)
+            net.write_json(p, dict(list(data.items())[-500:]), True)
+
+
 def resend_outbox(root: Path) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
     Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}], "failed": [{id, reason}]}.
     Stops at the first unreachable. R5.2: an entry written before the send-time scan is scanned here too;
     a hit is not sent, is removed from disk and reported as failed (one sentence, never the value)."""
-    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
     with contextlib.suppress(Refused):
         apply_allow_answers(root)  # the next orch relay command applies an answered allow question
+    return _flush_outbox(root)[0]
+
+
+def _flush_outbox(root: Path) -> tuple[dict, dict[str, Refused]]:
+    """resend_outbox without applying allow answers; also returns the relay's refusal per dropped id."""
+    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
+    errors: dict[str, Refused] = {}
     items = outbox_list(root)
     for n, m in enumerate(items):
         p = _outbox(root) / f"{m['id']}.json"
@@ -817,6 +871,7 @@ def resend_outbox(root: Path) -> dict:
                 secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
         except Refused as e:
             res["failed"].append({"id": m["id"], "reason": str(e)})
+            _record_not_sent(root, m["id"], str(e))
             p.unlink(missing_ok=True)  # a secret is not kept on disk for another try
             continue
         try:
@@ -829,13 +884,15 @@ def resend_outbox(root: Path) -> dict:
                     _set_problem(root, res["problem"])
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
+            errors[m["id"]] = e
+            _record_not_sent(root, m["id"], str(e))
         else:
             _record_posted(root, m["id"])
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
     if not res["waiting"] and "problem" not in res:
         _set_problem(root, None)  # nothing is blocked any more
-    return res
+    return res, errors
 
 
 UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stopped")
@@ -1341,6 +1398,8 @@ def send_question(
         "to": "phones",
         "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
     }
+    if sha := _SIGNED_QUESTIONS.pop(str(msg.get("id")), None):
+        rec["question_sha256"] = sha  # a signed answer must name exactly these signed bytes
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     with contextlib.suppress(
         Refused, OSError
@@ -2092,6 +2151,25 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False
 # ---- inbox --------------------------------------------------------------------------------------
 
 
+# message id -> SHA-256 of a question's signed bytes, for a caller that writes its asked record after the send
+# (send_question); taken out by that caller within the same call.
+_SIGNED_QUESTIONS: dict[str, str] = {}
+
+
+def _note_signed_question(root: Path, mid: str, env: dict) -> None:
+    """Keep the SHA-256 of a question's signed bytes in its asked record, so a signed answer is acted on only
+    when it names exactly this question (contracts/msgsig.md question_sha256). A record written before the
+    send gets it at once; send_question picks it up from _SIGNED_QUESTIONS."""
+    from orch import msgsig
+
+    with contextlib.suppress(msgsig.SigError, KeyError, TypeError, ValueError):
+        sha = hashlib.sha256(msgsig.read_envelope(env).signed).hexdigest()
+        if len(_SIGNED_QUESTIONS) > 256:
+            _SIGNED_QUESTIONS.clear()  # never grows: a leftover only means no hash on that record
+        _SIGNED_QUESTIONS[mid] = sha
+        _set_asked(root, mid, question_sha256=sha)
+
+
 def _asked_path(root: Path) -> Path:
     return net.secrets_dir(root) / "questions-sent.json"
 
@@ -2121,6 +2199,11 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
         return None, f"ignored: {frm} was not asked"
     if b.get("question_id") != asked["question_id"]:
         return None, "ignored: answer is for another question"
+    sig = msg.get("signed")  # set only by msgtrust.check_incoming after the signature checked out
+    want = asked.get("question_sha256")
+    if msg.get("type") == "answer" and isinstance(sig, dict) and isinstance(want, str) and want:
+        if sig.get("question_id") != asked["question_id"] or sig.get("question_sha256") != want:
+            return None, "refused: the answer names another question"
     if asked.get("group"):  # a question we asked a group member: only a current member of an open group
         from orch import chat_groups
 
@@ -2146,6 +2229,12 @@ def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -
     # Only a phone is a person. A subscriber or another workspace is another system: always agent:, never
     # human: (a person's answer starts the agent again; a peer must not decide that by its own label).
     ok_prefix = "human:" if frm.startswith("ph_") else "agent:"
+    if frm.startswith("ph_") and by == f"human:{frm}" and root is not None:
+        # a signed phone answer names the phone by its id (relay-api.md /v1/phone/answer): show its name
+        name = (_paired_phone(root, frm) or {}).get("name")
+        name = " ".join(clean_untrusted(name, 100).split()) if isinstance(name, str) else ""
+        if name:
+            by = f"human:{name[:64]}"
     if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
         asked is not None and asked.get("group") and not frm.startswith("ph_")
     ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
@@ -2425,6 +2514,21 @@ def _journal(root: Path, msgs: list[dict]) -> None:
                 f.write("".join(json.dumps(e) + "\n" for e in new))
 
 
+def _saved_here(root: Path, m: dict) -> bool:
+    return (root / ".orch" / "inbox" / f"{m.get('id', '')}.json").exists()
+
+
+def _handled_here(root: Path, m: dict) -> bool:
+    mid = str(m.get("id", ""))
+    s = seen(root)
+    return mid in s or f"{m.get('from')}/{mid}" in s
+
+
+def _kept_here(root: Path, m: dict) -> bool:
+    """The message is saved in .orch/inbox or was handled already (inbox files are never pruned)."""
+    return _saved_here(root, m) or _handled_here(root, m)
+
+
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
@@ -2435,6 +2539,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     ok = []
     acked = []
     arrival = {}
+    rejournal = []  # saved by an earlier pull that failed before its journal: watchers still hear of it
     for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
@@ -2454,8 +2559,14 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
             acked.append(m["id"])
             continue
         acked.append(m["id"])
-        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice
-        if v.kind in ("refused", "duplicate"):
+        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice.
+        # The replay list marks a message before it is saved: when that save failed, the relay's next
+        # delivery of the same bytes is the only copy left, so it is saved now (R3.1, nothing is lost).
+        lost_save = v.kind == "duplicate" and v.code != "dropped" and not _kept_here(root, v.message)
+        if v.kind in ("refused", "duplicate") and not lost_save:
+            if v.kind == "duplicate" and v.code != "dropped" and _saved_here(root, v.message):
+                if not _handled_here(root, v.message):
+                    rejournal.append(v.message)
             continue
         m = v.message
         if not msgtrust.inbox_slot_free(d / f"{m['id']}.json", m):
@@ -2463,8 +2574,8 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         net.write_json(d / f"{m['id']}.json", m)
         arrival[m["id"]] = n
         ok.append(m)
-    if ok:
-        _journal(root, ok)
+    if ok or rejournal:
+        _journal(root, ok + rejournal)  # an id already journaled is skipped
     if acked:
         _api(root, "POST", "/v1/inbox/ack", {"ids": acked})
     from orch import chat
