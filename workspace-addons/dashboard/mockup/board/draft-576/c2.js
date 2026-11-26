@@ -337,7 +337,7 @@
   document.body.appendChild(pc);
   pc.addEventListener('click', e => {
     const s = e.target.closest('[data-sim]')?.dataset.sim; if (!s) return; e.preventDefault();
-    if (s === 'finish') { const t = find('ORCH-547'); if (t.lane !== 'working') return; delete t.helper; t.tasks = [6, 6]; t.act = 'Check result'; move('ORCH-547', 'check', null); }
+    if (s === 'finish') { const t = find('ORCH-547'); if (t.lane !== 'working') return; delete t.helper; t.tasks = [6, 6]; t.act = 'Test results'; move('ORCH-547', 'check', null); }
     if (s === 'green') {
       const a = find('ORCH-545').addons[0]; if (a.tone === 'good') return;
       Object.assign(a, { tone: 'good', text: 'Pull request #1611: every check passed. It is in the merge queue.' });

@@ -72,7 +72,7 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     if t.get("status") in ("done", "dropped"):
         return "orch ticket list"
     if t.get("status") == "review":
-        return "a person looks at it and marks it Done: orch needs"
+        return "a person looks at it and marks it Done: orch review list"
     checks = t.get("checklist") or []
     if not checks:
         return f'add one task per step: orch check add {n} "<step>"'
@@ -165,6 +165,9 @@ def _status(data, args) -> str:
 
 
 def _list(data, args) -> str:
+    words = (getattr(args, "search", None) or "").strip().replace('"', "'")
+    if words or getattr(args, "waiting", False) or getattr(args, "blocked", False):
+        return _list_picked(data, args, words)
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
         broken = getattr(args, "_broken_tickets", None)
@@ -174,10 +177,26 @@ def _list(data, args) -> str:
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
 
 
+def _list_picked(data, args, words: str) -> str:
+    """`ticket list --search/--waiting/--blocked`: open the first hit, else widen the search."""
+    rows = data or []
+    if rows:
+        open_ = [t for t in rows if t.get("status") not in ("done", "dropped")]
+        if not open_:
+            return f"orch ticket show {_name(rows[0], rows[0]['id'])}"
+        t = open_[0]
+        return work_on(t if "checklist" in t else _load(args, t["id"]), t["id"])
+    if words and not (getattr(args, "all", False) or getattr(args, "status", None)):
+        return f'look in finished tickets too: orch ticket list --search "{words}" --all'
+    return "see every ticket: orch ticket list"
+
+
 def _ask(data, args) -> str:
     if (data or {}).get("taken_back"):
         return "keep working on the ticket."
-    return "keep working on the steps that do not need the answer."
+    t, q = _load(args), (data or {}).get("id") or "<question>"
+    how = f'orch answer {_name(t, _tid(args)) if t else _tid(args)} {q} "<answer>"'
+    return f"keep working on the steps that do not need the answer (a person answers with: {how})."
 
 
 def _needs(data, args) -> str:
@@ -308,7 +327,7 @@ HINTS = {
     "config agent": "start it on a ticket: orch run start <ticket>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
-    "diag query": "orch diag report",
+    "diag query": "if you need help, save a report (optional; it stays in this workspace): orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
     "diag tickets": "orch ticket list",
@@ -358,6 +377,7 @@ HINTS = {
     "checks init": "orch checks templates",
     "checks templates": "orch checks add <template> [--profile <name>]",
     "checks add": "orch checks list",
+    "checks show": "orch checks approve <name> --hash <h>  (the person, after looking)",
     "checks approve": "orch checks list",
     "checks remove": "orch checks list",
     "checks run": "orch checks list",
@@ -388,7 +408,7 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": _needs,
-    "counts": "what each number stands for: orch needs",
+    "counts": "what waits for you: orch review list",
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
