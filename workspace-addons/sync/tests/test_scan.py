@@ -1,5 +1,9 @@
+import base64
+import gzip
 import hashlib
 import json
+import struct
+import zlib
 
 import pytest
 
@@ -286,3 +290,32 @@ def test_utf16_without_bom_is_not_text():
     raw = "hello".encode("utf-16-le")  # no BOM, has NUL bytes
     assert [f.rule for f in scan_blob("tickets/t_abc123/artifacts/n.txt", raw)] == ["unknown-format"]
     assert scan_blob("tickets/t_abc123/artifacts/n.txt", "hello".encode("utf-16")) == []
+
+
+# #2702: a real 24x24 PNG whose compressed pixel data (IDAT) holds a gzip header by chance
+_PNG_WITH_GZIP_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAAAAADFHGIkAAABFUlEQVR42iWSCxHAIAxDK6dyIidyIqey9sJ2NxjQ5scmWU/GVqxOuk007G0md+xf"
+    "MrOcZhnHd7fuG6/EoVs+lGqt3dM+pOzFQ8fuSMDJfLYDTh+LCAb3EIyVnbmbm07QAl/0fcqcA0EaYFdwQGFIbZYjDndCyxy62n5LSWV17ljuAkF9"
+    "Q8eF0iz6OqHrQNAAR+lBC00eq5/2Gkcqzei9to1fUmmx60X4R8Ohsa6BIhi3YIq+9dwM2UcG9tnFe4CECORmXF4y4MErZkmO5+UPrl78W+dcFnL1"
+    "zKQZ/HFOxWK8Ivf6EnQbiUONZBsHhde7Ims3LxTXTxq3e41kTVB+hZBfs+nP0AC5lMg1pBol++psCg0++gApn+TBRuVJGgAAAABJRU5ErkJggg=="
+)
+
+
+def test_a_plain_png_with_a_gzip_header_in_its_pixels_is_checked():
+    assert b"\x1f\x8b\x08" in _PNG_WITH_GZIP_BYTES
+    assert scan_blob("tickets/t_abc123/artifacts/portrait.png", _PNG_WITH_GZIP_BYTES) == []
+
+
+def test_an_archive_after_the_png_or_in_a_stored_block_is_still_found():
+    gz = gzip.compress(b"hidden")
+    after = scan_blob("tickets/t_abc123/artifacts/p.png", _PNG_WITH_GZIP_BYTES + gz)
+    assert [(f.code, f.rule) for f in after] == [("cannot-check", "media-with-archive")]
+    stored = zlib.compress(gz, 0)  # the archive in an uncompressed deflate block: no pixel proof
+    ihdr = struct.pack(">IIBBBBB", len(gz), 1, 8, 0, 0, 0, 0)
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", stored) + chunk(b"IEND", b"")
+    fs = scan_blob("tickets/t_abc123/artifacts/p.png", png)
+    assert [(f.code, f.rule) for f in fs] == [("cannot-check", "media-with-archive")]
