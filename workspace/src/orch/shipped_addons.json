@@ -790,6 +790,10 @@
     "title": "Insights"
    }
   ],
+  "event_formats": [
+   "claude-stream-json/1",
+   "claude-transcript/1"
+  ],
   "gitignore": [],
   "name": "insights",
   "needs": true,

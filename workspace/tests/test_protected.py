@@ -100,18 +100,18 @@ def test_hook_answers_with_a_refusal(proj, monkeypatch, capsys):
     assert run_hook(monkeypatch, capsys, read, proj, t["id"]) == ""
 
 
-def test_hook_is_wired_before_bash_only(monkeypatch):
+def test_hook_is_wired_before_bash_only(monkeypatch, proj, collect_claude):
     """Where the record hook runs (POSIX) the guard is part of it (`orch record hook --with claude`, one
     process per tool event, ORCH-634; the guard itself answers only for Bash); without it (Windows) its own
     group, Bash only."""
     monkeypatch.setattr(adapters, "_is_windows", lambda: False)
-    doc = adapters.reminder_doc("claude")
+    doc = adapters.reminder_doc("claude", proj)
     if doc is None:
         pytest.skip("hooks not importable here")
     groups = doc["hooks"]["PreToolUse"]
     assert [g["hooks"][0]["command"].split(" -m orch ")[1] for g in groups] == ["record hook --with claude"]
     monkeypatch.setattr(adapters, "_is_windows", lambda: True)
-    groups = adapters.reminder_doc("claude")["hooks"]["PreToolUse"]
+    groups = adapters.reminder_doc("claude", proj)["hooks"]["PreToolUse"]
     guards = [g for g in groups if "protected-check" in g["hooks"][0]["command"]]
     assert len(guards) == 1 and guards[0]["matcher"] == "Bash" and len(groups) == 1
 

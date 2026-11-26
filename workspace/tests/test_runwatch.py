@@ -122,7 +122,9 @@ def _transcript(path, command, description=None, answered=False):
             "transcript_path": str(path)}  # fmt: skip
 
 
-def test_permission_prompt_shows_the_command_it_waits_on(proj, new_ticket, run, child, tmp_path, monkeypatch):
+def test_permission_prompt_shows_the_command_it_waits_on(
+    proj, new_ticket, run, child, tmp_path, monkeypatch, collect_claude
+):
     """ORCH-1808 (report r-1123-1145-ws): a helper waited for a Yes on a terminal permission prompt and the
     ticket page only said Needs you / Your OK on the screen. The waiting command now stands next to it."""
     from orch import runs_live
