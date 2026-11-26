@@ -66,7 +66,11 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
     await page.getByText('Run the web tests with npm run test:web').first().waitFor();
     assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'still no nav entry');
     await page.screenshot({path: path.join(OUT, 'lessons-page.png')});
-    assert.equal(await page.locator('.acc summary').count(), 0, 'Edit and Delete show on the row, nothing to open (#863)');
+    // only the row with a source ticket opens (the ticket link sits inside); a plain row shows Edit and Delete (#863)
+    assert.equal(await page.locator('.acc summary').count(), 1, 'one row opens: the one with a ticket');
+    assert.equal(await page.locator('.row-acts').count(), 1, 'the plain row shows its buttons');
+    await page.locator('.acc summary').first().click();
+    await page.screenshot({path: path.join(OUT, 'lessons-page-open.png')});
     await page.getByRole('button', {name: 'Edit'}).first().click();
     const dlg = page.locator('dialog[open]');
     await dlg.waitFor();
@@ -84,6 +88,7 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
     await dlg.getByRole('button', {name: 'Save'}).click();
     await page.locator('dialog[open]').waitFor({state: 'detached'});
     assert.deepEqual(calls.filter(c => c.args.verb === 'edit').at(-1), {op: 'addon.act', args: {addon: 'lessons', verb: 'edit', target: 'l_k2m9q4', value: 'Run the web tests with npm run test:web.'}});
+    if (!(await page.getByRole('button', {name: 'Delete'}).first().isVisible())) await page.locator('.acc summary').first().click();
     await page.getByRole('button', {name: 'Delete'}).first().click();
     await page.waitForFunction(() => document.querySelectorAll('[data-addon-prompt]').length === 1);
     assert.deepEqual(calls.at(-1).args, {addon: 'lessons', verb: 'rm', target: 'l_k2m9q4'});
