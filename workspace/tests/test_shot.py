@@ -409,18 +409,24 @@ def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
 
 
 _FAKE_DOM = """
-const doc = (busy, frames = []) => ({
-  querySelector: q => (q === '[aria-busy="true"]' && busy ? {} : null),
-  querySelectorAll: q => (q === 'iframe, frame' ? frames : []),
+const element = (hidden = false) => ({closest: q => q === '[hidden]' && hidden ? {} : null});
+const doc = (busy, frames = [], hidden = false) => ({
+  querySelectorAll: q => q === 'iframe, frame' ? frames :
+    q === '[aria-busy="true"]' && busy ? [element(hidden)] : [],
 });
-const frame = d => ({ contentDocument: d });
-const foreign = { get contentDocument() { throw new Error('cross-origin'); } };
+const frame = (d, hidden = false) => ({ ...element(hidden), contentDocument: d });
+const foreign = { ...element(), get contentDocument() { throw new Error('cross-origin'); } };
 const cases = {
   idle: doc(false, [frame(doc(false)), frame(null)]),
   top: doc(true),
   iframe: doc(false, [frame(doc(true))]),
   nested: doc(false, [frame(doc(false, [frame(doc(true))]))]),
   foreign: doc(false, [foreign]),
+  hiddenPanel: doc(true, [], true),
+  hiddenFrame: doc(false, [frame(doc(true), true)]),
+  hiddenNestedFrame: doc(false, [frame(doc(false, [frame(doc(true))]), true)]),
+  visibleFrameWithHiddenPanel: doc(false, [frame(doc(true, [], true))]),
+  hiddenPanelAndVisibleFrame: doc(true, [frame(doc(true))], true),
 };
 const out = {};
 for (const [name, document] of Object.entries(cases)) out[name] = eval(BUSY_JS);
@@ -433,4 +439,8 @@ def test_busy_check_looks_into_same_origin_iframes():
     # ORCH-2021: add-on pages run in an iframe and say aria-busy there; the top page alone looked done.
     src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
     out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
-    assert json.loads(out) == {"idle": False, "top": True, "iframe": True, "nested": True, "foreign": False}
+    assert json.loads(out) == {
+        "idle": False, "top": True, "iframe": True, "nested": True, "foreign": False,
+        "hiddenPanel": False, "hiddenFrame": False, "hiddenNestedFrame": False,
+        "visibleFrameWithHiddenPanel": False, "hiddenPanelAndVisibleFrame": True,
+    }
