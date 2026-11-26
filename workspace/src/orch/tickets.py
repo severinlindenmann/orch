@@ -1385,7 +1385,38 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
-def _check_can_finish(ticket: dict) -> None:
+def _git_head(root: Path) -> str | None:
+    """The workspace folder's HEAD commit, or None (no git, no commit, git unhappy). Read-only, short."""
+    try:
+        from orch import safegit
+
+        rc, out, _ = safegit.run(
+            ["rev-parse", "--verify", "-q", "HEAD^{commit}"], root, 3, read_only=True, filters=False
+        )
+    except Exception:  # noqa: BLE001 - a suggestion only: no git means no commit suggestion
+        return None
+    return out if rc == 0 and re.fullmatch(r"[0-9a-f]{40,64}", out or "") else None
+
+
+def evidence_hints(root: Path | None, ticket: dict, cids: list[str]) -> list[str]:
+    """One ready-to-run `orch check done` line per step that is done without evidence (R2.2, R2.7). The ref is
+    a suggestion only: the pull request linked on the ticket, else the last commit here, else a note to fill
+    in. The agent checks it fits the step before running it."""
+    pr = sha = None
+    if root is not None:
+        from orch import reviewer
+
+        try:
+            pr = next(iter(reviewer.pr_urls(root, ticket)), None)
+        except Exception:  # noqa: BLE001 - a suggestion only
+            pr = None
+        sha = None if pr else _git_head(root)
+    ref = f"--pr {pr}" if pr else f"--commit {sha}" if sha else '--note "<what shows it is done>"'
+    key = ticket.get("key") or ticket.get("id") or "<ticket>"
+    return [f"  orch check done {key} {cid} {ref}" for cid in cids]
+
+
+def _check_can_finish(ticket: dict, root: Path | None = None) -> None:
     open_ = [c["id"] for c in ticket["checklist"] if not c.get("done") and not c.get("wont_do")]
     if open_:
         raise Refused(
@@ -1394,9 +1425,11 @@ def _check_can_finish(ticket: dict) -> None:
         )
     bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence") and not c.get("wont_do")]
     if bad:
+        hints = evidence_hints(root, ticket, bad)
+        source = "" if hints[0].endswith('"<what shows it is done>"') else " (a suggestion: check it fits)"
         raise Refused(
             f"Not done: {', '.join(bad)} is checked without evidence. "
-            f"Add it with: orch check done <ticket> <step> --note '<what you did>'"
+            f"Add evidence that fits each step{source}:\n" + "\n".join(hints)
         )
 
 
@@ -1503,7 +1536,7 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool 
     if status == "done" and ticket["status"] != "done" and ownerpick.carries_draft(ticket):
         if by.startswith("agent:"):
             _check_not_too_early(root, ticket)
-            _check_can_finish(ticket)
+            _check_can_finish(ticket, root)
             add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
             return "review", by
         ownerpick.refuse_ticket(ticket, person)
@@ -1512,7 +1545,7 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool 
     if status == "waiting" and by.startswith("agent:") and not hidden_kind(ticket):
         _check_waits_on_something(ticket)
     if status == "done" and by.startswith("agent:"):
-        _check_can_finish(ticket)
+        _check_can_finish(ticket, root)
         if not config.agents_may_finish(root):
             add_history(ticket, by, f"{by} finished the work and sent it to Check")
             return "review", by
@@ -1618,7 +1651,7 @@ def accept_for_owner(
         )  # ORCH-582: a draft is the owner's, never the Reviewer's
         if auto is not None:
             ownerpick.refuse_auto(ticket)  # Human review needed on: never the Auto Reviewer's
-        _check_can_finish(ticket)
+        _check_can_finish(ticket, root)
         if _open_questions(ticket):
             raise Refused("A question on this ticket still waits for an answer.")
         ticket["status"] = "done"
