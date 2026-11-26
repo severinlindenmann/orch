@@ -37,6 +37,10 @@ Token and phone id in the Keychain. Nothing else is stored; lists come from the 
 The Keychain item is this device only (no backup, no iCloud Keychain) and is updated in place. The token goes only to an
 `https` relay (plain `http` just to this device's own loopback, for the Simulator e2e), and a redirect that leaves the relay
 is not followed. An invitation link taken from the clipboard is removed from it (the code works once).
+Only a Keychain answer of "no such item" counts as signed out (queue and last rows are cleared). Any other failed read
+(e.g. the phone is still locked after a restart) keeps the queue and the last rows, shows "orch can't read this phone's
+sign-in right now", and reads again on the next refresh or return to the app. Pairing finishes only after the token is
+saved; a failed save stops setup and asks for a new invitation.
 
 ## Tests
 - T0: `xcodebuild test -scheme OrchMobile -only-testing:OrchMobileTests/RelayClientTests -destination 'platform=iOS Simulator,name=iPhone 16'`.
