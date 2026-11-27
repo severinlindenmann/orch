@@ -249,7 +249,7 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
 
 RESERVED = [
     ("focus", "live_session", True, False),
-    ("focus", "session_typing", False, True),
+    ("focus", "session_typing", True, False),  # on by default (owner pick B a of ORCH-2188, ORCH-2314)
     ("focus", "terminal_typing", False, True),
     ("record", "keep_days", 90, 30),  # an allowed value (others are snapped: test_insights_settings.py)
     ("record", "max_mb", 2048, 512),
@@ -263,7 +263,8 @@ def test_reserved_config(proj, section, key, default, valid):
     # the FILE parsing; record_* / insights_* are the effective values (with the person's record), tested in
     # test_insights_settings.py
     def getter(root):
-        if section == "focus":  # the focus getters are the file value itself
+        # the focus getters are the file value itself (session_typing fails closed: its own test below)
+        if section == "focus" and key != "session_typing":
             assert getattr(config, f"{section}_{key}")(root) == config.file_value(root, section, key)
         return config.file_value(root, section, key)
 
@@ -313,8 +314,23 @@ def test_the_retired_focus_preview_key_reads_without_error_and_goes_on_the_next_
     assert cfg.read_text() == tricky.replace("reviewer = true", "reviewer = false")
 
 
+def test_typing_into_the_helpers_screen_is_on_by_default_and_a_broken_file_never_turns_it_on(proj):
+    """ORCH-2314 (owner pick B a of ORCH-2188): on with no setting; watch only is a setting. A file that
+    cannot be read, or a value that is not true / false, counts as watch only, so a person who turned
+    typing off never gets it back through a damaged file."""
+    assert config.focus_session_typing(None) is True
+    assert config.focus_session_typing(proj) is True
+    config.set_key(proj, "focus", "session_typing", False)
+    assert config.focus_session_typing(proj) is False
+    for text in ('[focus]\nsession_typing = "wrong"\n', "[focus]\nsession_typing = 1\n", "invalid toml ["):
+        config.path(proj).write_text(text)
+        assert config.focus_session_typing(proj) is False, text
+    config.path(proj).write_text("[focus]\nlive_session = true\n")
+    assert config.focus_session_typing(proj) is True
+
+
 def test_focus_session_typing_is_a_plain_setting(proj, run):
-    assert run("config", "get", "focus.session_typing")[1].strip() == "False"
+    assert run("config", "get", "focus.session_typing")[1].strip() == "True"
     code, out, _ = run("config", "set", "focus.session_typing", "on")
     assert code == 0 and "typing into the helper's screen is on" in out
     assert config.focus_session_typing(proj) is True

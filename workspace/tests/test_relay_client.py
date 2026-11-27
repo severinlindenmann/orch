@@ -1180,21 +1180,24 @@ def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     monkeypatch.setattr(relay, "_post_message", blocked)
     code, out, _ = run("relay", "send", PEER, "hello")
     assert code == 0 and "Not sent: " + problem in out and "kept" in out and "can't be reached" not in out
+    from orch import relay_view
+
+    assert "1 message waits to be sent: " + problem in relay_view.view(proj)["notice"]  # ORCH-2167: one waits
     m = json.loads(run("relay", "send", PEER, "second", "--json")[1])
     assert m["sent"] is False and m["problem"] == problem
     assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
     out = run("relay", "outbox", "--resend")[1]
     assert problem in out and "next orch relay command" not in out
-    from orch import relay_view
-
-    assert problem in relay_view.view(proj)["notice"]  # the dashboard's Relay tab says it too
+    assert (
+        "2 messages wait to be sent: " + problem in relay_view.view(proj)["notice"]
+    )  # the Relay tab says it too
     assert "Saved messages are waiting: " + problem in run("relay", "whoami")[2]  # before any relay command
     code, _, err = run("ask", new_ticket(), "Go?", "--phone")  # the question to the phones
     assert code == 2 and "saved on the ticket" in err and problem in err and "can't be reached" not in err
     monkeypatch.setattr(relay, "_post_message", real)
     assert "waiting messages" in run("relay", "outbox", "--resend")[1]  # the sends, the question, its note
     assert not list((proj / ".orch/outbox").glob("m_*.json")) and len(rel.sent) >= 3
-    assert relay.outbox_problem(proj) is None and "wait to be sent" not in relay_view.view(proj)["notice"]
+    assert relay.outbox_problem(proj) is None and "to be sent" not in relay_view.view(proj)["notice"]
 
 
 def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
@@ -2016,6 +2019,42 @@ def test_pickups_started_is_recorded_and_shown(proj, run, rel, new_ticket):
 
 def _allow_ticket_of(run):
     return next(t for t in _tickets(run) if t.get("ext", {}).get("relay", {}).get("allow_message"))
+
+
+def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, rel):
+    """ORCH-2167: 'Next: describe this workspace' only while it has no description. With the admin's
+    description (or an own one waiting for the admin) the next step is to write to a contact."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    rel.me["description"] = "Writes the weekly reports"
+    code, out, _ = connect(run, rel)
+    assert (
+        code == 0
+        and 'Next: orch relay send "Reports" "<text>"' in out
+        and "describe this workspace" not in out
+    )
+    rel.me.update(
+        description="", pending={"description": "Reports team", "tags": None, "at": "2026-11-04T13:05:00Z"}
+    )
+    assert "describe this workspace" not in connect(run, rel)[1]
+    rel.me.update(description="  ", pending=None)
+    assert "Next: describe this workspace: orch relay profile" in connect(run, rel)[1]
+
+
+def test_allow_ticket_keeps_the_senders_name_for_home(proj, run, rel):
+    """ORCH-2167: Home says who asked for a task another workspace sent. The ticket keeps that workspace's
+    name as a label (never its raw id); with no name known it keeps none and Home says 'Another workspace'."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "Add rate limit", "text": "x"}))
+    rel.inbox.append(
+        msg("m_deleg00000000002", "delegate", {"title": "Other", "text": "y"}, frm="ws_unknown001")
+    )
+    run("relay", "inbox")
+    by_from = {
+        t["ext"]["relay"]["from"]: t["ext"]["relay"] for t in _tickets(run) if t.get("ext", {}).get("relay")
+    }
+    assert by_from[PEER]["from_name"] == "Reports"
+    assert "from_name" not in by_from.get("ws_unknown001", {})
 
 
 def test_allow_question_once_applied_once(proj, run, rel):

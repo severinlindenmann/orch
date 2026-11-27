@@ -9,7 +9,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from orch import cardtext, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
@@ -28,7 +27,7 @@ def _exp(v) -> str:
 
 def _host(url: str) -> str:
 
-    return urlsplit(url).netloc or url
+    return net.shown_host(url) or url.rsplit("@", 1)[-1]
 
 
 def _fields(description, tags) -> str:

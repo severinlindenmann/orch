@@ -404,3 +404,20 @@ def test_show_prints_what_is_hashed_and_list_names_ignored_files(proj, databrick
     assert checkfiles.skipped(proj) == ["Bad.json"]
     with pytest.raises(Refused):
         checkfiles.show(proj, "nope")
+
+
+def test_list_never_prints_an_ignored_file_name_raw(proj, run):
+    """ORCH-2208: an ignored check file's name goes to the person's terminal, so an escape code, a line break
+    or a direction mark in it is shown as a dot (as `checks show` does for the file's text)."""
+    assert checkfiles.plain_name("a\x1b[2J\x1b[Hb\nc\u202ed\x7f.json") == "a.[2J.[Hb.c.d..json"
+    assert checkfiles.plain_name("Ärger Größe.json") == "Ärger Größe.json"
+    assert len(checkfiles.plain_name("x" * 300)) == 80
+    checkfiles.init(proj)
+    try:
+        (proj / ".orch" / "checks" / "Evil\x1b[2J\x1b]0;hi\x07.json").write_text("{}", encoding="utf-8")
+    except OSError:
+        pytest.skip("this file system takes no control characters in a name")
+    assert "Evil.[2J.]0;hi..json" in checkfiles.skipped(proj)
+    for extra in ([], ["--json"]):
+        code, out, _ = run("checks", "list", *extra)
+        assert code == 0 and "\x1b" not in out and "\x07" not in out and "Evil.[2J" in out

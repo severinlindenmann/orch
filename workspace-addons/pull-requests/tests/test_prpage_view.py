@@ -194,9 +194,12 @@ def _t(stamp):
     return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
 
 
-def test_the_queue_shows_its_groups_per_project_and_each_row_its_place(prws):
+def test_the_queue_shows_its_groups_per_project_and_each_row_its_place(prws, monkeypatch):
     from orch_pull_requests import store
 
+    # Adding and claiming must share a clock: a second boundary otherwise makes
+    # the claimed group's age 24 minutes while its queue age is 25 minutes.
+    monkeypatch.setattr(store, "now", lambda: "2026-11-19T12:00:00Z")
     add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}, {"url": PR.format(2)}, {"url": PR.format(3)}])
     poll.once(prws, fetch=FakeGitHub({"acme/app": [gql_pr(1), gql_pr(2), gql_pr(3), gql_pr(4, draft=True)]}))
     _queue(prws, 1, 2, 3, ticket="t_aaaaa1")

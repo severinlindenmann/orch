@@ -146,7 +146,7 @@ class Person:
 
 
 def typing_on(tmp_path, on=True):
-    """[focus] session_typing in the workspace's config file (a plain setting; off by default)."""
+    """[focus] session_typing in the workspace's config file (a plain setting; on by default, ORCH-2314)."""
     (tmp_path / ".orch").mkdir(exist_ok=True)
     (tmp_path / ".orch" / "config.toml").write_text(f"[focus]\nsession_typing = {str(on).lower()}\n")
 
@@ -256,8 +256,12 @@ def test_the_screen_route_is_same_origin_and_not_cached(helper, tmp_path):
 def test_typing_is_refused_server_side_when_the_setting_is_off(helper, tmp_path):
     orch, _ = helper
     (tmp_path / ".orch" / "tickets").mkdir(parents=True)
-    srv, base = serve(tmp_path, orch, Person(True))  # no config: session_typing is off
+    srv, base = serve(tmp_path, orch, Person(True))
     try:
+        # ORCH-2314 (owner pick B a of ORCH-2188): no config, typing is on; watch only is a setting
+        code, body = call(base + "/api/term?ticket=" + TID)
+        assert code == 200 and json.loads(body)["typing_allowed"] is True
+        typing_on(tmp_path, False)
         code, body = call(base + "/api/term?ticket=" + TID)
         assert code == 200 and json.loads(body)["typing_allowed"] is False
         code, text = post(base, [{"t": "nope"}, {"k": "Enter"}])
