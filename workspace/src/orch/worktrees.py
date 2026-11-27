@@ -1740,6 +1740,43 @@ def change_counts(root: Path, tip: str) -> tuple[int, int] | None:
         return None
 
 
+def helpers_in_folder(root: Path, top: Path | None = None) -> list[str]:
+    """The tickets whose helper session is open in the project folder itself (working or idle), oldest id
+    first: a bring-back waits for them. The same folder however it is spelled (a link in the workspace
+    path, case on Windows)."""
+    here = {_real(root)} | ({_real(top)} if top is not None else set())
+    out = []
+    for record in sorted((runs.run_dir(root) / "tickets").glob("t_*.json")):
+        rec = runs.read(root, record.stem)
+        if (
+            rec
+            and runs.state(rec) in ("alive", "maybe-stale")
+            and _real(runs.workdir_for(root, rec, record.stem)) in here
+        ):
+            out.append(record.stem)
+    return out
+
+
+def already_back(root: Path, ticket: str) -> bool:
+    """True when this ticket's work was brought back already (ORCH-2298: orch did it by itself between two
+    tries) and nothing of it waits: the ticket says merged and its copy's own line of work is gone. Read
+    only; anything unclear is False."""
+    try:
+        if not _TID.fullmatch(ticket):
+            return False
+        back = (tickets.load(root, ticket).get("work") or {}).get("bring_back") or {}
+        if back.get("state") != "merged":
+            return False
+        with _scoped(root):
+            top = _top_of(root)
+            if top is None:
+                return False
+            ref = f"refs/heads/orch/{ticket}"
+            return _git(["show-ref", "--verify", "--quiet", ref], top, read_only=True)[0] == 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
     target, tip, paths = approval_view(root, ticket)
     return target, tip, len(paths)
@@ -2711,15 +2748,8 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             if (top / path).exists():
                 return wait("a merge or another git operation is in progress in your folder")
         # The same folder however it is spelled (a link in the workspace path, case on Windows).
-        here = {_real(root), _real(top)}
-        for record in (runs.run_dir(root) / "tickets").glob("t_*.json"):
-            rec = runs.read(root, record.stem)
-            if (
-                rec
-                and runs.state(rec) in ("alive", "maybe-stale")
-                and _real(runs.workdir_for(root, rec, record.stem)) in here
-            ):
-                return wait("an agent is still working in your folder")
+        if helpers_in_folder(root, top):
+            return wait("an agent is still working in your folder")
         # A repository setting can change what `git merge` does (branch.<b>.mergeOptions: --squash,
         # --no-commit, -s ours). It is not something orch can switch off here: refuse it.
         name = origin.removeprefix("refs/heads/")
