@@ -77,11 +77,14 @@ def _job(text, name):
     return rest if nxt is None else rest[: nxt.start() + 1]
 
 
-def test_ci_wires_the_watch_outside_the_gate():
+def test_ci_wires_the_watch_without_downstream_dependencies():
     ci = _wf("ci.yml")
     watch = _job(ci, "runner-watch")
     assert "runs-on: ubuntu-latest" in watch  # never on the runners it watches
-    assert "runner-watch" not in _job(ci, "gate")  # never turns a run red
+    # No other job depends on the watch, so its result never turns a run red.
+    for name in re.findall(r"^  ([a-z][\w-]*):$", ci, re.MULTILINE):
+        if name != "runner-watch":
+            assert "runner-watch" not in _job(ci, name)
     # the script comes from the base branch, never from the pull request, next to the runner-list secret
     assert "ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.sha }}" in watch
     assert "name: runner-fallback" in watch and "gh run cancel" in watch

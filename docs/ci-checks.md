@@ -243,7 +243,7 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   disappears. The runner watch handles that by itself (ORCH-1932, `scripts/runner_watch.py`): when a run's jobs
   wait for our own runners and none that could take them has been online for 10 minutes in a row, the `runner-watch`
   job cancels the run and `runner-fallback.yml` starts it again as a whole, so the route reads the runner list again
-  and sends the jobs to GitHub's machines (at most twice per run; never part of the gate). Install the updated job-started hook before enabling
+  and sends the jobs to GitHub's machines (at most twice per run; no other job depends on the watch). Install the updated job-started hook before enabling
   this mode. To check routing without a queue group, dispatch `rules.yml` on a `copilot/` branch.
 - **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at
   a time), so one run's 12 jobs share them. A develop push goes to orch edge only when EVERY runner there is idle;
