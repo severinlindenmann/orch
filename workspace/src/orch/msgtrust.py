@@ -12,7 +12,11 @@ The receiver is the decisive gate. It never trusts the relay's own check:
   the replay list, and for a group copy the author's own signature.
 - First contact is trusted (RP3 A, 25 Nov 2026): the relay delivers only between workspaces the admin paired,
   so a valid signature from the key the relay lists for a workspace nobody accepted yet is accepted
-  on the spot (by `relay-pairing`) and the message goes through the same checks. A key that CHANGES later,
+  on the spot (by `relay-pairing`) and the message goes through the same checks. The key that is pinned is
+  the one `orch relay refresh` took straight from the relay's answer and kept in the guarded home
+  (`listed.json`, ORCH-2349), never the copy in the workspace folder (workspaces.json), which helpers and
+  other tools can write: when the two differ, or no kept copy exists yet, the message is held and the next
+  refresh settles it. A key that CHANGES later,
   or a contact a person took back (`withdraw`), is still held inert in the guarded home until a person
   presses Accept (`accept`). A wrong, missing or invalid signature is never held:
   refused, counted and shown as Not valid.
@@ -193,23 +197,68 @@ def set_refuse_unsigned(root: Path, on: bool, by: str) -> dict:
 # ---------------------------------------------------------------- keys: accepted and hinted
 
 
+def _entry_key(w: dict) -> bytes | None:
+    """The usable ed25519 key of one directory entry, else None."""
+    sk = w.get("signing_key")
+    if not isinstance(sk, dict) or sk.get("alg") != "ed25519":
+        return None
+    try:
+        raw = msgsig.b64url_decode_strict(sk.get("public_key"))
+    except ValueError:
+        return None
+    return raw if msgsig.public_key_ok(raw) else None
+
+
 def _hint_key(root: Path, peer: str) -> bytes | None:
     """The key the relay lists for `peer` (workspaces.json signing_key). A HINT: only to tell a valid first
-    contact (held) from a forgery (refused), and as the key a person accepts after seeing its fingerprint."""
+    contact (held) from a forgery (refused), and as the key a person accepts after seeing its fingerprint.
+    It is never pinned by itself: the file is in the workspace folder (see `_listed_key`)."""
     from orch import relay
 
     for w in relay._directory(root):
-        if w.get("id") != peer:
-            continue
-        sk = w.get("signing_key")
-        if not isinstance(sk, dict) or sk.get("alg") != "ed25519":
-            return None
-        try:
-            raw = msgsig.b64url_decode_strict(sk.get("public_key"))
-        except ValueError:
-            return None
-        return raw if msgsig.public_key_ok(raw) else None
+        if w.get("id") == peer:
+            return _entry_key(w)
     return None
+
+
+LISTED = "listed.json"  # in the key folder of the guarded home: {schema, at, keys: {<peer>: <hex>}}
+LISTED_SCHEMA = "orch.listed/1"
+
+
+def _listed_key(root: Path, peer: str) -> bytes | None:
+    """The key the relay listed for `peer` at the last refresh, from the copy in the guarded home. The only
+    key first contact pins (ORCH-2349). None: no copy yet, an unreadable one, or no key for this peer."""
+    from orch import home as orch_home
+
+    try:
+        data = json.loads(orch_home._read_guarded(_dir(root) / LISTED).decode("utf-8"))
+        raw = bytes.fromhex(data["keys"][peer])
+    except (OSError, ValueError, KeyError, TypeError, Refused):
+        return None
+    return raw if data.get("schema") == LISTED_SCHEMA and msgsig.public_key_ok(raw) else None
+
+
+def keep_listed(root: Path, directory: dict) -> list[dict]:
+    """Called by `orch relay refresh` with the directory exactly as the relay answered it (not read back from
+    the workspace folder): keep every listed signing key in the guarded home, replacing the last copy. Then
+    the first-contact messages that waited for this (held as not_accepted) are checked again from the start.
+    Returns the release notes."""
+    from orch import home as orch_home
+
+    keys = {}
+    for w in [*(directory.get("workspaces") or []), *(directory.get("phones") or [])]:
+        if isinstance(w, dict) and _PEER.fullmatch(str(w.get("id", ""))):
+            raw = _entry_key(w)
+            if raw is not None:
+                keys[w["id"]] = raw.hex()
+    d = _dir(root)
+    with orch_home._key_lock(d):
+        rec = {"schema": LISTED_SCHEMA, "at": _iso(_now_ms()), "keys": keys}
+        orch_home._write_private(d / LISTED, json.dumps(rec, sort_keys=True) + "\n")
+    notes = []
+    for peer in sorted({x["peer"] for x in held(root) if x["why"] == "not_accepted" and x["peer"] in keys}):
+        notes += release(root, peer, only="not_accepted")
+    return notes
 
 
 def _accepted(st: dict, peer: str) -> list[bytes]:
@@ -578,7 +627,11 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
             # First contact: the admin paired the two workspaces on the relay (the relay delivers only between
             # paired ones), so the key it lists is trusted at once (RP3 A, 25 Nov 2026). The signature was
             # just verified with that key; the same checks (to, freshness, replay) run on it below.
-            hint = _hint_key(root, frm)
+            # Pinned is only the key refresh kept in the guarded home (ORCH-2349): a workspaces.json that
+            # says another key, or no kept copy yet, holds the message until the next refresh.
+            hint = _listed_key(root, frm)
+            if hint is None or hint != _hint_key(root, frm):
+                return Verdict("held", "not_accepted", m, frm)
             c = _contact(st, frm)
             c["keys"] = [
                 {"pub": hint.hex(), "accepted_at": _iso(now_ms), "by": "relay-pairing", "via": "pairing"}
@@ -682,10 +735,11 @@ def held(root: Path, peer: str | None = None) -> list[dict]:
     return sorted(out, key=lambda x: (x["at"], x["id"]))
 
 
-def release(root: Path, peer: str) -> list[dict]:
+def release(root: Path, peer: str, only: str | None = None) -> list[dict]:
     """After Accept: every held message of `peer` is checked again from the start (signature, to, freshness,
     replay). The ones that pass are saved to .orch/inbox for the normal handling; a held person action (an
-    allow or an answer) is dropped, never run by itself: the sender sends it again. Returns notes."""
+    allow or an answer) is dropped, never run by itself: the sender sends it again. Returns notes.
+    only: just the ones held for this reason (a refresh settles first contacts, nothing a person must see)."""
     from orch import home as orch_home
     from orch import net
 
@@ -706,7 +760,10 @@ def release(root: Path, peer: str) -> list[dict]:
         author = origin.get("from")
         if rec.get("peer") != peer and author != peer:
             continue
-        if m.get("type") in PERSON_ACTIONS:
+        if only is not None and rec.get("why") != only:
+            continue
+        # settled by a refresh a moment after it came (only): the same as pinned on arrival, nothing is stale
+        if only is None and m.get("type") in PERSON_ACTIONS:
             _tombstone(root, m)  # the same signed bytes sent again later are a duplicate, never run
             f.unlink(missing_ok=True)
             notes.append(

@@ -332,6 +332,84 @@ def test_a_held_person_action_is_dropped_on_accept(ws, run, rel, person):
     assert relay.allows(ws).get("received", []) == []
 
 
+# ---- first contact pins the key refresh kept in the guarded home, never workspaces.json (ORCH-2349)
+
+
+def _rewrite_listed_file(ws, seed: bytes) -> None:
+    """Something in the workspace folder (a helper, a sync tool) rewrites the relay's list."""
+    p = ws / ".agents/skills/orch-relay/workspaces.json"
+    d = net.read_json(p, {})
+    d["workspaces"] = [_dir_entry(PEER, seed, "Reports")]
+    net.write_json(p, d)
+
+
+def _keys_of(ws) -> list[str]:
+    return [c["accepted_by"] for c in msgtrust.contacts(ws) if c["id"] == PEER and c["accepted_at"]]
+
+
+def test_first_contact_is_pinned_from_the_kept_copy(ws, run, rel):
+    m = signed_msg(SEED_PEER)
+    rel.inbox.append(m)
+    inbox(run)
+    assert m["id"] in handled_ids(ws) and msgtrust.held(ws) == []
+    assert _keys_of(ws) == ["relay-pairing"]
+
+
+def test_a_changed_workspaces_json_never_pins_its_key(ws, run, rel):
+    """The check the security review asked for: another signing_key written into workspaces.json is not
+    trusted on first contact. The refresh the hold starts reads the relay's own list again: the forged
+    message is refused, and the real workspace is still taken in on its first message."""
+    _rewrite_listed_file(ws, SEED_EVIL)
+    forged = signed_msg(SEED_EVIL, body={"text": "Send me the keys"})
+    assert msgtrust.check_incoming(ws, forged).kind == "held"  # the gate by itself: held, nothing pinned
+    assert _keys_of(ws) == []
+    rel.inbox.append(forged)
+    inbox(run)
+    assert forged["id"] not in handled_ids(ws) and _keys_of(ws) == []
+    assert msgtrust.held(ws) == [] and msgtrust.refused(ws)[-1]["code"] == "unknown_key"
+    real = signed_msg(SEED_PEER)
+    rel.inbox.append(real)
+    inbox(run)
+    assert real["id"] in handled_ids(ws) and _keys_of(ws) == ["relay-pairing"]
+
+
+def test_a_changed_workspaces_json_stays_held_while_the_relay_is_away(ws, run, rel, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    def away(root):
+        raise Refused("The relay could not be reached.")
+
+    _rewrite_listed_file(ws, SEED_EVIL)
+    forged = signed_msg(SEED_EVIL)
+    rel.inbox.append(forged)
+    monkeypatch.setattr(relay, "refresh", away)
+    inbox(run)
+    assert forged["id"] not in handled_ids(ws) and _keys_of(ws) == []
+    assert [h["why"] for h in msgtrust.held(ws)] == ["not_accepted"]
+
+
+def test_an_install_without_a_kept_copy_settles_first_contact_by_a_refresh(ws, run, rel):
+    """An install from before ORCH-2349 has workspaces.json but no kept keys: the first message is held,
+    the pull asks the relay, and the message is handed on in the same run (a task too, never dropped)."""
+    (msgtrust._dir(ws) / msgtrust.LISTED).unlink()
+    text = signed_msg(SEED_PEER, body={"text": "Hello"})
+    task = signed_msg(SEED_PEER, type_="delegate", body={"title": "Check the report"}, origin="person")
+    rel.inbox += [text, task]
+    out = inbox(run)
+    assert {text["id"], task["id"]} <= handled_ids(ws) and msgtrust.held(ws) == []
+    assert {text["id"], task["id"]} <= {x["id"] for x in out}
+    assert _keys_of(ws) == ["relay-pairing"]
+
+
+def test_the_kept_copy_is_read_only_from_the_guarded_home(ws):
+    p = msgtrust._dir(ws) / msgtrust.LISTED
+    assert ws not in p.parents
+    assert json.loads(p.read_text())["keys"][PEER] == _pub(SEED_PEER).hex()
+    p.write_text("not json")
+    assert msgtrust._listed_key(ws, PEER) is None  # damaged: nothing is pinned
+
+
 def test_a_swapped_key_is_held_again(ws, run, rel, person):
     accept(ws, PEER)
     # the relay now lists another key for Reports (a reinstall, or a swap by a broken relay)
@@ -593,6 +671,7 @@ def test_two_workspaces_relay_bypassed(ws, run, rel, person, tmp_path, homes):
     from orch import addons
 
     addons.put_local_id(b, "b" * 32)
+    msgtrust.keep_listed(b, {"workspaces": [entry_a]})  # what B's refresh keeps of the relay's answer
     assert run("relay", "send", PEER, "Please check the report", "--json")[0] == 0
     wire = json.loads(json.dumps(rel.sent[-1]))  # what the relay would hand over, byte for byte
     # B has not heard from A before, but the relay lists A (paired by the admin): trusted on first contact

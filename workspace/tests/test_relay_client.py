@@ -40,6 +40,11 @@ def msg(mid, type_, body, frm=PEER, **kw):
     }
 
 
+def _allow_sent(srv) -> dict:
+    """The allow this workspace sent (the "Delivered" receipt for the task went out before it, ORCH-2348)."""
+    return next(m for m in srv.sent if m["type"] == "allow")
+
+
 def b64(s: bytes) -> str:
     return base64.b64encode(s).decode()
 
@@ -289,7 +294,7 @@ def test_allow_once_bound_to_message_and_ticket_made(proj, run, rel):
     out = run("relay", "inbox")[1]
     assert "waiting for your answer on t_" in out
     code, out, _ = run("relay", "allow", "m_deleg00000000001", "--once")
-    a = rel.sent[0]
+    a = _allow_sent(rel)
     assert a["type"] == "allow" and a["reply_to"] == "m_deleg00000000001" and a["to"] == PEER
     assert (
         a["body"]["mode"] == "once"
@@ -327,8 +332,8 @@ def test_permanent_allow_start_key_and_token(proj, run, rel):
     rel.inbox.append(first)
     run("relay", "inbox")
     run("relay", "allow", "m_start00000000001", "--permanent")
-    tok = rel.sent[0]["body"]["token"]
-    assert rel.sent[0]["body"]["key"] == "weekly-report"
+    tok = _allow_sent(rel)["body"]["token"]
+    assert _allow_sent(rel)["body"]["key"] == "weekly-report"
     again = msg("m_start00000000002", "start", {"key": "weekly-report", "text": "go", "allow_token": tok})
     wrong_key = msg("m_start00000000003", "start", {"key": "other", "text": "go", "allow_token": tok})
     forged = msg(
@@ -2378,7 +2383,7 @@ def test_permanent_allow_crash_after_create_leaves_one_live_ticket(proj, run, re
     run("relay", "inbox")
     run("relay", "allow", "m_deleg00000000031", "--permanent")
     run("relay", "done", "m_deleg00000000031")
-    tok = rel.sent[0]["body"]["token"]
+    tok = _allow_sent(rel)["body"]["token"]
     mid = "m_deleg00000000032"
     rel.inbox.append(msg(mid, "delegate", {"title": "B", "text": "x", "allow_token": tok}))
     run("relay", "inbox")  # allowed by the token: no question ticket

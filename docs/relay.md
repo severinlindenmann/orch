@@ -91,6 +91,16 @@ from them, or we sent them a message about it),
 else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
 data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
 records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.
+The sender hears what happened (ORCH-2348): the receiving orch answers each message by itself with one fixed line,
+"Passed on to ORCH-12" / "Passed on to Chat", or "Delivered" for a task that waits for the person there. The sender's
+ticket gets one history line ("Message to Reports: Passed on to ORCH-12") and the Relay page shows it on the message
+instead of "Sent". A text or file about an open ticket that has had no answer for 3 days becomes one question for the
+person on that ticket (Ask again / Keep waiting / Go on without an answer), so no helper has to look again and again;
+when the answer still comes, the helper that gets it is told the line that takes the question back (a received
+message never settles a question by itself).
+First contact (RP3 A) pins the key `orch relay refresh` took from the relay's own answer and kept in the guarded orch
+home (`listed.json`), never the copy in the workspace folder (ORCH-2349): when `workspaces.json` says another key, the
+message is held and orch asks the relay again.
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 

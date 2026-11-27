@@ -123,7 +123,7 @@ def test_without_the_grant_or_as_a_helper_nothing_is_accepted(ws, run, monkeypat
 def test_relay_view_text_lists_contacts_too(ws, run):
     code, out, err = run("relay", "view")
     assert code == 0, err
-    assert f"Reports  {FP}  Not accepted yet" in out
+    assert f"Reports  {FP}  Paired, trusted from its first message" in out
 
 
 def test_a_swapped_key_shows_the_old_fingerprint_in_every_state(ws, rel, person):
