@@ -14,7 +14,9 @@ from orch.errors import Refused
 @pytest.fixture(autouse=True)
 def claude_found(monkeypatch):
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
 
 
@@ -643,3 +645,55 @@ def test_a_bare_flag_set_by_an_agent_never_hides_tracked_orch_files(proj, run):
     assert harness.private_tracked(proj) is None
     code, out, _ = run("private", "move")
     assert code != 0 and "Nothing to move" not in out
+
+
+def _count_git(monkeypatch):
+    from orch import safegit
+
+    real, seen = safegit.run_bytes, []
+
+    def counting(args, *a, **k):
+        seen.append(args[0])
+        return real(args, *a, **k)
+
+    monkeypatch.setattr(safegit, "run_bytes", counting)
+    return seen
+
+
+def test_a_private_write_asks_git_twice_and_starts_no_agent(proj, monkeypatch):
+    """#1055 #1325: one ls-files and one check-ignore per private write (was six git runs), and no
+    `<agent> --version` process (two more per write): the file is still written and ignored."""
+    from orch import net
+
+    repo(proj)
+    net.write_json(proj / ".orch" / "secrets" / "x.json", {"a": 0}, private=True)
+    asked = []
+    monkeypatch.setattr(adapters, "detect", lambda **k: asked.append(k) or [])
+    seen = _count_git(monkeypatch)
+    net.write_json(proj / ".orch" / "secrets" / "x.json", {"a": 1}, private=True)
+    assert seen == ["ls-files", "check-ignore"]
+    assert asked and all(k == {"versions": False} for k in asked)
+    assert json.loads((proj / ".orch" / "secrets" / "x.json").read_text()) == {"a": 1}
+    assert git(proj, "check-ignore", "-q", ".orch/secrets/x.json").returncode == 0
+
+
+def test_a_tracked_private_file_is_still_refused(proj):
+    from orch import net
+
+    repo(proj)
+    p = proj / ".orch" / "secrets" / "x.json"
+    net.write_json(p, {"a": 0}, private=True)
+    git(proj, "add", "-f", ".orch/secrets/x.json")
+    with pytest.raises(Refused, match="git would not leave"):
+        net.write_json(p, {"a": 1}, private=True)
+    assert json.loads(p.read_text()) == {"a": 0}
+
+
+def test_a_private_file_git_does_not_ignore_is_still_refused(proj):
+    """The one check-ignore run names fewer paths than asked: each is asked again, the refusal is the same."""
+    from orch import net
+
+    repo(proj)
+    with pytest.raises(Refused, match="git would not leave"):
+        net.write_json(proj / ".orch" / "not-ignored.json", {"a": 1}, private=True)
+    assert not (proj / ".orch" / "not-ignored.json").exists()

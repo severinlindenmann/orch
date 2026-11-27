@@ -11,7 +11,9 @@ from orch import adapters, harness, safegit, skills
 def claude_found(monkeypatch):
     """Claude is on this machine (the files entry of a found agent is applied; CI has none)."""
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
 
 
@@ -270,7 +272,7 @@ def test_init_says_what_it_linked_and_what_is_next(proj, run):
 
 
 def test_no_agent_found_links_nothing(proj, run, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [])
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out
     assert not (proj / ".claude").exists() and not (proj / "CLAUDE.local.md").exists()
@@ -279,7 +281,7 @@ def test_no_agent_found_links_nothing(proj, run, monkeypatch):
 
 def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+        adapters, "detect", lambda **_: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.local.md").exists()
@@ -296,7 +298,7 @@ def test_files_entries_come_from_the_data(proj, monkeypatch):
         {"instructions_link": {"OTHER.md": "@AGENTS.md"}, "skills_link": ".other/skills"},
     )
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+        adapters, "detect", lambda **_: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
     skills.set_block(proj, "orch", "x")
     assert skills.apply_agent_files(proj) == ["Codex"]
@@ -1157,7 +1159,7 @@ def test_reminder_settings_malformed_left_untouched_with_one_warning(proj, run, 
 
 
 def test_reminder_settings_not_written_without_claude(proj, run, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [])
     run("init")
     assert not (proj / ".claude").exists()
 
