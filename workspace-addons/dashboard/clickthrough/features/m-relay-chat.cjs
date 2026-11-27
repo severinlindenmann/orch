@@ -44,7 +44,13 @@ module.exports = {
     const inGroup = s => (s.groups?.hosted || []).find(g => g.ticket === tid);
     const members = s => (inGroup(s)?.members || []).filter(m => !m.left_at).map(m => m.ws);
     await until(s => members(s).includes('ws_kitchen001'), 'the group with Kitchen');
+    // phone width (390): the page opens on a chat, and "‹ Chats" shows the list; wide: the list is always there
+    const list = async () => {
+      const back = page.getByRole('button', { name: '‹ Chats' }).first();
+      if (await back.isVisible().catch(() => false)) await back.click();
+    };
     await open('#chat');
+    await list();
     await page.locator('[data-chat-action="select"]').filter({ hasText: 'Plan the summer party' }).first().click();
     const draft = page.locator('.chat-page textarea[data-thread]');
     await draft.waitFor({ timeout: 20000 });
@@ -54,8 +60,10 @@ module.exports = {
     // and removing a member there is e-ticket-chat-workspaces.cjs
     await until(s => (s.ticket_chats || []).some(x => x.id === tid), 'the group as a ticket chat');
     await reload();
+    await list();
     await page.locator(`.chat-list-row[data-id="${tid}"]`).first().click();
-    await page.getByText('Kitchen, can you bring the dessert?').first().waitFor({ timeout: 20000 })
+    // the visible one: at 390 the list (whose row repeats the last line) is hidden behind the open chat
+    await page.locator('text=Kitchen, can you bring the dessert? >> visible=true').first().waitFor({ timeout: 20000 })
       .catch(() => { throw new Error('the group message is gone after a reload'); });
 
     await open('#ticket/' + tid);
