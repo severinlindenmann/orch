@@ -83,8 +83,9 @@ orch answer "$FID" q1 no
 f2_is 't["waiting_on"] is None and t["questions"][0]["answer"] == "no"'
 ORCH_TICKET="$FID" "$PY" "$AGENT_PY" --ask "Send it today?" "work on $FID"
 f2_is 't["status"] == "review" and t["checklist"][2]["evidence"][0]["ref"] == "answer was no"'
+# a helper's own Done stays in Review: a person marks a ticket Done (ORCH-2108)
 orch ticket status "$FID" done
-f2_is 't["status"] == "done"'
+f2_is 't["status"] == "review"'
 # ORCH-897 (first run): init is safe to repeat, and orch uninstall keeps the tickets so init brings the folder back
 step "init again"
 ORCH_AGENT=claude orch init

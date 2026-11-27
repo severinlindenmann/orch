@@ -1892,8 +1892,10 @@ def _op_timeout(op, args) -> int:
         return 150
     if op == "checks.approve":  # the approved check runs once at once (checkfiles.TIMEOUT_MAX: 2 minutes)
         return 150
-    if op == "run.start":  # a slow computer: the copy step may wait for its lock (worktrees.LOCK_WAIT, 150 s); cutting
-        return 180  # the start off sooner kills it half way (ORCH-2362), so it must end by itself first
+    if op == "run.start":
+        # a slow computer: the copy step may wait for its lock (worktrees.LOCK_WAIT, 150 s); cutting the start
+        # off sooner kills it half way (ORCH-2362), so it must end by itself first
+        return 180
     return 75 if op == "config.agent.test" else 60
 
 
