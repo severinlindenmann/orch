@@ -406,11 +406,9 @@ def test_show_prints_what_is_hashed_and_list_names_ignored_files(proj, databrick
         checkfiles.show(proj, "nope")
 
 
-def test_list_never_prints_an_ignored_file_name_raw(proj, capsys):
+def test_list_never_prints_an_ignored_file_name_raw(proj, run):
     """ORCH-2208: an ignored check file's name goes to the person's terminal, so an escape code, a line break
     or a direction mark in it is shown as a dot (as `checks show` does for the file's text)."""
-    from orch import cli
-
     assert checkfiles.plain_name("a\x1b[2J\x1b[Hb\nc\u202ed\x7f.json") == "a.[2J.[Hb.c.d..json"
     assert checkfiles.plain_name("Ärger Größe.json") == "Ärger Größe.json"
     assert len(checkfiles.plain_name("x" * 300)) == 80
@@ -421,6 +419,5 @@ def test_list_never_prints_an_ignored_file_name_raw(proj, capsys):
         pytest.skip("this file system takes no control characters in a name")
     assert "Evil.[2J.]0;hi..json" in checkfiles.skipped(proj)
     for extra in ([], ["--json"]):
-        assert cli.main(["--dir", str(proj), "checks", "list", *extra]) == 0
-        out = capsys.readouterr().out
-        assert "\x1b" not in out and "\x07" not in out and "Evil.[2J" in out
+        code, out, _ = run("checks", "list", *extra)
+        assert code == 0 and "\x1b" not in out and "\x07" not in out and "Evil.[2J" in out

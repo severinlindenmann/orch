@@ -507,7 +507,7 @@ def view(root: Path) -> dict:
         s = "s" if waiting != 1 else ""
         problem = relay.outbox_problem(root)
         out["notice"] = (
-            f"{waiting} message{s} wait to be sent: {problem}"
+            f"{waiting} message{s} {'waits' if waiting == 1 else 'wait'} to be sent: {problem}"
             if problem
             else f"The relay can't be reached. You can keep writing. {waiting} message{s} "
             + (
