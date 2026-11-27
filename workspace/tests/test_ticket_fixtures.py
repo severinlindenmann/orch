@@ -179,6 +179,82 @@ def test_broken_json_is_refused_and_not_overwritten(one_ticket, proj, run):
         assert run("ticket", "list")[0] == 0
 
 
+@pytest.mark.parametrize("variant", ["crlf", "bom", "bom-crlf"])
+def test_ticket_file_saved_by_a_windows_editor_still_works(variant, proj, run, monkeypatch):
+    """R1.6/R8.2: a ticket fixed by hand on Windows (Notepad, PowerShell 5 `Set-Content -Encoding UTF8`)
+    comes back with CRLF line ends and/or a UTF-8 BOM, in a folder with spaces and umlauts. It lists,
+    shows, takes a checklist item and an edit, and survives `orch update --project-only`."""
+    # no agent tool on PATH: nothing here may start the real claude/copilot/codex
+    bins = (sys.executable, shutil.which("git"))
+    monkeypatch.setenv("PATH", os.pathsep.join(os.path.dirname(x) for x in bins))
+    ws = proj / "Mein Ordner – Müller Ä"
+    ws.mkdir()
+    monkeypatch.chdir(ws)
+    before = _install(ws, NEWEST)
+    for p in (ws / ".orch" / "tickets").glob("t_*.json"):
+        b = p.read_bytes()
+        if "crlf" in variant:
+            b = b.replace(b"\n", b"\r\n")
+        if "bom" in variant:
+            b = b"\xef\xbb\xbf" + b
+        p.write_bytes(b)
+    assert {t["id"] for t in tickets.list_all(ws)} == set(before)
+    code, out, err = run("ticket", "list")
+    assert code == 0 and all(tid in out for tid in before), err
+    tid = sorted(before)[0]
+    code, shown, err = run("ticket", "show", tid)
+    assert code == 0 and before[tid]["title"] in shown, err
+    assert run("check", "add", tid, "Schritt für Größe", "--by", "human:tester")[0] == 0
+    assert run("ticket", "edit", tid, "--note", "geändert", "--by", "human:tester")[0] == 0
+    code, out, err = run("update", "--project-only")
+    assert code == 0 and "Traceback" not in err, err
+    new = json.loads(tickets.ticket_path(ws, tid).read_text(encoding="utf-8"))  # orch writes plain UTF-8
+    assert new["note"] == "geändert" and new["checklist"][-1]["text"] == "Schritt für Größe"
+    assert new["title"] == before[tid]["title"]
+
+
+def test_read_only_ticket_file_is_refused_with_a_next_step(one_ticket, proj, run, monkeypatch):
+    """Windows refuses to replace a read-only file (OneDrive, a synced or copied folder): one sentence that
+    says what to do, never a traceback, the file and its folder as they were."""
+    tid, p = one_ticket
+    from orch import procs
+
+    real = procs.replace
+
+    def windows_replace(src, dst):
+        if Path(dst) == p:
+            raise PermissionError(13, "Access is denied", str(dst))
+        return real(src, dst)
+
+    monkeypatch.setattr(procs, "replace", windows_replace)
+    p.chmod(0o444)
+    try:
+        raw = p.read_bytes()
+        code, out, err = run("check", "add", tid, "x", "--by", "human:tester")
+        assert code == 2 and "Traceback" not in out + err, err
+        assert "read-only" in err and "try again" in err.lower(), err
+        assert p.read_bytes() == raw
+        assert not list(p.parent.glob(".tmp-*"))
+    finally:
+        p.chmod(0o644)
+
+
+def test_locked_ticket_file_is_refused_with_a_next_step(one_ticket, proj, run, monkeypatch):
+    """Another program (OneDrive mid-download, an editor, a virus scan) holds the file open on Windows."""
+    tid, p = one_ticket
+    real = Path.read_text
+
+    def locked(self, *a, **k):
+        if self == p:
+            raise PermissionError(13, "The process cannot access the file", str(self))
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", locked)
+    code, out, err = run("ticket", "show", tid)
+    assert code == 2 and "Traceback" not in out + err, err
+    assert err.startswith(f"Refused: Ticket {tid}") and "try again" in err.lower(), err
+
+
 def test_old_proof_fields_load_show_as_plain_and_are_kept(proj, run):
     """A ticket written while Done and Won't do carried extra fields (`verdicts[]`, `wont_mac`, `wont_nonce`,
     `wont_line`, `wont_by`): they stay in the file. Done shows as Done (not Review), the fields are ignored

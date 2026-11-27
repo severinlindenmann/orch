@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from orch import adapters, addons, cli_leave, diag, diag_collect, safegit, services
+from orch import adapters, addons, cli_leave, diag, diag_collect, procs, safegit, services
 
 _REAL_UV_FAILS = cli_leave._uv_fails
 
@@ -21,6 +21,7 @@ def tools_found(monkeypatch):
     )
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}")
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")
+    monkeypatch.setattr(procs, "launcher_problem", lambda: None)  # the faked orch works (ORCH-2138)
     monkeypatch.setattr(cli_leave, "_uv_fails", lambda uv: None)
     plenty = type("U", (), {"free": 10**11, "total": 10**12})()  # never the real (maybe full) disk
     monkeypatch.setattr(diag_collect.shutil, "disk_usage", lambda p: plenty)

@@ -738,6 +738,13 @@ def _file_lock(d: Path, name: str):
         try:
             os.close(os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
             break
+        except PermissionError:
+            # Windows: a lock file another holder is deleting right now refuses O_EXCL with EACCES, not EEXIST
+            if os.name != "nt":
+                raise
+            if time.monotonic() > end:
+                raise Refused("The key store is busy. Try again.") from None
+            time.sleep(0.02)
         except FileExistsError:
             with contextlib.suppress(OSError):
                 if time.time() - lock.stat().st_mtime > 30:  # a crashed holder

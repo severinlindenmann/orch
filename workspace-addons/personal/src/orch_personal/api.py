@@ -1390,8 +1390,13 @@ def _use_meeting(root: Path, who: Who, ticket: str, mid: str) -> dict:
 
 
 def _orch_cmd() -> list[str]:
+    """`$ORCH_BIN` (never orch.exe on Windows: orch.procs.orch_cmd, ORCH-2138), else this Python's own orch."""
     orch = os.environ.get("ORCH_BIN")
-    return [orch] if orch else [sys.executable, "-I", "-P", "-m", "orch"]
+    try:
+        from orch import procs
+    except ImportError:
+        return [orch] if orch else [sys.executable, "-I", "-P", "-m", "orch"]
+    return procs.orch_cmd() if orch else procs.orch_python_argv()
 
 
 def _attach(root: Path, ticket: str, name: str, body: str, by: str) -> str:

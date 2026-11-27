@@ -855,16 +855,30 @@ try { & $Script } catch { [Console]::Error.WriteLine("THROWN: " + $_.Exception.M
 """
 
 
+# Every call is logged; STUB_RESTORE=fail makes `update --after-install` stop the way a refused one does
+# (its reason on stderr, exit code 2).
+_ORCH_STUB = r"""#!/bin/sh
+[ -n "$STUB_ORCH_LOG" ] && echo "$*" >> "$STUB_ORCH_LOG"
+if [ "$1 $2" = "update --after-install" ] && [ "$STUB_RESTORE" = fail ]; then
+  echo "Refused: An add-on install or update is still finishing in the background. Try again in a minute." >&2
+  exit 2
+fi
+echo "stub: SAYS $*"
+"""
+
+
 def _stub_orch(folder, says):
     """A POSIX stand-in for orch.exe; plain `orch` finds its extensionless twin outside Windows."""
     folder.mkdir(parents=True, exist_ok=True)
     for name in ("orch.exe", "orch"):
         exe = folder / name
-        exe.write_text(f'#!/bin/sh\necho "stub: {says} $*"\n')
+        exe.write_text(_ORCH_STUB.replace("SAYS", says))
         exe.chmod(0o755)
 
 
-def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1", bin_dir=None, path=(), orch=True):
+def _run_install_ps1(
+    tmp_path, mode, script=ROOT / "install.ps1", bin_dir=None, path=(), orch=True, restore="ok"
+):
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("needs PowerShell 7 (pwsh)")
@@ -889,12 +903,14 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1", bin_dir=None, 
         "STUB_TOOLDIR": str(tmp_path / "tools"),
         "STUB_BIN": str(bin_dir),
         "STUB_INSTALL_EXIT": "0" if mode == "success" else "2",
+        "STUB_RESTORE": restore,
+        "STUB_ORCH_LOG": str(tmp_path / "orch-calls.log"),
     }
     r = subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(stubs), "-Script", str(script), "-Mode", mode],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120,
     )  # fmt: skip
-    return r.returncode, r.stdout + r.stderr, env
+    return r.returncode, r.stdout, env  # one redirected transcript, in the order a person reads it
 
 
 _STAGES = {
@@ -986,3 +1002,45 @@ def test_install_ps1_missing_orch_exe_is_not_called_installed(tmp_path):
     assert f"THROWN: orch install stopped: uv finished, but {exe} is missing. Next: " in out
     for never in ("orch is installed", "orch init", "& '", "SetEnvironmentVariable", "Typing orch"):
         assert never not in out
+
+
+def _lines(out):
+    return [x.rstrip() for x in out.splitlines() if x.strip()]
+
+
+_RESTORE_REASON = (
+    "Refused: An add-on install or update is still finishing in the background. Try again in a minute."
+)
+_RESTORE_SUMMARY = "orch is installed, but putting your add-ons back did not finish (the reason is above)."
+
+
+@_POSIX_STUB
+def test_install_ps1_failed_restore_says_installed_and_gives_one_step(tmp_path):
+    # orch is not on Path: the one step is the installed copy by its full path (space, both apostrophes)
+    custom = tmp_path / "Anna O'Neil\u2019s tools" / "bin"
+    code, out, env = _run_install_ps1(tmp_path, "success", bin_dir=custom, restore="fail")
+    assert code == 0, out  # the installer itself still ends normally
+    lines = _lines(out)
+    assert lines.index(_RESTORE_REASON) < lines.index(_RESTORE_SUMMARY)  # orch's own reason stays first
+    assert "orch is installed." not in lines and not any(x.startswith("Note:") for x in lines)
+    assert "init" not in out  # a returning person: no second, competing next step
+    assert lines[-2] == "Go to your project folder and run this to put your add-ons back:"
+    assert lines[-1].startswith("  & '") and lines[-1].endswith("' update")
+    log = tmp_path / "orch-calls.log"
+    assert log.read_text().splitlines() == ["update --after-install"]  # nothing is retried for the person
+    # the printed line is real PowerShell: pasted, it runs that installed copy with `update`
+    r = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", lines[-1].strip()],
+        env=env, capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    assert log.read_text().splitlines()[-1] == "update"
+
+
+@_POSIX_STUB
+def test_install_ps1_failed_restore_by_name_when_orch_runs_the_installed_copy(tmp_path):
+    _code, out, _ = _run_install_ps1(tmp_path, "success", path=[tmp_path / "bin"], restore="fail")
+    lines = _lines(out)
+    assert _RESTORE_SUMMARY in lines
+    go = "Open a new terminal, go to your project folder and run this to put your add-ons back:"
+    assert lines[-2:] == [go, "  orch update"]

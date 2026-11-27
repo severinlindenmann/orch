@@ -817,7 +817,9 @@ def _pump(pipe, out, h, errors):
 
 def _kill_group(pid: int, grace: float = 2.0) -> None:
     """End every process of the child's own session: TERM, then KILL after a short grace. Nothing left holds a
-    key or a pipe."""
+    key or a pipe. POSIX only: Windows has no os.killpg or SIGKILL (the child gets no own session there)."""
+    if os.name == "nt":
+        return
     for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
         try:
             os.killpg(pid, sig)

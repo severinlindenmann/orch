@@ -22,6 +22,50 @@ def orch_python_argv(*args: str) -> list[str]:
     return [sys.executable, "-I", "-P", "-m", "orch", *args]
 
 
+SELF = "orch:self"  # an orch_bin that means "this Python's own orch" (pagesession.SELF)
+
+
+def orch_cmd(orch_bin: str | None = None) -> list[str]:
+    """The argv prefix an add-on (or any caller) starts orch with: `orch_bin` (default `$ORCH_BIN`) when it is
+    a test's fake or the orch command on macOS/Linux, else this Python's `-I -P -m orch` (ORCH-2138). On
+    Windows the orch launcher (`orch` / `orch.exe`) is never started: a company computer may block .exe files,
+    and an add-on runs in orch's own Python anyway. Without any orch on the PATH it is this Python as well."""
+    b = os.environ.get("ORCH_BIN") if orch_bin is None else orch_bin
+    if b == SELF:
+        return orch_python_argv()
+    if os.name == "nt":
+        if not b or Path(b.replace("\\", "/")).name.lower() in ("orch", "orch.exe"):
+            return orch_python_argv()
+        return [b]
+    if not b or b == "orch":
+        import shutil
+
+        return ["orch"] if shutil.which("orch") else orch_python_argv()
+    return [b]
+
+
+def python_command_line() -> str:
+    """How a person or a helper types orch without the launcher: `"<python>" -m orch`."""
+    return f'"{sys.executable}" -m orch'
+
+
+def launcher_problem() -> str | None:
+    """Windows only: "missing" when no orch launcher is on the PATH, "blocked" when it is there but does not
+    start (a company rule that blocks .exe files); None when it works, and always None on macOS/Linux."""
+    if os.name != "nt":
+        return None
+    import shutil
+
+    exe = shutil.which("orch")
+    if not exe:
+        return "missing"
+    try:
+        r = _run([exe, "--version"], capture_output=True, timeout=15, stdin=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "blocked"
+    return None if r.returncode == 0 else "blocked"
+
+
 def background_popen_kwargs() -> dict[str, int | bool]:
     """Start a background process without a visible Windows console; callers supply log streams.
 
@@ -37,10 +81,67 @@ def background_popen_kwargs() -> dict[str, int | bool]:
     return {"start_new_session": True, "stdin": subprocess.DEVNULL}
 
 
+def _win_processes() -> list[tuple[int, int, str]]:
+    """(pid, parent pid, exe file name) of every process, from a Toolhelp snapshot (Windows only)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    out: list[tuple[int, int, str]] = []
+    try:
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        more = k32.Process32FirstW(snap, ctypes.byref(entry))
+        while more:
+            out.append((entry.th32ProcessID, entry.th32ParentProcessID, entry.szExeFile))
+            more = k32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        k32.CloseHandle(snap)
+    return out
+
+
+def _win_launcher_children(pid: int, table: list[tuple[int, int, str]]) -> list[int]:
+    """The real-python child a venv launcher starts for itself: a direct child with the launcher's own image
+    name (python.exe) and nothing else. Only when pid has exactly one such child; with more, which one is the
+    launcher's is not certain and none is taken."""
+    own = next((exe for p, _, exe in table if p == pid), None)
+    if not own:
+        return []
+    same = [p for p, parent, exe in table if parent == pid and exe.lower() == own.lower()]
+    return same if len(same) == 1 else []
+
+
+def _win_taskkill(pid: int) -> None:
+    _run(
+        ["taskkill", "/PID", str(pid), "/F"],  # no /T: it would also end helpers the service started detached
+        capture_output=True,
+        timeout=5,
+        check=True,
+        creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
+
+
 def stop_tree(pid: int, *, verified: Callable[[], bool]) -> bool:
     """Stop only a recorded service, after its caller's full identity check.
 
-    Windows venv launchers can leave children behind: taskkill includes descendants of this pid.
+    Windows: the service and the real-python child its venv launcher starts, never the rest of the tree
+    (taskkill /T would end merge queue runners and helpers the service started, which must keep working).
     Never walk up to a parent (which may not be ours). POSIX retains single-pid SIGTERM.
     A taskkill failure is surfaced so callers keep the record for a later stop attempt.
     """
@@ -48,13 +149,12 @@ def stop_tree(pid: int, *, verified: Callable[[], bool]) -> bool:
         return False
     if sys.platform == "win32":
         try:
-            _run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                timeout=5,
-                check=True,
-                creationflags=0x08000000,  # CREATE_NO_WINDOW
-            )
+            try:
+                targets = [pid, *_win_launcher_children(pid, _win_processes())]
+            except (OSError, ValueError, AttributeError):
+                targets = [pid]  # no process list: the recorded pid alone
+            for target in reversed(targets):  # the child first, so the launcher does not start another
+                _win_taskkill(target)
         except (OSError, subprocess.SubprocessError) as exc:
             raise RuntimeError("The service could not be stopped. Try again in a moment.") from exc
     else:

@@ -10,6 +10,17 @@ import subprocess
 import threading
 from pathlib import Path
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 BY = "agent:automation"
 ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
 
@@ -42,7 +53,7 @@ def call(root: Path, *args: str, by: bool | str = True):
     if "--" in head:
         cut = head.index("--")
         head, tail = head[:cut], head[cut:]
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *head, "--json"] + (["--by", actor] if by else []) + tail
+    cmd = [*_orch_cmd(), *head, "--json"] + (["--by", actor] if by else []) + tail
     try:
         p = _run(cmd, cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
@@ -71,13 +82,14 @@ def _here(root: Path, args):
     core, a read the core does not answer here or a refusal). One process per read was most of the machine
     load with many helpers (ORCH-634)."""
     try:
-        from orch import reads
+        from orch import procs, reads
     except ImportError:
         return None
     if not (hasattr(reads, "answer") and hasattr(reads, "same_orch")):
         return None
     try:
-        if not reads.same_orch(_launcher(root, os.environ.get("ORCH_BIN") or "orch")):
+        cmd = _orch_cmd()
+        if cmd != procs.orch_python_argv() and not reads.same_orch(_launcher(root, cmd[0])):
             return None
         value = reads.answer(Path(root), [*args, "--json"])
     except Exception:  # noqa: BLE001 - NotHere, Refused or anything else: the command gets its chance
@@ -212,7 +224,7 @@ def run_start(
     refused = sync_refusal(root, tid)
     if refused:
         return {"result": "failed", "reason": refused}
-    cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
+    cmd = [*_orch_cmd(), "run", "start", tid, "--json", "--by", by or BY]
     if mode:
         cmd += ["--mode", mode]
     if agent and AGENT_RE.match(agent):  # only a name; core refuses one it does not know

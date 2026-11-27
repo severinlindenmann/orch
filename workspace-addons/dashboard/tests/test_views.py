@@ -163,6 +163,66 @@ time.sleep(60)
     assert not alive(pid), "orphaned child survived"
 
 
+def _as_windows(monkeypatch, taskkill=None):
+    """What the view puller meets on Windows: no os.killpg (report r-1123-1055, ORCH-1796). The Popen flags
+    stay POSIX here (creationflags only run on Windows); signal.SIGKILL stays because Popen.kill() needs it."""
+    from orch_dashboard import views
+
+    monkeypatch.setattr(views, "_WINDOWS", True)
+    monkeypatch.setattr(views, "_group_kw", dict)
+    monkeypatch.setattr(views, "_taskkill_exe", lambda: taskkill)
+    monkeypatch.delattr(os, "killpg", raising=False)
+
+
+def test_windows_starts_the_view_as_its_own_group(monkeypatch):
+    from orch_dashboard import views
+
+    monkeypatch.setattr(views, "_WINDOWS", True)
+    assert views._group_kw() == {"creationflags": 0x00000200}  # CREATE_NEW_PROCESS_GROUP
+
+
+def test_pull_works_without_killpg_as_on_windows(ws, fake_orch, monkeypatch):
+    _as_windows(monkeypatch)
+    r = ViewPuller(ws, str(fake_orch), timeout=5).pull("scheduler")
+    assert r["state"] == "ok" and r["view"] == check_view(example())
+
+
+def test_timeout_without_killpg_ends_the_tree_with_taskkill(ws, fake_orch, monkeypatch):
+    from orch_dashboard import views
+
+    _script(fake_orch, "print(os.getpid(), flush=True)\ntime.sleep(60)\n")
+    _as_windows(monkeypatch, taskkill="C:\\Windows\\System32\\taskkill.exe")
+    calls = []
+    monkeypatch.setattr(views, "_run", lambda argv, **kw: calls.append(argv))
+    t0 = time.time()
+    r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
+    assert r["state"] == "error" and "too long" in r["message"] and time.time() - t0 < 5
+    assert calls and calls[0][0].endswith("taskkill.exe") and calls[0][-2:] == ["/T", "/F"]
+    pid = int(calls[0][2])
+    for _ in range(30):  # the stub taskkill did nothing: the command itself was still ended
+        if not alive(pid):
+            break
+        time.sleep(0.1)
+    assert not alive(pid)
+
+
+def test_failed_taskkill_still_ends_the_command(ws, fake_orch, monkeypatch):
+    import subprocess
+
+    from orch_dashboard import views
+
+    _script(fake_orch, "time.sleep(60)\n")
+    _as_windows(monkeypatch, taskkill="taskkill.exe")
+
+    def hung(*a, **kw):
+        raise subprocess.TimeoutExpired(a[0], 5)
+
+    monkeypatch.setattr(views, "_run", hung)
+    t0 = time.time()
+    r = ViewPuller(ws, str(fake_orch), timeout=0.5).pull("scheduler")
+    assert r["state"] == "error" and "too long" in r["message"] and time.time() - t0 < 5
+
+
 def test_output_is_capped_while_reading(ws, fake_orch):
     _script(
         fake_orch,

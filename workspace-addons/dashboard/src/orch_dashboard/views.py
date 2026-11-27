@@ -788,6 +788,56 @@ def check_view(v) -> dict | None:
     }
 
 
+_WINDOWS = os.name == "nt"
+_run = subprocess.run  # module-local, so a test patches this and never the global subprocess.run
+
+
+def _group_kw() -> dict:
+    """Start the `view` command as the head of its own group, so a kill also reaches what it started."""
+    if _WINDOWS:
+        return {"creationflags": 0x00000200}  # CREATE_NEW_PROCESS_GROUP: ended as a tree (taskkill /T)
+    return {"start_new_session": True}
+
+
+def _taskkill_exe() -> str | None:
+    try:
+        from orch.safegit import taskkill_exe  # the core's one lookup: full path in the system folder
+    except ImportError:
+        return None
+    return taskkill_exe()
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """End an add-on's `view` command and what it started; never raises. POSIX: SIGKILL to its own process
+    group. Windows has no os.killpg or SIGKILL (ORCH-1796): `taskkill /T /F` while it still runs (a finished
+    pid may be reused), then the command alone when taskkill is missing or failed."""
+    if not _WINDOWS:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return
+    if p.poll() is not None:
+        return
+    exe = _taskkill_exe()
+    if exe:
+        try:
+            _run(
+                [exe, "/PID", str(p.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        if p.poll() is None:
+            p.kill()
+    except OSError:
+        pass
+
+
 class ViewPuller:
     """One per server. `pull(name)` -> {"state": "ok"|"stale"|"error", "view", "as_of", "message"}."""
 
@@ -809,7 +859,7 @@ class ViewPuller:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                **_group_kw(),
             )
         except OSError:
             return None, "The orch command could not be started."
@@ -817,10 +867,7 @@ class ViewPuller:
         state = {"n": 0, "big": False}
 
         def kill():
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            _kill_tree(p)
 
         def read():  # hard cap while reading, not after
             while True:

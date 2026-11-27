@@ -437,10 +437,15 @@ def test_without_tmux_the_run_is_one_turn_at_a_time(proj, run, lab, monkeypatch)
     tid = _ticket(run)
     code, out, err = run("run", "start", tid, "--json")
     assert code == 0 and json.loads(out)["mode"] == "oneshot"
-    _until(lambda: runs.read(proj, tid) is None)
-    code, out, err = run(
-        "run", "start", tid, "--mode", "live", "--json"
-    )  # asked for live: same record, plain note
+    lock = runs.run_dir(proj) / "tickets" / f"{tid}.lock"
+    # Windows: the record is gone a moment before the finished run lets go of its lock file
+    _until(lambda: runs.read(proj, tid) is None and not lock.exists(), what="first run fully ended")
+    end = time.monotonic() + 10
+    while True:  # asked for live: same record, plain note
+        code, out, err = run("run", "start", tid, "--mode", "live", "--json")
+        if code == 0 or time.monotonic() > end:
+            break
+        time.sleep(0.2)
     assert code == 0 and json.loads(out)["mode"] == "oneshot" and "needs tmux" in err, (code, out, err)
     _until(lambda: runs.read(proj, tid) is None)
 

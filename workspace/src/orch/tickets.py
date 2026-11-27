@@ -426,14 +426,16 @@ def _read_ticket(p: Path, tid: str) -> dict:
             _check_shape(data, tid)
             return fill_missing(data)
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
-            if syncgate.live_holder(_root_of(p)) is None:
+            live = syncgate.live_holder(_root_of(p)) is not None
+            if attempt == 3 or not live:
                 if isinstance(e, PermissionError):
-                    raise
+                    raise Refused(
+                        f"Ticket {tid} can't be read: another program has its file open (a sync app like"
+                        " OneDrive, an editor). Wait a moment and try again."
+                    ) from None
+                if live:
+                    raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
                 raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
-            if attempt == 3:
-                if isinstance(e, PermissionError):
-                    raise
-                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
 
@@ -631,7 +633,14 @@ def _write(root: Path, ticket: dict) -> None:
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())  # a crash right after the replace never leaves an empty ticket file
-        procs.replace(tmp, p)
+        try:
+            procs.replace(tmp, p)
+        except PermissionError:
+            how = "is read-only" if p.exists() and not os.access(p, os.W_OK) else "is open in another program"
+            raise Refused(
+                f"Ticket {ticket['id']} can't be saved: its file {how} (a sync app like OneDrive can do"
+                " this). Make the file writable or close that program, then try again."
+            ) from None
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
