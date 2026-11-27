@@ -70,12 +70,20 @@ jobs:
           fetch-depth: 0  # the Windows check and the main release base below read the history
       # On main (release push or manual run) compare with the previous release, not with develop: after a release
       # main equals develop, so the default found 0 changed files and relay/publish built no binaries (ORCH-370).
+      # A manual run on any other branch (the release keeper's full signal on develop or its release-test branch)
+      # compares with main: everything since the last release. The default compared with develop and found 0
+      # changed files, so 14 of 17 jobs were skipped (#2559).
       - id: base
-        if: github.ref == 'refs/heads/main' && github.event_name != 'schedule'
+        if: (github.ref == 'refs/heads/main' && github.event_name != 'schedule') || github.event_name == 'workflow_dispatch'
         env:
           BEFORE: ${{ github.event.before }}
+          SINCE_MAIN: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
         run: |
-          sha="$(bash scripts/ci_changes_base.sh "$BEFORE")"
+          if [ "$SINCE_MAIN" = true ]; then
+            sha="$(bash scripts/ci_changes_base.sh --since-main)"
+          else
+            sha="$(bash scripts/ci_changes_base.sh "$BEFORE")"
+          fi
           echo "changes since: ${sha:-default}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - id: f
