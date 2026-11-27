@@ -67,7 +67,7 @@ const liveBarModel = typeof liveBarRows === 'function' ? liveBarRows : require('
 function liveTicketSession(t, run, helperState) {
   if (!t || !t.id || t.status === 'dropped' || !run) return null;
   const hs = helperState(run, t);
-  if (hs) return {s:hs.state === 'you' ? 'wait' : hs.state === 'idle' ? 'idle' : hs.state === 'waiting' ? 'queue' : 'run'};
+  if (hs) return {s:hs.state === 'you' ? 'wait' : hs.state === 'idle' ? 'idle' : 'run'};  // ORCH-2347: on hold is a running session (Watch), never In line
   return run.hold ? {s:'queue'} : null;
 }
 // The word on a ticket's session button (draft D feature 3, "the button on every ticket"): Answer when it needs you, Watch while its helper works, Open

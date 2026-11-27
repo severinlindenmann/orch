@@ -91,7 +91,7 @@ function page(first) {
     orch:{toast() {}, enter() {}, needsIn() {}, close() {}, resolve() {}}};
   const ctx = {window, document:doc, Node, location:{hash:'#ticket/t_x'}, history:{replaceState() {}}, localStorage:{getItem:() => null, setItem() {}},
     CustomEvent:class { constructor(type, init) { this.type = type; this.detail = init?.detail; } }, MutationObserver:class { observe() {} disconnect() {} },
-    setInterval:() => 0, clearInterval() {}, setTimeout:() => 0, clearTimeout() {}, addEventListener() {}, console,
+    setInterval:() => 0, clearInterval() {}, setTimeout:() => 0, clearTimeout() {}, addEventListener() {}, console, URL,
     fetch:url => ['/api/state', '/api/act'].includes(String(url).split('?')[0]) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
   window.window = window;
   vm.createContext(ctx);
@@ -190,6 +190,24 @@ test('a working ticket: one header line, no old Watch live, Stop in the bar, the
   assert.equal(p.count('prop-owner-t_x'), 0, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
   assert.match(read('app.js'), /newCls = 'btn outline sm'/);
+});
+
+// ORCH-2347 (report r-1127-0539-ws): a helper on hold for its own command read as two states ("On hold" and "Running
+// a command"), and its pull request read "No checks yet" in Results but "Conflict" in References.
+test('ORCH-2347: a helper waiting on its command is one state, and a conflicting pull request reads the same twice', async () => {
+  const pr = 'https://github.com/o/r/pull/2984';
+  const tk = ticket({status:'active', key:'ORCH-56', refs:[{kind:'github-pr', url:pr, title:'Atomic writes', status:'conflict',
+    view:{kind:'github-pr', title:'Atomic writes', status:'conflict', label:'GitHub', icon:'github', group:'References'}}],
+    checklist:[{id:'c1', text:'Open the pull request', done:true, evidence:[{type:'pr', ref:pr, at:'2026-11-27T05:00:00Z'}]}]});
+  const hold = {state:'waiting', word:'On hold', detail:'Waiting for its own command · 34 min'};
+  const p = page(state(tk, {runs:{t_x:{running:true, age_seconds:3120, helper:hold, claim:{agent:'claude', mode:'live'}}}}));
+  await tick(); await tick();
+  assert.match(p.main.querySelector('[data-key="ticket-kicker"]').textContent, /^ORCH-56·On hold·/, 'the one state word');
+  assert.equal(p.main.querySelector('[data-key="ticket-sentence"]').textContent, 'Waiting for its own command · 34 min.', 'and what it is on hold for');
+  assert.doesNotMatch(p.text(), /Running a command|In line/, 'no second state');
+  assert.match(p.main.querySelector('.ref-state').textContent, /^Conflict$/, 'References');
+  const item = require(path.join(WEB, 'pages/results-feed.js')).resultsItems(tk, null).find(it => it.type === 'pr');
+  assert.equal(item.status, 'conflict', 'Results draws the same live word (the card itself: orch_ui results.test.mjs)');
 });
 
 // ORCH-581 (owner picked draft E): Properties shows only what is set; every empty property and every add-on the
