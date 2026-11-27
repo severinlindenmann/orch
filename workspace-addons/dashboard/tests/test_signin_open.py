@@ -111,6 +111,24 @@ def test_open_is_refused_for_an_agent(ws, monkeypatch, capsys):
     assert not (Path(pagelaunch.key_dir(ws)) / "launch-dashboard.token").exists()
 
 
+@pytest.mark.parametrize("env", [{"tool": "claude"}, {"run": "r_1"}])
+@pytest.mark.parametrize("extra", [[], ["--json"]])
+def test_open_print_never_prints_a_sign_in_link_for_a_helper(ws, monkeypatch, capsys, env, extra):
+    """ORCH-2167: the printed link carries the sign-in. Under an agent tool, and inside an orch run whose tool
+    orch does not know, `--print` prints no link (so none lands in a helper's log) and makes no token."""
+    _running(monkeypatch)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: env.get("tool"))
+    if env.get("run"):
+        monkeypatch.setenv("ORCH_RUN", env["run"])
+    else:
+        monkeypatch.delenv("ORCH_RUN", raising=False)
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda root: False)
+    assert cli.main(["--dir", str(ws), "open", "--print", *extra]) == 2
+    cap = capsys.readouterr()
+    assert "#launch=" not in cap.out + cap.err and "http" not in cap.out
+    assert not (Path(pagelaunch.key_dir(ws)) / "launch-dashboard.token").exists()
+
+
 def test_open_says_how_to_start_a_stopped_dashboard(ws, monkeypatch, capsys):
     monkeypatch.setattr(service, "running", lambda root: None)
     assert cli.main(["--dir", str(ws), "open"]) == 2

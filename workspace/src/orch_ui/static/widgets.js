@@ -99,9 +99,13 @@ UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
 const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':(d=>d+(d===1?' day':' days'))(Math.round(m/1440));
-UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
+/* ORCH-2314: the core's detail of a helper that waits for an OK carries the start of the call ("Your OK on the screen:
+   S=/private/tmp/…; cd /tmp && python3 $S …", ORCH-1808). A list row and the ticket's line say only that it waits; the
+   command is shown whole on the OK card of its pane, with the answers. UI.helperWhy(detail) -> the words without it. */
+UI.helperWhy=d=>String(d||'').replace(/^(Your (?:answer and your )?OK on the screen):[\s\S]*$/,'$1');
+UI.helperMeta=r=>{r=r||{};const d=UI.helperWhy(r.detail);
  if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
- if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
+ if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.charAt(0).toLowerCase()+d.slice(1)].filter(Boolean).join(' · ');
  if(r.state==='waiting'||r.state==='idle'||r.state==='stuck'||r.state==='limit')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
 /* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
@@ -111,6 +115,8 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
 const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Review',done:'Done',dropped:"Won't do"};
+/* ORCH-2314 (owner pick C a of ORCH-2188): a helper that waits for an OK on its screen may say so in its pill (Focus pane) */
+const OK_WORD='Waits for your OK';
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
@@ -120,7 +126,7 @@ UI.ticketState=(t,helper)=>{t=t||{};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
- if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:(helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||'')?helper.word:HELPER_WORD[helper.state],helper};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:((helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||''))||(helper.state==='you'&&helper.word===OK_WORD)?helper.word:HELPER_WORD[helper.state],helper};
  if(helper)return {pill:'working',word:'Working',helper:null};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};

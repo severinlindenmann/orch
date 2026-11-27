@@ -310,13 +310,14 @@ TYPING_OFF = (
 
 
 def _typing_allowed(root, plain: bool = False) -> bool:
-    """The session_typing setting, a plain one (off unless the workspace turned it on). plain: the plain terminal, a
+    """The session_typing setting, a plain one (on unless the workspace turned it off: owner pick B a of ORCH-2188,
+    watch only is a setting). plain: the plain terminal, a
     shell on this computer, has its own switch, terminal_typing (off by default; owner, ORCH-261)."""
     from orch import config
 
     if plain:
         return bool(config.focus_terminal_typing(root))
-    return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
+    return bool(config.focus_session_typing(root))  # an unreadable config file counts as off
 
 
 def _link_msg(session, name: str) -> bytes:

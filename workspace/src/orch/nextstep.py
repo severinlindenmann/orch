@@ -335,6 +335,15 @@ def _relay_paired(args) -> str | None:
     return None if _relay_names(args) else WAIT_FOR_ADMIN
 
 
+def _described(d) -> bool:
+    """This workspace already has a description: the admin's or its own, also one that waits for the admin.
+    Then "describe this workspace" is no next step (ORCH-2167)."""
+    if not isinstance(d, dict):
+        return False
+    pending = d.get("pending") if isinstance(d.get("pending"), dict) else {}
+    return any(isinstance(v, str) and v.strip() for v in (d.get("description"), pending.get("description")))
+
+
 def _relay_send_line(d, args) -> str:
     names = _relay_names(args)
     if not names:
@@ -528,7 +537,11 @@ HINTS = {
     "github release": _release,
     "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
-    "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
+    "publish connect": lambda d, a: (
+        "share a file: orch publish file <path>"
+        if _described(d)
+        else 'describe this workspace: orch publish profile --description "..." --tags a,b'
+    ),
     "publish invite": lambda d, a: f"open {a.folder} in your helper; it is connected to publish.",
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish whoami": "share a file: orch publish file <path>",
@@ -542,7 +555,12 @@ HINTS = {
     "publish stop": "orch publish list",
     "publish delete": "orch publish list",
     "relay connect": lambda d, a: (
-        _relay_paired(a) or 'describe this workspace: orch relay profile --description "..." --tags a,b'
+        _relay_paired(a)
+        or (
+            _relay_send_line(d, a)
+            if _described(d)
+            else 'describe this workspace: orch relay profile --description "..." --tags a,b'
+        )
     ),
     "relay invite": lambda d, a: f"open {a.folder} in your helper; it is connected to the relay.",
     "relay status": _relay_status,

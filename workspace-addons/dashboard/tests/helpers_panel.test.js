@@ -70,6 +70,12 @@ test('kit: the meta line and the summary use the same words on every page', () =
   const UI = kit();
   assert.equal(UI.helperMeta({state:'working', step:{n:3, of:4}, minutes:52, detail:''}), 'Step 3 of 4 · 52 min');
   assert.equal(UI.helperMeta({state:'you', idle:180, detail:'Your answer'}), 'Since 3 h · your answer');
+  // ORCH-2314: a wait for an OK says that it waits, never the cut-off start of the command (it is whole on the OK card)
+  const ok = 'Your OK on the screen: S=/private/tmp/claude-502/-Users-x/sq.py; cd /tmp && python3 $S "RESTORE TABLE';
+  assert.equal(UI.helperWhy(ok), 'Your OK on the screen');
+  assert.equal(UI.helperWhy('Your answer and your OK on the screen: rm -rf build'), 'Your answer and your OK on the screen');
+  assert.equal(UI.helperWhy('Nothing running for 18 min'), 'Nothing running for 18 min');
+  assert.equal(UI.helperMeta({state:'you', idle:180, detail:ok}), 'Since 3 h · your OK on the screen');
   assert.equal(UI.helperMeta({state:'idle', detail:'Nothing running for 18 min'}), 'Nothing running for 18 min');
   assert.equal(UI.helperMeta({state:'idle', finished:true, detail:'Nothing running for 5 min'}), 'Finished · Nothing running for 5 min');
   assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 needs you · 1 idle');
@@ -88,6 +94,13 @@ test('ORCH-643: a helper stopped on the usage limit shows Stopped: usage limit a
   assert.match(UI.helperPill('limit', 'Stopped: usage limit').className, /^pill helper-pill$/);
   const s = UI.ticketState({status:'active'}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
   assert.equal(s.word, 'Stopped: usage limit'); assert.equal(s.pill, 'check');
+});
+
+test('ORCH-2314: a helper that waits for an OK on its screen may say so in its pill; any other word stays Needs you', () => {
+  const UI = kit();
+  assert.equal(UI.ticketState({status:'active'}, {state:'you', word:'Waits for your OK', detail:'Your OK on the screen: ls'}).word, 'Waits for your OK');
+  assert.equal(UI.ticketState({status:'active'}, {state:'you', word:'Anything else', detail:''}).word, 'Needs you');
+  assert.equal(UI.ticketState({status:'active'}, {state:'working', word:'Waits for your OK'}).word, 'Working');
 });
 
 test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row buttons; an empty list says so', () => {
