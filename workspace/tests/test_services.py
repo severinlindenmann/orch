@@ -536,3 +536,54 @@ def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monk
     services._call(tmp_path, "focus", m, "stop", restart=True)
     services._call(tmp_path, "focus", m, "start", restart=True)
     assert seen == [("stop", None), ("stop", "1"), ("start", None)]
+
+
+def _tmux_dir(tmp_path, name="brew"):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "tmux").write_text("#!/bin/sh\n")
+    (d / "tmux").chmod(0o755)
+    return str(d)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no tmux on Windows")
+def test_a_service_started_with_a_short_path_still_finds_an_installed_tmux(tmp_path, monkeypatch):
+    """ORCH-2367 (report r-1127-1221-t_7eoocm): the dashboard, started with a PATH that does not lead to tmux,
+    started every helper in the background: no terminal on the ticket although tmux was installed. The start
+    of a service puts the folder of an installed tmux at the end of PATH; nothing else in PATH changes."""
+    from orch import launchenv
+
+    brew, empty, other = _tmux_dir(tmp_path), str(tmp_path / "none"), _tmux_dir(tmp_path, "own")
+    for name in (
+        "a",
+        "b",
+    ):  # a short PATH with no tmux in it (never /usr/bin: a Linux machine has tmux there)
+        (tmp_path / name).mkdir()
+    short = os.pathsep.join([str(tmp_path / "a"), str(tmp_path / "b")])
+    assert launchenv.with_tmux({"PATH": short}, (empty, brew))["PATH"] == os.pathsep.join([short, brew])
+    # PATH already leads to a tmux (the person's own, or a stand-in): untouched, the same object
+    env = {"PATH": os.pathsep.join([other, str(tmp_path / "a")])}
+    assert launchenv.with_tmux(env, (brew,)) is env
+    # no tmux anywhere: untouched; orch then says truthfully that tmux is not installed
+    env = {"PATH": short}
+    assert launchenv.with_tmux(env, (empty,)) is env
+    assert launchenv.with_tmux({}, (brew,))["PATH"] == brew
+    # a file that cannot be run is no tmux
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "plain" / "tmux").write_text("x")
+    (tmp_path / "plain" / "tmux").chmod(0o644)
+    assert launchenv.with_tmux(env, (str(tmp_path / "plain"),)) is env
+
+    # the start of a service uses it; a stop does not need it
+    seen = {}
+
+    def run(argv, **kw):
+        seen[argv[-2]] = kw["env"]["PATH"]
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(services.subprocess, "run", run)
+    monkeypatch.setattr(launchenv, "TMUX_DIRS", (brew,))
+    monkeypatch.setenv("PATH", short)
+    services._call(tmp_path, "dashboard", {"run": "x_addon"}, "start")
+    services._call(tmp_path, "dashboard", {"run": "x_addon"}, "stop")
+    assert seen == {"start": os.pathsep.join([short, brew]), "stop": short}
