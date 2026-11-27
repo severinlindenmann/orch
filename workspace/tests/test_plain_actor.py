@@ -79,7 +79,7 @@ def test_relay_allow_from_a_plain_terminal(proj, run, rel):
     code, out, err = run("relay", "allow", "m_deleg00000000001", "--once")
     assert code == 0, out + err
     _plain(out, err)
-    assert rel.sent[0]["type"] == "allow"
+    assert [m["type"] for m in rel.sent] == ["text", "allow"]  # the "Delivered" receipt, then the allow
 
 
 def test_answer_from_a_plain_terminal_is_the_persons(proj, run, new_ticket, monkeypatch):

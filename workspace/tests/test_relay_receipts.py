@@ -212,8 +212,10 @@ def test_only_the_workspace_we_wrote_to_can_say_where_it_went(proj, run, rel, ne
         reply_to=mid,
     )
     rel.inbox.append(forged)
-    run("relay", "inbox")
+    out = run("relay", "inbox")[1]
+    assert "did not send there" in out
     assert relay.receipts(proj)["got"] == {} and _states(proj)["Can you check the numbers?"] == "Sent"
+    assert "Passed on" not in run("relay", "inbox")[1]  # handled once, not listed again and again
 
 
 # ---------------------------------------------------------------- no answer: one question for the person
@@ -307,3 +309,30 @@ def test_a_message_still_in_the_outbox_is_not_a_missing_answer(proj, run, rel, n
     monkeypatch.setattr(relay, "outbox_list", lambda root: [{"id": mid, "to": PEER}])  # it never went out
     assert relay.no_answer(proj) == []
     assert _states(proj)["Can you check the numbers?"] == "Not sent yet"
+
+
+def test_group_copies_status_notes_and_old_log_lines_are_never_asked_about(proj, run, rel, new_ticket):
+    """Only a text or file of ours to one workspace about a ticket is watched: record_sent marks it. A group
+    copy, a status note and a sent-log line from before ORCH-2348 raise no question, however old."""
+    _listed(rel)
+    connect(run, rel)
+    tid = new_ticket("Ask them")
+    base = {"schema": "orch.msg/1", "from": "ws_pilatus001", "to": PEER, "type": "text", "ticket": tid}
+    old = "2026-11-10T10:00:00Z"
+    group = {"text": "From Pilatus", "group": {"id": "grp_x", "host": "ws_pilatus001"}}
+    relay_view.record_sent(proj, {**base, "id": "m_aaaaaaaaaaaaaaaa", "created_at": old, "body": group})
+    note = {"text": "Working on it", "update": {"kind": "working"}}
+    relay_view.record_sent(proj, {**base, "id": "m_bbbbbbbbbbbbbbbb", "created_at": old, "body": note})
+    p = relay_view._sent_path(proj)
+    legacy = {
+        "id": "m_cccccccccccccccc",
+        "to": PEER,
+        "type": "text",
+        "at": old,
+        "preview": "x",
+        "ticket": tid,
+    }
+    p.write_text(p.read_text("utf-8") + json.dumps(legacy) + "\n", "utf-8")
+    assert not any(e.get("watch") for e in relay_view._sent(proj))
+    run("relay", "inbox")
+    assert relay.no_answer(proj) == [] and _no_answer_questions(proj, tid) == []

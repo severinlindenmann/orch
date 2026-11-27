@@ -662,7 +662,8 @@ def _add_contacts(rel, common) -> None:
 
 _STATE_WORDS = {
     "accepted": "Accepted",
-    "not_accepted": "Not accepted yet",
+    # RP3 A: nobody has to accept a workspace the admin paired; the old "Not accepted yet" read like a to-do
+    "not_accepted": "Paired, trusted from its first message",
     "new_key": "New key without the old one",
     "not_valid": "Not valid",
     "withdrawn": "Withdrawn",

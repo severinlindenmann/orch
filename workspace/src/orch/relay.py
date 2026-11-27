@@ -3572,10 +3572,15 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                             note = f"could not use this phone message: {clean_untrusted(str(e), 200)}"
                         auto = True
                         _mark_seen(root, m["id"])  # last
-            elif (sent_line := _receipt_for(root, m)) is not None:
+            elif _is_receipt(m):
                 with locked(root):  # ORCH-2348: what the other workspace did with a message of ours
                     if m["id"] not in seen(root):
-                        note, auto = _apply_receipt(root, m, sent_line), True
+                        sent_line = _receipt_for(root, m)
+                        if sent_line is None:  # not ours to that workspace (or long gone): nothing to show
+                            note = "a receipt for a message this workspace did not send there"
+                        else:
+                            note = _apply_receipt(root, m, sent_line)
+                        auto = True
                         _mark_seen(root, m["id"])  # last
                 if not auto:
                     continue  # another reader handled it meanwhile
@@ -3711,24 +3716,32 @@ def _give_receipt(root: Path, msg: dict, tid: str | None, general: bool, passed:
             _message(root, msg["from"], "text", body, None, mid)
         else:
             _message(root, msg["from"], "text", body, tid, mid)
-    except (Refused, OSError, ValueError, KeyError, TypeError) as e:
+    except Refused:
+        pass  # the relay does not let us write to that workspace (a one-way pair): no receipt, nothing wrong
+    except (OSError, ValueError, KeyError, TypeError) as e:
         log_send_failure(root, "the receipt for a workspace's message", e)
 
 
-def _receipt_for(root: Path, m: dict) -> dict | None:
-    """The sent-log line a workspace's automatic `ack` text answers: only for a message we sent to exactly
-    that workspace. Anything else is no receipt (and is shown as the text it is)."""
+def _is_receipt(m: dict) -> bool:
+    """A workspace's automatic `ack` text about one message (reply_to): a receipt, never work to pass on."""
     frm, body = m.get("from"), m.get("body")
     if m.get("type") != "text" or not isinstance(frm, str) or not frm.startswith("ws_"):
-        return None
+        return False
     upd = body.get("update") if isinstance(body, dict) else None
-    if not isinstance(upd, dict) or upd.get("kind") != "ack" or msg_group(m):
-        return None
+    return (
+        isinstance(upd, dict)
+        and upd.get("kind") == "ack"
+        and isinstance(m.get("reply_to"), str)
+        and not msg_group(m)
+    )
+
+
+def _receipt_for(root: Path, m: dict) -> dict | None:
+    """The sent-log line a receipt is about: only a message we sent to exactly that workspace counts."""
     from orch import relay_view
 
-    rid = m.get("reply_to")
     for e in reversed(relay_view._sent(root)):
-        if e.get("id") == rid and e.get("to") == frm and not e.get("update"):
+        if e.get("id") == m["reply_to"] and e.get("to") == m["from"] and not e.get("update"):
             return e
     return None
 
@@ -3791,13 +3804,9 @@ def no_answer(root: Path) -> list[dict]:
 
     newest: dict[tuple, dict] = {}
     for e in relay_view._sent(root):
-        if (
-            e.get("type") in ("text", "file")
-            and str(e.get("to", "")).startswith("ws_")
-            and not e.get("update")
-        ):
-            if isinstance(e.get("ticket"), str) and isinstance(e.get("id"), str):
-                newest[(e["ticket"], e["to"])] = e
+        # `watch`: record_sent marks the lines an answer is looked for (never a group copy or a status note)
+        if e.get("watch") is True and isinstance(e.get("ticket"), str) and isinstance(e.get("id"), str):
+            newest[(e["ticket"], e["to"])] = e
     out, picked, waiting = [], None, None
     for e in newest.values():
         age = _age_seconds(e.get("at"))

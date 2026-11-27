@@ -100,6 +100,16 @@ def record_sent(root: Path, msg: dict) -> None:
     upd = (msg.get("body") or {}).get("update")
     if isinstance(upd, dict) and isinstance(upd.get("kind"), str):
         entry["update"] = upd["kind"][:20]  # an automatic status note, not something a person wrote
+    body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
+    if (
+        msg["type"] in ("text", "file")
+        and str(msg["to"]).startswith("ws_")
+        and "ticket" in entry
+        and not {"update", "group"} & set(body)
+    ):
+        # ORCH-2348: a text or file of ours to one workspace about a ticket: an answer is looked for (and the
+        # person asked when none comes). Never a group copy or a status note, and no line from before this.
+        entry["watch"] = True
     path = _sent_path(root)
     if path is None:
         return
