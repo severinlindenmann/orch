@@ -63,8 +63,11 @@ def test_own_checks_read_while_some_still_run(monkeypatch):
     g = gh(monkeypatch, lambda a: (8, json.dumps(rows)))  # gh exits 8 while checks run
     got = g.own_checks(URL)
     assert got == {
-        "failed": [{"name": "lint", "link": "https://github.com/acme/app/actions/runs/1/job/11"}],
+        "failed": [
+            {"name": "lint", "link": "https://github.com/acme/app/actions/runs/1/job/11", "state": ""}
+        ],
         "pending": ["tests"],
+        "cancelled": [],  # ORCH-2029: a check that was only cancelled is listed apart, never as failed
     }
     assert g.own_checks_failed(URL) is True
 
