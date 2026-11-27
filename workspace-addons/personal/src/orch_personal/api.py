@@ -304,7 +304,7 @@ def _meetings_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
         return {
             "state": "empty",
             "status": "No recorder yet",
-            "line": "Add your recorder as a way in and turn it on.",
+            "line": "Meetings come from a recorder on this computer. Turn one on under Ways in; until then nothing arrives.",
         }
     last = items[0] if items else None
     pend = [] if who.helper else meetings_mod.pending(root)

@@ -1,5 +1,9 @@
 schema = "orch.skill-description/1"
 
+[service_facts]
+relay = "relay"
+webhooks = "relay"
+
 [online]
 lead = "Start agent runs by themselves with orch automation."
 not_for = "Not for waiting on a person (use orch ask)."

@@ -707,7 +707,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .sync-options label{display:flex;gap:12px;align-items:center;padding:16px;border-top:1px solid var(--border);cursor:pointer}
 .sync-options label:hover{background:var(--surface-2)}
 @media(max-width:1000px){.blk-pair{grid-template-columns:1fr}.blk-settings .setting-row{grid-template-columns:112px minmax(0,1fr)}.setting-row .row-action{grid-column:2;justify-content:flex-start}}
-@media(max-width:600px){.setting-row{grid-template-columns:112px minmax(0,1fr)}.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
+@media(max-width:600px){.setting-row{grid-template-columns:112px minmax(0,1fr)}.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1/-1}}
 .blk-settings .setting-row{border-top:1px solid var(--border)}
 
 /* from Insights (#795 B1): metric card, chart, bar rows, notes, loading mask, settings rows. Tokens only. */
@@ -1122,15 +1122,63 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-panel[data-mode=bottom]{height:var(--live-h);animation:live-up var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:0;bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
-.live-pane{display:flex;flex:1 1 0;flex-direction:column;min-width:0;min-height:0}
-.live-pane+.live-pane{border-left:1px solid var(--border-strong)}
+.live-pane{display:flex;flex:var(--f,1) 1 0;flex-direction:column;min-width:0;min-height:0;container:live-pane/inline-size}
 .live-panel[data-mode=right]{flex-direction:column}
-.live-panel[data-mode=right] .live-pane+.live-pane{border-left:0;border-top:1px solid var(--border-strong)}
+/* ORCH-2200 (owner pick F a): free splits. A split is a row (side by side) or a column (stacked) of panes and splits,
+   each taking its share (--f, set by the page); between two a 1 px divider with a wider grab area: drag it, arrow keys
+   move it, double click makes the split equal. Hover, focus and drag show it in the brand colour with a small handle. */
+.live-split{display:flex;flex:var(--f,1) 1 0;min-width:0;min-height:0}
+.live-split[data-dir=col]{flex-direction:column}
+.live-div{position:relative;z-index:3;flex:none;background:var(--border-strong);touch-action:none}
+.live-split[data-dir=row]>.live-div{width:1px;cursor:col-resize}
+.live-split[data-dir=col]>.live-div{height:1px;cursor:row-resize}
+.live-div::before{content:"";position:absolute;inset:calc(-1 * var(--s1)) 0}
+.live-split[data-dir=row]>.live-div::before{inset:0 calc(-1 * var(--s1))}
+.live-div::after{content:"";position:absolute;top:50%;left:50%;border-radius:2px;background:var(--brand);opacity:0;transform:translate(-50%,-50%);transition:opacity var(--dur-fast) var(--ease-move)}
+.live-split[data-dir=row]>.live-div::after{width:4px;height:var(--s7)}
+.live-split[data-dir=col]>.live-div::after{width:var(--s7);height:4px}
+.live-div:hover,.live-div:focus-visible,.live-div[data-drag]{background:var(--brand)}
+.live-div:hover::after,.live-div:focus-visible::after,.live-div[data-drag]::after{opacity:1}
+.live-div:focus-visible{outline:none}
 .live-panel:not([data-n="1"]) .live-pane[data-on]>.live-ph{box-shadow:inset 0 2px 0 var(--brand)}
 .live-panel:not([data-n="1"]) .live-pane:not([data-on])>.live-ph{background:var(--sidebar)}
 .live-pane[data-new]{animation:live-in var(--dur-base) var(--ease-enter)}
 .live-panel[data-mode=right] .live-pane[data-new]{animation-name:live-up}
-.live-ph{display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s2) var(--s1) var(--s4);border-bottom:1px solid var(--border)}
+.live-ph{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s2) var(--s1) var(--s3);border-bottom:1px solid var(--border)}
+/* ORCH-2199 (owner picks A a, G a, H a): the header is the pane's one row above the screen. The status pill opens the
+   session's details (.live-stat-pop); a plain terminal starts with >_ and its folder. Under 480 px of pane, Pin and Split
+   fold into More ([data-fold] hides here, [data-fold-item] shows in More). */
+.live-stat{display:inline-flex;flex:none;align-items:center;min-height:28px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;cursor:pointer}
+.live-stat:hover .pill,.live-stat[aria-expanded=true] .pill{box-shadow:0 0 0 1px var(--brand)}
+.live-ph>.live-stat-pop{top:calc(100% + var(--s1));left:var(--s2);right:auto;width:min(320px,calc(100% - var(--s4)))}
+.live-stat-row{display:flex;gap:var(--s3);align-items:center;justify-content:space-between;min-height:28px}
+.live-stat-row>.meta{flex:none}
+.live-stat-row>span:last-child{min-width:0;text-align:right;overflow-wrap:anywhere}
+.live-stat-warm{margin:0}
+.live-stat-perm{display:grid;gap:var(--s1);padding-top:var(--s2);border-top:1px solid var(--border)}
+.live-stat-perm .meta{margin:0}
+.live-mdl-pick .btn,.live-stat-perm .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
+.live-plain-ic{display:inline-flex;flex:none;color:var(--text-muted)}
+.live-pfolder{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-ph:has(>.live-pfolder)>.live-pt{flex:0 1 auto;min-width:0}
+.live-ph>.live-pfolder{margin-left:calc(-1 * var(--s1))}
+.live-term-tools{display:inline-flex;flex:none;align-items:center;margin-left:auto}
+.live-term-tools:empty{display:none}
+.live-term-tools .term-say{max-width:18ch}
+.live-pop [data-fold-item]{display:none}
+@container live-pane (max-width:599px){
+  .live-ctl [data-fold],.live-ph>.live-view{display:none}
+  .live-pop [data-fold-item]{display:flex}
+  .live-term-tools .term-say{display:none}
+}
+@container live-pane (max-width:299px){  /* four panes at 1280: the header keeps Close and More in view, the key and Full screen wait in the popover */
+  .live-ph .key,.live-ctl [data-key="live-full"]{display:none}
+  .live-stat{flex:0 1 auto;min-width:0;overflow:hidden}
+  .live-stat .pill{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .live-ph[data-compact]>.live-pt{min-width:0}
+}
+@container live-pane (max-width:639px){.live-term-tools .term-copy-w{display:none}}
+@container live-pane (max-width:479px){.live-term-tools .term-copy{display:none}}  /* a selection still copies with Ctrl+C or Cmd+C */
 .live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pt{flex:1 1 0;min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 button.live-pt{min-height:32px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;font-weight:600;text-align:left;cursor:pointer}
@@ -1144,9 +1192,10 @@ button.live-pt:hover{color:var(--brand)}
    beside the title, the word as tooltip and name (draft D, ORCH-1328); the row goes under the title only when the
    title would get less than about 12 characters (a phone) */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
-.live-ph[data-compact]{flex-wrap:wrap;row-gap:0}
-.live-ph[data-compact]>.live-pt{min-width:min(12ch,100%)}
-.live-ph[data-compact]>.live-ctl{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.live-ph[data-compact]{flex-wrap:nowrap}
+.live-ph[data-compact]>.live-pt{min-width:4ch}
+.live-ph[data-compact]>.live-ctl{flex:none;gap:0;margin-left:auto}
+.live-ph>.live-term-tools+.live-ctl{margin-left:0}
 .live-opt .key{color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pop-scroll{max-height:min(320px,45vh);overflow-y:auto;overscroll-behavior:contain}  /* a long list of sessions to pick from (Add beside) */
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1198,10 +1247,9 @@ button.live-pt:hover{color:var(--brand)}
 }
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-why{margin:0;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
+/* ORCH-2197: the OK card (a helper waits for an OK on its screen): the command shows, a few rows, then it scrolls */
+.live-ok-t{display:flex;align-items:center;gap:var(--s2)}.live-ok-cmd{max-height:calc(var(--s8) * 2.5);font-family:var(--font-mono)}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
-.live-meta{margin:0}
-.live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
-.live-info>.btn{margin-inline-start:auto}
 /* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
    first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
 .live-view{flex:none}
@@ -1215,8 +1263,6 @@ button.live-pt:hover{color:var(--brand)}
    of a split pane stays on one row beside Open ticket */
 .live-pb[data-live-body]:has(>.live-ask:not([hidden]))>.live-chat:has(>.live-chat-empty){min-height:0}
 .live-pb[data-live-body]:has(>.live-ask:not([hidden])) .live-chat-empty{display:none}
-.live-panel:not([data-n="1"]) .live-info{flex-wrap:nowrap}
-.live-panel:not([data-n="1"]) .live-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
    the bottom) never covers its last line in a short pane (ORCH-1328) */
 .live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
@@ -1234,6 +1280,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .live-link{display:inline-flex;align-items:center;min-height:24px;overflow-wrap:anywhere}  /* a 24 px tap target (WCAG 2.5.8) now the chat fits its pane and the links show (ORCH-1328) */
 .live-chat-empty{margin:auto 0}
+/* a chat that is the ticket's summary, not the helper's conversation, says so in one small line that stays at the top
+   while it scrolls, with Open terminal for the real screen (ORCH-2204) */
+.live-chat-src{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin:0;padding-bottom:var(--s1);background:var(--surface)}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
 .live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;cursor:pointer}
@@ -1293,6 +1342,11 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
    phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
+/* ORCH-2202 (owner pick I a): the ticket page beside Focus goes to one column: Properties under Progress, in the page
+   (not the sticky side column), so no step text is cut; the side menu folds to its icon rail and Focus takes that room */
+body[data-live-narrow] .ticket-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .ticket-layout>.rail-sheet{position:static;max-height:none;overflow:visible;padding:var(--s4) 0 0;border-left:0;border-top:1px solid var(--border)}
+body[data-live-rail] .live-dock{--live-w:clamp(320px,calc(100vw - var(--sidebar-width) - 600px),760px)}
 body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */
@@ -1346,27 +1400,22 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .doc-line{white-space:pre-wrap;overflow-wrap:anywhere}.doc-line.risk{box-shadow:inset 3px 0 0 var(--danger),inset 0 0 0 1px var(--danger);background:var(--danger-soft);color:var(--danger)}
 .doc-risk{display:inline-block;margin-left:8px;padding:0 6px;border-radius:999px;border:1px solid currentColor;font-family:var(--font-sans,inherit);font-size:11px;white-space:nowrap}
 .doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
-/* ---- Live bar (draft D, ORCH-337): one calm row under every page. Groups with a small label: needs-you chips
-   (orange), pinned chips, the sessions open in the panel ("Open"), then quiet counts that open a list with search. It
-   never wraps: data-fold says how far it folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols
-   and counts with a short word, 4 needs you and More with words, 5 the numbers alone).
-   Fixed under the page beside the side bar; at phone width above the tab bar (--lbar-bottom, set by the page).
-   .lbar-sample shows it inline in the gallery. ---- */
+/* ---- Live bar (draft D, ORCH-337; ORCH-2198): one calm row under every page: the page's name, one Helpers menu
+   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) lists the sessions in groups (.lbar-gh:
+   Needs you, Working, Quiet, with counts); each row opens its pane. It opens on the side of the bar with room
+   (data-at=above|below, set by the page), so it stays inside the window with the bar at the bottom or the top (full
+   screen). It never wraps: data-fold 3 and up shows New as an icon. Fixed under the page beside the side bar; at phone
+   width above the tab bar (--lbar-bottom, set by the page). .lbar-sample shows it inline in the gallery. ---- */
 .lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
 .lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
-.lbar-chip[aria-current=true]{background:var(--surface-3);color:var(--text)}
 .lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
 .lbar-home:hover{background:var(--surface-2)}
 .lbar-sw{display:flex;flex:1 1 0;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-width:0;overflow:hidden}
-.lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw,.lbar[data-fold="5"] .lbar-sw{gap:var(--s1)}
-.lbar-g{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
-.lbar-l{display:inline-flex;align-items:center;margin-right:var(--s1);font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap}
-.lbar-g[data-g=wait] .lbar-l{color:var(--needs-you);font-weight:600}
-.lbar-chip,.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
-.lbar-chip:hover,.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
-.lbar-chip[data-s=wait]{color:var(--needs-you)}
-.lbar-chip:focus-visible,.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
+.lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw{gap:var(--s1)}
+.lbar-cnt{display:inline-flex;flex:none;gap:var(--s2);align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);line-height:16px;white-space:nowrap;text-decoration:none;cursor:pointer;transition:background var(--dur-fast) ease}
+.lbar-cnt:hover{background:var(--surface-2);color:var(--text)}
+.lbar-cnt:focus-visible{outline-offset:-2px}  /* the row hides overflow: the ring goes inside */
 .lbar-cnt[aria-expanded=true]{background:var(--surface-3);color:var(--text)}
 .lbar-sym{font-family:var(--font-mono);color:var(--text-muted)}
 [data-s=wait]>.lbar-sym,.lbar-sym[data-s=wait]{color:var(--needs-you)}
@@ -1374,24 +1423,28 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar .ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .lbar-end{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
 .lbar-end:empty{display:none}
-.lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
-.lbar-pop-h{margin:0;font-weight:600}
+.lbar-pop{position:absolute;left:var(--s3);bottom:calc(100% + var(--s2));z-index:6;display:flex;flex-direction:column;gap:var(--s2);width:min(420px,calc(100vw - var(--s5)));max-height:min(60vh,480px);padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);font-size:var(--fs-body)}
+.lbar-pop[data-at=below]{top:calc(100% + var(--s2));bottom:auto}
+.lbar-helpers{border:1px solid var(--border);color:var(--text)}
+.lbar-gh{display:flex;justify-content:space-between;gap:var(--s2);margin:var(--s2) 0 0;padding:0 var(--s3);color:var(--text-muted);font-size:var(--fs-meta);font-weight:600;line-height:16px;letter-spacing:.04em;text-transform:uppercase}
+.lbar-gh:first-child{margin-top:0}
+.lbar-gh b{font-weight:600;color:var(--text-muted)}
+.lbar-gh[data-g=wait]{color:var(--needs-you)}
+.lbar-go{color:var(--text-muted);font-size:var(--fs-meta);white-space:nowrap}
+.lbar-row:hover .lbar-go{color:var(--text)}
+.lbar-row[aria-current=true]{background:var(--surface-3)}
 .lbar-list{display:grid;align-content:start;gap:var(--s1);min-height:0;overflow:auto;overscroll-behavior:contain}
-.lbar-row{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:var(--s2);align-items:center;min-height:var(--s7);padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none}
+.lbar-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;gap:var(--s2);align-items:center;min-height:var(--s7);padding:var(--s1) var(--s3);border:0;border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none}
 .lbar-row:hover{background:var(--surface-2)}
-.lbar-row .lbar-st{display:inline-flex;gap:var(--s1);align-items:center;font-size:var(--fs-meta);font-weight:600;color:var(--text-muted);white-space:nowrap}
-.lbar-row .lbar-st[data-s=wait]{color:var(--needs-you)}
-.lbar-row .lbar-st[data-s=run]{color:var(--working)}
 .lbar-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
 .lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
 body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
-.lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
-  .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
+  .lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
   /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
@@ -1399,7 +1452,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
   body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
   .chat-page:has(.chat-welcome){height:auto}
 }
-@media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
+@media(prefers-reduced-motion:reduce){.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
 
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
@@ -1623,8 +1676,8 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
    in three modes: preview (the small tree on a wall tile), tree (the switcher beside a pane: main helper, its tickets
    indented, small helpers with a dashed guide and tag, earlier sessions) and strip (the same rows in one line that
    scrolls inside itself: a narrow pane, a split, a phone). The selected row has a brand edge; a helper that needs you
-   is orange. The message box of a pane names who receives it (.live-msg). The bar's group chip carries the helper
-   count (.lbar-n). Tokens only. ---- */
+   is orange. The message box of a pane names who receives it (.live-msg). The group's row in the bar's Helpers menu
+   carries the helper count (.lbar-n). Tokens only. ---- */
 .gtree{display:flex;flex-direction:column;gap:var(--s1);min-width:0}
 .gtree-h{display:grid;gap:2px;margin:0;padding:0 var(--s2) var(--s1)}
 .gtree-gt{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1708,6 +1761,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-vhint[role=alert]{color:var(--text)}
 @keyframes live-voice-bar{from{height:20%}to{height:100%}}
 @media(prefers-reduced-motion:reduce){.live-voice[data-rec] .live-voice-wave i{animation:none;height:60%}}
+.lbar-rn .lbar-n{display:inline-block;margin-left:var(--s2)}
 .lbar-n{min-width:16px;padding:0 var(--s1);border-radius:var(--r1);background:var(--surface-3);color:var(--text-muted);font-variant-numeric:tabular-nums;text-align:center}
 @media(prefers-reduced-motion:reduce){.gtree-row{transition:none}}
 /* ORCH-817: Stop and End session in the pane header, a wall tile's More and the bar; the idle note of a helper pane */
@@ -1716,9 +1770,18 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-end-opt{align-items:flex-start;min-height:var(--touch)}
 .live-end-opt .ic-wrap{margin-top:2px}
 .live-end-row{display:flex;flex-wrap:wrap;gap:var(--s2)}
-.live-end-idle{display:grid;flex:none;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
-.live-end-idle p{margin:0}
+.live-end-idle{display:flex;flex:none;gap:var(--s2);align-items:center;justify-content:space-between;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}
 .live-end-idle[hidden]{display:none}
+.live-stuck-t{min-width:0}
+/* ORCH-2201: a ticket that waits for the person says why before Start: the question with its answer field, or the review (Start choice, inline) */
+.live-why{display:grid;gap:var(--s2);padding:var(--s3);border:1px solid var(--warning);border-radius:var(--radius-card);background:var(--warning-soft)}
+.live-why-h{margin:0;color:var(--warning);font-size:var(--fs-meta);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.live-why-q{margin:0}
+.live-why-opts,.live-why-act{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.live-why-line{display:flex;gap:var(--s2);align-items:center}
+.live-why-line .input{flex:1;min-width:0}
+.live-why-line>.live-why-q{flex:1}
+.live-why-link{color:var(--brand)}
 .live-ended{display:grid;gap:var(--s3)}
 .live-ended h3,.live-ended>p{margin:0}
 .wall-foot,.wall-line{position:relative}
@@ -1726,6 +1789,8 @@ button.gtree-row:hover{background:var(--surface-2)}
 .lbar-rw{display:flex;gap:var(--s1);align-items:center}
 .lbar-rw .lbar-row{flex:1;min-width:0}
 .lbar-endwrap{position:absolute;left:var(--s3);bottom:100%;z-index:6}
+.lbar-endwrap[data-at=below]{top:100%;bottom:auto}
+.lbar-endwrap[data-at=below] .live-pop{top:var(--s2);bottom:auto}
 .lbar-endwrap .live-pop{right:auto;left:0}
 .lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
 .lbar-newrow .live-opt{flex:1;min-width:0}
@@ -1747,7 +1812,7 @@ button.gtree-row:hover{background:var(--surface-2)}
  .switch-table,.switch-table tbody,.table-wrap .switch-table{display:block;min-width:0}
  .switch-table thead,.switch-table td:nth-child(3){display:none}
  .switch-table tr{display:grid;grid-template-columns:var(--s9) minmax(0,1fr);align-items:center;border-top:1px solid var(--border)}
- .switch-table td{border:0;min-width:0;overflow:hidden}
+ .switch-table td{border:0;min-width:0;overflow:hidden;height:auto}
  .switch-table td:nth-child(4){grid-column:2;padding-top:0}
  .switch-table td .truncate{max-width:none}
 }
@@ -2253,6 +2318,18 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket .ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}
 .review-ticket .btn.primary{background:transparent;border-color:var(--border-strong);color:var(--text)}
 .review-ticket .btn.primary:hover{background:var(--surface-2);border-color:var(--border-strong)}
+/* ORCH-2185 (Focused review D, with decisionFirst): the panel's tabs Ticket / Chat / What the helper does (a .segmented
+   row of links in the panel's header, in place of its "Ticket" heading). Chat: the ticket's chat lines over the Chat
+   message box (UI.composer layout box), the box stays at the bottom of the panel. The helper's screen (UI.term) fills
+   the panel's height, watching until "Let me type". */
+.review-ticket-h:has(.review-ticket-tabs){flex-wrap:wrap}
+.review-ticket-tabs{flex:0 1 auto;flex-wrap:nowrap;margin-right:auto}
+.review-ticket-tabs .btn,.review-ticket-h>.btn{white-space:nowrap;text-decoration:none}
+.review-ticket[data-tab=chat] .review-ticket-b,.review-ticket[data-tab=helper] .review-ticket-b{display:flex;flex-direction:column;min-height:0}
+.review-panel-chat{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-log{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-box{position:sticky;bottom:0;padding-top:var(--s2);background:var(--surface)}
+.review-panel-term{display:flex;flex-direction:column;flex:1 1 auto;min-height:calc(var(--s9) * 5)}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
 @media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
 
@@ -2936,3 +3013,27 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
 .bulk-bar .menu-pop .meta{padding:4px 8px}
 .bulk-bar[aria-busy=true] .bulk-actions{opacity:.5;pointer-events:none}
 .bulk-bar .bulk-clear{margin-left:auto}
+
+/* Review gaps against the approved drafts (ORCH-2316). R4 A: Comment turns on pointing: what you can point at shows a
+   dashed outline (a paragraph takes a comment, a picture a numbered spot); words never zoom (.no-zoom). R6 A: a result's
+   steps fold under "What the helper did". */
+.swipe-preview.no-zoom{cursor:default}
+.swipe-commenting{margin:0 var(--s4) var(--s3);flex-shrink:0}
+.swipe-commenting .grow{min-width:0}
+.swipe-card.commenting .swipe-preview:not(.plain):not(.no-zoom){outline:1px dashed var(--border-strong);outline-offset:2px;cursor:crosshair}
+.swipe-card.commenting .swipe-point{outline:1px dashed var(--border-strong);outline-offset:var(--s1);border-radius:var(--radius);cursor:pointer}
+.swipe-card.commenting .swipe-point:hover,.swipe-card.commenting .swipe-point:focus-visible{outline:1px solid var(--warning)}
+.doc details.doc-steps{margin-top:var(--s2)}
+.doc details.doc-steps>summary{min-height:32px;display:flex;align-items:center}
+.doc details.doc-steps ol{margin:var(--s1) 0 0}
+@media (max-width:720px){.swipe-commenting{order:-1;flex-wrap:wrap;align-items:flex-start;margin:0 var(--s4) var(--s3);padding:var(--s2) var(--s3)}.swipe-commenting>.grow{flex:1 1 calc(100% - 32px)}.swipe-commenting>.btn{margin-left:auto}.swipe-commenting>.btn+.btn{margin-left:0}}
+/* ORCH-2316: on a phone the answers are pinned over the card's lower part, so the card's links (Open ticket, Open,
+   See the changes) sit right under its title, where the pinned bar never covers them */
+@media (max-width:720px){
+ .swipe-card>.swipe-head{order:-2}
+ .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
+ .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
+}
+/* ORCH-2185 / ORCH-2316: narrow phones need the links above the title: Linux font wrapping at 390 px
+   leaves only 21 px before the pinned answer bar. Keep the same safe placement through 480 px. */
+@media (max-width:480px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}

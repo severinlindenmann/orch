@@ -1193,3 +1193,11 @@ def test_session_list_route_answers_for_a_ticket_id_only(art):
     assert code == 200 and json.loads(body) == {"available": False, "sessions": []}
     assert _get(art, "/api/sessions/..%2fx")[0] == 404 and _get(art, "/api/sessions/t_x")[0] == 404
     assert _get(art, "/api/sessions/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403
+
+
+def test_talk_route_answers_for_a_ticket_id_only(art):
+    """ORCH-2204: the pane's Chat reads the helper's real conversation here; none on file says unavailable."""
+    code, body, _ = _get(art, "/api/talk/t_other000x")
+    assert code == 200 and json.loads(body) == {"available": False, "turns": [], "more": False}
+    assert _get(art, "/api/talk/..%2fx")[0] == 404 and _get(art, "/api/talk/t_x")[0] == 404
+    assert _get(art, "/api/talk/t_other000x", {"Sec-Fetch-Site": "cross-site"})[0] == 403

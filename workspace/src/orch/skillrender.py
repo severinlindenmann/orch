@@ -21,25 +21,6 @@ _STANDALONE = re.compile(r"^(\{\{[#^/]\w+\}\})\n", re.M)
 DESCRIPTION_FILE = "description.toml"
 MESSAGE = "Skills updated; they apply from the next agent session."
 
-# Facts each skill may use, and which combinations cannot happen (used by the lint test to render every one).
-FACTS: dict[str, list[str]] = {
-    "orch-relay": ["connected", "workspaces", "files", "delegate", "start", "phones", "webhooks"],
-    "orch-publish": ["connected", "files", "apps", "permanent", "public"],
-    "orch-automation": ["relay", "webhooks"],
-    "orch-dashboard": ["publish"],
-    "orch-github": [],
-}
-
-
-def possible(skill: str, f: dict[str, bool]) -> bool:
-    if skill in ("orch-relay", "orch-publish") and not f["connected"]:
-        return not any(v for k, v in f.items() if k != "connected")
-    if skill == "orch-relay" and not f["workspaces"] and (f["files"] or f["delegate"] or f["start"]):
-        return False
-    if skill == "orch-automation" and f["webhooks"] and not f["relay"]:
-        return False
-    return True
-
 
 def render(text: str, facts: dict[str, bool]) -> str:
     """Sections by boolean facts. An unknown fact is an error, so a typo cannot silently hide text."""
@@ -65,12 +46,18 @@ def description(spec: dict, facts: dict[str, bool]) -> str:
     return f"{o['lead']} Use when you need to: {joined}. {o['not_for']}"
 
 
-def render_skill(source: Path, facts: dict[str, bool]) -> tuple[str, str]:
+def description_spec(source: Path) -> dict | None:
+    path = source / DESCRIPTION_FILE
+    return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def render_skill(source: Path, facts: dict[str, bool], spec: dict | None = None) -> tuple[str, str]:
     """(SKILL.md text, AGENTS block text) for a skill folder and facts."""
     body = render((source / "SKILL.md").read_text(encoding="utf-8"), facts)
-    spec_file = source / DESCRIPTION_FILE
-    if spec_file.is_file():
-        desc = description(tomllib.loads(spec_file.read_text(encoding="utf-8")), facts)
+    if spec is None:
+        spec = description_spec(source)
+    if spec is not None:
+        desc = description(spec, facts)
         body = body.replace("{{description}}", desc.replace('"', "'"))
     block = ""
     for fn in skills.BLOCK_FILES:
@@ -95,7 +82,7 @@ def _connected(root: Path, service: str) -> dict | None:
     return cfg if {"url", "workspace", "token"} <= cfg.keys() else None
 
 
-def facts_for(root: Path, skill: str) -> dict[str, bool]:
+def facts_for(root: Path, skill: str, spec: dict) -> dict[str, bool]:
     if skill == "orch-relay":
         ws = _json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json")
         can = [w.get("can_send") or {} for w in ws.get("workspaces", []) if isinstance(w, dict)]
@@ -116,12 +103,11 @@ def facts_for(root: Path, skill: str) -> dict[str, bool]:
             "connected": cfg is not None,
             **{k: bool(rights.get(k)) for k in ("files", "apps", "permanent", "public")},
         }
-    relay = _connected(root, "relay") is not None
-    if skill == "orch-automation":
-        return {"relay": relay, "webhooks": relay}
-    if skill == "orch-dashboard":
-        return {"publish": _connected(root, "publish") is not None}
-    return {}
+    services = spec.get("service_facts", {})
+    if not isinstance(services, dict) or any(v not in ("relay", "publish") for v in services.values()):
+        raise ValueError("service_facts in description.toml must map fact names to 'relay' or 'publish'")
+    connections = {service: _connected(root, service) is not None for service in set(services.values())}
+    return {fact: connections[service] for fact, service in services.items()}
 
 
 def remember_rights(root: Path, who: dict) -> None:
@@ -197,7 +183,7 @@ def sync_github(root: Path) -> bool:
         return False
     dest = skills.harness_skill(root, GITHUB_SKILL)
     if github_on(root):
-        body, block = render_skill(src, facts_for(root, GITHUB_SKILL))
+        body, block = render_skill(src, {})
         body = skillstatus.mark_deprecated(body)
         if (
             dest.is_dir()
@@ -235,7 +221,8 @@ def render_installed(root: Path, addon: str, source: Path) -> bool:
     if "{{" not in (source / "SKILL.md").read_text(encoding="utf-8"):
         return False  # a plain skill: install_skill already copied it
     dest = skills.harness_skill(root, skill) / "SKILL.md"
-    body, block = render_skill(source, facts_for(root, skill))
+    spec = description_spec(source)
+    body, block = render_skill(source, facts_for(root, skill, spec or {}), spec)
     body = skillstatus.mark_deprecated(body)
     changed = False
     if not dest.is_file() or dest.read_text(encoding="utf-8") != body:
