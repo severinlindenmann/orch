@@ -29,6 +29,21 @@ from prpage_util import prws  # noqa: F401  (the Pull requests page tests' works
 
 
 @pytest.fixture(autouse=True)
+def no_outside_env(monkeypatch):
+    """The tests run the same inside an agent tool (Claude Code, Copilot ...): core counts a `human:` actor as
+    that agent when the tool's variables are set. The git config a tool injects (GIT_CONFIG_*, e.g.
+    safe.bareRepository=explicit) is not the test's either."""
+    import os
+
+    from orch import adapters
+
+    for k in set(os.environ) - set(adapters.human_environ(os.environ)):
+        monkeypatch.delenv(k)
+    for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(k)
+
+
+@pytest.fixture(autouse=True)
 def woke(monkeypatch):
     """No test ever starts a real helper: the queue's wake only records (ticket, text)."""
     from orch_pull_requests import runner

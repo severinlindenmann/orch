@@ -364,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--json", action="store_true")
     ls = q.add_parser("list", help="what waits and what happened lately")
     ls.add_argument("--json", action="store_true")
+    q.add_parser("snapshot", help="read the queue and its base branches without contacting GitHub")
     au = q.add_parser(
         "audit",
         help="merges past the queue, times it stood still, check runs per merge, minutes to merged, the busiest hour and group start to merged, for the last hours",
@@ -429,6 +430,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{len(waiting)} pull requests wait and no merge queue runner is running.")
                 return 1
             print("The merge queue runner is fine.")
+            return 0
+        if args.sub == "snapshot":
+            from . import settings
+
+            try:
+                entries = [
+                    {k: row[k] for k in ("url", "state", "ticket", "ended") if k in row}
+                    for row in store.read(root, strict=True, require_file=True)
+                ]
+            except (OSError, UnicodeError, Refused):
+                entries = None
+            print(json.dumps({"bases": settings.bases(root), "entries": entries}))
             return 0
         if args.sub == "list":
             rows = store.read(root)

@@ -245,11 +245,16 @@
    "blocks": [
     {
      "empty": {
-      "text": "Link a pull request to a ticket and it shows up here with its checks.",
+      "button": {
+       "label": "Open tickets",
+       "to": "app:tickets"
+      },
+      "text": "Add a pull request link to a ticket and it shows up here with its checks.",
       "title": "No pull requests yet"
      },
      "items": [],
-     "title": "Pull requests",
+     "meta": "0 open",
+     "title": "Open pull requests",
      "type": "list"
     },
     {

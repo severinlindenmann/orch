@@ -12,8 +12,10 @@
 .chat-page h2{font-size:14px;font-weight:600}
 .chat-page button,.chat-page input,.chat-page textarea{font:inherit;color:inherit}
 .chat-page button,.chat-page summary{cursor:pointer}
-.chat-page button,.chat-page a,.chat-page summary,.chat-page input{min-height:44px;touch-action:manipulation}
-.chat-page :focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+/* A closed Details is its 44 px summary line with the word in the middle, no empty band under it. */
+.chat-page summary{align-content:center}
+.chat-page button:where(:not(.switch)),.chat-page a,.chat-page summary,.chat-page input{min-height:44px;touch-action:manipulation}
+.chat-page :focus-visible{outline:2px solid var(--brand);outline-offset:3px;box-shadow:var(--focus-ring)}
 .chat-page button:disabled{cursor:default;color:var(--disabled-text);opacity:.65}
 .chat-page .chat-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 12px;min-height:44px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface-2);color:var(--text);text-decoration:none;line-height:1.4;text-align:center;overflow-wrap:anywhere}
 .chat-page .chat-button:hover:not(:disabled){background:var(--surface-3);border-color:var(--brand)}

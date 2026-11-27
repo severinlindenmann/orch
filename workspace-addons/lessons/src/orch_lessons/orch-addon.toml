@@ -13,5 +13,6 @@ gitignore = [".orch/addons/lessons/"]
 
 [dashboard]
 label = "Lessons"
+subtitle = "What helpers learned here, in one list."
 icon = "book"
 place = "settings"

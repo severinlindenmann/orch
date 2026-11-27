@@ -298,3 +298,40 @@ def test_clean_office_files_and_pdfs_pass(srv, built):
     index.refresh(built)
     for n in ("ok.docx", "ok.xlsx", "ok.pdf"):
         assert get(srv, "/api/file?p=Sales%2F" + n)[0] == 200, n
+
+
+def test_zip_files_and_drawings_are_checked_before_they_are_served(srv, built, monkeypatch):
+    import io
+    import zipfile
+
+    from conftest import write
+
+    from orch_files import index
+
+    key = "AKIAIOSFODNN7EXAMPLE"
+
+    def make(parts):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            for n, body in parts.items():
+                z.writestr(n, body)
+        return b.getvalue()
+
+    bad = {
+        "leak.zip": make({"a/readme.txt": "hello", "a/deep/notes.txt": f"key {key}"}),
+        "leak.svg": f"<svg xmlns='x'><text>{key}</text></svg>".encode(),
+        "cut.zip": b"PK\x03\x04 not really a zip",
+    }
+    good = {
+        "ok.zip": make({"a.txt": "Breakfast for 60"}),
+        "ok.svg": b"<svg xmlns='x'><text>Menu</text></svg>",
+    }
+    for name, data in {**bad, **good}.items():
+        write(built, "Sales/" + name, data)
+    with monkeypatch.context() as m:
+        m.setattr(index, "_read_texts", lambda *a, **k: None)
+        index.refresh(built)
+    for name in bad:
+        assert get(srv, "/api/file?p=Sales%2F" + name)[0] == 404, name
+    for name in good:
+        assert get(srv, "/api/file?p=Sales%2F" + name)[0] == 200, name

@@ -204,7 +204,7 @@ def detected_agents(root: Path) -> list[str]:
     """Built-in agents this machine or folder uses: found on the PATH, running us, or chosen here."""
     from orch import adapters, config
 
-    names = {r["name"] for r in adapters.detect() if r["found"]}
+    names = {r["name"] for r in adapters.detect(versions=False) if r["found"]}
     for n in (adapters.detect_env(os.environ), config.agent_name(root)):
         if n:
             names.add(n)
@@ -414,10 +414,11 @@ def unlink_skill(root: Path, name: str) -> None:
         harness.unlink_skill(root, where, name)
 
 
-def ensure_gitignore(root: Path) -> None:
+def ensure_gitignore(root: Path, also: str | None = None) -> frozenset:
     """The local-only lines (secrets, inbox, run files, ...) stay out of git: .orch/.gitignore and
-    .git/info/exclude, never the team's .gitignore. Refuses when neither can be written."""
-    harness.protect_local(root, _exclude_lines(root))
+    .git/info/exclude, never the team's .gitignore. Refuses when neither can be written. `also`: a private
+    file about to be written (see harness.protect_local)."""
+    return harness.protect_local(root, _exclude_lines(root), also)
 
 
 def front_matter_name(skill_dir: Path) -> str:

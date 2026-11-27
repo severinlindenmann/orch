@@ -94,13 +94,16 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-head>.side-toggle{display:none}
 .nav-addons{display:grid;gap:4px}
 .nav-row{position:relative;display:grid}
-.nav-row>.nav-item{padding-right:40px}
-.nav-row>.nav-pin{position:absolute;right:4px;top:0;bottom:0;margin-block:auto;height:fit-content;opacity:.4;transition:opacity var(--dur-fast) var(--ease-move)}
-.nav-row:is(:hover,:focus-within) .nav-pin{opacity:1}
-.nav-pin[aria-pressed=true] svg{fill:currentColor}
-.nav-more{width:100%;font:inherit;font-size:14px;cursor:pointer}
-.nav-more .ic{transition:transform var(--dur-base) var(--ease-move)}
-.nav-more[aria-expanded=true] .ic{transform:rotate(180deg)}
+/* The menu's add-ons (D2 A, ORCH-2283): plain rows; 'Change this list' shows one small switch per row (In the list or
+   under More), Done hides them again. More (n) / Fewer unfolds the rest in place. */
+.nav-row-edit>.nav-item{padding-right:52px}
+.nav-row>.nav-pin{position:absolute;right:8px;top:0;bottom:0;margin-block:auto;display:grid;place-items:center;width:36px;height:28px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
+.nav-pin:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.nav-pin-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);transition:background var(--dur-fast) var(--ease-move)}
+.nav-pin-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform var(--dur-fast) var(--ease-move)}
+.nav-pin[aria-checked=true] .nav-pin-sw{background:var(--brand)}
+.nav-pin[aria-checked=true] .nav-pin-sw:after{transform:translateX(12px);background:var(--on-brand)}
+:is(.nav-more,.nav-change){width:100%;font:inherit;font-size:14px;cursor:pointer}
 @media(min-width:1280px){.side-head>.side-toggle{display:inline-flex}}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
@@ -141,6 +144,23 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-foot .side-settings .nav-item{flex:1 1 auto;min-width:0}
 .side-foot .side-settings .nav-item.nav-icon-only{flex:none;width:36px;justify-content:center;padding:8px}
 .side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
+/* Person block, look A (ORCH-1880, owner pick from draft ORCH-1763): ONE row - the person (avatar with its sign-in dot, the
+   name, the menu), then Phone, Settings and Documentation as icons with their words on hover. The rail stacks it. */
+.side-foot.person-row{display:flex;align-items:center;gap:2px}
+.person-row>.person-switch,.person-row>details.person-menu{flex:1 1 auto;min-width:0}
+.person-row>.person-switch[hidden],.side-foot.person-row .phone-toggle[hidden]{display:none}
+.person-row .person-menu>summary .nav-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-foot.person-row .person-menu>summary{gap:8px;padding:4px 6px}
+.person-row .person-menu>summary :is(.chev,.grow){display:none}
+.side-foot.person-row .phone-toggle{flex:none;justify-content:center;width:32px;padding:6px;color:var(--text-muted);cursor:pointer}
+.side-foot.person-row .side-settings .nav-item.nav-icon-only{width:32px;padding:6px}
+.side-foot.person-row .phone-toggle[aria-checked=true]{color:var(--brand)}
+.person-row>.side-settings{flex:none}
+/* no person chosen yet: "Pick your name" keeps its words, the icons go to a second line */
+.side-foot.person-row:has(.nav-label.pick){flex-wrap:wrap}
+.person-row:has(.nav-label.pick)>.person-switch{flex-basis:100%}
+/* a status dot on an avatar (signed in = .ok, not signed in = plain grey); the words sit in its owner's title and label */
+.avatar>.dot{position:absolute;right:-2px;bottom:-2px;box-shadow:0 0 0 2px var(--surface)}
 /* A long menu (12 items on a 900 px screen) scrolls above the foot; a soft edge shows there is more (report r-1118-0908-t_oxw444-2). */
 .sidebar-scroll{background:linear-gradient(var(--sidebar) 30%,transparent) top/100% 24px no-repeat local,linear-gradient(transparent,var(--sidebar) 70%) bottom/100% 24px no-repeat local,linear-gradient(rgba(0,0,0,.35),transparent) top/100% 10px no-repeat scroll,linear-gradient(transparent,rgba(0,0,0,.35)) bottom/100% 10px no-repeat scroll}
 @media(min-width:721px) and (max-height:960px){.side-foot .nav-item,.side-foot .phone-toggle,.side-foot .mm-toggle{min-height:32px;padding-block:4px}}
@@ -181,6 +201,14 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .page-heading h1{margin:0}
 .page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
 .page-heading-actions>.btn.ghost:last-child{padding-right:0}
+/* A slot an add-on fills later (its header link) takes no gap while empty: the right edge stays the same (D1, ORCH-2315). */
+.page-heading-actions>:empty:not(.btn){display:none}
+/* One top for every page (D1, ORCH-2282): '← parent' above the name on a page inside another page; Settings first in the
+   actions, the one filled button last (UI.pageTop). On a phone the buttons go under the sentence, left-aligned. */
+.page-back{display:inline-flex;align-items:center;gap:6px;min-height:24px;width:max-content;max-width:100%;margin:0 0 4px;font-size:13px;line-height:18px;color:var(--text-muted);text-decoration:none;border-radius:6px}
+.page-back:hover{color:var(--text)}
+.page-back:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.page-back .ic{width:14px;height:14px}
 .page-header p,.page-heading p{color:var(--text-muted)}
 .page-heading p{margin:0}
 .page-header p{margin-top:8px}
@@ -366,6 +394,19 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 /* A menu that holds a short form (a title, choices, one action): wide enough for one-line choices, never past the screen. */
 .menu-pop.menu-pop-wide{min-width:320px;max-width:min(380px,calc(100vw - 32px));padding:8px;gap:8px}
 .menu-pop-wide .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
+/* A menu of choices in groups side by side (ORCH-2155, the ticket's Actions): each group an eyebrow and its rows, left aligned. */
+.menu-pop-wide .grid-2>[role=group]{display:grid;align-content:start}
+/* A ticked choice in a menu (menuitemradio): the tick column keeps every word on one edge, ticked or not. */
+.menu-tick{display:inline-flex;width:16px;flex:none;justify-content:center;color:var(--brand)}
+/* Action bar (ORCH-2155): equal buttons on one grid under a title, 4 across on a computer, 2 per row on a phone. A
+   details.menu or a Start button in it is one cell and fills it. */
+.btn-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2);max-width:824px}
+.btn-bar>*{min-width:0}
+.btn-bar>.btn,.btn-bar>details.menu>summary.btn,.btn-bar>.start-host,.btn-bar>.start-host>.start-split{width:100%}
+.btn-bar>.start-host{display:flex}
+.btn-bar>.btn,.btn-bar>details.menu>summary.btn{justify-content:center}
+.btn-bar .start-split>.btn:first-child{flex:1;min-width:0;justify-content:center}
+@media(max-width:720px){.btn-bar{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* Start button (ORCH-475): one click starts the usual way (Continue, or Start with no earlier session); the caret opens the
    Start choice (.live-start from widgets.css). While it starts both halves are disabled and the main half says Starting… */
 .start-split{display:inline-flex;align-items:stretch;position:relative}
@@ -436,6 +477,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar:has(.nav-label) .nav-group>summary:after{display:none}
 .sidebar:has(.nav-label) .phone-toggle{padding:8px 4px}
 .sidebar:has(.nav-label) .side-foot{gap:8px}
+.sidebar:has(.nav-label) .side-foot.person-row{flex-direction:column;align-items:stretch}
+.sidebar:has(.nav-label) .side-foot.person-row .phone-toggle{width:100%}
 /* the person switch keeps only its letter; "Signed in" (the usual case) goes, any other state is a dot with its words on hover;
    its menu opens beside the rail, so the narrow rail never scrolls sideways (ORCH-1636, ORCH-1638) */
 .sidebar:has(.nav-label) .person-menu>summary>:not(.avatar),.sidebar:has(.nav-label) .session-state[data-state=signed-in],.sidebar:has(.nav-label) .session-state>:not(.chip),.sidebar:has(.nav-label) .session-state:after{display:none}
@@ -471,6 +514,10 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:is([data-side=rail],[data-live-rail]) .nav-group>summary:after{display:none}
 .shell:is([data-side=rail],[data-live-rail]) .phone-toggle{padding:8px 4px}
 .shell:is([data-side=rail],[data-live-rail]) .side-foot{gap:8px}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot.person-row{flex-direction:column;align-items:stretch}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot.person-row .phone-toggle{width:100%}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot .side-settings{flex-direction:column}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
 .shell:is([data-side=rail],[data-live-rail]) .person-menu>summary>:not(.avatar),.shell:is([data-side=rail],[data-live-rail]) .session-state[data-state=signed-in],.shell:is([data-side=rail],[data-live-rail]) .session-state>:not(.chip),.shell:is([data-side=rail],[data-live-rail]) .session-state:after{display:none}
 .shell:is([data-side=rail],[data-live-rail]) .session-state{justify-content:center}
 .shell:is([data-side=rail],[data-live-rail]) .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
@@ -496,10 +543,12 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar[data-open=true] .side-foot .side-settings{display:flex}
 .sidebar .side-foot .side-settings .nav-item.nav-icon-only{width:44px}
 .sidebar .side-foot{margin:0}
+.sidebar[data-open=true] .side-foot.person-row{display:flex}
+.sidebar .side-foot.person-row .phone-toggle{width:44px;min-height:44px}
 .btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
-.nav-pin{opacity:1}
-.nav-row>.nav-item{padding-right:52px}
+.nav-row>.nav-pin{width:44px;height:44px;right:4px}
+.page-back{min-height:44px;margin:-10px 0 -6px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
 /* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
@@ -515,7 +564,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .switch:before{content:"";position:absolute;inset:-12px -4px}
 dialog.sheet{width:100%}
 }
-@media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
+@media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.page-heading-actions{margin-left:0;width:100%;flex-wrap:wrap}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
 @media(forced-colors:active){.btn,.badge,.switch,.phase{border:1px solid ButtonText}.nav-item[aria-current=page]{outline:1px solid Highlight}.progress>span{background:Highlight}.skeleton{border:1px solid GrayText}:focus-visible{outline:2px solid Highlight}.dot{border:1px solid CanvasText}}
 
 /* compat for the question card, evidence tiles and demo pages */

@@ -189,7 +189,7 @@ test('same numbers: every page shows the same count, date and state for the same
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
-    note('needs you', 'Review Waiting tab + rows listed above the cards', int(review.waiting) + review.extra);
+    note('needs you', 'Review Waiting tab (cards + rows listed above them, ORCH-2339)', int(review.waiting));
     note('needs you', 'Review "All cards" rows waiting + rows listed above the cards', review.queue + review.extra);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
     noise('top bar (on Review)', reviewChrome.topBar);
@@ -207,7 +207,7 @@ test('same numbers: every page shows the same count, date and state for the same
       // a lane header reads "<icon> Name" then its number on the next line
       const lines = t.split('\n').map(x => x.trim()).filter(Boolean);
       for (let i = 0; i < lines.length - 1; i++) {
-        const m = /^[^\w]*\s*(Needs you|Check|Working|Waiting|Backlog|Done|Stuck)$/.exec(lines[i]);
+        const m = /^[^\w]*\s*(Needs you|Review|Working|Waiting|Backlog|Done|Stuck)$/.exec(lines[i]);
         if (m && /^\d+$/.test(lines[i + 1]) && !(m[1] in lanes)) lanes[m[1]] = Number(lines[i + 1]);
       }
       const rows = {};                                  // key -> {lane, due}: the lane a row sits in and its Due cell
@@ -216,7 +216,7 @@ test('same numbers: every page shows the same count, date and state for the same
         // the pick checkbox cell (ORCH-2034) holds no text: read the cells after it
         const cells = [...r.children].filter(c => !c.classList.contains('pick-cell')).map(c => (c.innerText || '').trim());
         const key = /(?:^|\n)\s*([A-Z]+-\d+)\b/.exec(cells[0] || '');
-        const head = /^[^\w]*\s*(Needs you|Check|Working|Waiting|Backlog|Done|Stuck)\b/.exec((r.innerText || '').trim());
+        const head = /^[^\w]*\s*(Needs you|Review|Working|Waiting|Backlog|Done|Stuck)\b/.exec((r.innerText || '').trim());
         if (head && !key) { lane = head[1]; continue; }
         if (key) rows[key[1]] = {lane, due: cells[1] || ''};
       }
@@ -231,10 +231,10 @@ test('same numbers: every page shows the same count, date and state for the same
     noise('Tickets header', tickets.pill);
     // #2385: work that stopped stays in its own lane (Working): it is counted beside the lanes, like Review's extra rows
     const stoppedRows = state.needs.filter(n => n.source === 'core' && /^(helper|reviewer):/.test(n.kind || '')).length;
-    note('needs you', 'Tickets lanes (Needs you + Check) + work that stopped', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0) + stoppedRows);
+    note('needs you', 'Tickets lanes (Needs you + Review) + work that stopped', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Review || 0) + stoppedRows);
     noise('top bar (on Tickets)', ticketsChrome.topBar);
     note('tickets', 'Tickets list header', int(tickets.head));
-    note('tickets', 'Tickets lanes (every lane added up)', Object.entries(tickets.lanes).filter(([k]) => k !== 'Needs you' && k !== 'Check').reduce((a, [, v]) => a + v, 0) + (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
+    note('tickets', 'Tickets lanes (every lane added up)', Object.entries(tickets.lanes).filter(([k]) => k !== 'Needs you' && k !== 'Review').reduce((a, [, v]) => a + v, 0) + (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Review || 0));
 
     // ---- one ticket page: its state word and its Due, for tickets in different lanes
     // (one with a question, one with a late day, one result to check, one working, one in the backlog with a day, one without)
@@ -248,8 +248,12 @@ test('same numbers: every page shows the same count, date and state for the same
         const main = document.querySelector('main');
         const due = [...main.querySelectorAll('*')].find(e => e.children.length === 0 && /^Due$/.test((e.innerText || '').trim()));
         // the first word line; a ticket with a live helper starts with its number ("PIL-2 · Working · ...")
-        const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
-        return {state: first, due: due ? (due.nextElementSibling || due.parentElement.nextElementSibling || {innerText: ''}).innerText.trim() : ''};
+        // '← Tickets' above the name (one top for every page, ORCH-2282) is the way back, not the ticket's state
+        const back = (main.querySelector('.page-back')?.innerText || '').trim();
+        const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && x !== back && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
+        // the words on screen only: an edit field also says ", change due date" to a screen reader (.sr-only, label in name)
+        const shown = n => { if (!n) return ''; const c = n.cloneNode(true); c.querySelectorAll('.sr-only').forEach(x => x.remove()); return c.textContent.trim(); };
+        return {state: first, due: due ? shown(due.nextElementSibling || due.parentElement.nextElementSibling) : ''};
       });
       await page.screenshot({path: path.join(OUT, 'ticket-' + key + '.png')});
     }
@@ -315,7 +319,7 @@ test('same numbers: every page shows the same count, date and state for the same
 
     // the same ticket: Tickets lane = ticket page state word; Tickets Due = ticket page Due
     // Working lane: the ticket page says 'Working' while a helper runs, 'In progress' when none does (ORCH-415, owner approved)
-    const LANE_WORD = {'Needs you': ['Needs you'], Check: ['Check'], Working: ['Working', 'In progress']};
+    const LANE_WORD = {'Needs you': ['Needs you'], Review: ['Review'], Working: ['Working', 'In progress']};
     for (const [key, row] of Object.entries(tickets.rows)) {
       const tp = ticketPage[key];
       if (!tp) continue;

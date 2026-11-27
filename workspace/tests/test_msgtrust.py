@@ -250,29 +250,35 @@ def test_sender_cannot_sign_as_another_workspace(ws, run, rel, person):
 # ---------------------------------------------------------------- first contact is held until Accept
 
 
-def test_new_sender_is_held_until_a_person_accepts(ws, run, rel, person):
+def test_paired_sender_is_trusted_on_first_contact(ws, run, rel, person):
+    """RP3 A (25 Nov 2026): the admin paired the two workspaces on the relay, so the first message arrives."""
     m = signed_msg(SEED_PEER, body={"text": "Hello, first contact"})
     rel.inbox.append(m)
     out = inbox(run)
-    assert m["id"] not in handled_ids(ws)
-    assert all(x["id"] != m["id"] for x in out)
-    assert [h["id"] for h in msgtrust.held(ws)] == [m["id"]]
-    assert m["id"] in rel.acked
-    c = next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)
-    assert (
-        c["state"] == "not_accepted"
-        and c["held"] == 1
-        and c["fingerprint"] == msgsig.fingerprint(_pub(SEED_PEER))
-    )
-    # still nothing on the next pull
-    inbox(run)
-    assert m["id"] not in handled_ids(ws)
-    code, txt, _ = run("relay", "contacts", "accept", PEER, "--fingerprint", c["fingerprint"])
-    assert code == 0 and "1 held message(s) let in" in txt
-    assert m["id"] in handled_ids(ws)
-    out = inbox(run)
+    assert m["id"] in handled_ids(ws) and m["id"] in rel.acked
     assert any(x["id"] == m["id"] for x in out)
     assert msgtrust.held(ws) == []
+    c = next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)
+    assert c["state"] == "accepted" and c["held"] == 0
+    assert c["fingerprint"] == msgsig.fingerprint(_pub(SEED_PEER))
+    # the same bytes again are a duplicate; a forged key is still refused
+    assert msgtrust.check_incoming(ws, json.loads(json.dumps(m))).kind == "duplicate"
+    forged = signed_msg(SEED_EVIL)
+    assert msgtrust.check_incoming(ws, forged).kind == "refused"
+
+
+def test_a_withdrawn_contact_stays_held_until_a_person_accepts(ws, run, rel, person):
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")
+    m = signed_msg(SEED_PEER, body={"text": "Hello again"})
+    rel.inbox.append(m)
+    out = inbox(run)
+    assert m["id"] not in handled_ids(ws) and all(x["id"] != m["id"] for x in out)
+    assert [h["id"] for h in msgtrust.held(ws)] == [m["id"]]
+    c = next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)
+    assert c["state"] == "withdrawn" and c["held"] == 1
+    code, txt, _ = run("relay", "contacts", "accept", PEER, "--fingerprint", c["fingerprint"])
+    assert code == 0 and "1 held message(s) let in" in txt
+    assert m["id"] in handled_ids(ws) and msgtrust.held(ws) == []
 
 
 def test_accept_is_a_person_action(ws, run, rel):
@@ -305,6 +311,8 @@ def test_unknown_key_without_a_listed_key_is_refused_not_held(ws, run, rel, pers
 
 def test_a_held_person_action_is_dropped_on_accept(ws, run, rel, person):
     from orch import relay
+
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")
 
     allow = signed_msg(
         SEED_PEER,
@@ -587,13 +595,9 @@ def test_two_workspaces_relay_bypassed(ws, run, rel, person, tmp_path, homes):
     addons.put_local_id(b, "b" * 32)
     assert run("relay", "send", PEER, "Please check the report", "--json")[0] == 0
     wire = json.loads(json.dumps(rel.sent[-1]))  # what the relay would hand over, byte for byte
-    # B has not accepted A: held, nothing handled
+    # B has not heard from A before, but the relay lists A (paired by the admin): trusted on first contact
     v = msgtrust.check_incoming(b, wire)
-    assert v.kind == "held" and v.code == "not_accepted"
-    msgtrust.hold(b, v)
-    r = msgtrust.accept(b, WS, "human:tester", "dashboard", fingerprint=msgsig.fingerprint(pub_a))
-    assert [x["result"] for x in r["released"]] == ["released"]
-    assert (b / ".orch/inbox" / f"{wire['id']}.json").is_file()
+    assert v.kind == "ok" and msgtrust.held(b) == []
     # the same bytes again: a duplicate, never handled twice
     assert msgtrust.check_incoming(b, wire).kind == "duplicate"
     # changed on the way: refused
@@ -771,6 +775,7 @@ def test_a_dropped_held_allow_sent_again_is_never_run(ws, run, rel, person):
         origin="person",
         reply_to="m_0000000000000997",
     )
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")
     rel.inbox.append(allow)
     inbox(run)
     accept(ws, PEER)
@@ -971,6 +976,7 @@ def test_what_is_delivered_is_what_was_signed(ws, person):
 
 @pytest.mark.parametrize("typ", ["start", "delegate"])
 def test_a_held_start_or_delegate_is_dropped_on_accept(ws, run, rel, person, typ):
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")  # RP3 A: a paired first contact is not held
     m = signed_msg(SEED_PEER, type_=typ, body={"text": "Run it"}, origin="person")
     rel.inbox.append(m)
     inbox(run)
@@ -981,6 +987,7 @@ def test_a_held_start_or_delegate_is_dropped_on_accept(ws, run, rel, person, typ
 
 
 def test_a_held_message_of_any_body_shape_never_breaks_accept(ws, run, rel, person):
+    msgtrust.withdraw(ws, PEER, "human:tester", "cli")  # RP3 A: a paired first contact is not held
     odd = signed_msg(SEED_OTHER, frm=OTHER, body={"origin": "x", "text": "hi"})
     mine = signed_msg(SEED_PEER)
     rel.inbox += [odd, mine]

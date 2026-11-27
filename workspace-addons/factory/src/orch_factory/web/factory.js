@@ -115,11 +115,28 @@
     for (const value of values) el.append(node('li', value));
     return el;
   }
+  // One top for every page (owner D1, ORCH-2282): the master page top (kit components.css .page-top, as UI.pageTop draws
+  // it): the name and one sentence, the buttons on the right. A page inside another page has '← <parent>' above its name.
   function heading(title, subtitle, ...actions) {
     document.title = text(title) + ' · Factory';
     const h1 = node('h1', title); h1.tabIndex = -1;
-    return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
+    const top = group('page-heading page-top', group('page-top-text', h1, node('p', subtitle, 'muted')));
+    if (actions.length) top.append(group('page-heading-actions', ...actions));
+    return top;
   }
+  // D6 (ORCH-2315): Factory's one Settings button, the master's (kit widgets.js UI.settingsButton), first on the right of
+  // its own top. It moves the dashboard (target _top) to Settings › Add-ons › Factory.
+  const settingsButton = () => window.UI?.settingsButton ? [window.UI.settingsButton({href: '/#settings/addons/factory', top: true})] : [];
+  function inner(top, label, href) {
+    const a = node('a', null, 'page-back'); a.href = href; a.dataset.key = 'page-back';
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('class', 'ic'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    path.setAttribute('d', 'M19 12H5m6-6-6 6 6 6'); svg.append(path);
+    a.append(svg, node('span', label));
+    top.querySelector('.page-top-text')?.prepend(a);
+    return top;
+  }
+  const toOrder = (top, order) => validId(order?.id) ? inner(top, text(order.title) || 'Order', '#/order/' + order.id) : inner(top, 'Factory', '#/');
   // The questions your helper asked on the order (the draft's open questions): one card each, its options and its
   // suggestion shown, the answer given in the dashboard's own question card (the page never answers).
   function questionCards(order) {
@@ -438,7 +455,9 @@
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
-    el.append(field, count, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
+    // D4 (26 Nov): the idea box is the master's empty-page look (.page-empty): one sentence, the first step right there.
+    const step = group('page-empty-step'); step.append(field, count, group('row', go, fallback), status);
+    el.append(step); el.classList.add('f-idea', 'page-empty'); return el;
   }
   // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
   // stays when the list arrives.
@@ -481,9 +500,10 @@
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
+    // D3 B (ORCH-2284): one name, Factory, and the words every page uses: Needs you
     view.append(heading('Factory', needing.length
-      ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing in Factory waits for you right now.'));
+      ? plural(needing.length, 'thing in Factory needs you', 'things in Factory need you') + '.' + (minutes ? ' About ' + minutes + ' min of your time.' : '')
+      : 'Turn an idea into finished work, step by step.', ...settingsButton()));
     // What waits for you comes first, in one block; a kind with nothing in it gets no section of its own (owner
     // 16 Nov, ORCH-72): the missing kinds are named once in a quiet line at the end, not as a wall of empty sections.
     const kinds = [
@@ -508,10 +528,15 @@
     const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
       const block = node('section', null, 'f-section f-waits');
-      const mark = badge('Waits for you'); mark.classList.add('attn');
-      block.setAttribute('aria-label', 'Waits for you'); block.append(mark, ...waiting); view.append(block);
+      const mark = badge('Needs you'); mark.classList.add('attn');
+      block.setAttribute('aria-label', 'Needs you'); block.append(mark, ...waiting); view.append(block);
     }
-    view.append(theIdea(), askRow(auto));
+    // D4: with nothing in Factory yet the idea box IS the page: no switch, no lines about what is missing.
+    const empty = !orders.length && !auto?.on;
+    const box = theIdea(), boxTitle = box.querySelector('h2');
+    if (boxTitle) boxTitle.textContent = empty ? 'No ideas yet. Start with one' : 'Start with an idea';
+    if (empty) { view.append(box); return; }
+    view.append(box, askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
@@ -590,7 +615,7 @@
   }
   function proposal(order) {
     const data = order.proposal;
-    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
+    view.append(toOrder(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')), order));
     if (!data) { view.append(card('No plan yet', p('Your helper is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
@@ -650,7 +675,7 @@
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
-    view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
+    view.append(inner(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')), 'Factory', '#/'));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Your helper answers routine pauses. Putting it live still asks you.'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
@@ -857,7 +882,7 @@
     const canAsk = stop.state === 'open' && embedded() && reach.length > 0 && validId(order.id);
     const ask = canAsk ? node('button', 'Ask another workspace', 'btn outline sm f-btn') : null;
     if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
-    view.append(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
+    view.append(toOrder(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), order), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
       const looks = item.tag === 'taste' ? lookCards(order, item) : [];
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
@@ -880,7 +905,7 @@
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
-    view.append(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'));
+    view.append(inner(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'), 'Factory', '#/'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
       node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
@@ -987,7 +1012,7 @@
       const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
       if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
         // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-        view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+        view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
       } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
     }
     try {
@@ -1029,7 +1054,7 @@
           showNoticesNow(homeData, order, draft);
           // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
           const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
-          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(toOrder(heading(order.title, 'Draft · version ' + version, orderLink(order)), order), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

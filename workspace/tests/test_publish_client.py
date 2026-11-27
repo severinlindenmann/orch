@@ -95,7 +95,7 @@ def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
 def test_not_connected(run, proj):
     turn_on(proj, "publish")
     code, _, err = run("publish", "whoami")
-    assert code == 2 and "not connected" in err
+    assert code == 2 and "Publish isn't connected yet" in err and "orch publish connect --paste" in err
 
 
 def test_file_share_roundtrip_and_link(proj, run, pub):
@@ -683,22 +683,21 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     code, out, _ = run("publish", "view", "--json")
     v = json.loads(out)
     assert code == 0 and v["schema"] == "orch.addon-view/1" and key not in out and "#k=" not in out
-    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Files")
+    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Shared now")
     row = files["items"][0]
-    assert files["compact"] is True and files["meta"] == "1 link"
+    assert files["compact"] is True and files["meta"].startswith("1 link")
     assert (
         row["title"] == "a.txt" and "link" not in row
     )  # no https link: it is copied by its id, with the key kept here
-    assert row["meta"][0] == "Anyone with the link" and row["meta"][1].startswith(
-        ("Expires ", "Kept until")
-    )  # expiry shown once
+    # The end is shown once (the fake has none).
+    assert row["subtitle"] == "No note" and row["meta"][-1] == "Kept until you delete it"
     ops = [(a["label"], a["action"]["op"]) for a in row["actions"]]
     assert ops == [("Copy link", "link.copy"), ("Extend", "link.extend"), ("Stop sharing", "link.stop")]
     assert re.fullmatch(r"f_[a-z0-9]+", row["actions"][0]["action"]["args"]["id"])
     assert v["header"]["button"] == {"label": "Share a file", "action": {"op": "link.share"}}
     assert v["blocks"][-1]["type"] == "footnote"
     # the box title adds to the page title Shared, and no unexplained place for apps (daily look 23 Nov)
-    assert all(b.get("title") != "Shared" for b in v["blocks"])
+    assert all(b.get("title") not in ("Shared", "Publish") for b in v["blocks"])
     assert "portal" not in v["blocks"][-1]["text"] and "app" not in v["blocks"][-1]["text"]
 
 
@@ -718,7 +717,7 @@ def test_view_counts_apps_and_gives_them_open(proj, run, pub, monkeypatch):
     monkeypatch.setattr(
         publish,
         "list_all",
-        lambda root, timeout=None: {
+        lambda root, timeout=None, quick=False: {
             "files": [],
             "apps": [
                 {
@@ -734,7 +733,7 @@ def test_view_counts_apps_and_gives_them_open(proj, run, pub, monkeypatch):
         },
     )
     v = publish.view(proj)
-    files = next(b for b in v["blocks"] if b.get("title") == "Files")
+    files = next(b for b in v["blocks"] if b.get("title") == "Shared now")
     apps = next(b for b in v["blocks"] if b.get("title") == "Apps")
     assert "meta" not in files  # the file count only counts files
     assert "ask a helper" in v["blocks"][-1]["text"] and "portal" not in v["blocks"][-1]["text"]

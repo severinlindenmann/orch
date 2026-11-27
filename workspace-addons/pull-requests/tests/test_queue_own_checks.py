@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from test_queue import FakeGit, FakeGitHub, make, states, url
 
-from orch_pull_requests import blame, store
+from orch_pull_requests import blame, required_checks, store
 
 JOB = "https://github.com/acme/app/actions/runs/77/job/{}"
 
@@ -181,3 +181,89 @@ def test_no_room_for_a_second_run_keeps_its_rerun_for_later(ws):
     r.clock = lambda: 10**9
     r.next_batch()
     assert gh.reruns == [77, 88] and _row(ws, 1)["state"] == "waiting"
+
+
+class RollUp(OwnChecks):
+    """CI's roll-up check red in run 77; the called job is `cancelled` (stopped) or `failed` (a real failure)."""
+
+    def own_checks(self, u):
+        c = self.checks.get(1, {})
+        link = JOB.format(1)
+        rows = [{"name": required_checks.ROLLUP, "link": link, "state": "FAILURE"}] if c.get("failed") else []
+        rows += [{"name": n, "link": link, "state": "FAILURE"} for n in c.get("real", [])]
+        return {
+            "failed": rows,
+            "pending": [],
+            "cancelled": [{"name": n, "link": link} for n in c.get("stopped", [])],
+        }
+
+
+def test_a_red_roll_up_over_cancelled_jobs_runs_again_once_and_then_keeps_waiting(ws):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = RollUp(
+        {1: {}}, {1: {"failed": True, "stopped": ["workspace / test"]}}
+    )  # the rerun is cancelled again
+    r, _ = make(ws, gh, FakeGit())
+    assert r.next_batch() == [] and gh.reruns == [("acme/app", 77)]
+    assert "were cancelled; the merge queue runs them again once" in _row(ws, 1)["why"]
+    r.clock = lambda: 10**9
+    r.next_batch()
+    row = _row(ws, 1)
+    assert len(gh.reruns) == 1 and row["state"] == "waiting"
+    assert row["why"] == "its checks were cancelled; they run again when GitHub has room"
+    gh.checks[1] = {}  # they ran green later: taken, not dropped
+    r.clock = lambda: 10**10
+    r.run()
+    assert states(ws) == {1: "merged"}
+
+
+def test_a_red_roll_up_over_a_real_failure_leaves_after_one_rerun(ws, woke):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = RollUp(
+        {1: {}}, {1: {"failed": True, "real": ["workspace / test"], "stopped": ["addons / dashboard"]}}
+    )
+    r, _ = make(ws, gh, FakeGit())
+    r.run()
+    row = _row(ws, 1)
+    assert len(gh.reruns) == 1 and row["state"] == "out" and "failed again after one rerun" in row["why"]
+
+
+def test_a_red_roll_up_with_nothing_cancelled_is_a_real_failure(ws, woke):
+    store.add(ws, url(1), None, "agent:t", login="bot")
+    gh = RollUp({1: {}}, {1: {"failed": True}})
+    r, _ = make(ws, gh, FakeGit())
+    r.run()
+    assert _row(ws, 1)["state"] == "out" and len(gh.reruns) == 1
+
+
+def test_own_checks_reads_job_states_and_cancelled_jobs_from_the_rollup():
+    import json
+    import subprocess
+
+    from orch_pull_requests.github import GitHub
+
+    rows = [
+        {
+            "name": required_checks.ROLLUP,
+            "bucket": "fail",
+            "state": "FAILURE",
+            "link": JOB.format(1),
+            "workflow": "ci",
+        },
+        {
+            "name": "workspace / test",
+            "bucket": "cancel",
+            "state": "CANCELLED",
+            "link": JOB.format(2),
+            "workflow": "ci",
+        },
+        {"name": "lint", "bucket": "fail", "state": "TIMED_OUT", "link": JOB.format(3), "workflow": "ci"},
+    ]
+    gh = GitHub.__new__(GitHub)
+    gh._run = lambda *a, **k: subprocess.CompletedProcess(a, 8, json.dumps(rows), "")
+    got = gh.own_checks(url(1))
+    assert [(x["name"], x["state"]) for x in got["failed"]] == [
+        (required_checks.ROLLUP, "FAILURE"),
+        ("lint", "TIMED_OUT"),
+    ]
+    assert got["cancelled"] == [{"name": "workspace / test", "link": JOB.format(2)}]

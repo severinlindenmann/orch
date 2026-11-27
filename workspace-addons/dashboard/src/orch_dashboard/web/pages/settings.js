@@ -1,6 +1,19 @@
 'use strict';
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general', settingsAddon = null;
+// D6 (26 Nov): where an add-on's settings were opened from ({hash, label}), so "Back to <add-on name>" returns there in one
+// hop. Opened from Settings › Add-ons (or a fresh load): Back goes to that list.
+let settingsBack = null;
+function noteSettingsBack(oldUrl, hash) {
+  const m = /^#settings\/addons\/([a-z][a-z0-9-]{1,31})$/.exec(hash || '');
+  if (!m) return;
+  const prev = String(oldUrl || '').includes('#') ? String(oldUrl).slice(String(oldUrl).indexOf('#')) : '';
+  if (/^#settings(\/|$)/.test(prev)) { if (prev === '#settings/addons' || prev.startsWith('#settings/addons/')) settingsBack = null; return; }
+  const own = /^#addon\/([a-z][a-z0-9-]{1,31})(?:[/#?]|$)/.exec(prev);
+  const row = own && array(state?.settings?.addons).find(a => a && a.name === own[1]);
+  const label = own ? (row ? rowLabel(row) : addonLabel(addons().find(a => a.name === own[1]))) : prev === '' || prev === '#' || prev === '#home' ? 'Home' : prev.startsWith('#tickets') ? 'Tickets' : prev.startsWith('#review') ? 'Review' : null;
+  settingsBack = label ? {hash:prev || '#home', label} : null;
+}
 const settingsBusy = new Set();
 // ORCH-227: a choice shows at once, with "Saving…", while it is saved; a click while one saves is sent after it (the
 // last click wins). settingsPending holds the picked value per key, settingsQueued the next send.
@@ -168,7 +181,7 @@ function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
-        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
+        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to review first.'),
         settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
       h('span', {className:'switch-text', 'aria-hidden':'true'}, settings.agents_may_finish ? 'On' : 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
@@ -415,7 +428,7 @@ function settingsReviewText(id, settings) {
     ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
     : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
   if (id === 'workflow') return settings.agents_may_finish
-    ? {verb:'Turn off', what:'Helpers will ask you to check finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
+    ? {verb:'Turn off', what:'Helpers will ask you to review finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
     : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting for your check stay there.'};
   if (id === 'copies-switch') return copiesModeOf(settings) !== 'off'
     ? {verb:'Turn off', what:'Helpers will all work in your own folder, also when they work at the same time.', affects:'Copies that already exist stay until their ticket is done. Your own files are not touched.'}
@@ -717,7 +730,7 @@ async function syncSave() {
   syncUi.busy = true; render();
   const result = sameAddr ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);  // how often: unsigned
   syncUi.busy = false;
-  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); render(); return; }
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work. Try again.', 'error'); render(); return; }
   syncUi.draft = null; syncUi.note = '';
   if (!result.answer?.public) window.orch.toast('Saved.', 'ok');
   await syncLoad();
@@ -728,7 +741,7 @@ async function syncNowClick() {
   syncUi.nowBusy = true; syncUi.note = ''; render();
   const result = await syncAct('now', SYNC);
   syncUi.nowBusy = false;
-  if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+  if (!result.ok) window.orch.toast(result.text || 'That did not work. Try again.', 'error');
   else if (result.answer?.still_paused || result.answer?.choose_first) syncUi.note = String(result.answer.text || '');
   await syncLoad();
 }
@@ -765,7 +778,7 @@ function signStep({title, body, here, there, value, done, run}) {
     actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
     const result = await run();
     await window.orch.close(d);
-    window.orch.toast(result?.ok ? 'Confirmed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
+    window.orch.toast(result?.ok ? 'Confirmed. ' + (done || '') : result?.text || 'That did not work. Try again.', result?.ok ? 'ok' : 'error');
   });
   actions.append(sign);
   d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You confirm this as ' + who + '.'), actions].filter(Boolean));
@@ -857,37 +870,43 @@ async function relayReconnect(control) {
   window.orch.toast(ok ? 'Checked. Relay is connected.' : 'Relay is not connected.', ok ? 'ok' : 'error');
   control.disabled = false;
 }
-// One add-on's own settings page (draft addon-detail): the switch, the connection, what it holds, and a quiet
-// always-visible "About this add-on" at the bottom. Reached from a row of the Add-ons tab (#settings/addons/<name>).
+// One add-on's own settings page (D6, 26 Nov, owner picked A): everything in one list - on or off, its options, the
+// connection, and Remove with one line about what stays. "Back to <page>" returns to where it was opened from (the
+// add-on's Settings button, settingsBack); opened from Settings › Add-ons it goes back to that list.
+// Reached from the add-on's Settings button and from a row of the Add-ons tab (#settings/addons/<name>).
 function addonDetailPage(addon) {
-  const d = addon.detail, live = addons().find(a => a.name === addon.name), label = rowLabel(addon);
+  const d = addon.detail, label = rowLabel(addon);
   const connected = addon.active && d?.connected;
   const row = (title, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, title), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
-  const links = live?.dashboard?.panel === 'links';
+  // A row of the one list: what it is (bold), one plain line, its control at the right.
+  const item = (title, line, control, key) => h('div', {className:'card-row set-item', 'data-key':key}, h('div', {className:'grow'}, settingsText('h3', {}, title), line ? settingsText('p', {className:'meta'}, line) : null), control);
+  const links = addons().find(a => a.name === addon.name)?.dashboard?.panel === 'links';
   const shown = state.look ? state.look.shared_pages !== false : null;
   const settingsRows = [
-    row('Add-on', settingsText('p', {}, addon.description || label),
+    item(label + (addon.active ? ' is on' : ' is off'), addon.description || '',
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
-    addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
-    links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+    addon.active && d ? item('Connection', connected && d.address ? 'Connection address: ' + d.address : '', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), 'addon-detail-connection') : null,
+    links && shown !== null ? row(label, settingsText('p', {}, 'Show workspace name and icon'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on published pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
     addon.name === 'pull-requests' && addon.active && state.settings ? releaseMergeRow(row, state.settings) : null,
   ];
   // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
   const technical = settingsRows.splice(1, 1).filter(Boolean);
   if (technical.length) settingsRows.push(moreSettings('addon-' + addon.name, ...technical));
-  const where = live && (live.dashboard || live.page)
-    ? h('div', {className:'card'}, row('Open', settingsText('p', {}, 'See what ' + label + ' holds.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(addon.name), 'data-key':'addon-detail-open'}, 'Open ' + label + ' →'), 'addon-detail-open-row')) : null;
-  return fragment(h('div', {className:'settings stack', 'data-key':'settings-addon-detail'},
-    heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
-    h('div', {className:'card'}, settingsRows),
-    where,
-    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
-    // the description is the Add-on row's text already: About shows only what is not said above (ORCH-1684)
-    connected && d.address ? h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
-      settingsText('p', {className:'meta'}, 'Connection address: ' + d.address)) : null));
+  // Remove is the list's last row, with one line about what stays; a part of orch says it cannot be removed.
+  if (!snapshot && addon.name !== 'dashboard') settingsRows.push(addon.removable === false
+    ? item('Remove ' + label, label + ' is part of orch. You can turn it off, but not remove it.', null, 'addon-detail-core')
+    : item('Remove ' + label, 'Your tickets stay as they are. You can add it again any time.', h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove'), 'addon-detail-remove-row'));
+  const back = settingsBack || {hash:'#settings/addons', label:'Add-ons'};
+  const master = typeof window !== 'undefined' && window.UI?.pageBack ? window.UI.pageBack({label:'Back to ' + back.label, href:back.hash}) : null;
+  if (master) master.dataset.key = 'addon-detail-back';
+  const backLink = master || h('a', {className:'page-back', href:back.hash, 'data-key':'addon-detail-back'}, '← Back to ' + back.label);
+  // Drawn in the Add-ons tab of Settings (the draft: Settings' tabs stay, the add-on's list sits in its tab).
+  return h('div', {className:'stack', 'data-key':'settings-addon-detail'}, backLink,
+    settingsText('h2', {className:'set-sub addon-detail-name'}, label),
+    h('div', {className:'card'}, settingsRows));
 }
 function settingsPage() {
   const settings = state.settings;
@@ -933,7 +952,6 @@ function settingsPage() {
       : h('div', {className:'card pad empty-note', 'data-key':'settings-addons-empty'}, settingsText('h3', {}, 'No optional add-ons installed'), settingsText('p', {className:'meta'}, 'Add tools for schedules, shared links and more.')),
     null);
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
-  if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['people', 'People'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
@@ -953,7 +971,7 @@ function settingsPage() {
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings)), prepareCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
-    panel('addons', addonsPanel),
+    panel('addons', detailAddon ? addonDetailPage(detailAddon) : addonsPanel),
     panel('about', aboutPanel())))
   ));
 }
@@ -961,6 +979,8 @@ function settingsPage() {
 // Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs a detached `orch update`.
 // The phase comes from update.js ("orch-update-state" events).
 const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
+// While a check is under way: master skeleton lines (app.js skeletonLines), never a bare "…" that then jumps.
+const aboutLoading = (label, n, key) => typeof skeletonLines === 'function' ? skeletonLines(label, n, key) : settingsText('p', {className:'meta', 'data-key':key}, label);
 const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
 function updLoad(force = false) {
   if (updUi.loading || (updUi.info && !force)) return;
@@ -1030,7 +1050,7 @@ function aboutPanel() {
     body = [settingsText('p', {className:'bad', role:'alert', 'data-key':'update-failed'}, 'The update did not finish: ' + clean(updUi.reason).replace(/[.\s]+$/, '') + '. orch is still the old version.'),
       snapshot ? null : updButton('Try again', 'update-retry', () => { updUi.phase = 'idle'; render(); })];
   } else if (!info) {
-    body = settingsText('p', {className:'meta', 'data-key':'update-loading'}, 'Checking for a newer version…');
+    body = aboutLoading('Checking for a newer version…', 1, 'update-loading');
   } else {
     const ready = info.update_available === true && newest;
     body = [
@@ -1045,7 +1065,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
+    line('Installed', h('div', {className:'stack'}, have?.label || info ? h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]) : aboutLoading('Reading the installed version…', 2, 'update-installed'), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
@@ -1109,7 +1129,7 @@ function toolsCard() {
   const checked = tools.map(t => t.checked_at).filter(Boolean).sort()[0];
   return h('div', {className:'stack', 'data-key':'settings-tools'}, h('h2', {className:'set-sub'}, 'Tools'),
     h('div', {className:'card'},
-      !data ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-loading'}, 'Checking your tools for newer versions\u2026'))
+      !data ? h('div', {className:'card-row'}, h('div', {className:'grow'}, aboutLoading('Checking your tools for newer versions\u2026', 3, 'tools-loading')))
         : data.failed ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-unknown'}, 'Could not check your tools right now.'))
         : tools.map(t => toolRow(t, data.job)),
       toolUi.reason ? h('div', {className:'card-row'}, settingsText('p', {className:'bad', role:'alert', 'data-key':'tools-failed'}, 'The update did not start: ' + clean(toolUi.reason))) : null,
@@ -1271,10 +1291,16 @@ const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
 function pageStopped(r) {
   const svc = array(state?.services).filter(s => s && s.addon === r.id);
   if (snapshot || !svc.length || svc.some(s => s.running === true)) return null;
-  const label = addonLabel(addons().find(a => a.name === r.id));
-  return fragment(h('section', {className:'card pad stack', 'data-key':'page-stopped'},
-    h('div', {className:'row'}, h('p', {className:'grow'}, label + ' isn’t running.'),
-      h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start'))));
+  const a = addons().find(a => a.name === r.id), label = addonLabel(a);
+  // D5 (26 Nov): the page keeps its name; one notice under it says what happened, what still works, one green button.
+  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:addonSettingsHref(r.id)}),
+    pageNotice({what:label + ' has stopped.', still:'Its work waits. Your tickets and everything else still work.', dataKey:'page-stopped',
+      action:h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start ' + label)}));
+}
+// D5 (26 Nov): the one notice, from the master (UI.pageNotice): what happened, what still works, one button.
+function pageNotice({what, still = '', action = null, tone = 'attn', dataKey = null}) {
+  if (window.UI?.pageNotice) return window.UI.pageNotice({what, still, action, tone, dataKey});
+  return h('div', {className:'banner page-notice ' + (tone === 'error' ? 'error' : 'attn'), role:'status', ...(dataKey ? {'data-key':dataKey} : {})}, h('p', {className:'grow'}, h('strong', {}, what), still ? ' ' + still : ''), action);
 }
 // Every add-on page runs sandboxed: its own origin is opaque, so a script in it can never read this page's
 // secret or reach into this page (ORCH-186). One orch ships acts with a pass for that add-on only, handed over in
@@ -1340,8 +1366,25 @@ function pageFrame(r) {
   frame.addEventListener('load', () => frameTakesKeys(frame));
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
-  if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
-  return fragment(skeleton, frame);
+  if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); frameSlow(frame, src); }
+  return fragment(frameSlowNotice(r, src), skeleton, frame);
+}
+// D5 (26 Nov): a page that takes too long says so in the one notice, with Try again, instead of grey bars that never end.
+// Drawn by pageFrame itself (so a redraw keeps it) once the frame for that address has loaded for FRAME_SLOW_MS without luck.
+const FRAME_SLOW_MS = 10000, framesSlow = new Set();
+function frameSlow(frame, src) {
+  setTimeout(() => {
+    if (!frame.isConnected || !frame.classList.contains('embed-loading') || framesLoaded.has(src)) return;
+    framesSlow.add(src); render();
+  }, FRAME_SLOW_MS);
+  frame.addEventListener('load', () => { if (framesSlow.delete(src)) render(); }, {once:true});
+}
+function frameSlowNotice(r, src) {
+  if (!framesSlow.has(src)) return null;
+  const label = addonLabel(addons().find(a => a.name === r.id));
+  const again = h('button', {type:'button', className:'btn primary sm', 'data-key':'embed-slow-again'}, 'Try again');
+  again.addEventListener('click', () => { framesSlow.delete(src); frameShown()?.remove(); render(); });
+  return pageNotice({what:label + ' is taking longer than usual.', still:'Your tickets and everything else still work.', action:again, dataKey:'embed-slow'});
 }
 // The shown shipped add-on page asks to open another of its places (a link, or a fresh pass after a reload or an
 // expired one): the dashboard opens it, so the new page gets a pass. A link to the dashboard's own page moves it.
@@ -1419,10 +1462,43 @@ globalThis.addEventListener?.('message', event => {
   document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
 });
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
+// Sharing not connected yet (ORCH-2170, RP2): the admin's whole text is pasted on the add-on's own page and Connect
+// runs its connect from that text (the core finds the connect line). The view asks for it with its Connect button.
+const linkUi = {text:'', busy:false, error:''};
+const linkNeedsConnect = id => isPublish(id) && !snapshot && addonViews[id]?.view?.header?.button?.action?.op === 'link.connect';
+function linkPaste(id) {
+  const a = addons().find(a => a.name === id);
+  const input = h('textarea', {rows:4, className:'input', 'data-native':'link-text', 'data-key':'link-connect-text', 'aria-label':'Text from your admin', placeholder:'Paste the whole text here. It starts with “Connect this workspace…”', autocomplete:'off', spellcheck:'false', disabled:linkUi.busy});
+  input.value = linkUi.text;
+  return h('section', {className:'card pad stack-sm', 'data-key':'link-connect'},
+    settingsText('h2', {}, 'Connect ' + addonTitle(a)),
+    settingsText('p', {className:'meta'}, 'Your admin gives you a short text. Paste all of it here, then share a file.'),
+    input,
+    linkUi.error ? settingsText('p', {className:'meta', role:'alert', 'data-key':'link-connect-error'}, linkUi.error) : null,
+    h('div', {className:'row'}, h('button', {type:'button', className:'btn sm primary', 'data-native':'link-connect', 'data-key':'link-connect-button', disabled:linkUi.busy}, linkUi.busy ? 'Connecting…' : 'Connect')));
+}
+async function linkConnect(id) {
+  const text = linkUi.text.trim();
+  if (linkUi.busy || !id) return;
+  linkUi.error = text ? '' : 'Paste the text from your admin first.';
+  linkUi.busy = !!text;
+  paintAddon(id);
+  if (!text) return;
+  const result = await act('link.connect', {text});
+  linkUi.busy = false;
+  if (!result.ok) { linkUi.error = result.text || 'That did not work. Copy the whole text from your admin again and paste it here.'; paintAddon(id); return; }
+  linkUi.text = '';
+  window.orch.toast('Connected. You can share a file now.', 'ok');
+  await loadAddon(id);
+}
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
 const sharingOn = () => addons().some(a => a.active !== false && isPublish(a.name));
 const addonTitle = a => a?.dashboard?.title || addonLabel(a);
+// The add-on's part of Settings (the Settings button in its page top), or null where this browser has no Settings.
+// D6 (26 Nov): an add-on's one Settings button (heading's `settings`, the master UI.settingsButton through UI.pageTop)
+// opens that add-on's part of Settings; its Back returns here (settingsBack, set when the address changes).
+const addonSettingsHref = id => snapshot || !id || id === 'dashboard' || !state?.settings || !array(state.settings.addons).some(a => a && a.name === id) ? null : '#settings/addons/' + encodeURIComponent(id);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
 function addonHeaderNodes(id) {
@@ -1430,7 +1506,7 @@ function addonHeaderNodes(id) {
   if (!header || snapshot) return [];
   const out = [];
   if (header.status) out.push(h('span', {className:'badge ' + (header.status.tone === 'good' ? 'done' : header.status.tone && header.status.tone !== 'neutral' ? 'paused' : ''), role:'status'}, (header.status.tone === 'good' ? '● ' : '') + clean(header.status.label)));
-  const to = header.link ? OrchBlocks.appHash(header.link.to) : null;
+  const to = header.link && !noticeTakesLink(addonViews[id].view) ? OrchBlocks.appHash(header.link.to) : null;
   if (to) out.push(h('a', {className:'btn ghost sm', href:to}, clean(header.link.label)));
   const op = header.button?.action?.op;
   if (op === 'link.share' && isPublish(id)) out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, 'Share a file'));
@@ -1442,18 +1518,21 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:addonSettingsHref(id)}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
   // The Browser page (panel "browser", ORCH-1494): every helper's browser, drawn here (pages/livebrowse.js).
   if (panelOf(id) === 'browser' && typeof browserListPage === 'function') return browserListPage(addons().find(a => a.name === id));
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
+  // One top for every page (D1, ORCH-2282): Settings first on the right (this add-on's part of Settings), then the
+  // view's own status and link, the one filled button last.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
+  const settings = addonSettingsHref(id);
   if (panelOf(id) === 'repeats') {
-    const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New repeat');
+    const add = snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-native':'repeat'}, iconEl('plus'), 'New repeat');
     if (add) add.onclick = () => repeatsDialog(null, id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {settings, actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
-  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {actions:slot}), addonHost(id));
+  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings, actions:slot}), addonHost(id));
 }
 // The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {
@@ -1472,14 +1551,20 @@ function settingsGo(tab) {
 }
 function addonBody(a, res) {
   if (!res) return fragment(skeletonFor('section'));
-  const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
-  if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'It did not answer.', ' Nothing here was changed.'), retry));
-  return fragment(res.state === 'stale' ? h('p', {className:'meta'}, 'As of ', time(res.as_of)) : null,
-    res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
-    addonNotice(res.view), h('div', {id:'addon-blocks'}));
+  const retry = snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'retry-addon'}, 'Try again');
+  // D5: one notice under the page name, the same look everywhere; the page keeps what it can still show.
+  if (res.state === 'error' || !res.view) return fragment(pageNotice({tone:'error', what:'Can’t show ' + addonLabel(a) + ' right now.', still:clean(res.message || 'It did not answer.') + ' Nothing here was changed.', action:retry, dataKey:'addon-error'}));
+  return fragment(res.state === 'stale' ? pageNotice({what:addonLabel(a) + ' is taking longer than usual.', still:'What you see is from ' + time(res.as_of) + '.' + (res.message ? ' ' + clean(res.message) : ''), action:retry, dataKey:'addon-stale'}) : addonNotice(res.view),
+    h('div', {id:'addon-blocks'}));
 }
+// D5: a warning notice without a button of its own takes the heading's link (to a page of the dashboard) as its one
+// green button, so what to do sits with what happened (Relay: "Connect Relay").
+// The first sentence says what happened (bold), the rest what still works.
+const noticeParts = text => { const t = clean(text), m = /^(.+?[.!?])\s+(.+)$/.exec(t); return m ? {what:m[1], still:m[2]} : {what:t}; };
+const noticeTakesLink = view => !!view?.notice && !view.button && ['warn', 'needs-you', 'bad'].includes(view.notice_tone) && !!OrchBlocks.appHash(view.header?.link?.to);
 function addonNotice(view) {
   if (!view.notice) return null;
+  if (noticeTakesLink(view) && !snapshot) return pageNotice({tone:view.notice_tone === 'bad' ? 'error' : 'attn', ...noticeParts(view.notice), action:h('a', {className:'btn primary sm', href:OrchBlocks.appHash(view.header.link.to), 'data-key':'notice-link'}, clean(view.header.link.label))});
   if (view.header?.status && view.notice_tone === 'good') return null;   // the heading's status pill already says it
   const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
   const b = view.button;
@@ -1487,8 +1572,8 @@ function addonNotice(view) {
   const split = view.notice_tone === 'good' && /^([^.]{1,24})\. (.+)$/.exec(String(view.notice));
   if (split) return h('p', {className:'status-line'}, h('span', {className:'badge done'}, '● ' + clean(split[1])), h('span', {}, clean(split[2])));
   const op = b?.action?.op;
-  if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
-  return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
+  if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return view.notice_tone === 'bad' || ['warn', 'needs-you'].includes(view.notice_tone) ? pageNotice({tone:view.notice_tone === 'bad' ? 'error' : 'attn', ...noticeParts(view.notice)}) : h('p', {className:tone}, clean(view.notice));
+  return pageNotice({tone:view.notice_tone === 'bad' ? 'error' : 'attn', ...noticeParts(view.notice), action:h('button', {type:'button', className:'btn primary sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label))});
 }
 let pendingRepeat = null;  // {addon, tid, title, plan, removing, savedAt}: the repeat being saved or removed, shown as a row
 // The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
@@ -1505,12 +1590,13 @@ function paintAddon(id) {
   const template = addonBody(a, addonViews[id]);
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
-    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
-    if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
+    if (linkNeedsConnect(id)) blocks.append(linkPaste(id));   // not connected yet: the paste box is the page (RP2)
+    else blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
+    if (!blocks.childNodes.length) blocks.append(window.UI?.pageEmpty ? window.UI.pageEmpty({title:'Nothing here yet', text:'It fills in as work happens. Nothing to do for you.'}) : stateNote('Nothing here yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     // Block text is supplied by add-ons; keep internal keys out of visible copy.
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
+    while (walker.nextNode()) walker.currentNode.data = cleanTextNode(walker.currentNode.data);
   }
   // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
   // in place of the ticket's own row when it has one, else as a new row on top.
@@ -1616,7 +1702,7 @@ async function addonAct(control) {
       d.append(el('p', '', 'Choose a helper first, then start again.'));
       actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
       d.append(actions); window.orch.open(d);
-    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work. Try again.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
@@ -1658,7 +1744,7 @@ async function addonReview(id, control) {
     locks.add('addon-act');
     const result = await act('addon.act', {...args, value:key});
     locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     await loadAddon(id);
   });
 }
@@ -1678,7 +1764,7 @@ async function addonRadio(input) {
   locks.add('addon-act'); group.forEach(n => { n.disabled = true; });
   const result = await act('addon.act', {addon:id, verb:input.dataset.radioVerb, target:input.dataset.radioTarget});
   locks.delete('addon-act');
-  window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
 }
 // RP5: write in a workspace's thread on the Relay page itself (the same message.send path as the Chat page).
@@ -1689,7 +1775,7 @@ async function convSendClick(control) {
   locks.add('addon-act'); control.disabled = true;
   const result = await act('message.send', {workspace:ws, text});
   locks.delete('addon-act'); control.disabled = false;
-  if (result.ok) { OrchBlocks.convSent(ws); if (box) box.value = ''; } else window.orch.toast(result.text || 'That did not work.', 'error');
+  if (result.ok) { OrchBlocks.convSent(ws); if (box) box.value = ''; } else window.orch.toast(result.text || 'That did not work. Try again.', 'error');
   await loadAddon(id);
 }
 // Workspace messages are composed in their persistent Chat thread.
@@ -1873,7 +1959,7 @@ function repeatsDialog(only = null, addonName = null) {
   const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
-    window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
@@ -1915,7 +2001,7 @@ async function repeatSend(d, args, pending, okText) {
   finally { clearTimeout(timer); }
   if (pendingRepeat === mine) pendingRepeat = result.ok ? {...mine, savedAt:Date.now()} : null;
   if (route().kind === 'addon') paintAddon(route().id);
-  window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  window.orch.toast(result.ok ? okText : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
   if (route().kind === 'addon') await loadAddon(route().id);
 }
 // `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
@@ -1983,18 +2069,18 @@ function shareDialog(start = null) {
     create.disabled = true; note.textContent = 'Uploading…';
     if (start) {
       try { const res = await fetch(start.url, {cache:'no-store'}); if (!res.ok) throw new Error('read'); file = new File([await res.blob()], start.name); }
-      catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+      catch (_) { note.textContent = 'That file could not be read. Pick it again.'; create.disabled = false; return; }
     }
     if (file.size > SHARE_MAX) { note.textContent = 'That file is over 3 MB.'; create.disabled = false; return; }
     let data = '';
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       for (let i = 0; i < bytes.length; i += 32768) data += String.fromCharCode(...bytes.subarray(i, i + 32768));
-    } catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+    } catch (_) { note.textContent = 'That file could not be read. Pick it again.'; create.disabled = false; return; }
     const before = new Set((sharedLinks || []).map(l => String(l.id)));
     const out = await act('link.share', {name:file.name, data:btoa(data), days:7});
     create.disabled = false;
-    if (!out.ok) { note.textContent = out.text || 'That did not work.'; return; }
+    if (!out.ok) { note.textContent = out.text || 'That did not work. Try again.'; return; }
     await loadSharedLinks();
     if (shownAddon()) await loadAddon(shownAddon());
     const row = (sharedLinks || []).filter(l => !before.has(String(l.id)) && l.link)[0];
@@ -2034,7 +2120,7 @@ async function sharedLinkAction(control) {
   const send = async () => {
     control.disabled = true;
     const result = stop ? await act('link.stop', {id:link.id}) : await act('link.extend', {id:link.id, days:7});
-    window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     await loadSharedLinks();
     await loadAddon(shownAddon());
     control.disabled = false;
@@ -2044,8 +2130,11 @@ async function sharedLinkAction(control) {
 }
 // Rebind after reconciliation: retained DOM nodes must use the current link data.
 function bindAddonControls(host) {
+  const down = isPublish(shownAddon()) && addonViews[shownAddon()]?.view?.notice_tone === 'warn';   // sharing can't be reached: share, extend and stop sharing wait
   host.querySelectorAll('[data-native]').forEach(control => {
-    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : sharedLinkAction(control);
+    if (down && ['link-share', 'link-extend', 'link-stop'].includes(control.dataset.native)) control.disabled = true;
+    if (control.dataset.native === 'link-text') { control.oninput = () => { linkUi.text = control.value; }; return; }
+    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : control.dataset.native === 'link-connect' ? linkConnect(shownAddon()) : sharedLinkAction(control);
   });
 }
 

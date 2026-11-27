@@ -1,4 +1,4 @@
-// Contacts and the phone, with a stand-in relay (server.py, on 127.0.0.1; one paired phone, one workspace "Kitchen"):
+// Relay and the phone, with a stand-in relay (server.py, on 127.0.0.1; one paired phone, one workspace "Kitchen"):
 // the person turns the relay on and connects it here, opens Settings > Relay, turns on "Send questions to my
 // phone" (confirms), picks "switch off after 8 h", reloads and sees both kept. When the time runs out (made to run
 // out here), the page says so once and marks the notice seen; after a reload it is not shown again.

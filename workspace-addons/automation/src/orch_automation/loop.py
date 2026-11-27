@@ -36,6 +36,11 @@ FAST_FAIL_SECONDS = 10
 TIME_LIMITS = (30, 45, 60, 75, 90, 120, 180)  # minutes a repeat's run may take (ext.automation.time_limit)
 
 
+def workspace_paused(root: Path) -> bool:
+    """`orch pause` (core's runaway brake, R8.6) is on in this workspace: core's .orch/run/paused.json."""
+    return (Path(root) / ".orch" / "run" / "paused.json").exists()
+
+
 def _stopped(root: Path, tid: str) -> bool:
     """The current run was stopped by its time limit (it counts as stopped early)."""
     return ((load_state(root).get(tid) or {}).get("current_run") or {}).get("stopped") is True
@@ -423,7 +428,7 @@ class Scheduler:
         tick() starts it once, through `orch run start`: core's run cap and `orch pause` apply. While paused
         nothing is touched. A reset already passed is left to that wake / core's own resume."""
         run = Path(self.root) / ".orch" / "run"
-        if (run / "paused.json").exists():
+        if workspace_paused(self.root):
             return []
         try:
             data = json.loads((run / "limit-stop.json").read_text(encoding="utf-8"))
@@ -647,10 +652,17 @@ class Scheduler:
                 orchcli.log(self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat.")
 
     def tick(self, now: datetime) -> list[str]:
-        """One pass. Returns the ticket ids a run was started for."""
+        """One pass. Returns the ticket ids a run was started for.
+        While `orch pause` is on nothing starts: no agent run, no script, no inbox pass, no Try again. Nothing due
+        is used up (wake times, planned repeats, phone texts, queued input, relay messages and pickups all stay
+        waiting), so `orch resume` starts them on the next pass. Time limits and the health checks still run."""
         self.cfg = load_config(self.root)
         self.check_watch()
         self.enforce_limits(now)
+        if workspace_paused(self.root):
+            self.doctor_soon(now)
+            self.wake.clear()
+            return []
         started: list[str] = self.act_on_answers(now)
         self.limit_waits(now)
         started += self.phone_tickets(now)

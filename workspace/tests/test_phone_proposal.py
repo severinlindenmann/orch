@@ -301,7 +301,8 @@ def test_relay_refusal_through_the_helper_command_says_nothing_about_the_relay(p
     gid = tickets.ensure_general(proj, "human:t")
     code, out, err = run("relay", "send", "phones", SENTENCE, "--ticket", gid, "--ref", "proposal:Rename X")
     assert code == 0, err
-    text = (out + err).lower()
+    # the next-step line names `orch relay inbox` on purpose (RP9): the check is about the result text
+    text = "\n".join(ln for ln in (out + err).lower().splitlines() if "orch relay inbox" not in ln)
     assert failure_log(proj)
     assert "refus" not in text and "not sent" not in text and "relay" not in text.replace("sent to", "")
     (entry,) = [m for m in chat.read_day(proj, chat.day_key(proj))["messages"] if m["by"] != "you"]

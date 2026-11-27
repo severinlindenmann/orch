@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -215,3 +216,13 @@ def test_a_link_pointing_outside_the_tree_means_no_precheck_not_a_crash(tmp_path
     sha = git.run("rev-parse", "refs/queue/base").stdout.strip()
     got = precheck.run(git, sha, "true")
     assert got.ok in (None, True)  # Python without the data filter unpacks it; with it: no copy, never red
+
+
+def test_the_precheck_runs_in_a_folder_with_spaces_quotes_and_umlauts(tmp_path):
+    """R1.6: the copy's folder is the working folder, never part of the person's command line."""
+    where = tmp_path / "Grüße – Mein 'Ordner' & Co"
+    where.mkdir()
+    argv = [sys.executable, "-c", "import os; print(os.getcwd())"]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    code, out = precheck._shell(command, where, dict(os.environ), timeout=60)
+    assert code == 0 and os.path.samefile(out.strip(), where)

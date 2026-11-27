@@ -1,13 +1,15 @@
 {
   "schema": "orch.addon-view/1",
   "generated_at": "2026-11-16T09:00:00Z",
+  "header": {"link": {"label": "← Installed add-ons", "to": "app:settings/addons"}},
   "blocks": [
     {
       "type": "list",
-      "title": "Lessons",
+      "title": "Saved lessons",
       "count": 2,
       "items": [
         {"title": "Run the web tests with npm run test:web; plain npm test skips them.", "subtitle": "Added 15 Nov by Claude · from DM1-12", "link": "t_k3m9q2",
+         "tickets": [{"id": "t_k3m9q2", "key": "DM1-12", "title": "Make the web tests run in CI"}],
          "actions": [
            {"label": "Edit", "action": {"op": "addon.prompt", "args": {"verb": "edit", "target": "l_k2m9q4", "value": "Run the web tests with npm run test:web; plain npm test skips them.", "label": "Edit lesson"}}},
            {"label": "Delete", "tone": "bad", "action": {"op": "addon.act", "args": {"verb": "rm", "target": "l_k2m9q4"}}}
@@ -18,7 +20,7 @@
            {"label": "Delete", "tone": "bad", "action": {"op": "addon.act", "args": {"verb": "rm", "target": "l_a1b2c3"}}}
          ]}
       ],
-      "empty": {"title": "No lessons yet", "text": "Your helper adds a lesson when it learns something the next helper should know."}
+      "empty": {"title": "No lessons yet", "text": "Your helper adds a lesson when it learns something the next helper should know.", "link": {"label": "Open tickets", "to": "app:tickets"}}
     }
   ]
 }

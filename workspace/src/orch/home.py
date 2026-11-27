@@ -584,6 +584,8 @@ def _check_binding(root: Path, d: Path) -> None:
         raise Refused(BINDING_MISMATCH) from None
     except (ValueError, AttributeError):
         raise Refused("A record in the orch folder is unreadable.") from None
+    except OSError:  # e.g. PermissionError: a plain refusal, never a traceback (#585)
+        raise Refused(TRY_AGAIN) from None
     if not isinstance(stored, str):
         raise Refused("A record in the orch folder is unreadable.")
     if stored == here:
@@ -736,6 +738,13 @@ def _file_lock(d: Path, name: str):
         try:
             os.close(os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
             break
+        except PermissionError:
+            # Windows: a lock file another holder is deleting right now refuses O_EXCL with EACCES, not EEXIST
+            if os.name != "nt":
+                raise
+            if time.monotonic() > end:
+                raise Refused("The key store is busy. Try again.") from None
+            time.sleep(0.02)
         except FileExistsError:
             with contextlib.suppress(OSError):
                 if time.time() - lock.stat().st_mtime > 30:  # a crashed holder

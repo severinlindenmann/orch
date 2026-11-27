@@ -616,6 +616,43 @@ def test_release_body_lists_tickets_and_titles():
     assert "- Fix the page height (#1147)" in body and "Merge pull request" not in body
 
 
+# #2112: release 120's highlights read "Merge queue: #2788, #2789" instead of what changed
+GROUP = {
+    "sha": "9" * 40,
+    "at": "2026-11-17T00:00:00+00:00",
+    "subject": "Merge pull request #2790 from severinlindenmann/orch-queue/develop-a1b2",
+    "title": "Merge queue: #1155, #2789",
+}
+
+
+def test_highlights_list_a_queue_groups_members_not_the_group():
+    titles = {2789: "Clock starts again after a split"}
+    got = rk.highlights([GROUP, REAL[2]], TICKETS, "severinlindenmann/orch", titles)
+    assert got == [
+        "ORCH-41 Copy Doc for webhook subscribers",
+        "Clock starts again after a split (#2789)",
+        "Fix the page height (#1147)",
+    ]
+    body = rk.release_body(32, DEV, [GROUP], TICKETS, "severinlindenmann/orch", "ci", titles)
+    assert "Merge queue" not in body and "#2790" not in body
+    assert "- ORCH-41 Copy Doc for webhook subscribers (#1155)" in body
+    assert "- Clock starts again after a split (#2789)" in body
+
+
+def test_the_merged_note_reads_member_titles_only_for_members_no_ticket_names(tmp_path, monkeypatch):
+    seen = notes(monkeypatch)
+    out = go(
+        tmp_path,
+        state={"release": gate(phase="card", unreleased=[GROUP])},
+        open_release=None,
+        prs=pr("MERGED"),
+        tickets=TICKETS,
+        pr_titles={"2789": "Clock starts again after a split", "1155": "not this one"},
+    )
+    assert "\n- ORCH-41 Copy Doc" in seen[0] and "\n- Clock starts again after a split (#2789)" in seen[0]
+    assert "Merge queue" not in seen[0] and out["state"]["last_installed"] == 31
+
+
 def notes(monkeypatch):
     seen = []
     monkeypatch.setattr(
@@ -854,6 +891,57 @@ def test_deploy_card_says_when_production_could_not_be_read(tmp_path, capsys):
     line = rk.prep_line("relay", p)
     assert line.startswith("The relay server is fetched and checked (")
     assert "Production's relay program could not be read over ssh" in line and "release_deploy_host" in line
+
+
+# #2060: after the server move the deploy card asked to deploy to a host that no longer ran the service
+IDLE = {"develop": MAIN, "main": MAIN, "unreleased": []}
+
+
+def test_no_deploy_card_while_the_deploy_host_is_wrong_and_one_once_it_answers(tmp_path, capsys):
+    wrong = "the deploy host old.example does not answer over ssh: check github.release_deploy_host"
+    out = go(
+        tmp_path,
+        capsys,
+        state={"release": gate(phase="card")},
+        open_release=None,
+        prs=pr("MERGED"),
+        changed=["relay/src/main.rs"],
+        built=BUILT,
+        fetched=FETCHED,
+        prod_sha={},
+        host_problem=wrong,
+    )
+    assert [d.split(":")[0] for d in out["did"]] == ["update", "fetch", "note", "rmwt"]
+    assert out["state"]["deploy"]["host"] == wrong and f"no deploy card: {wrong}" in out["lines"][-1]
+    still = go(
+        tmp_path, capsys, state={"deploy": out["state"]["deploy"]}, heads=dict(IDLE), host_problem=wrong
+    )
+    assert still["did"] == [] and f"deploy: release 31 has no deploy card yet: {wrong}" in still["lines"]
+    dep = still["state"]["deploy"]
+    ok = go(tmp_path, capsys, state={"deploy": dep}, heads=dict(IDLE), prod_sha={"relay": "c" * 64})
+    assert ok["did"] == ["deploy-card:relay"] and "host" not in ok["state"]["deploy"]
+    assert ok["state"]["deploy"]["prep"]["relay"]["prod"] == "c" * 64  # read again from the right host
+
+
+def test_host_problem_names_a_stopped_service(tmp_path, monkeypatch):
+    key = tmp_path / "k"
+    key.write_text("x")
+    w = rk.World(None, cfg(tmp_path, deploy_host="root@new", deploy_key=str(key)))
+    seen = []
+
+    def fake(argv, **k):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 3, "active\ninactive\n", "")
+
+    monkeypatch.setattr(rk.subprocess, "run", fake)
+    got = w.host_problem(["relay", "publish"])
+    assert seen[0][-1] == "systemctl is-active orch-relay orch-publish"
+    assert got.startswith("the deploy host root@new does not run the service (orch-publish is inactive)")
+    monkeypatch.setattr(
+        rk.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 255, "", "")
+    )
+    assert "does not answer over ssh" in w.host_problem(["relay"])
+    assert rk.World(None, cfg(tmp_path)).host_problem(["relay"]) is None  # no deploy host set: not checked
 
 
 def test_deploy_go_hands_the_helper_the_prepared_program(tmp_path, capsys, monkeypatch):
@@ -1529,6 +1617,43 @@ def test_a_walk_ticket_finished_without_a_result_says_how_to_record_it(tmp_path)
     )
 
 
+# #2722: a dropped release's walk tickets stayed open and were asked for more work hours later
+DROPS = ["drop-walk:install ORCH-1", "drop-walk:services ORCH-2", "drop-walk:clickthrough ORCH-3"]
+
+
+def test_a_recut_release_ends_its_walk_tickets(tmp_path):
+    bad = [{"name": "macos", "status": "COMPLETED", "conclusion": "FAILURE"}, ROLLUP_DONE]
+    out = go_walks(
+        tmp_path,
+        state={"release": gate(walks=started())},
+        open_release={"number": 9031},
+        prs=pr(checks=bad),
+        heads={"develop": "e" * 40, "main": MAIN, "unreleased": UN3},
+    )
+    assert out["did"] == ["close:release 31 PR 9031", *DROPS] and out["state"]["release"] is None
+
+
+def test_a_release_closed_by_someone_ends_its_walk_tickets(tmp_path):
+    out = go_walks(tmp_path, state={"release": gate(walks=started())}, open_release=None, prs=pr("CLOSED"))
+    assert [d for d in out["did"] if d.startswith("drop-walk")] == DROPS
+    assert "release 31: the install walk (ORCH-1) ended with the release" in out["lines"]
+
+
+def test_dropping_a_walk_leaves_a_finished_walk_ticket_alone(tmp_path, monkeypatch):
+    from orch import tickets
+
+    done = {"ORCH-1": "done", "ORCH-2": "working"}
+    calls = []
+    monkeypatch.setattr(tickets, "resolve", lambda root, ref: ref)
+    monkeypatch.setattr(tickets, "load", lambda root, ref: {"status": done[ref]})
+    monkeypatch.setattr(tickets, "log", lambda root, ref, text, by: calls.append(("log", ref)))
+    monkeypatch.setattr(tickets, "set_status", lambda root, ref, s, by: calls.append((s, ref)))
+    w = rk.World(tmp_path, cfg(tmp_path))
+    walks = {"install": {"ticket": "ORCH-1"}, "services": {"ticket": "ORCH-2"}, "x": {"ticket": "not opened"}}
+    rk.drop_walks(w, {"n": 31, "walks": walks}, "its pull request was closed")
+    assert calls == [("log", "ORCH-2"), ("dropped", "ORCH-2")]
+
+
 def test_a_release_merged_red_before_its_card_is_noted_as_without_proof(tmp_path):
     out = go_walks(
         tmp_path,
@@ -1698,6 +1823,71 @@ def test_a_leftover_folder_is_not_removed_by_the_cut(real_clone):
     with pytest.raises(Refused, match="exists already"):
         w.cut(35, sha, "Release 35")
     assert (wt / "keep.txt").exists()
+
+
+def _leftover(clone, sha, wt, br="release/part35-0101"):
+    _cut_git("worktree", "add", "-q", str(wt), "-b", br, sha, cwd=clone)  # a cut stopped before its undo
+    return br
+
+
+def _no_pr(monkeypatch):
+    real_run = rk.World._run
+
+    def fake(self, argv, cwd=None, timeout=120):
+        if argv[:3] == [self.gh, "pr", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: no")
+        return real_run(self, argv, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(rk.World, "_run", fake)
+
+
+def test_a_clean_worktree_an_earlier_cut_left_behind_is_removed_and_the_cut_goes_on(real_clone, monkeypatch):
+    # #1998: an interrupted pass left release-35 behind and every later cut stopped at "exists already"
+    w, clone, sha, wt = real_clone
+    old = _leftover(clone, sha, wt)
+    _no_pr(monkeypatch)
+    with pytest.raises(Refused, match="pr create"):  # it got as far as the pull request: past the folder
+        w.cut(35, sha, "Release 35\n- plain work (#1)")
+    assert old not in _cut_git("branch", "--list", "release/*", cwd=clone)
+
+
+@pytest.mark.parametrize("why", ["changed", "pushed", "other"])
+def test_a_leftover_worktree_with_work_on_github_or_of_another_release_stays(real_clone, why):
+    w, clone, sha, wt = real_clone
+    br = _leftover(clone, sha, wt, "release/part34-0101" if why == "other" else "release/part35-0101")
+    if why == "changed":
+        (wt / "note.txt").write_text("a person's work\n")
+    if why == "pushed":
+        _cut_git("push", "-q", "origin", f"{br}:{br}", cwd=wt)
+    with pytest.raises(Refused, match="exists already"):
+        w.cut(35, sha, "Release 35")
+    assert wt.exists() and br in _cut_git("branch", "--list", "release/*", cwd=clone)
+
+
+def test_the_same_cut_failure_twice_opens_one_top_ticket(tmp_path, monkeypatch):
+    w = rk.World(None, cfg(tmp_path))
+    opened, rows = [], []
+
+    def cut(self, n, sha, body):
+        raise Refused("something blocks the cut")
+
+    def new(self, parent, title, note, done_when, **k):
+        opened.append((parent, title))
+        rows.append({"id": "t_red", "key": "ORCH-90", "title": title, "status": "working", "note": note})
+        return "ORCH-90"
+
+    monkeypatch.setattr(rk.World, "cut", cut)
+    monkeypatch.setattr(rk.World, "tickets", lambda self: rows)
+    monkeypatch.setattr(rk.World, "new_ticket", new)
+    monkeypatch.setattr(rk.World, "note", lambda self, ref, text: None)
+    st = {"release": {"n": 35, "sha": DEV, "unreleased": [], "phase": "cut"}}
+    first = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    assert opened == [] and len(first) == 1  # one failure may be a blip: only the run log
+    again = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    assert opened == [("ORCH-79", "Release 35 is not cut: something blocks the cut")]
+    assert again[-1] == "red: opened top ticket ORCH-90 (Release 35 is not cut: something blocks the cut)"
+    third = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    assert len(opened) == 1 and third[-1] == "red, ticket ORCH-90 is open"
 
 
 def test_a_secret_stop_puts_one_card_per_line_on_the_role_ticket(tmp_path, monkeypatch):
@@ -2018,6 +2208,39 @@ def test_no_fix_in_the_queue_after_two_hours_opens_a_revert_pull_request(tmp_pat
 
 def test_no_revert_before_two_hours(tmp_path, capsys):
     assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys, hours_ago=1.5)["did"])
+
+
+def test_keeper_reads_only_the_active_queue_and_distinguishes_empty(proj, queue_manifest, monkeypatch):
+    from orch import addons
+
+    w = rk.World(proj, cfg(proj))
+    path = proj / ".orch/addons/pull-requests/queue.json"
+    path.parent.mkdir(parents=True)
+    fix = {"url": "https://github.com/o/r/pull/7", "state": "running", "ticket": "t_red"}
+    path.write_text(json.dumps({"entries": [fix]}))
+    assert w.queue_entries() is None  # disabled, even though it left a queue behind
+    monkeypatch.setattr(addons, "active", lambda root: {queue_manifest["name"]: {}})
+    assert w.queue_entries() == [fix]
+    path.write_text('{"entries":[]}')
+    assert w.queue_entries() == []
+    path.write_text("{")
+    assert w.queue_entries() is None
+    path.unlink()
+    assert w.queue_entries() is None
+
+
+def test_keeper_revert_uses_the_providers_priority_command(proj, queue_on, monkeypatch):
+    w = rk.World(proj, cfg(proj, worktrees=str(proj / "worktrees")))
+    url = "https://github.com/o/r/pull/8"
+    queue_on["merge_queue"]["add"] = ["admit"]
+    ok = subprocess.CompletedProcess([], 0, url, "")
+    monkeypatch.setattr(w, "_run", lambda *a, **kw: ok)
+    monkeypatch.setattr(w, "bot_ok", lambda: None)
+    monkeypatch.setattr(w, "secret_free", lambda body: True)
+    commands = []
+    monkeypatch.setattr(w, "orch", lambda argv: commands.append(argv) or ok)
+    assert w.revert(7, DEV, "Undo #7", "fix", "ORCH-500") == url
+    assert commands == [[queue_on["name"], "admit", url, "--ticket", "ORCH-500", "--first"]]
 
 
 def test_no_revert_while_a_fix_of_the_ticket_is_in_the_queue(tmp_path, capsys):

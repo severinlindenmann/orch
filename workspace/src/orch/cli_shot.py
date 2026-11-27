@@ -282,7 +282,9 @@ def page_url(url: str, part: str) -> str:
 
 
 STILL_LOADING = "the page was still loading"
-BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
+# Busy in one frame (asked per frame by _busy below). Hidden panels do not affect the picture:
+# their checks may only start when opened (ORCH-2038).
+BUSY_JS = "[...document.querySelectorAll('[aria-busy=\"true\"]')].some(e => !e.closest('[hidden]'))"
 
 
 def _frames(tree: dict) -> list[str]:

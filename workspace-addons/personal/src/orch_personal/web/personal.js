@@ -15,6 +15,13 @@
     return e;
   }
   function link(href, cls, ...kids) { const a = el('a', cls, ...kids); a.href = href; return a; }
+  // a master icon (kit/icons.js): a fixed SVG string from the design system, never workspace text
+  function ic(name, size = 18) {
+    if (!window.icon) return null;
+    const t = document.createElement('template');
+    t.innerHTML = window.icon(name, size);
+    return t.content.firstChild;
+  }
   function button(label, cls, onClick) {
     const b = el('button', cls, label); b.type = 'button'; b.addEventListener('click', onClick); return b;
   }
@@ -38,7 +45,7 @@
     return host;
   }
 
-  const SIGN_IN = 'Personal is private. Open the dashboard with a sign-in link from orch (run orch start on the computer).';
+  const SIGN_IN = 'Personal is private. Open the dashboard with a new sign-in link from orch (orch start prints one).';
   const NO_REACH = 'Personal does not answer. Reload the page; if it stays, run orch start.';
   async function read(path) {
     let r;
@@ -65,25 +72,41 @@
   // --- Home ------------------------------------------------------------------------------------------------
   function needsCard(needs) {
     const card = el('section', 'card');
-    card.append(el('div', 'card-h', el('h2', null, 'Needs you now'), el('span', 'meta', needs.length + (needs.length === 1 ? ' thing' : ' things'))));
-    for (const n of needs) {
+    const count = needs.length === 1 ? '1 thing' : needs.length + ' things · most urgent first';
+    card.append(el('div', 'card-h', el('h2', null, 'Needs you now'), el('span', 'grow'), el('span', 'meta', count)));
+    // something that stopped comes first; the first row holds the page's one filled button
+    const sorted = [...needs.filter(n => n.tone === 'bad'), ...needs.filter(n => n.tone !== 'bad')];
+    sorted.forEach((n, i) => {
       const row = el('div', 'list-row');
-      row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text + (n.at ? ' · ' + when(n.at) : ''))));
+      const dot = el('span', 'dot ' + (n.tone === 'bad' ? 'bad' : 'needs'));
+      dot.setAttribute('aria-hidden', 'true');
+      row.append(dot, el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text + (n.at ? ' · ' + when(n.at) : ''))));
       if (n.fix_key) row.querySelector('.grow').append(el('p', 'meta', 'A ticket to fix it: ', el('span', 'chip', n.fix_key)));
-      const acts = el('div', 'row-acts', button(n.action, 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name)
+      const acts = el('div', 'row-acts', button(n.action, i === 0 ? 'btn primary sm' : 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name)
         : n.part === 'calendar' ? calNeed(n) : n.part === 'meetings' ? (location.hash = '#meetings')
         : INBOX[n.part] ? (location.hash = '#' + n.part + '/' + encodeURIComponent(n.item)) : openFolder()));
       if (n.suggestion) acts.append(button('Not now', 'btn ghost sm', () => calAct('cal_decline', {id: n.suggestion}, 'Turned down.')));
       row.append(acts);
       card.append(row);
-    }
+    });
     return card;
   }
+  const listWords = w => w.length < 2 ? w.join('') : w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1];
+  const PART_ICON = {notes: 'file', calendar: 'calendar', meetings: 'mic', mail: 'mail', messages: 'comment'};
+  // a count or date stays quiet text; a state that needs the person is a pill with its dot (never colour alone)
+  function tileStatus(t) {
+    const tone = {empty: ['', 'idle'], stopped: ['failed', 'bad'], attn: ['needs', 'needs']}[t.state];
+    if (!tone) return el('span', 'meta', t.status);
+    const dot = el('span', 'dot ' + tone[1]);
+    dot.setAttribute('aria-hidden', 'true');
+    return el('span', ('pill ' + tone[0]).trim(), dot, t.status);
+  }
   function tile(t) {
-    const tone = {ok: 'done', empty: 'working', stopped: 'attn', attn: 'needs'}[t.state] || '';
     const card = el('article', 'card part-tile');
-    card.append(el('div', 'card-h', el('h2', null, link('#' + t.part, 'part-tile-link', t.label)), el('span', 'badge ' + tone, t.status)));
-    const body = el('div', 'part-tile-body', el('p', 'glance', el('strong', null, t.line), t.changed ? el('span', 'side meta', (t.changed_word || 'changed') + ' ' + when(t.changed)) : null));
+    card.append(el('div', 'card-h', ic(PART_ICON[t.part]), el('h2', null, link('#' + t.part, 'part-tile-link', t.label)), el('span', 'grow'), tileStatus(t)));
+    const body = el('div', 'part-tile-body');
+    if (t.events && t.events.length) t.events.forEach(e => body.append(el('p', 'glance', el('span', 'meta when', e.at), el('strong', 'grow', e.title))));
+    else body.append(el('p', 'glance', el('strong', null, t.line), t.changed ? el('span', 'side meta', (t.changed_word || 'changed') + ' ' + when(t.changed)) : null));
     // Mail and Messages: the top three that need you, a badge where a helper made a reply
     (t.rows || []).forEach(r => body.append(el('p', 'glance', el('strong', null, r.title), el('span', 'side meta', r.ready ? 'Reply ready' : (r.from && r.from !== r.title ? r.from : when(r.when))))));
     if (t.source) body.append(el('p', 'meta', t.source));
@@ -101,13 +124,15 @@
   }
   function waysCard(rows) {
     const card = el('section', 'card');
-    card.append(el('div', 'card-h', el('h2', null, 'Ways in'), el('span', 'meta', 'Each checks itself once a day')));
+    card.append(el('div', 'card-h', el('h2', null, 'Ways in'), el('span', 'grow'), el('span', 'meta', 'Each checks itself once a day')));
     const pill = {works: ['done', 'ok'], permission: ['needs', 'needs'], stopped: ['failed', 'bad'], off: ['', 'idle']};
     for (const w of rows) {
       // one line: the reason when it needs you (the fix button is in Needs you now), else when it last worked
       const seen = !w.on ? 'off until you turn it on' : w.problem ? w.problem : w.last_worked ? 'last worked ' + when(w.last_worked) : 'has not worked yet';
       const [pc, dc] = pill[w.status] || pill.off;
-      const text = el('div', 'grow', el('p', null, el('strong', null, w.name), ' ', el('span', ('pill ' + pc).trim(), el('span', 'dot ' + dc), w.words)),
+      const dot = el('span', 'dot ' + dc);
+      dot.setAttribute('aria-hidden', 'true');
+      const text = el('div', 'grow', el('p', null, el('strong', null, w.name), ' ', el('span', ('pill ' + pc).trim(), dot, w.words)),
         el('p', 'meta', seen));
       const btn = w.on ? button('Turn off', 'btn outline sm', () => wayAct('way_off', w.way, w.name))
         : button('Turn on', 'btn outline sm', () => wayAct('way_on', w.way, w.name));
@@ -117,10 +142,10 @@
   }
   function activityCard(rows) {
     const card = el('section', 'card');
-    card.append(el('div', 'card-h', el('h2', null, 'What helpers did with it lately'), el('span', 'meta', 'Last 7 days')));
+    card.append(el('div', 'card-h', el('h2', null, 'What helpers did with it lately'), el('span', 'grow'), el('span', 'meta', 'Last 7 days')));
     if (!rows.length) card.append(el('p', 'pad muted', 'Helpers have not used Personal yet.'));
     for (const a of rows) {
-      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', mail: 'Mail: ', messages: 'Messages: ', ways: 'Ways in: ', calendar: 'Calendar: '}[a.part] || '') + a.what),
+      card.append(el('div', 'list-row', el('span', 'meta when', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', mail: 'Mail: ', messages: 'Messages: ', ways: 'Ways in: ', calendar: 'Calendar: '}[a.part] || '') + a.what),
         a.ticket_key ? el('span', 'chip', a.ticket_key) : null));
     }
     return card;
@@ -145,12 +170,12 @@
     if (today.parts.length) {
       const grid = el('div', 'tile-grid');
       today.parts.forEach(t => grid.append(tile(t)));
-      grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Files and Tasks come later')));
+      grid.append(link('#parts', 'part-tile-add', ic('plus', 24), el('strong', null, 'Add a part'), (today.later || []).length ? el('span', 'meta', listWords(today.later.map(l => l.label)) + ' come later') : null));
       out.push(grid);
     } else out.push(firstNoteCard());
     if (today.ways && today.ways.length) out.push(waysCard(today.ways));
     out.push(activityCard(today.activity));
-    out.push(el('p', 'footnote meta', 'Helpers use: orch personal today · They get only what the rules of each part allow.'));
+    out.push(el('p', 'meta', 'Helpers use: ', el('code', null, 'orch personal today'), ' · They get only what the rules of each part allow.'));
     return out;
   }
 
@@ -989,6 +1014,8 @@
     view.replaceChildren(...out);
     view.setAttribute('aria-busy', 'false');
   }
+  const plus = ic('plus', 16);
+  if (plus) $('add-link').prepend(plus);
   addEventListener('hashchange', route);
   route();
 })();

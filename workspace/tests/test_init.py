@@ -11,7 +11,9 @@ from orch import adapters, harness, safegit, skills
 def claude_found(monkeypatch):
     """Claude is on this machine (the files entry of a found agent is applied; CI has none)."""
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
 
 
@@ -270,7 +272,7 @@ def test_init_says_what_it_linked_and_what_is_next(proj, run):
 
 
 def test_no_agent_found_links_nothing(proj, run, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [])
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out
     assert not (proj / ".claude").exists() and not (proj / "CLAUDE.local.md").exists()
@@ -279,7 +281,7 @@ def test_no_agent_found_links_nothing(proj, run, monkeypatch):
 
 def test_codex_only_needs_only_agents_md(proj, run, monkeypatch):
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+        adapters, "detect", lambda **_: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
     code, out, _ = run("init")
     assert code == 0 and "Linked for" not in out and not (proj / "CLAUDE.local.md").exists()
@@ -296,7 +298,7 @@ def test_files_entries_come_from_the_data(proj, monkeypatch):
         {"instructions_link": {"OTHER.md": "@AGENTS.md"}, "skills_link": ".other/skills"},
     )
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
+        adapters, "detect", lambda **_: [{"name": "codex", "label": "Codex", "found": True, "version": None}]
     )
     skills.set_block(proj, "orch", "x")
     assert skills.apply_agent_files(proj) == ["Codex"]
@@ -1144,6 +1146,24 @@ def test_reminder_settings_refreshes_an_old_path(proj, run):
     assert h["command"] == reminder_settings.hook_command("claude")
 
 
+def test_reminder_settings_saved_by_a_windows_editor_are_merged_and_seen_by_doctor(proj, run):
+    """R1.6: a settings file with a UTF-8 BOM and CRLF (PowerShell 5, Notepad) is merged, not "left as it
+    is", and `orch doctor` sees the reminder (it used to say "Run: orch init" forever)."""
+    from orch import cli_leave, reminder_settings
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_bytes(b'\xef\xbb\xbf{\r\n  "env": {"A": "\xc3\xa4"}\r\n}\r\n')
+    code, out, _ = run("init")
+    assert code == 0 and "left it as it is" not in out, out
+    doc = cli_leave._json_quiet(f)
+    assert doc["env"] == {"A": "ä"} and reminder_settings.has_ours(doc)
+    assert len(_ours(doc, "UserPromptSubmit")) == 1
+    f.write_bytes(b"\xef\xbb\xbf" + f.read_bytes())  # the editor saved it again with a BOM
+    assert reminder_settings.has_ours(cli_leave._json_quiet(f))
+    assert reminder_settings.remove_one(proj, ".claude/settings.local.json") == "removed"
+
+
 @pytest.mark.parametrize(
     "text", ["{not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"Stop": 1, "UserPromptSubmit": "x"}}']
 )
@@ -1157,7 +1177,7 @@ def test_reminder_settings_malformed_left_untouched_with_one_warning(proj, run, 
 
 
 def test_reminder_settings_not_written_without_claude(proj, run, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [])
     run("init")
     assert not (proj / ".claude").exists()
 
