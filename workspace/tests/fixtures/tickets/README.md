@@ -28,3 +28,10 @@ git worktree remove /path/to/old; rm -r "$H"          # delete exactly those pat
 The commands of `make_fixture.sh` may need small changes for another version (a flag renamed); edit the copy
 you run, not the fixtures already committed. Fixtures made: 2026-11-09 (99e09754), 2026-11-12 (74bf19ea),
 2026-11-14 (602bd79d).
+
+## Odd shapes (`../ticket_shapes/`)
+
+Flat hand-made, anonymized files modelled on shapes seen in real workspaces: only the required fields, an
+empty checklist, every evidence kind (plus an unknown one), `ext` of a removed add-on, unknown fields on the
+ticket, items and questions (R3.1). `test_odd_shapes_load_check_show_and_round_trip` also builds a ticket
+with a very long history from the minimal one. A new `t_*.json` there is picked up automatically.

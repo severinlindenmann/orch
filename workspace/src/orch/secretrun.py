@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from pathlib import PurePosixPath, PureWindowsPath
 
 from orch import hider, keystore, launchenv, term
 from orch import home as orch_home
@@ -285,8 +286,11 @@ RISKY_PROGRAMS = re.compile(
 )
 
 
-def _under(path: str, base: str) -> bool:
-    return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
+def _under(path: str, base: str, windows: bool | None = None) -> bool:
+    """path is base or lies below it. Windows paths compare without case and accept / and \\ alike."""
+    pure = PureWindowsPath if (os.name == "nt" if windows is None else windows) else PurePosixPath
+    p, b = pure(path), pure(base)
+    return p == b or b in p.parents
 
 
 XCODE_SELECT_LINK = (

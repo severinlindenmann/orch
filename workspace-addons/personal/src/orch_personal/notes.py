@@ -18,6 +18,11 @@ _MAX_BYTES = 1024 * 1024
 _LINK = re.compile(r"\[\[([^\]\n]+)\]\]")
 
 
+def _fold(text: str) -> str:
+    """macOS and iCloud store file names decomposed (u + diaeresis), people type them composed."""
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 class Refused(Exception):
     """An operation the person can fix or choose not to do."""
 
@@ -114,7 +119,7 @@ class Vault:
                 title = note_id.rsplit("/", 1)[-1]
                 group = note_id.split("/", 1)[0] if "/" in note_id else ""
                 notes[note_id] = Note(note_id, title, group, changed[note_id], (), ())
-                titles.setdefault(title.casefold(), []).append(note_id)
+                titles.setdefault(_fold(title), []).append(note_id)
             incoming: dict[str, list[str]] = {note_id: [] for note_id in notes}
             for note_id, body in texts.items():
                 links: dict[str, None] = {}
@@ -131,7 +136,7 @@ class Vault:
                         continue
                     for match in _LINK.finditer(line):
                         target = re.split(r"[|#]", match[1], maxsplit=1)[0].strip()
-                        candidates = titles.get(target.casefold(), [])
+                        candidates = titles.get(_fold(target), [])
                         resolved = (
                             target if target in notes else candidates[0] if len(candidates) == 1 else None
                         )
@@ -143,7 +148,7 @@ class Vault:
             for note_id, sources in incoming.items():
                 sources.sort(key=lambda source: (notes[source].title.casefold(), source))
                 notes[note_id] = replace(notes[note_id], linked_from=tuple(sources))
-            self._folded = {i: (notes[i].title + "\n" + t).casefold() for i, t in texts.items()}
+            self._folded = {i: _fold(notes[i].title + "\n" + t) for i, t in texts.items()}
             self._notes, self._texts, self._titles = notes, texts, titles
             self._fingerprint = fingerprint
         except OSError as exc:
@@ -169,7 +174,7 @@ class Vault:
         self._refresh()
         if ref in self._notes:
             return self._notes[ref]
-        matches = self._titles.get(ref.casefold(), [])
+        matches = self._titles.get(_fold(ref), [])
         if len(matches) == 1:
             return self._notes[matches[0]]
         if matches:
@@ -185,7 +190,7 @@ class Vault:
 
     def find(self, words: str, limit: int = 20) -> list[tuple[Note, str]]:
         self._refresh()
-        terms = words.casefold().split()
+        terms = _fold(words).split()
         if not terms or limit <= 0:
             return []
         found: list[tuple[Note, str]] = []
@@ -196,7 +201,7 @@ class Vault:
             snippet = note.title
             for line in body.splitlines():
                 collapsed = " ".join(line.split())
-                positions = [collapsed.casefold().find(term) for term in terms]
+                positions = [_fold(collapsed).find(term) for term in terms]
                 hits = [position for position in positions if position >= 0]
                 if hits:
                     start = max(0, min(hits) - 60)
@@ -205,7 +210,7 @@ class Vault:
             found.append((note, snippet[:160]))
         found.sort(
             key=lambda hit: (
-                not any(term in hit[0].title.casefold() for term in terms),
+                not any(term in _fold(hit[0].title) for term in terms),
                 -hit[0].changed,
                 hit[0].id,
             )

@@ -573,3 +573,50 @@ def test_a_title_with_spaces_quotes_and_umlauts_reaches_orch_as_one_word(tmp_pat
     got = orchcli.call(folder, "ticket", "new", title, write=True)
     assert got["argv"] == ["ticket", "new", title, "--json", "--by", "agent:factory"]
     assert os.path.samefile(got["cwd"], folder)
+
+
+def _orch_bin(tmp_path, monkeypatch, body):
+    script = tmp_path / "orch bin ü" / "orch"
+    script.parent.mkdir()
+    script.write_text(f"#!{sys.executable}\nimport sys\n{body}\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(script))
+
+
+def test_core_that_cannot_be_reached_or_read_is_refused_plainly(ws, tmp_path, monkeypatch):
+    from orch_factory import orchcli
+
+    monkeypatch.setenv("ORCH_BIN", str(tmp_path / "no orch here"))
+    with pytest.raises(Refused, match="could not be reached") as error:
+        orchcli.tickets(ws)
+    assert error.value.code == "not_available"
+    cases = (
+        ("print('not json')", "readable answer", "not_available"),
+        ("print('null')", "readable answer", "not_available"),
+        ("print('[1]'); sys.exit(2)", "Orch refused the request.", "refused"),
+        (
+            'print(\'{"error": "No such ticket.", "code": "not_found"}\'); sys.exit(2)',
+            "No such ticket.",
+            "not_found",
+        ),
+    )
+    for i, (body, text, code) in enumerate(cases):
+        sub = tmp_path / f"case{i}"
+        sub.mkdir()
+        _orch_bin(sub, monkeypatch, body)
+        with pytest.raises(Refused, match=text) as error:
+            orchcli.ticket(ws, "t_000001")
+        assert error.value.code == code
+
+
+def test_journal_that_was_cut_or_damaged_is_refused_not_overwritten(ws):
+    store = Store(ws)
+    with store.locked():
+        pass
+    for raw, text in ((b'{"id": "e_1"}', "incomplete line"), (b"not json\n", "cannot be read")):
+        store.write("journal.jsonl", raw)
+        with pytest.raises(Refused, match=text):
+            store.journal_read()
+        with store.locked(), pytest.raises(Refused, match=text):
+            store.journal_append({"type": "proposed", "order": "t_abc123"})
+        assert store.read("journal.jsonl") == raw

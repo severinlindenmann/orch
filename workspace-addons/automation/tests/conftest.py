@@ -106,6 +106,8 @@ elif args[:2] == ["run", "start"]:
         print(json.dumps({{"error": "Automation is paused in this workspace. Turn it back on with: orch resume."}})); sys.exit(2)
     if (root / "noagent").exists():
         print(json.dumps({{"error": "No agent found; set one later: orch config set workspace.agent <name>"}})); sys.exit(2)
+    if (root / ("capped-" + tid)).exists():
+        print(json.dumps({{"error": "This ticket already ran 20 times on its own today; start it yourself or wait until tomorrow."}})); sys.exit(2)
     if (root / ("busy-" + tid)).exists():
         print(json.dumps({{"error": "An agent is already working on this ticket.", "pending": "--text" in args}})); sys.exit(2)
     log = ".orch/run/logs/" + tid + "-r1.log"

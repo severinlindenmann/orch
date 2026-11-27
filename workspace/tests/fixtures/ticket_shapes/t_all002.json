@@ -1,0 +1,200 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_all002",
+  "title": "Every kind of evidence",
+  "status": "active",
+  "created_at": "2026-11-10T08:00:00Z",
+  "updated_at": "2026-11-10T08:00:00Z",
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Note",
+      "done": true,
+      "evidence": [
+        {
+          "type": "note",
+          "ref": "seen",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ],
+      "item_extra": {
+        "k": 1
+      }
+    },
+    {
+      "id": "c2",
+      "text": "Command",
+      "done": true,
+      "evidence": [
+        {
+          "type": "command",
+          "ref": "pytest -q",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z",
+          "exit": 0,
+          "summary": "ok"
+        }
+      ]
+    },
+    {
+      "id": "c3",
+      "text": "File",
+      "done": true,
+      "evidence": [
+        {
+          "type": "file",
+          "ref": "docs/example.md",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "c4",
+      "text": "PR",
+      "done": true,
+      "evidence": [
+        {
+          "type": "pr",
+          "ref": "https://github.com/example/repo/pull/1",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "c5",
+      "text": "Commit",
+      "done": true,
+      "evidence": [
+        {
+          "type": "commit",
+          "ref": "0123456789abcdef0123456789abcdef01234567",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "c6",
+      "text": "URL",
+      "done": true,
+      "evidence": [
+        {
+          "type": "url",
+          "ref": "https://example.com/page",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "c7",
+      "text": "Done with no evidence",
+      "done": true,
+      "evidence": []
+    },
+    {
+      "id": "c8",
+      "text": "Open",
+      "done": false,
+      "evidence": []
+    },
+    {
+      "id": "c9",
+      "text": "Odd evidence type",
+      "done": true,
+      "evidence": [
+        {
+          "type": "hologram",
+          "ref": "from a newer orch",
+          "by": "agent:fixture",
+          "at": "2026-11-11T09:00:00Z"
+        }
+      ]
+    }
+  ],
+  "refs": [
+    {
+      "kind": "url",
+      "ref": "https://example.com/x"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Which?",
+      "options": [
+        "A",
+        "B"
+      ],
+      "recommended": "A",
+      "answer": null,
+      "asked_at": "2026-11-10T09:00:00Z",
+      "kind": "future:kind"
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-10T08:00:00Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Created"
+    }
+  ],
+  "revision": 1,
+  "key": "FX-2",
+  "kind": "bug",
+  "summary": "Short handover.",
+  "done_when": "All kinds shown.",
+  "note": "a note",
+  "waiting_on": {
+    "kind": "time",
+    "until": "2030-01-01T00:00:00Z"
+  },
+  "sessions": [
+    {
+      "id": "s1",
+      "agent": "claude"
+    }
+  ],
+  "started": "2026-11-10T08:05:00Z",
+  "model": "small",
+  "estimate": {
+    "minutes": 3,
+    "cost": 0.1,
+    "by": "agent:fixture",
+    "at": "2026-11-10T08:06:00Z"
+  },
+  "maybe_same": [
+    "t_min001"
+  ],
+  "superseded_by": null,
+  "plan_first": true,
+  "future_field": {
+    "nested": {
+      "a": [
+        1,
+        2,
+        {
+          "b": null
+        }
+      ]
+    },
+    "n": 1.5
+  },
+  "ext": {
+    "removedaddon": {
+      "state": "gone",
+      "list": [
+        1,
+        2
+      ]
+    },
+    "automation": {
+      "recurring": false,
+      "unknown_inner": "x"
+    }
+  }
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fake agent that is just a command line: the generic adapter's test double.
 
-    agent.py [--silent N | --interactive | --reply TEXT] [--show] [prompt ...]
+    agent.py [--silent N | --interactive | --reply TEXT | --ask TEXT] [--show] [prompt ...]
 
 Default (one-shot): reads the prompt (arguments, or stdin when there are none), finds the ticket id in
 $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item with `orch`, then exits.
@@ -13,10 +13,16 @@ at start and after each line, which is how a generic agent says "idle". A notice
 ask the person something, ORCH-1760).
 --show: one-shot, but first reads the ticket as a person reads it (`orch ticket show <id>`, plain text) and
 logs that text as one "show: ..." line (R2.6: a new answer is printed first).
+--ask TEXT: one-shot, the whole F2 loop over two runs (R2.1-R2.6, ORCH-2069). First run: asks TEXT (options yes/no,
+yes recommended) and, while it waits, still finishes the first open item (R2.6). A run while the question is open
+does nothing. The run after the answer: finishes every open item with the answer in its evidence note and sets the
+ticket done.
 
 $ORCH_CMD names the orch command (default: orch). $ORCH_TEST_AGENT_LOG (or $GENERIC_AGENT_LOG), when set, gets one line per prompt or
 input line ("prompt: ..." / "input: ...") so tests can count what arrived.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -29,7 +35,7 @@ import time
 
 def orch(*args: str) -> subprocess.CompletedProcess:
     cmd = shlex.split(os.environ.get("ORCH_CMD", "orch")) + list(args)
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def log(kind: str, text: str) -> None:
@@ -63,11 +69,32 @@ def do_work(tid: str, show: bool = False) -> None:
             return
 
 
+def ask_flow(tid: str, text: str) -> None:
+    r = orch("ticket", "show", tid, "--json")
+    if r.returncode != 0:
+        return
+    t = json.loads(r.stdout)
+    q = next((q for q in t.get("questions", []) if q.get("text") == text), None)
+    if q is None:
+        orch("ask", tid, text, "--option", "yes", "--option", "no", "--recommend", "yes",
+             "--because", "the fake agent always suggests yes", "--by", "agent:fake")
+        do_work(tid)
+        return
+    if q.get("answer") is None:
+        return
+    for item in t.get("checklist", []):
+        if not item.get("done"):
+            orch("check", "start", tid, item["id"])
+            orch("check", "done", tid, item["id"], "--note", f"answer was {q['answer']}")
+    orch("ticket", "status", tid, "done", "--by", "agent:fake")
+
+
 def main(argv: list[str]) -> int:
     interactive = "--interactive" in argv
     show = "--show" in argv
     silent = None
     reply = None
+    ask = None
     rest = []
     it = iter(argv)
     for a in it:
@@ -75,6 +102,8 @@ def main(argv: list[str]) -> int:
             silent = float(next(it))
         elif a == "--reply":
             reply = next(it)
+        elif a == "--ask":
+            ask = next(it)
         elif a not in ("--interactive", "--show"):
             rest.append(a)
     prompt = " ".join(rest)
@@ -106,7 +135,9 @@ def main(argv: list[str]) -> int:
         prompt = sys.stdin.read()
     log("prompt", prompt)
     tid = ticket_of(prompt)
-    if tid:
+    if tid and ask is not None:
+        ask_flow(tid, ask)
+    elif tid:
         do_work(tid, show)
     print(json.dumps({"type": "result", "result": reply}) if reply is not None else "done")
     return 0
