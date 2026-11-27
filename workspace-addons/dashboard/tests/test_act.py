@@ -680,6 +680,7 @@ def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_
     assert actions._op_timeout("addon.set", {"on": False}) == 60
     assert actions._op_timeout("config.agent.test", {}) == 75
     assert actions._op_timeout("review.answer", {}) == 300  # ORCH-1415: Merge retries
+    assert actions._op_timeout("run.start", {}) == 180  # ORCH-2362: outlasts the copies lock wait (150 s)
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
