@@ -196,6 +196,46 @@ jobs:
           EDGE_RUNNER_WHEN_BUSY: ${{ vars.EDGE_RUNNER_WHEN_BUSY }}
           STATUS_TOKEN: ${{ (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository)) && secrets.MAC_RUNNER_STATUS_TOKEN || '' }}
         run: python3 scripts/edge_route.py
+  # A run that sent jobs to our own runners falls back to GitHub's machines when those runners stay offline (ORCH-1932,
+  # 27 Nov: all four went offline after a network drop and develop's jobs waited for them): scripts/runner_watch.py
+  # watches the run; after 10 minutes with queued self-hosted jobs and no runner online it leaves the artifact
+  # runner-fallback and cancels the run, and runner-fallback.yml starts the whole run again (route reads the runners
+  # again). Not in the gate's needs: it never turns a run red. The script comes from the base branch (no pull request
+  # code next to the runner-list secret, like check-runner.yml).
+  runner-watch:
+    needs: [check-runner, route]
+    if: ${{ !cancelled() && (contains(needs.route.outputs.checks, 'self-hosted') || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both' || needs.route.outputs.where == 'mac') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.sha }}
+          sparse-checkout: |
+            scripts/runner_watch.py
+            scripts/mac_route.py
+          sparse-checkout-cone-mode: false
+      - id: w
+        continue-on-error: true
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SELF: runner-watch
+          GH_TOKEN: ${{ github.token }}
+          STATUS_TOKEN: ${{ secrets.MAC_RUNNER_STATUS_TOKEN }}
+        run: python3 scripts/runner_watch.py
+      - if: steps.w.outputs.fallback == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-fallback
+          path: runner-fallback/why.txt
+      - if: steps.w.outputs.fallback == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
   # The light set of a pull request into develop on its own: words, style, ruff, the workspace tests that read the
   # changed code and the suites of the changed add-ons, one job (scripts/ci_light.py, ORCH-556). The rest runs once
   # in its merge queue group.
