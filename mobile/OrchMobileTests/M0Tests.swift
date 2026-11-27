@@ -418,7 +418,7 @@ final class ConversationTests: XCTestCase {
         let o = OutboxItem(clientId: "c0", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T09:59:00Z", general: true, text: "queued")
         d.outbox = [o]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .queued)
-        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed("no"))
+        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed(NotSentNote.generic))
         d.outbox = []
         d.messages = [text("m_a", from: me, to: ws, at: "2026-11-06T10:00:00Z", body: TextBody(text: "a", clientId: "c1", general: true), cid: "c1")]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .sent)
@@ -832,7 +832,8 @@ final class AppModelV3Tests: XCTestCase {
         await m.setMute(MockRelay.pilatus, .forever); XCTAssertTrue(m.workspace(MockRelay.pilatus)!.isMuted())
         await m.setMute(MockRelay.pilatus, .off); XCTAssertFalse(m.workspace(MockRelay.pilatus)!.isMuted())
         let added = await m.redeemInvitation(PairingLink.sample.link); XCTAssertEqual(added.map(\.id), ["ws_home000001"]); XCTAssertEqual(m.workspaces.count, 3)
-        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty); XCTAssertNotNil(m.message)
+        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty)
+        XCTAssertEqual(m.message, "This invitation has expired or was already used. Ask the person who invited you for a new one.", "a used link names who can replace it")
         await m.removeWorkspace(MockRelay.reports)
         XCTAssertNil(m.workspace(MockRelay.reports)); XCTAssertTrue(m.messages.allSatisfy { $0.workspaceId != MockRelay.reports })
     }

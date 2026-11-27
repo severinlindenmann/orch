@@ -38,6 +38,12 @@
 <section class="card chart-card" id="week" hidden><div class="section-head roomy"><h2>This week against the budget</h2><span class="meta" id="week-label"></span></div><div class="progress" id="week-bar" role="progressbar" aria-label="This week against the budget" aria-valuemin="0" aria-valuemax="100"><span></span></div></section>
 <section class="card chart-card" id="people" hidden><div class="section-head roomy"><h2>By person</h2><span class="meta">Last 30 days</span></div>
 <div class="table-wrap"><table class="data-table"><caption class="sr-only">Tickets, helper time and cost by person</caption><thead><tr><th scope="col">Person</th><th scope="col" class="numeric">Finished</th><th scope="col" class="numeric">Open</th><th scope="col" class="numeric">Helper time</th><th scope="col" class="numeric">Cost</th></tr></thead><tbody id="people-rows"></tbody></table></div></section></section>
+<section id="weekly" class="card chart-card" aria-labelledby="weekly-title" hidden><div class="section-head roomy"><h2 id="weekly-title">Last 7 days</h2><span class="meta">From ticket history</span></div>
+<div id="weekly-error" aria-live="polite" hidden></div>
+<div class="stat-row" id="weekly-stats"></div>
+<div class="analysis-grid space-top" id="weekly-lists"><div><p class="meta" id="weekly-done-title"></p><div class="stack" id="weekly-done" role="list" aria-labelledby="weekly-done-title"></div></div>
+<div><p class="meta" id="weekly-stuck-title"></p><div class="stack" id="weekly-stuck" role="list" aria-labelledby="weekly-stuck-title"></div></div></div>
+<div id="weekly-state" hidden></div></section>
 <div id="loading" class="area-body loading-mask" inert aria-hidden="true">
 <div class="metric-grid"><article class="card metric"><p class="meta">Times helpers worked</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head roomy"><h2>Work over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head roomy"><h2>Skills used</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
