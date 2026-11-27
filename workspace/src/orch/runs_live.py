@@ -1478,6 +1478,10 @@ def confirm_prompt(pane: str) -> dict | None:
     hooks = [i for i in above if _HOOK_HEAD.match(rows[i].strip())]
     command = reason = None
     unclear = len(heads) > 1 or len(hooks) > 1 or (bool(heads) and not any(t < heads[0] for t in tops))
+    # ORCH-2352: a command that wraps over more rows than are read pushes the title and the top border out of
+    # them. With no title there is no command to show, so an answer is offered only when the dialog is still
+    # bounded and no hook asked: a hook's confirm is never answered blind.
+    unclear = unclear or (not heads and (bool(hooks) or not tops))
     if heads and not unclear:
         head = heads[0]
         hook = hooks[0] if hooks and hooks[0] > head else None
