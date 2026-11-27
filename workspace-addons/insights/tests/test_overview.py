@@ -16,6 +16,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from orch_insights import server
 from orch_insights.lists import build_list
 from orch_insights.overview import ERROR, PARTIAL, build_overview
 from orch_insights.server import read_counts
@@ -189,7 +190,8 @@ def test_cards_order_limit_and_honest_units(answer):
     cards = build_overview(answer)["needs"]
     assert [card["kind"] for card in cards] == ["skill", "connection", "key"]
     assert cards[0]["text"] == "2 of 5 uses failed; 0 refused."
-    assert cards[1]["title"] == 'Stripe said "not allowed" 3 times'
+    assert cards[1]["title"] == "Stripe said “not allowed” 3 times"
+    assert cards[1]["text"] == "Check what this service is allowed to do."
     assert cards[2]["title"] == "1 key not used in 30 days"
     assert all(card["button"] == "Look" for card in cards)
     answer["items"].append({**answer["items"][2], "name": "also-bad", "uses": 5, "ok": 0, "failed": 5})
@@ -304,6 +306,7 @@ def test_own_interpreter_and_timeout(ws, monkeypatch):
 
     monkeypatch.setenv("ORCH_BIN", "/never/use/this")
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(server, "_by_worker", lambda *a: server._MISS)  # the read worker could not answer
     assert read_counts(ws) is None
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import functools
+import importlib
 import json
 import os
 import re
@@ -133,7 +134,7 @@ def chosen(root: Path) -> str:
 # ---------------------------------------------------------------- argv
 
 
-def _split(cmd: str) -> list[str]:
+def split_command(cmd: str) -> list[str]:
     if os.name == "nt":
         return [
             t[1:-1] if len(t) > 1 and t[0] == t[-1] and t[0] in "\"'" else t
@@ -174,7 +175,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         cmd = a["command"] if tpl == "{command}" else a["interactive"]
         if not cmd:
             raise Refused(f"'{name}' has no command yet. Add it: orch config agent add {name} --command ...")
-        items = _split(cmd)
+        items = split_command(cmd)
     else:
         items = list(tpl)
     has_prompt = any("{prompt}" in i for i in items)
@@ -493,7 +494,7 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     a = load(name, root)
     rh, rec = a.get("reminder_hooks") or {}, a.get("record_hooks") or {}
     guard = a.get("guard_hooks") or {}
-    if _is_windows():
+    if _is_windows() or (rec and not _collector_module(a, "oneshot", root)):
         rec = {}
     if not rh and not rec and not guard:
         return None
@@ -531,26 +532,32 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     return {"hooks": hooks}
 
 
-_COLLECTORS = {"claude-stream-json/1": "orch.collect_claude"}  # oneshot.events format -> its collector
-_LIVE_COLLECTORS = {"claude-transcript/1": "orch.collect_claude"}  # live.events format -> its collector
+def _collector_module(adapter: dict, mode: str, root: Path | None) -> str | None:
+    fmt = (adapter.get(mode) or {}).get("events")
+    if root is None or not fmt:
+        return None
+    from orch import addons
+
+    if not addons.activation_path(root).is_file():
+        return None
+    for _, manifest in sorted(addons.active_manifests(root).items()):
+        if fmt in manifest.get("event_formats", ()):
+            return f"{manifest['run']}.collector"
+    return None
 
 
 def collector(name: str, root: Path | None = None):
     """The module that maps this agent's output to record events (its `oneshot.events` format, agents/
     capabilities.json): `collect(lines, writer, ctx)` for the oneshot stdout and `hook_line(payload)` for the
     tool's own hook payload (record_hooks). None: orch cannot read this agent's output."""
-    import importlib
-
-    module = _COLLECTORS.get((load(name, root).get("oneshot") or {}).get("events"))
+    module = _collector_module(load(name, root), "oneshot", root)
     return importlib.import_module(module) if module else None
 
 
 def live_collector(name: str, root: Path | None = None):
     """The module that names this agent's tool calls in a live session (its `live.events` format):
     `describe_tool(name, input)`. None: orch cannot read this agent's live conversation."""
-    import importlib
-
-    module = _LIVE_COLLECTORS.get((load(name, root).get("live") or {}).get("events"))
+    module = _collector_module(load(name, root), "live", root)
     return importlib.import_module(module) if module else None
 
 

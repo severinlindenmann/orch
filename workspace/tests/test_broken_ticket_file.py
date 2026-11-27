@@ -9,7 +9,7 @@ import pytest
 
 from orch import adapters, addons, ticketindex, tickets
 
-FIX = "fix the JSON by hand or restore it from git"
+FIX = "fix the JSON by hand, or delete the file to drop the ticket"
 
 
 @pytest.fixture
@@ -41,6 +41,7 @@ def test_list_names_the_broken_file(broken, run, text):
     assert code == 0
     assert "Good one" in out and "Broken one" not in out
     assert f".orch/tickets/{tid}.json is broken" in out and FIX in out
+    assert "git" not in out.replace(tid, "")  # ORCH-2111: .orch/ is never committed (ids may hold "git")
     assert p.read_bytes() == before  # never repaired or rewritten
 
 
@@ -68,6 +69,7 @@ def test_show_by_key_finds_the_broken_file_that_names_it(broken, run):
     code, _, err = run("ticket", "show", key.lower())
     assert code != 0
     assert f"Ticket {key} can't be read" in err and f"{tid}.json is broken" in err and FIX in err
+    assert "git" not in err.replace(tid, "")  # a random ticket id may hold "git" (t_evbgit)
 
 
 def test_show_by_key_of_an_empty_file_names_the_broken_files(broken, run):
@@ -96,6 +98,7 @@ def test_doctor_reports_the_broken_file(broken, run, monkeypatch, text):
     assert code == 0
     assert f".orch/tickets/{tid}.json is broken" in out and FIX[:1].upper() + FIX[1:] + "." in out
     assert "Nothing wrong." not in out
+    assert "restore it from git" not in out
     assert p.read_bytes() == before
 
 

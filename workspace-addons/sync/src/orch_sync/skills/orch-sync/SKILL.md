@@ -24,6 +24,7 @@ metadata:
 - Keeping their copy of a ticket is the person's decision: `orch sync resolve <path> --keep theirs`. Ask the person first.
 - The ticket counter is the person's decision too: `orch sync resolve ticket-counter.json --keep theirs` always, and `--keep mine` when sync paused because "Ticket numbers jumped far ahead on the other computer". Never choose it for the person.
 - A file name that differs from a local one only in capital letters is the person's choice: `orch sync resolve <path> --keep-local-name` (the other computer's name is not applied while the remote stays as it is) or `orch sync resolve <path> --rename-local "<new name>"` (then both arrive). `--keep` is refused for these files.
+- A ticket's file whose name has a character sync can't send (letters outside A-Z such as ä, or & , + #) stays on this computer and shows under "Not synced". To sync it, rename it with letters, digits, spaces, `. _ - ( )` only.
 - A held add-on change waits for the person: `orch sync approve <ticket> <addon>` lets its value in. Never write the files in `.orch/run/sync/` yourself.
 - Use `orch sync approve <ticket> <addon> --ignore` to dismiss the held change. A changed value asks again.
 - "The histories of the two computers cannot be combined": this computer's files stay as they are, and a new commit from the other computer clears this pause by itself. Only if the person wants the other computer's copy now: `orch sync take-remote` (the same checks as every merge: ticket numbers and add-on changes are still decided here, files only this computer has stay).

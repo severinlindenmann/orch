@@ -148,6 +148,25 @@ def tws(tmp_path_factory, monkeypatch):
     return ws
 
 
+def test_scheduler_ticket_json_needs_a_paired_test_workspace(tws, monkeypatch, capsys):
+    """The Windows smoke merges stderr into stdout before parsing ticket new as JSON."""
+    from orch import secretscan
+
+    outside = tws.parents[1] / "orch-sched"
+    (outside / ".orch").mkdir(parents=True)
+    for root, readable in ((outside, False), (tws, True)):
+        monkeypatch.chdir(root)
+        monkeypatch.delenv("ORCH_ROOT", raising=False)
+        monkeypatch.setattr(secretscan, "_noted", False)
+        assert cli.main(["ticket", "new", "Scheduled smoke", "--json", "--by", "human:owner"]) == 0
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["id"]
+        if readable:
+            assert captured.err == ""
+        else:
+            assert secretscan.NOTE_SKIPPED in captured.err
+
+
 def test_launch_url_on_a_test_install(tws):
     url = pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]
@@ -817,7 +836,16 @@ try { & $Script } catch { [Console]::Error.WriteLine("THROWN: " + $_.Exception.M
 """
 
 
-def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
+def _stub_orch(folder, says):
+    """A POSIX stand-in for orch.exe; plain `orch` finds its extensionless twin outside Windows."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("orch.exe", "orch"):
+        exe = folder / name
+        exe.write_text(f'#!/bin/sh\necho "stub: {says} $*"\n')
+        exe.chmod(0o755)
+
+
+def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1", bin_dir=None, path=(), orch=True):
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("needs PowerShell 7 (pwsh)")
@@ -825,12 +853,14 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
     stubs.write_text(_PS_STUBS, encoding="utf-8")
     (tmp_path / "empty").mkdir()
     (tmp_path / "tools" / "orch-workspace").mkdir(parents=True)
-    (tmp_path / "bin").mkdir()
-    orch_exe = tmp_path / "bin" / "orch.exe"
-    orch_exe.write_text("#!/bin/sh\necho stub: orch update --after-install\n")
-    orch_exe.chmod(0o755)
+    bin_dir = bin_dir or tmp_path / "bin"
+    if orch:
+        _stub_orch(bin_dir, "orch")
+    else:
+        bin_dir.mkdir(parents=True)
     env = {
-        "PATH": str(tmp_path / "empty"),  # no real uv or powershell is ever found
+        # no real uv or powershell is ever found; `path` puts folders ahead of it
+        "PATH": os.pathsep.join([*map(str, path), str(tmp_path / "empty")]),
         "HOME": str(tmp_path),
         "USERPROFILE": str(tmp_path),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
@@ -838,14 +868,14 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
         "TMP": str(tmp_path),
         "ORCH_REPO": str(ROOT),
         "STUB_TOOLDIR": str(tmp_path / "tools"),
-        "STUB_BIN": str(tmp_path / "bin"),
+        "STUB_BIN": str(bin_dir),
         "STUB_INSTALL_EXIT": "0" if mode == "success" else "2",
     }
     r = subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(stubs), "-Script", str(script), "-Mode", mode],
         env=env, capture_output=True, text=True, timeout=120,
     )  # fmt: skip
-    return r.returncode, r.stdout + r.stderr
+    return r.returncode, r.stdout + r.stderr, env
 
 
 _STAGES = {
@@ -865,7 +895,7 @@ _STAGES = {
 @pytest.mark.parametrize("mode", sorted(_STAGES))
 def test_install_ps1_names_the_stage_that_stopped(tmp_path, mode):
     stage, step, diagnostic = _STAGES[mode]
-    code, out = _run_install_ps1(tmp_path, mode)
+    code, out, _ = _run_install_ps1(tmp_path, mode)
     assert code != 0
     assert f"THROWN: orch install stopped {stage}; its details are above). Next: " in out
     assert step in out and "run the install line again" in out
@@ -878,11 +908,62 @@ def test_install_ps1_names_the_stage_that_stopped(tmp_path, mode):
     assert not (tmp_path / "tools" / "orch-workspace" / "orch-install.json").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+_POSIX_STUB = pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+_INIT = "local tickets: enough to start"
+
+
+@_POSIX_STUB
 def test_install_ps1_success_still_ends_with_init(tmp_path):
-    code, out = _run_install_ps1(tmp_path, "success")
+    code, out, _ = _run_install_ps1(tmp_path, "success", path=[tmp_path / "bin"])
     assert code == 0, out
-    assert "stub: orch update --after-install" in out and "orch is installed." in out and "orch init" in out
+    assert "stub: orch update --after-install" in out and "orch is installed." in out
     assert "stopped" not in out
     record = json.loads((tmp_path / "tools" / "orch-workspace" / "orch-install.json").read_text())
     assert record["kind"] == "normal"
+    # plain orch reaches the new copy: the lines from before, no full path, no Path advice
+    assert "Open a new terminal, go to your project folder and run one of these:" in out
+    assert f"  orch init                  {_INIT}" in out and "  orch init --recommended    the same" in out
+    assert "Typing orch" not in out and "SetEnvironmentVariable" not in out and "& '" not in out
+
+
+def _printed_init_line(out):
+    return next(ln.strip() for ln in out.splitlines() if ln.endswith(_INIT)).removesuffix(_INIT).strip()
+
+
+@_POSIX_STUB
+@pytest.mark.parametrize("case", ["custom-bin", "older-orch-first"])
+def test_install_ps1_prints_a_runnable_full_path_when_orch_is_not_the_new_copy(tmp_path, case):
+    # a custom UV_TOOL_BIN_DIR; PowerShell also ends a '...' string at a curly apostrophe
+    custom = tmp_path / "Prog Fïles" / "Sev's tools \u2019 $HOME" / "bin"
+    path = []
+    if case == "older-orch-first":
+        _stub_orch(tmp_path / "old", "older orch")
+        path = [tmp_path / "old", custom]
+    code, out, env = _run_install_ps1(tmp_path, "success", bin_dir=custom, path=path)
+    assert code == 0, out
+    assert "stub: orch update --after-install" in out  # the new copy ran the after-install step
+    found = f"starts another orch ({tmp_path / 'old' / 'orch'})" if path else "finds no orch"
+    assert f"Typing orch in this window {found}, not the one just installed: {custom / 'orch.exe'}" in out
+    assert "works in any PowerShell window and changes nothing on this computer" in out
+    assert ("keeps starting the other one" if path else "Typing just orch finds nothing") in out
+    for never in ("SetEnvironmentVariable", "new terminal", "new window", "Open a new"):
+        assert never not in out
+    line = _printed_init_line(out)
+    assert line.startswith("& '") and line.endswith("' init")
+    assert "init --recommended" in out  # the goal choice stays as it was
+    # Run the printed line as given, in a fresh PowerShell with the same Path: which copy actually ran?
+    r = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", line],
+        env=env, capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "stub: orch init"
+
+
+def test_install_ps1_missing_orch_exe_is_not_called_installed(tmp_path):
+    code, out, _ = _run_install_ps1(tmp_path, "success", orch=False)
+    assert code != 0
+    exe = tmp_path / "bin" / "orch.exe"
+    assert f"THROWN: orch install stopped: uv finished, but {exe} is missing. Next: " in out
+    for never in ("orch is installed", "orch init", "& '", "SetEnvironmentVariable", "Typing orch"):
+        assert never not in out

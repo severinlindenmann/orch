@@ -19,10 +19,9 @@
 .ticket-select{min-height:44px;width:auto;max-width:220px}
 .changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
 .owner-line{gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
-.tickets-empty{display:grid;justify-items:center;gap:12px;padding:48px 24px;text-align:center}.tickets-empty p{max-width:52ch}
 
 /* Ticket toolbar: layout toggle, active view chip, person, search (accepted Tickets draft) */
-.board-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.board-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0}
 .board-toolbar .view-toggle{margin:0}
 .board-toolbar .ticket-select{min-height:36px;font-size:12px;padding:6px 8px}
 .board-toolbar .search-field{width:220px;max-width:100%}.board-toolbar .search-field input{min-height:36px;font-size:12px;width:100%;max-width:100%}
@@ -34,7 +33,7 @@
 .ticket-table .btn{min-height:32px}.ticket-table .move-button{width:32px;min-width:32px;min-height:32px}
 .ticket-table td{height:auto;min-height:var(--row-height);padding-block:8px;vertical-align:middle}
 .ticket-table .group-row th{padding:0;background:var(--surface-2);height:36px}
-.ticket-table .group-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;padding:0 12px;background:none;border:0;color:var(--text);font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer}
+.ticket-table .group-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;padding:0 12px;background:none;border:0;color:var(--text);font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer;outline-offset:-2px}
 .ticket-table .step-progress{display:flex;align-items:center;gap:8px}.ticket-table .step-progress .progress{width:56px;flex:none}
 .ticket-table .who{display:inline-flex;align-items:center;gap:6px}
 .ticket-table .ticket-actions{text-align:right;white-space:nowrap}.ticket-table .ticket-actions .btn+.btn{margin-left:4px}
@@ -49,11 +48,11 @@
 .table-wrap{position:relative}
 
 /* Owner feedback 14 Nov (lane v1): view chips, collapsed empty board columns, clickable rows, one action on hover */
-.view-chips{flex-wrap:wrap;gap:8px;align-items:center}
+.view-chips{flex-wrap:wrap;gap:8px;align-items:center;flex-basis:100%}
 .view-chip{text-decoration:none;min-height:32px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
 .ticket-table tr.row-click{cursor:pointer}
-.ticket-table tr.row-click:hover td{background:var(--surface-2)}
+.ticket-table tr.row-click:not(.is-picked):hover td{background:var(--surface-2)}
 @media(hover:hover){.ticket-table tr.row-click .ticket-menu,.ticket-table tr.row-click .ticket-actions-row>:not(:first-child){opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
   .ticket-table tr.row-click:hover .ticket-actions-row>*,.ticket-table tr.row-click:focus-within .ticket-actions-row>*{opacity:1}}
 .ticket-table th{white-space:nowrap}.ticket-table .ticket-actions .btn{white-space:nowrap}.ticket-table td.steps{width:1%;white-space:nowrap}.ticket-table .step-progress .progress{width:80px}
@@ -62,3 +61,4 @@
 /* Owner 15 Nov (fb3): the card's "..." is a small icon button in the top-right corner; the title uses the full width */
 
 .ticket-table td:first-child a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@media(max-width:720px){a.view-chip{min-height:var(--touch);min-width:var(--touch);justify-content:center}.view-chips{gap:4px}}

@@ -72,7 +72,7 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     if t.get("status") in ("done", "dropped"):
         return "orch ticket list"
     if t.get("status") == "review":
-        return "a person looks at it and marks it Done: orch needs"
+        return "a person looks at it and marks it Done: orch review list"
     checks = t.get("checklist") or []
     if not checks:
         return f'add one task per step: orch check add {n} "<step>"'
@@ -100,6 +100,33 @@ def _triage(data, args) -> str:
     if isinstance(data, dict) and "rows" in data and not data["rows"]:  # the read-only list came back empty
         return "orch ticket list  (see your tickets)"
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
+
+
+def _one(args) -> str:
+    """The ticket key of a run command; `run status A B` names several, so the hint keeps the placeholder."""
+    tid = _tid(args)
+    if isinstance(tid, list):
+        tid = tid[0] if len(tid) == 1 else "<ticket>"
+    t = _load(args, tid) if tid != "<ticket>" else None
+    return _name(t, tid) if t else tid
+
+
+def _run_status(data, args) -> str:
+    n, d = _one(args), data or {}
+    if "runs" in d:  # several tickets at once
+        return "orch run list"
+    if d.get("running"):
+        return f'send it a message if it needs one: orch run send {n} "<text>"'
+    if d.get("state") == "maybe-stale":
+        return f"orch run start {n} --take-over"
+    return f"orch run start {n}"
+
+
+def _run_start(data, args) -> str:
+    n = _one(args)
+    if (data or {}).get("skipped"):
+        return f"orch ticket show {n}"
+    return f"watch it: orch run status {n}"
 
 
 def _check_add(data, args) -> str:
@@ -138,6 +165,9 @@ def _status(data, args) -> str:
 
 
 def _list(data, args) -> str:
+    words = (getattr(args, "search", None) or "").strip().replace('"', "'")
+    if words or getattr(args, "waiting", False) or getattr(args, "blocked", False):
+        return _list_picked(data, args, words)
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
         broken = getattr(args, "_broken_tickets", None)
@@ -147,10 +177,26 @@ def _list(data, args) -> str:
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
 
 
+def _list_picked(data, args, words: str) -> str:
+    """`ticket list --search/--waiting/--blocked`: open the first hit, else widen the search."""
+    rows = data or []
+    if rows:
+        open_ = [t for t in rows if t.get("status") not in ("done", "dropped")]
+        if not open_:
+            return f"orch ticket show {_name(rows[0], rows[0]['id'])}"
+        t = open_[0]
+        return work_on(t if "checklist" in t else _load(args, t["id"]), t["id"])
+    if words and not (getattr(args, "all", False) or getattr(args, "status", None)):
+        return f'look in finished tickets too: orch ticket list --search "{words}" --all'
+    return "see every ticket: orch ticket list"
+
+
 def _ask(data, args) -> str:
     if (data or {}).get("taken_back"):
         return "keep working on the ticket."
-    return "keep working on the steps that do not need the answer."
+    t, q = _load(args), (data or {}).get("id") or "<question>"
+    how = f'orch answer {_name(t, _tid(args)) if t else _tid(args)} {q} "<answer>"'
+    return f"keep working on the steps that do not need the answer (a person answers with: {how})."
 
 
 def _needs(data, args) -> str:
@@ -243,6 +289,12 @@ def _ref_wait(data, args) -> str:
     return "NOT green or not merged (see the line above): fix it, push, then run orch ref wait again"
 
 
+def _addon_check(data, args) -> str:
+    if isinstance(data, dict) and data.get("ok"):
+        return f"turn it on with: orch addon add {args.name}"
+    return f"fix what is listed, then run orch addon check {args.name} again"
+
+
 HINTS = {
     "init": _init,
     "update": _update,
@@ -255,6 +307,7 @@ HINTS = {
     "addon remove": "orch addon list",
     "addon uninstall": "orch addon list",
     "addon list": "turn one on with: orch addon add <name>",
+    "addon check": _addon_check,
     "manager start": "talk to it in Focus, or join it: orch manager status",
     "manager stop": "start it again any time: orch manager start",
     "manager status": "orch manager start",
@@ -263,9 +316,25 @@ HINTS = {
     "session close": "start it again any time: orch session new <kind>",
     "session end": "start it again any time: orch session new <kind>",
     "session stop": "send it a message to go on, or end it: orch session end <kind>",
+    "run start": _run_start,
+    "run status": _run_status,
+    "run list": "look at one: orch run status <ticket>",
+    "run attach": lambda d, a: f"orch run status {_one(a)}",
+    "run screen": lambda d, a: f'send it a message if it needs one: orch run send {_one(a)} "<text>"',
+    "run send": lambda d, a: f"it reads the message at its next step: orch run status {_one(a)}",
+    "run take-back": lambda d, a: f"orch run status {_one(a)}",
+    "run stop": _on_ticket,
+    "run history": lambda d, a: f"continue one: orch run start {_one(a)} --session <id>",
+    "run tend": "orch run list",
+    "agents": "choose one for this folder: orch config agent <name>",
+    "agents test": "choose it for this folder: orch config agent <name>",
+    "config get": lambda d, a: None if a.key else "change one: orch config set <key> <value>",  # a bare value
+    "config set": "keep working: orch ticket list",
+    "config propose": "a person accepts or edits it in Settings; keep working: orch ticket list",
+    "config agent": "start it on a ticket: orch run start <ticket>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
-    "diag query": "orch diag report",
+    "diag query": "if you need help, save a report (optional; it stays in this workspace): orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
     "diag tickets": "orch ticket list",
@@ -315,6 +384,7 @@ HINTS = {
     "checks init": "orch checks templates",
     "checks templates": "orch checks add <template> [--profile <name>]",
     "checks add": "orch checks list",
+    "checks show": "orch checks approve <name> --hash <h>  (the person, after looking)",
     "checks approve": "orch checks list",
     "checks remove": "orch checks list",
     "checks run": "orch checks list",
@@ -345,7 +415,7 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": _needs,
-    "counts": "what each number stands for: orch needs",
+    "counts": "what waits for you: orch review list",
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",

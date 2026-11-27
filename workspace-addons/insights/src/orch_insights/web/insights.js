@@ -15,12 +15,13 @@ const MARKS = {working: '✓ ', look: '▲ ', new: '◇ ', idle: '', unknown: ''
 const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
+let weekly = null;  // the last good reading of the last 7 days (a failed read keeps it, ORCH-1860)
 let stuckNow = 0;  // ORCH-476: the core's Stuck count (Stuck now): the health line never says All good beside it
 // ORCH-1860: a failed read keeps the last good reading. readAt: when each part was last read well; failed: the parts
 // whose last read failed (the error text). Only in memory: a lost sign-in or another workspace forgets them all.
 let readAt = {}, failed = {}, workspace = null, era = 0, again = false;
 const asked = {};  // per list: the number of its newest read; an older answer arriving later is dropped
-const NAMES = {overview: 'the numbers', skills: 'the skills', connections: 'the connected services', keys: 'the keys'};
+const NAMES = {weekly: 'the last 7 days', overview: 'the numbers', skills: 'the skills', connections: 'the connected services', keys: 'the keys'};
 const READ_ERROR = 'Insights could not read the workspace record.';
 
 function node(tag, text, className) {
@@ -66,10 +67,12 @@ function forget() {
   era++;
   overview = null; lists = {}; readAt = {}; failed = {}; stuckNow = 0;
   for (const id of ['metrics', 'bars', 'rows', 'thead', 'services', 'needs', 'models-bars', 'models-rows',
-    'team-stats', 'people-rows', 'empty', 'overview-error', 'list-error']) byId(id).replaceChildren();
+    'team-stats', 'people-rows', 'empty', 'overview-error', 'list-error', 'weekly-stats', 'weekly-done', 'weekly-stuck',
+    'weekly-state', 'weekly-error']) byId(id).replaceChildren();
   for (const id of ['skill-text', 'trend-text', 'models-text', 'week-label', 'services-title', 'foot-note', 'lost-note',
     'health']) byId(id).textContent = '';
-  for (const id of ['team', 'week', 'models', 'lost-note', 'overview-error', 'list-error', 'checkup']) byId(id).hidden = true;
+  for (const id of ['team', 'week', 'weekly', 'weekly-error', 'models', 'lost-note', 'overview-error', 'list-error', 'checkup']) byId(id).hidden = true;
+  weekly = null;
   // the health check card is drawn by checkup.js; its proposals go too (its note element stays for checkup.js)
   for (const child of [...byId('checkup').children]) if (child.id !== 'checkup-note') child.remove();
 }
@@ -100,7 +103,9 @@ function paintFailure(host, part, onRetry) {
   });
   row.append(button, node('p', why, 'meta'));
   text.append(row);
-  banner.append(node('span', '!', 'bad'), text);
+  const mark = node('span', '!', 'bad');
+  mark.setAttribute('aria-hidden', 'true');
+  banner.append(mark, text);
   host.replaceChildren(banner);
   if (had) button.focus({preventScroll: true});
 }
@@ -163,13 +168,15 @@ function servicesTile(view, small) {
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view, team) {
   const note = 'Fills after a helper’s first work';
+  // services already set up are ready now: "fills after the first work" beside a 3 contradicts the number
+  const services = view.tabs.connections.count ? 'Ready for your helpers' : note;
   // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
   // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
   const worked = team && team.time && team.time !== '–';
   // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
   const started = view.started || 0;
-  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
-  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, note)];
+  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, services)];
+  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, services)];
 }
 
 function fillMetrics() {
@@ -181,10 +188,8 @@ function fillMetrics() {
 
 function fillTrend() {
   const runs = overview.runs;
-  byId('trend').setAttribute('aria-label',
-    `Daily trend unavailable. Helpers worked ${plural(runs, 'time')}; daily totals were not supplied.`);
   byId('trend-text').textContent =
-    `Helpers worked ${plural(runs, 'time')}. There isn’t enough dated activity to draw a reliable trend.`;
+    `Helpers worked ${plural(runs, 'time')}. Not enough days of work yet to draw a chart.`;
 }
 
 function fillBars() {
@@ -300,6 +305,56 @@ function renderLost(view) {
   note.hidden = !(view && view.lost);
   note.textContent = view && view.lost ? view.lost.text : '';
 }
+// The last 7 days from ticket history (`orch insights week`): done, time to done, stuck now, each by name.
+function weeklyRow(key, title, side) {
+  const item = node('div', undefined, 'list-row');
+  item.setAttribute('role', 'listitem');
+  const name = node('div', undefined, 'grow');
+  name.append(node('strong', key), node('div', title, 'meta truncate'));
+  item.append(name);
+  if (side) item.append(node('span', side, 'badge attn'));
+  return item;
+}
+function weeklyList(id, title, rows, more, side) {
+  byId(`${id}-title`).textContent = title;
+  const list = byId(id);
+  list.replaceChildren(...rows.map(r => weeklyRow(r.key, r.title, side ? r.why : '')));
+  if (more) list.append(node('p', `and ${more} more`, 'meta'));
+}
+function renderWeekly(view) {
+  const host = byId('weekly'), state = byId('weekly-state');
+  host.hidden = false;
+  if (!view || view.error) {  // a failed read keeps the last good reading, with the banner on top (ORCH-1860)
+    failed.weekly = (view && view.error) || 'Insights could not read the tickets.';
+    paintFailure(byId('weekly-error'), 'weekly', () => loadWeekly());
+    if (!weekly) { byId('weekly-stats').replaceChildren(); byId('weekly-lists').hidden = true; state.hidden = true; }
+    return;
+  }
+  weekly = view;
+  readAt.weekly = new Date();
+  delete failed.weekly;
+  paintFailure(byId('weekly-error'), 'weekly', () => loadWeekly());
+  state.hidden = !view.empty;
+  byId('weekly-lists').hidden = view.empty;
+  if (view.empty) {
+    byId('weekly-stats').replaceChildren();
+    paintState(state, 'empty', view.text, 'Tickets show here once they are done or get stuck.');
+    return;
+  }
+  state.replaceChildren();
+  byId('weekly-stats').replaceChildren(
+    statTile('Done', String(view.done), view.done_text),
+    statTile('Time to done', view.typical || '–', view.typical_text));
+  weeklyList('weekly-done', view.done ? `Done · ${view.done}` : 'Done · none yet', view.done_rows, view.more, false);
+  weeklyList('weekly-stuck', view.stuck ? `Stuck now · ${view.stuck}` : 'Stuck now · nothing is stuck', view.stuck_rows, view.stuck_more, true);
+}
+async function loadWeekly(asked = read('/api/weekly')) {
+  const mine = era;
+  let view = null;
+  try { view = await asked; } catch (error) { if (said(error)) return; }
+  if (mine === era) renderWeekly(view);
+}
+
 // The models and the week are asked for at once, side by side with the overview (ORCH-1621: one after the
 // other, the page waited for each answer in turn).
 function askModels() {
@@ -525,7 +580,9 @@ async function refresh() {
   if (document.hidden || loading) return;
   loading = true;
   try {
-    const models = askModels(), skills = read('/api/list/skills');
+    const models = askModels(), skills = read('/api/list/skills'), week = read('/api/weekly');
+    week.catch(() => {});
+    loadWeekly(week);
     skills.catch(() => {});  // read again below; an early failure is said there
     let answer;
     try { answer = await read('/api/overview'); } catch (error) {
@@ -539,13 +596,19 @@ async function refresh() {
     delete failed.overview;
     renderLost(overview);
     if (overview.first_day) {
-      const mine = era;
-      const team = await loadModels(models);
-      if (mine !== era) return;
+      // The tiles come at once; the models read (`orch tokens`, every ticket of 30 days) can take seconds at 10,000
+      // tickets, so the team and the helper-time note follow when it answers (ORCH-2288).
+      const mine = era, first = overview;
+      const paint = team => {
+        const grid = node('div', undefined, 'metric-grid');
+        grid.append(...emptyTiles(first, team));
+        byId('empty').replaceChildren(grid);
+      };
       showView('empty');
-      const grid = node('div', undefined, 'metric-grid');
-      grid.append(...emptyTiles(overview, team));
-      byId('empty').replaceChildren(grid);
+      paint(null);
+      const team = await loadModels(models);
+      if (mine !== era || overview !== first) return;
+      if (team) paint(team);
       return;
     }
     const mine = era;

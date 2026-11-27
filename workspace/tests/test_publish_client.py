@@ -117,6 +117,38 @@ def test_file_share_roundtrip_and_link(proj, run, pub):
     assert json.loads((proj / ".orch/secrets/files/keys.json").read_text())[res["id"]]
 
 
+def test_link_key_never_lands_in_a_ticket_or_a_run_record(proj, run, pub):
+    """R5.1: the key stays in the link fragment. Recording the link on a ticket keeps `#k=…`, the CLI never
+    echoes the key, and a run record hides it."""
+    from orch import secretrun
+
+    connect(run, pub)
+    f = proj / "report.txt"
+    f.write_bytes(b"hello report")
+    link = json.loads(run("publish", "file", str(f), "--json")[1])["link"]
+    key = link.split("#k=")[1]
+    tid = json.loads(run("ticket", "new", "Share report", "--json")[1])["id"]
+    run("check", "add", tid, "Share it")
+    run("check", "add", tid, "Tell them")
+    outs = [
+        run("ref", "add", tid, link),
+        run("ticket", "summary", tid, f"Shared at {link}"),
+        run("check", "done", tid, "c1", "--url", link),
+        run("check", "done", tid, "c2", "--note", f"sent {link} by mail"),
+    ]
+    assert all(code == 0 and key not in out + err for code, out, err in outs)
+    kept = link.split("#k=")[0] + "#k=\u2026"
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert key not in text and text.count(kept) >= 4
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and "secrets" not in p.parts and key in p.read_text("utf-8", errors="ignore")
+    ]
+    assert leaks == []
+    assert key not in secretrun.record_writer(proj).hider.hide_text(f"orch publish file -> {link}")
+
+
 BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())
 
 
@@ -466,6 +498,51 @@ def test_net_retries_connection_failures_only(monkeypatch):
     assert len(tries) == 1 and sleeps == []
 
 
+def test_net_tries_a_stalled_request_once_more_at_most(monkeypatch):
+    """A server that takes the connection and never answers: each try waits the whole time limit, so four
+    tries held `orch relay send` for minutes. One more try after a stall, then the message stays queued."""
+    from orch import net
+    from orch.errors import Refused
+
+    tries = []
+    sleeps = own_sleeps(monkeypatch)
+
+    def stalls(req, timeout, **kw):
+        tries.append(1)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", stalls)
+    with pytest.raises(Refused, match="reach"):
+        net.call("POST", "http://x.test/v1/messages", body={"a": 1}, timeout=1)
+    assert len(tries) == 2 and sleeps == [1]
+
+
+def test_net_one_wait_per_host_skips_a_silent_host_only(monkeypatch):
+    import urllib.error
+
+    from orch import net
+    from orch.errors import Refused
+
+    tries = []
+    own_sleeps(monkeypatch)
+
+    def refused(req, timeout, **kw):
+        tries.append(req.host)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(net.urllib.request, "urlopen", refused)
+    with net.one_wait_per_host():
+        for url in ("http://a.test/x", "http://a.test/y", "http://b.test/x"):
+            with pytest.raises(Refused, match="reach") as e:
+                net.call("GET", url)
+            assert e.value.status is None
+    assert tries == ["a.test"] * 4 + ["b.test"] * 4
+    tries.clear()
+    with pytest.raises(Refused):
+        net.call("GET", "http://a.test/x")  # outside a command every call tries again
+    assert len(tries) == 4
+
+
 def test_net_does_not_replay_posts_after_send(monkeypatch):
     from orch import net
     from orch.errors import Refused
@@ -670,7 +747,7 @@ def test_publish_has_a_shared_tab():
     import tomllib
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
-    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Publish"
 
 
 def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):
@@ -778,6 +855,76 @@ def test_replace_with_a_secret_is_refused(proj, run, pub):
     code, out, err = run("publish", "file", "a.txt", "--replace", res["id"])
     assert code != 0 and "a.txt" in err
     _no_echo(out, err)
+
+
+NAME_TOKEN = "sk-live-" + "zq8wm2rt5yp1xk7nb4vc"  # a made-up key shape that also fits an app name
+
+
+def test_file_with_a_secret_in_its_name_is_refused_and_a_harmless_name_shares(proj, run, pub):
+    connect(run, pub)
+    (proj / f"{PLANT}.txt").write_text("clean")
+    n = len(pub.calls)
+    code, out, err = run("publish", "file", f"{PLANT}.txt")
+    assert code != 0 and "file's name" in err and "Nothing was shared" in err
+    _no_echo(out, err)
+    assert len(pub.calls) == n
+    (proj / "token-refresh-fix.patch").write_text("clean")
+    assert run("publish", "file", "token-refresh-fix.patch")[0] == 0
+
+
+def test_folder_and_member_names_are_scanned_and_never_quoted(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    (site / "quarter").mkdir(parents=True)
+    (site / "meeting notes.html").write_text("<h1>hi</h1>")
+    (site / "quarter" / "agenda.txt").write_text("clean")
+    code, out, _ = run("publish", "file", "site")
+    assert code == 0, out
+    n = len(pub.calls)
+    secret_dir = site / "quarter" / PLANT
+    secret_dir.mkdir()
+    (secret_dir / "agenda.txt").write_text("clean")
+    code, out, err = run("publish", "file", "site")
+    assert code != 0 and "name in the folder" in err
+    _no_echo(out, err)
+    secret_dir.rename(site / "quarter" / "ok")
+    if sys.platform != "win32":  # a name the viewer rejects is quoted by that refusal: the scan runs first
+        (site / f"a\\{PLANT}.txt").write_text("clean")
+        code, out, err = run("publish", "file", "site")
+        assert code != 0 and "name in the folder" in err
+        _no_echo(out, err)
+        (site / f"a\\{PLANT}.txt").unlink()
+    outer = proj / PLANT
+    site.rename(outer)
+    code, out, err = run("publish", "file", PLANT)
+    assert code != 0 and "folder's name" in err
+    _no_echo(out, err)
+    (outer / "quarter" / "agenda.txt").write_text(f"TOKEN={PLANT}")  # a content hit still names a clean file
+    outer.rename(site)
+    code, out, err = run("publish", "file", "site")
+    assert code != 0 and "quarter/agenda.txt" in err and "line 1" in err
+    _no_echo(out, err)
+    assert len(pub.calls) == n
+
+
+def test_app_name_and_member_paths_are_scanned_before_upload(proj, run, pub):
+    connect(run, pub)
+    app = make_app(proj)
+    (app / "docs").mkdir()
+    (app / "docs" / "token-refresh-fix.md").write_text("clean")
+    code, out, _ = run("publish", "app", str(app))
+    assert code == 0, out
+    n = len(pub.calls)
+    (app / "docs" / f"{PLANT}.md").write_text("clean")
+    code, out, err = run("publish", "app", str(app))
+    assert code != 0 and "name in the app" in err
+    _no_echo(out, err)
+    (app / "docs" / f"{PLANT}.md").unlink()
+    (app / "app.toml").write_text(f'name = "{NAME_TOKEN}"\nstack = "static"\n')
+    code, out, err = run("publish", "app", str(app))
+    assert code != 0 and "app's name" in err
+    assert NAME_TOKEN not in out + err and NAME_TOKEN[8:] not in out + err
+    assert len(pub.calls) == n
 
 
 def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):

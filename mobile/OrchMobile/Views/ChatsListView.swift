@@ -60,6 +60,9 @@ struct ChatsListView: View {
                     }
                 }.toolbar({ if case .group = route { return Visibility.hidden }; return Visibility.visible }(), for: .navigationBar)
             }
+            // An invitation opened while paired (ORCH-2127): the Add workspace confirmation, after an open New topic closes.
+            .onChange(of: model.incomingInvite, initial: true) { _, _ in showIncomingInvite() }
+            .onChange(of: sheet) { _, _ in showIncomingInvite() }
             .sheet(item: $sheet) { item in
                 switch item {
                 case .newTopic:
@@ -69,6 +72,11 @@ struct ChatsListView: View {
                 }
             }
         }
+    }
+
+    private func showIncomingInvite() {
+        guard model.incomingInvite != nil, sheet == nil, !model.addWorkspaceOpen else { return }
+        sheet = .addWorkspace
     }
 
     private var header: some View {
@@ -238,8 +246,8 @@ struct ChatsListView: View {
                     Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
                         .lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
                     Text([wsName, ShellTime.day(question.message.createdAt)].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
-                    Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
+                    Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize, 2))
                 }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
                 ShellChevron()
             }.padding(.horizontal, 16).padding(.vertical, 14).contentShape(Rectangle())
@@ -274,7 +282,7 @@ struct ChatsListView: View {
                         }
                         HStack(spacing: 6) {
                             if working && !starting { ProgressView().controlSize(.mini).tint(Theme.muted).accessibilityHidden(true) }
-                            Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                            Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
                         }
                         if let label = ChatsRowRules.questionLabel(summary.openQuestions) {
                             Text(label).themeFont(13).foregroundStyle(Theme.warn).accessibilityLabel(ChatsRowRules.needsYouSpoken(summary.openQuestions) ?? label)
@@ -352,6 +360,8 @@ enum ChatsRowRules {
     static func pinned(_ questions: [Question]) -> [Question] { Array(questions.prefix(pinnedLimit)) }
     /// Row titles: one line (tail cut) at default sizes, two at accessibility Dynamic Type sizes. Full title: Info.
     static func titleLines(_ accessibilitySize: Bool) -> Int { accessibilitySize ? 2 : 1 }
+    /// Preview and detail lines: cut at default sizes, shown in full (no limit) at accessibility sizes so nothing is lost to "…".
+    static func detailLines(_ accessibilitySize: Bool, _ normal: Int = 1) -> Int? { accessibilitySize ? nil : normal }
     /// Chat headers drop their subtitle (status, last seen) at accessibility sizes so the title stays readable; Info has it.
     static func showsHeaderSubtitle(_ accessibilitySize: Bool) -> Bool { !accessibilitySize }
     /// VoiceOver words for the amber needs-you count, kept apart from the unread badge ("3 unread").
@@ -485,8 +495,8 @@ struct TicketChatsSection: View {
             WorkspaceBadge(name: wsName, icon: row.workspace.icon, color: row.workspace.color, size: 32).padding(.top, 2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.topic.title).themeFont(16, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
-                Text(preview).themeFont(14).foregroundStyle(Theme.muted).lineLimit(1)
-                Text(TicketChatsRules.detail(row, workspaceName: wsName)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(preview).themeFont(14).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
+                Text(TicketChatsRules.detail(row, workspaceName: wsName)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
                 if !row.topic.isStarting {   // the status chip the workspace screen's topic rows showed
                     Text(row.topic.status.chip).themeFont(12).foregroundStyle(row.topic.status == .waitingOnYou ? Theme.warn : Theme.muted)
                 }

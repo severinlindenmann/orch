@@ -434,7 +434,7 @@ test('home rows: number before the title, no chip, no empty Working now, See all
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
   assert.ok(left); assert.match(text, /All 2 tickets →/); assert.doesNotMatch(text, /1 result to check/);  // ORCH-1616: no counts under the heading
-  assert.match(text, /Needs you/); assert.match(text, /Check result/); assert.doesNotMatch(text, /Details|Technical details/);
+  assert.match(text, /Needs you/); assert.match(text, /Test results/); assert.doesNotMatch(text, /Details|Technical details/);
 });
 // One list: a result to check is one row with ONE button; same-name results are one row ("3 versions"), newest first.
 test('home results: one row and one button each, same-name stacked, newest first', () => {
@@ -446,7 +446,7 @@ test('home results: one row and one button each, same-name stacked, newest first
   assert.equal(rows.length, 4, 'every result is in the one list, none folded away');
   for (const row of rows) {
     assert.equal(nodes(row, n => n.tag === 'a' || n.tag === 'button').length, 1, 'ONE button per row');
-    assert.match(JSON.stringify(row), /Check result/);
+    assert.match(JSON.stringify(row), /Test results/);
   }
   assert.doesNotMatch(text, /Show all|Mark older as done|Open result|Send back/);
   assert.match(text, /3 versions/); assert.match(text, /Needs you/); // six results, one row stacks three
@@ -675,7 +675,7 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
   assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
   assert.match(ticket, /function ticketWorkingStrip[\s\S]*?liveFocusButton\(t, true\)[\s\S]*?const actions = \[focusBtn, typeof ticketChatButton === 'function' \? ticketChatButton\(t\) : null, railButton\(t\), menu\]/);
-  assert.match(ticket, /working && !helperLive \? agentBar\(t\)/);
+  assert.match(ticket, /working && !helperLive( && [^?\n]+)? \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });

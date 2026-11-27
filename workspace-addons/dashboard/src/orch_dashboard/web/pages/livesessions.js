@@ -43,13 +43,13 @@ function liveNow(s) {
 function liveTool(s) {
   return [s?.tool, s?.model].filter(x => typeof x === 'string' && x).join(' · ');
 }
-// How long it stays: draft D's words
+// How long it stays, in plain words (ORCH-1684: no "stays warm", no "the conversation is kept")
 function liveWarm(s) {
   if (!s) return '';
   if (s.status === 'idle') return Number.isFinite(s.closes_in_seconds) ? 'closes in ' + liveDur(s.closes_in_seconds) + ' if left idle' : 'idle';
-  if (s.status === 'closed') return s.needs === true ? '' : 'closed, the conversation is kept';
+  if (s.status === 'closed') return s.needs === true ? '' : 'closed, you can continue it later';
   if (s.status === 'in-line') return 'starts when a place is free';
-  return s.status === 'needs-you' ? 'stays warm while it waits for you' : 'stays warm while it works';
+  return s.status === 'needs-you' ? 'stays open while it waits for you' : 'stays open while it works';
 }
 // The meta line of a pane or tile: tool and model, open time, how long it stays
 function liveMeta(s) {
@@ -164,10 +164,18 @@ if (typeof module === 'object' && module.exports) {
           const marked = mark(list), sig = JSON.stringify([marked, groups]), first = !store.ready;
           store.list = marked; store.groups = groups; store.ready = true; store.windows = body.windows === true;
           if (first) setTimeout(moveOldPins, 0);
-          if (sig !== store.sig || first) { store.sig = sig; window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:list}})); }
-        }
-      } catch { /* offline or the server restarts: the next read tries again */ }
+          const was = store.failed;
+          store.failed = false;
+          if (sig !== store.sig || first || was) { store.sig = sig; window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:list}})); }
+        } else fail();
+      } catch { fail(); /* offline or the server restarts: the next read tries again */ }
       finally { store.busy = false; }
+    }
+    // A read that failed: the wall says so instead of loading for ever (the next tick tries again by itself)
+    function fail() {
+      if (store.failed) return;
+      store.failed = true;
+      window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:store.list}}));
     }
     function tick() {
       clearTimeout(store.timer);
@@ -188,6 +196,7 @@ if (typeof module === 'object' && module.exports) {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)
       get ready() { return store.ready; },
+      get failed() { return store.failed === true; },  // the last read did not answer (the wall's error state)
       get windows() { return store.windows === true; },  // no live screen backend there: one-step helpers show their log (ORCH-1797)
       get(ref) { return store.list.find(x => x.id === ref || (x.key && String(x.key).toLowerCase() === String(ref || '').toLowerCase())) || null; },
       refresh: read,

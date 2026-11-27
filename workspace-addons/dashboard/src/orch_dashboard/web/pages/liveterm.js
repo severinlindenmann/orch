@@ -47,7 +47,8 @@ function liveTermFor(id, label, plain) {
   const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
     label, plain,
-    settingsHref: page ? '#settings/addons/' + encodeURIComponent(page) : null,  // ORCH-1600: the typing switch is there
+    // ORCH-1600: the typing switch is there; the plain terminal's is the owner's, in People (ORCH-1684)
+    settingsHref: page ? (plain ? '#settings/people' : '#settings/addons/' + encodeURIComponent(page)) : null,
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
     onTyping: async (on, byOther) => {
@@ -68,6 +69,7 @@ const liveTermTold = () => { if (typeof window === 'object' && typeof CustomEven
 if (typeof window === 'object') window.LiveTerm = {
   has: id => liveTerms.has(id),
   typing: id => !!liveTerms.get(id)?.ui.typing(),
+  send: liveTermSend,
   // typing for this session as soon as its stream allows it: now, or after a new hello (the setting was just turned on)
   want(id) {
     const t = liveTerms.get(id);
@@ -77,6 +79,21 @@ if (typeof window === 'object') window.LiveTerm = {
     liveTermClose(t, 0);  // the stream opens again on the next tick and says hello with the new setting
   },
 };
+// Types text (never Enter) into a session's terminal for "Run in terminal" (ORCH-2203): the session's pane shows its
+// terminal (opened or switched to Terminal), and once its stream says hello the text goes the way a key does
+// (/api/term/input: the sign-in and the typing setting are checked there). Resolves {ok, text}.
+async function liveTermSend(id, text, {wait = 6000, plain = false} = {}) {
+  if (!plain && typeof liveViewSet === 'function' && liveViewOf(id) !== 'term') liveViewSet(id, 'term');
+  if (plain && typeof window === 'object') window.LiveLayer?.open?.(id);
+  if (typeof liveLayerFill === 'function') liveLayerFill();
+  const until = Date.now() + wait;
+  let t = liveTerms.get(id);
+  while (!(t && t.es && t.page) && Date.now() < until) { await new Promise(r => setTimeout(r, 100)); t = liveTerms.get(id); }
+  if (!(t && t.es && t.page)) return {ok:false, text:'That terminal is not open yet. Open it and try again.'};
+  const r = await liveTermPost('/api/term/input', {ticket:id, data:text, page:t.page});
+  if (!r.ok) liveTermSay(r);
+  return r;
+}
 // Opens the session's stream (once; again after it closed and LIVE_TERM_RETRY passed).
 function liveTermOpen(id, t) {
   if (t.es || typeof EventSource !== 'function' || Date.now() < t.retry) return;
@@ -158,4 +175,4 @@ function liveTermTick() {
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   setInterval(liveTermTick, LIVE_TERM_EVERY);
 }
-if (typeof module === 'object' && module.exports) module.exports = {liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};
+if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};

@@ -38,15 +38,15 @@ const head = slice(ssrc, '// The add-on\'s name, the same', 'const asList');
 test('an add-on has the same display name on or off (never the lower-case package name)', () => {
   const c = load(settingsCtx(), head);
   for (const n of ['factory', 'insights', 'sync', 'publish', 'relay']) assert.equal(c.rowLabel({name: n, active: false}), capitalise(n));
-  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Relay'}}), 'Relay');
 });
 
-// ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
+// ORCH-141: the Settings list says the menu name (Publish, Relay), the same as the sidebar
 test('the Settings list row uses the menu name that the sidebar shows', () => {
   const c = load(settingsCtx(), head);
-  assert.equal(c.rowLabel({name: 'publish', label: 'Shared'}), 'Shared');
-  assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
-  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'publish', label: 'Publish'}), 'Publish');
+  assert.equal(c.rowLabel({name: 'relay', label: 'Relay'}), 'Relay');
+  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Relay'}}), 'Relay');
   assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
 });
 
@@ -194,20 +194,29 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
   assert.equal(find(mk({typing_on: true}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-typing')), null);
 });
 
-// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default
-test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
-  const mk = (settings) => {
-    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default. ORCH-1684: the
+// switch is the owner's, in People; the Focus page keeps only the helper's Typing, and says its description once
+test('the plain terminal switch sits in People, not on the Focus add-on page; the description shows once', () => {
+  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'Watch helpers work and answer them'};
+  const mk = (settings, list = [focus]) => {
+    const ctx = settingsCtx({addons: () => list, state: {look: null, settings}, heading: t => el('h1', {}, t)});
+    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()')
+      + '\n' + slice(ssrc, 'function terminalTypingCard(', 'function peoplePanel(') + '\nthis.page = addonDetailPage; this.card = terminalTypingCard;', ctx);
     return ctx;
   };
-  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};
-  const on = mk({typing_on: true, terminal_typing_on: false}).page(focus);
-  const sw = find(on, byKey('addon-detail-terminal-typing'));
+  const c = mk({typing_on: true, terminal_typing_on: false});
+  const page = c.page(focus);
+  assert.doesNotMatch(text(page), /plain terminal/, 'no plain terminal switch on the add-on page');
+  assert.ok(find(page, byKey('addon-detail-typing')), 'the helper switch stays as it was');
+  assert.equal(text(page).split('Watch helpers work and answer them').length, 2, 'the description shows once');
+  assert.equal(find(page, byKey('addon-about')), null, 'no About section that only repeats the description');
+  assert.match(text(c.page({name: 'relay', active: true, description: 'd', detail: {connected: true, address: 'https://relay.example'}})), /About this add-on.*Connection address: https:\/\/relay\.example/);
+  const card = c.card({typing_on: true, terminal_typing_on: false});
+  const sw = find(card, byKey('settings-terminal-typing-switch'));
   assert.equal(sw.props['data-action'], 'terminal-typing');
   assert.equal(sw.props['aria-checked'], false, 'helper typing on leaves the plain terminal off');
-  assert.match(text(find(on, byKey('addon-detail-terminal-typing-row'))), /Let me type into the plain terminal.*shell on this computer/);
-  assert.ok(find(on, byKey('addon-detail-typing')), 'the helper switch stays as it was');
-  assert.equal(find(mk({typing_on: true}).page(focus), byKey('addon-detail-terminal-typing')), null, 'an older core without the setting: no row');
-  assert.equal(find(mk({terminal_typing_on: true}).page({...focus, active: false}), byKey('addon-detail-terminal-typing')), null);
+  assert.match(text(card), /Plain terminal.*Let me type into the plain terminal.*shell on this computer.*Only the owner can change this/);
+  assert.equal(mk({}).card({typing_on: true}), null, 'an older core without the setting: no card');
+  assert.equal(mk({}, [{...focus, active: false}]).card({terminal_typing_on: true}), null, 'no add-on with live sessions on: no card');
+  assert.match(ssrc, /panel\('people', \[\.\.\.peoplePanel\(settings\), terminalTypingCard\(settings\)\]\)/);
 });

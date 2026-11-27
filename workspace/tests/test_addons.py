@@ -184,6 +184,8 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
         lambda t: t.replace('run = "orch_hello"', 'run = "os.path"'),
+        lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["unversioned"]'),
+        lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["test/1"]'),
         lambda t: t.replace("background = false", 'background = false\nsetup = "setup"'),
         lambda t: t.replace("background = false", 'background = false\nsetup = ["../x"]'),
     ],
@@ -1308,8 +1310,7 @@ def test_clean_init_shows_no_addon_commands(proj, run, capfd):
     )
     for name in ("publish", "relay", "dashboard", "automation"):
         assert f"orch-{name}" not in tree and f"orch {name}" not in tree
-    rows = {r["name"]: r["active"] for r in json.loads(run("addon", "list", "--json")[1])}
-    assert rows == {"publish": False, "relay": False}
+    assert json.loads(run("addon", "list", "--json")[1]) == []
     code, _, err = run("relay", "inbox")
     assert code == 2 and "Turn it on: orch addon add relay" in err
     code, _, err = run("publish", "whoami")
@@ -1320,6 +1321,32 @@ def test_clean_init_shows_no_addon_commands(proj, run, capfd):
     code, _, err = run("ask", t, "Ok?", "--phone")
     assert code == 2 and "orch addon add relay" in err
     assert json.loads(run("ticket", "show", t, "--json")[1])["questions"] == []  # nothing asked
+
+
+@pytest.mark.real_bundle
+@pytest.mark.parametrize("name,other", [("relay", "publish"), ("publish", "relay")])
+def test_core_client_listing_follows_activation(proj, run, name, other):
+    assert run("init")[0] == 0
+
+    def check_listing(on):
+        code, text, err = run("addon", "list")
+        assert code == 0, err
+        assert (name in text) == on and other not in text
+        code, raw, err = run("addon", "list", "--json")
+        assert code == 0, err
+        assert (name in raw) == on and other not in raw
+        rows = {r["name"]: r for r in json.loads(raw)}
+        if on:
+            assert rows[name]["active"] is True
+        catalog = json.loads(run("addon", "list", "--catalog", "--json")[1])
+        states = {r["name"]: r["active"] for r in catalog}
+        assert states[name] is on and states[other] is False
+
+    check_listing(False)
+    assert run("addon", "add", name, "--yes")[0] == 0
+    check_listing(True)
+    assert run("addon", "remove", name)[0] == 0
+    check_listing(False)
 
 
 def test_add_relay_and_publish_like_any_addon(proj, run, uv_calls, capfd):
@@ -1578,7 +1605,7 @@ def test_list_shows_shipped_addons_not_installed_yet(proj, run, tmp_path, monkey
     assert rows["factory"]["installed"] is False and rows["factory"]["active"] is False
     assert rows["factory"]["running"] is False and rows["factory"]["source"] == "built-in"
     assert rows["factory"]["description"] == "Says hello."
-    assert all(r["installed"] is True for n, r in rows.items() if n in addons.CORE_ADDONS)
+    assert rows.keys().isdisjoint(addons.CORE_ADDONS)
     text = run("addon", "list")[1]
     assert "Available" in text and "factory" in text.split("Available", 1)[1]
     assert "factory" not in text.split("Available", 1)[0]
@@ -1674,7 +1701,7 @@ def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
         {"name": "focus", "installed": True, "active": True, "description": "A live page"},
         {"name": "pull-requests", "installed": False, "active": False, "description": "Open pull requests"},
     ]
-    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "listing", lambda root, *, catalog: rows)
     code, out, _ = run("addon", "list")
     assert code == 0
     for r in rows:
@@ -1691,3 +1718,14 @@ def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
     for line in addons.help_lines(proj):
         assert line.split()[0] in manifests, line
     assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
+
+
+def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
+    act = {"who": "people"}
+    addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
+    with pytest.raises(Refused, match="Only a person"):
+        addons._people_only("x", act, "on", ["act", "on", "--by", "agent:a"])
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    with pytest.raises(Refused, match="Only a person"):
+        addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
+    addons._people_only("x", {"who": "anyone"}, "on", ["act", "on", "--by", "agent:a"])

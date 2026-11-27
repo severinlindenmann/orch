@@ -91,3 +91,19 @@ Home: the question is body text; answering moves the card out, the next one in, 
   between two starts, when nothing waits, or in a shared copy.
 
 - ORCH-1741 (owner 23 Nov, "39 things wait on you"): a ticket in Review whose pull request waits in the merge queue (or that a helper is repairing for the queue) is no result row and no count: one quiet line "N in the merge queue, nothing to do" under the list. It comes back as a result to check when the queue gives up on the pull request. A ticket never shows two rows: an open question or "passed its checks but was not merged" takes the place of its result row; the Check card also says why the Reviewer was not sure. Merged work with nothing open and a security review with an ok close by themselves.
+
+## Polish pass (25 Nov 2026, ORCH-2086)
+
+- The product now matches this page for the first question: answer tiles share the row (each at most 400 px, so 1920
+  is not stretched) with "Suggested" beside the answer, no extra "Needs you · Choose an answer" line under the
+  Needs you badge, and the quiet button under the tiles sits on the left edge at phone width.
+- Finished: the title, result and time sit close together (8 px), as drawn; links keep their 44 px touch area
+  without stretching the line. No change to this page's markup was needed.
+
+## 26 Nov 2026 (ORCH-2169, RP8 B, RP4)
+
+- Menu labels follow the owner's naming: "Relay" (was Contacts) and "Publish" (was Shared / Shared links).
+- Home needs area: one quiet notice line "New contact: Marketing, connected by your admin. Their messages are on the
+  Relay page." with source "Relay" and a quiet "OK" button (same row pattern as `need-notice`). Added because RP8 B
+  lets a contact the admin connected show up without a click. Relay task questions use the RP4 words
+  ("Allow this task", "Always allow tasks from <name>", "Decline"); see `relay/relay.html`.

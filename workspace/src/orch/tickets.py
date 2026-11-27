@@ -188,7 +188,8 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
-BROKEN_FIX = "fix the JSON by hand or restore it from git"
+# .orch/ is kept out of git (info/exclude), so git has no copy to restore (ORCH-2111): only advice that works.
+BROKEN_FIX = "fix the JSON by hand, or delete the file to drop the ticket"
 
 
 def broken_file(name: str) -> str:
@@ -498,8 +499,28 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+# R5.1: a shared file's key lives only in its link's fragment (`#k=<key>`, contracts/crypto.md). A ticket
+# keeps the link without the key (`#k=…`, as in contracts/review/ticket.example.json): tickets go to git,
+# other workspaces and the phone, the key never does.
+_LINK_KEY_RE = re.compile(r"#k=[A-Za-z0-9_-]{16,}")
+LINK_KEY_KEPT = "#k=\u2026"
+
+
+def drop_link_keys(obj):
+    """`obj` with the key of every shared link (`#k=<key>`) replaced by `#k=…`, changed in place."""
+    if isinstance(obj, str):
+        return _LINK_KEY_RE.sub(LINK_KEY_KEPT, obj) if "#k=" in obj else obj
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = drop_link_keys(v)
+    elif isinstance(obj, list):
+        obj[:] = [drop_link_keys(v) for v in obj]
+    return obj
+
+
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    drop_link_keys(ticket)
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
@@ -1170,6 +1191,7 @@ def create(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}}, "ticket")
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
@@ -1341,7 +1363,7 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         return f"{count} {word}" + ("" if count == 1 else "s")
 
     if n["failed"]:
-        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
+        line, level = f"{plural(n['failed'], 'task')} failed", "fail"
     elif n["changed"]:
         line, level = "Changes haven't been checked yet", "warn"
     elif uncovered:
@@ -1351,12 +1373,12 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         line = f'{noun} of "Done when" {"has" if one else "have"} no task'
         level = "warn"
     elif n["passed"] or n["note"]:
-        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+        bits = ([f"{plural(n['passed'], 'task')} with evidence"] if n["passed"] else []) + (
             [plural(n["note"], "note")] if n["note"] else []
         )
         line, level = " · ".join(bits), "ok" if n["passed"] else "note"
     else:
-        line, level = "No checks recorded", "note"
+        line, level = "No evidence yet", "note"
     return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
@@ -1370,11 +1392,12 @@ def _check_can_finish(ticket: dict) -> None:
 
 
 def _open_questions(ticket: dict) -> list[str]:
-    """Plain questions nobody answered yet (an add-on's own questions are its business)."""
+    """Plain questions nobody answered yet (an add-on's own questions are its business). Ideas left for later
+    (ORCH-2186, `left_from`) wait for the person without holding up the ticket."""
     return [
         q["id"]
         for q in ticket.get("questions") or []
-        if q.get("answer") is None and q.get("kind") in (None, "plain")
+        if q.get("answer") is None and q.get("kind") in (None, "plain") and not q.get("left_from")
     ]
 
 
@@ -1637,6 +1660,11 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away
             raise Refused(f"{qid} waits for the owner.")
         if q.get(autoreview.OWNER_ONLY):
             raise Refused(f"{qid} waits for the owner: they took it back from the Reviewer.")
+        if "said" in q:  # ORCH-2183: the quote is checked again on the fresh ticket
+            from orch import cardcontext
+
+            if cardcontext.stale(root, ticket, q) is not None:
+                raise Refused(f"{qid} waits for the owner: the words it quotes changed since.")
         rec = q.get("recommended")
         if not rec or rec not in q["options"]:
             raise Refused(f"{qid} has no recommended answer.")
@@ -1681,7 +1709,7 @@ def undo_reviewer_accept(root: Path, tid: str, by: str) -> dict:
         ticket.pop("human_review", None)
         add_history(ticket, by, "Status done -> review")
         add_history(ticket, by, autoreview.UNDONE_LINE + "the Reviewer's accept; back in Review for you, "
-                    "with Human review needed on.")  # fmt: skip
+                    "with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -1706,7 +1734,7 @@ def undo_reviewer_send_back(root: Path, tid: str, cid: str, by: str) -> dict:
         add_history(ticket, by, f"Status {was} -> review")
         what = _one_line(item.get("text"), 120)
         add_history(ticket, by, autoreview.UNDONE_LINE + f"the Reviewer's send-back ({what}); "
-                    "back in Review for you, with Human review needed on.")  # fmt: skip
+                    "back in Review for you, with “I review the result” on.")  # fmt: skip
 
     return apply_op(root, tid, op, by=by)[0]
 
@@ -2191,6 +2219,14 @@ def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
     return f"Quiet since {_when_words(at, now or datetime.now())}"
 
 
+def no_secret(root: Path, body, what: str) -> None:
+    """R5.2: text a person or agent writes into a ticket runs the one scanner (secretscan) first; a hit
+    refuses with the kind and the field, never the value, and nothing is written."""
+    from orch import secretscan
+
+    secretscan.refuse_if_secret_in(root, body, what, verb="saved")
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
     if key in PROTECTED_FIELDS:
@@ -2252,6 +2288,11 @@ def edit(
     fields = fields or {}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(
+        root,
+        {"title": title, **{k: v for k, v in fields.items() if isinstance(v, str)}},
+        "ticket",
+    )
 
     def op(ticket):
         if title is not None:
@@ -2302,8 +2343,8 @@ def human_review(ticket: dict) -> bool:
     return ticket.get("human_review") is not False
 
 
-HUMAN_REVIEW_ON = "Human review needed: on"
-HUMAN_REVIEW_OFF = "Human review needed: off"
+HUMAN_REVIEW_ON = "I review the result: on"
+HUMAN_REVIEW_OFF = "I review the result: off"
 
 
 def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int | None = None) -> dict:
@@ -2946,6 +2987,7 @@ def tidy(
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
+    no_secret(root, {"title": title, "description": description, **fields}, "ticket")
     more = _prepare_fields(root, tid, extra or {})
     kind_name = clean_kind(kind_name) if kind_name else None
 
@@ -3349,6 +3391,7 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
+    no_secret(root, {"summary": text}, "summary")
 
     def op(t):
         _set_field(t, "summary", text)
@@ -3378,6 +3421,7 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         clean[k] = v
     if not clean:
         raise Refused("Say what to record: --changed, --why or --not-included.")
+    no_secret(root, clean, "outcome")
 
     def op(ticket):
         out = dict(ticket.get("outcome") or {})
@@ -3445,6 +3489,7 @@ def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = Non
     if not text.strip():
         raise Refused("A checklist item needs text.")
     covers = _clean_covers(covers)
+    no_secret(root, {"text": text}, "task")
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
@@ -3596,10 +3641,11 @@ def check_done(
     proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
+        name = ticket.get("key") or tid
         raise Refused(
-            "A check is done only with evidence. Say what shows it, for example "
-            f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
-            "(also --pr, --commit, --file, --url)."
+            "A task is done only with evidence. Say what shows it, for example "
+            f'orch check done {name} {cid} --note "what you did" or --file <file> '
+            "(also --url, --command, --pr, --commit)."
         )
     refuse_secret_in_evidence(root, evidence)
     evs = [parse_evidence(e) for e in evidence]
@@ -3609,8 +3655,7 @@ def check_done(
         item = _item(t, cid)
         _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
-            ev.setdefault("by", by)
-            ev.setdefault("at", now())
+            ev["by"], ev["at"] = by, now()  # the core sets who and when, whatever the item says
         add_evidence(item, evs)
         item["done"] = True
         if proved:
@@ -3983,6 +4028,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
+    no_secret(root, {"text": text}, "history entry")
     return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
 
@@ -3993,6 +4039,7 @@ def ref_add(
 
     t = load(root, tid)
     value = refs.detect(root, t["id"], target, kind, title, kinds)
+    no_secret(root, {k: v for k, v in value.items() if isinstance(v, str)}, "reference")
     identity = {k: v for k, v in value.items() if k != "title" and (k != "kind" or "url" not in value)}
     added = True
     result = None
@@ -4404,8 +4451,24 @@ def ask(
     links: list[dict] | None = None,
     add_workspace: str | None = None,
     because: str | None = None,
+    if_wait: str | None = None,
+    facts: list[str] | None = None,
+    said: str | None = None,
+    due: str | None = None,
+    ideas: list[str] | None = None,
 ) -> tuple[dict, dict]:
-    """because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
+    """ideas (ORCH-2186, Focused review E): IDEAS_MIN to IDEAS_MAX one-line ideas the person sorts one by one
+    (Keep, Later or No) on Review; the question then has no --option. What is left for later comes back as a
+    smaller card (`left_from`) that never holds up the ticket.
+    due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
+    stored as UTC (`due`), shown as "Next deadline" on Review and counted when it passes unanswered
+    (attention.week).
+    said (ORCH-2183, Focused review B): a stable reference to a person's own words (a chat message id,
+    history:<at>, rules:<n>); orch copies the words, author and day from that record (orch/cardcontext.py) and
+    refuses a reference that is not a person's words. No reference, no quote.
+    if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
+    answers) and up to FACTS_MAX "What matters" lines. One line each; an empty one is left out, never guessed.
+    because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
     when it has one.
     card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
@@ -4430,8 +4493,17 @@ def ask(
             )
         if len(because) > BECAUSE_MAX:
             raise Refused(f"--because is one line of at most {BECAUSE_MAX} characters.")
+    if_wait = " ".join((if_wait or "").split()) or None
+    if if_wait and len(if_wait) > BECAUSE_MAX:
+        raise Refused(f"--if-wait is one line of at most {BECAUSE_MAX} characters.")
+    facts = [f for f in (" ".join(str(x or "").split()) for x in facts or []) if f] or None
+    if facts and len(facts) > FACTS_MAX:
+        raise Refused(f"Give at most {FACTS_MAX} --fact lines: the few that decide it.")
+    if facts and any(len(f) > BECAUSE_MAX for f in facts):
+        raise Refused(f"A --fact is one line of at most {BECAUSE_MAX} characters.")
     if kind is not None and not KIND_RE.fullmatch(kind):
         raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
+    ideas = clean_ideas(ideas, options, recommended, card) if ideas else None
     act = None
     if action is not None:
         try:
@@ -4450,11 +4522,27 @@ def ask(
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
+    no_secret(
+        root,
+        {
+            "text": text,
+            "options": list(options),
+            "recommended": recommended,
+            "because": because,
+            "if_wait": if_wait,
+            "facts": facts,
+            "ideas": ideas,
+        },
+        "question",
+    )
     for part in (
         text,
         *options,
         *([recommended] if recommended else []),
         *([because] if because else []),
+        *([if_wait] if if_wait else []),
+        *(facts or []),
+        *(ideas or []),
         *_labels(act),
     ):
         if _asks_for_secret(part):
@@ -4474,12 +4562,26 @@ def ask(
 
     preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
 
+    said_ref = (said or "").strip() or None
+    due_at = parse_time(due) if due and due.strip() else None
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
-            if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
+            if (
+                old["answer"] is None
+                and old["text"] == text.strip()
+                and old["options"] == list(options)
+                and old.get("ideas") == ideas
+            ):
                 return old
         if check is not None:
             _item(ticket, check)
+        quoted = None
+        if said_ref:  # copied from the record itself, on the locked ticket (ORCH-2183)
+            from orch import cardcontext
+
+            quoted = cardcontext.quote(root, ticket, said_ref)
+            no_secret(root, {"said": quoted["words"]}, "question")
         q = {
             "id": _next_id(ticket["questions"], "q"),
             "text": text.strip(),
@@ -4489,6 +4591,7 @@ def ask(
             "answered_by": None,
             "via": None,
             "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
+            "asked_by": by,  # ORCH-2023: who asked (the dashboard names it); older questions have none
         }
         if kind is not None:
             q["kind"] = kind
@@ -4498,6 +4601,16 @@ def ask(
             q["check"] = check
         if because:  # RULE A: only when given (old digests stay the same); part of what the person is shown
             q["because"] = because
+        if if_wait:  # RULE A, as because (ORCH-2182)
+            q["if_wait"] = if_wait
+        if facts:
+            q["facts"] = facts
+        if quoted:  # RULE A, as because (ORCH-2183)
+            q["said"] = quoted
+        if due_at:  # RULE A (ORCH-2184)
+            q["due"] = due_at
+        if ideas:  # RULE A (ORCH-2186)
+            q["ideas"] = ideas
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4519,6 +4632,56 @@ def ask(
 
 GROUP_MAX = 80
 BECAUSE_MAX = 200
+FACTS_MAX = 4
+IDEAS_MIN, IDEAS_MAX = 2, 12  # ORCH-2186: a list to sort, short enough to sort in one sitting
+
+
+def clean_ideas(ideas, options, recommended, card) -> list[str]:
+    """The ideas of `orch ask --idea` (ORCH-2186): one line each, no repeats, IDEAS_MIN to IDEAS_MAX of them,
+    never with --option, --recommend or a card (each idea gets its own Keep, Later or No)."""
+    if options or recommended or card is not None:
+        raise Refused(
+            "--idea goes with a plain question only (no --option, --recommend or card): "
+            "each idea gets Keep, Later or No."
+        )
+    out = [i for i in (" ".join(str(x or "").split()) for x in ideas) if i]
+    if not IDEAS_MIN <= len(out) <= IDEAS_MAX:
+        raise Refused(f"Give {IDEAS_MIN} to {IDEAS_MAX} --idea lines, one idea each.")
+    if any(len(i) > BECAUSE_MAX for i in out):
+        raise Refused(f"An --idea is one line of at most {BECAUSE_MAX} characters.")
+    if len({i.casefold() for i in out}) != len(out):
+        raise Refused("Each --idea once: two of them say the same.")
+    return out
+
+
+IDEAS_LEFT_COPY = ("text", "facts", "if_wait", "due", "said", "asked_by")
+
+
+def _ideas_left(ticket: dict, q: dict, decision: dict | None, by: str) -> str | None:
+    """ORCH-2186: the ideas the person left for later (or did not sort) come back as a smaller card on the
+    same ticket: the same question with only those ideas, marked `left_from`, so it never holds up the ticket
+    (the helper works on what was kept). Returns its id, or None when nothing is left."""
+    left = (decision or {}).get("ideas", {}).get("later") if isinstance(q.get("ideas"), list) else None
+    if not left:
+        return None
+    n = {
+        "id": _next_id(ticket["questions"], "q"),
+        **{k: q[k] for k in IDEAS_LEFT_COPY if q.get(k) is not None},
+        "options": [],
+        "recommended": None,
+        "answer": None,
+        "answered_by": None,
+        "via": None,
+        "asked_at": now(),
+        "ideas": list(left),
+        "left_from": q["id"],
+    }
+    ticket["questions"].append(n)
+    k = len(left)
+    add_history(ticket, by, f"{k} idea{'' if k == 1 else 's'} left for later: {n['id']}")
+    return n["id"]
+
+
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -4533,6 +4696,11 @@ def question_digest(q) -> str:
         "shown",
         "links",
         "because",
+        "if_wait",
+        "facts",
+        "said",
+        "due",
+        "ideas",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
@@ -4686,6 +4854,7 @@ def answer(
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
+    no_secret(root, {"answer": text}, "answer")
 
     person_click = by.startswith("human:") and (via != "cli" or not agent_tool())
 
@@ -4724,6 +4893,7 @@ def answer(
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
+        _ideas_left(ticket, q, decision, by)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
         # A click on the dashboard or a phone is a person even when that server was started from a helper's
         # session (its environment then shows an agent tool, which only says who runs the CLI). #1354.
@@ -4803,7 +4973,7 @@ def record_answered(
     root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None, person: bool = False
 ) -> dict:
     """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
-    a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
+    a Test results card, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
     decision.replaced_by. One apply_op, one history line "Answered <qid>: <summary>"."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")

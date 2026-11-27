@@ -76,13 +76,29 @@ def _needs(args, root):
     return 0
 
 
+def _week(args, root):
+    """`orch insights week`: the last 7 days from ticket history; --json is the answer the page reads."""
+    from . import weekly
+
+    try:
+        answer = weekly.collect(root)
+    except Exception:  # noqa: BLE001 - an unreadable ticket store is said in one line, never a trace
+        print(json.dumps({"error": weekly.ERROR}) if args.json else weekly.ERROR + " Run `orch doctor`.")
+        return 2
+    print(json.dumps(answer, ensure_ascii=False) if args.json else weekly.text(weekly.view(answer)))
+    return 0
+
+
 def _checkup(args, root):
     """`orch insights checkup <verb>` and `orch insights propose`: the same code the dashboard calls (via this CLI)."""
     from . import checkup_core as cc
 
     try:
         if args.cmd == "propose":
-            draft = json.loads(args.draft if args.draft is not None else sys.stdin.read(1_000_000))
+            try:
+                draft = json.loads(args.draft if args.draft is not None else sys.stdin.read(1_000_000))
+            except ValueError:
+                raise cc.CheckupError("The proposal is not valid JSON.", "invalid") from None
             res = cc.propose(root, draft)
         else:
             verb = args.verb
@@ -96,11 +112,18 @@ def _checkup(args, root):
                 "reject": lambda: cc.reject(root, args.id),
                 "weekly": lambda: cc.weekly(root, args.state == "on"),
             }[verb]()
-    except ValueError:
-        res = None
-        error = cc.CheckupError("The proposal is not valid JSON.", "invalid")
     except cc.CheckupError as e:
         res, error = None, e
+    except OSError:  # a read-only or locked .orch/insights folder: a plain refusal, never a traceback
+        res = None
+        error = cc.CheckupError(
+            "The .orch/insights folder cannot be written; make it writable and try again.", "not_available"
+        )
+    except ValueError:  # an unreadable file there; never reported as a bad proposal
+        res = None
+        error = cc.CheckupError(
+            "A file in .orch/insights cannot be read; check it and try again.", "not_available"
+        )
     if res is None:
         print(json.dumps({"error": str(error), "code": error.code}) if args.json else f"Refused: {error}")
         return 2
@@ -133,6 +156,8 @@ def main(argv=None):
     pr = commands.add_parser("propose", help="a check-up run sends one proposal (JSON)")
     pr.add_argument("--draft")
     pr.add_argument("--json", action="store_true")
+    week = commands.add_parser("week", help="the last 7 days: tickets done, stuck now, time to done")
+    week.add_argument("--json", action="store_true")
     needs = commands.add_parser("needs", help="rows for `orch needs`")
     needs.add_argument("--json", action="store_true")
     for name in ("start", "stop", "status", "open"):
@@ -151,6 +176,8 @@ def main(argv=None):
         return _checkup(args, root)
     if args.cmd == "needs":
         return _needs(args, root)
+    if args.cmd == "week":
+        return _week(args, root)
     try:
         return _serve(args, root) if args.cmd == "serve" else _manage(args, root)
     except (RuntimeError, OSError) as error:

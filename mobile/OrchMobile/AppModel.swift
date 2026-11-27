@@ -17,6 +17,12 @@ final class AppModel {
     private(set) var credentials: Credentials?
     private(set) var invite: PairingLink?
     private(set) var inviteState: InviteState = .none
+    /// An invitation opened while this phone is already paired: the Add workspace confirmation takes it (ORCH-2127).
+    private(set) var incomingInvite: PairingLink?
+    /// An Add workspace sheet is on screen (it takes `incomingInvite` itself; the Chats list then opens no second one).
+    @ObservationIgnored var addWorkspaceOpen = false
+    /// Invitation codes being redeemed right now: one code goes to the server once, even on a double tap.
+    @ObservationIgnored private var redeeming: Set<String> = []
     private(set) var pairedWorkspaces: [WorkspaceRef] = []
 
     // Data
@@ -113,6 +119,10 @@ final class AppModel {
 
     private let outboxDirectory: URL
     private let defaults: UserDefaults
+    private let credentialStore: any CredentialStore
+    /// The last credential read failed without saying the pairing is gone: queue and snapshot are kept, and the next
+    /// refresh or return to the app reads again.
+    private(set) var credentialsUnavailable = false
     /// Last known lists on disk (LocalSnapshot.swift): shown at launch before the first refresh answers.
     private let snapshotURL: URL
     /// Rows came from the snapshot: the Chats list shows them instead of the loading skeleton while the first refresh runs.
@@ -124,12 +134,14 @@ final class AppModel {
     /// The Chats list shows the loading placeholder only when there is nothing to show yet.
     var showsLoadingPlaceholder: Bool { !hasLoaded && !restoredFromSnapshot }
     static let installedMarkerKey = "installedMarker"
-    static let pairAgainMessage = "This phone needs to be paired again. Open the invitation from your computer to connect."
+    static let credentialsUnavailableMessage = "orch can't read this phone's sign-in right now. Unlock your iPhone, then open orch again."
+    static let credentialsNotSavedMessage = "This iPhone couldn't save its sign-in, so setup did not finish. Restart your iPhone, then open a new invitation."
+    static let pairAgainMessage = "This phone needs to be paired again. Ask the person who invited you for a new invitation."
 
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
          voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
          speechCache: URL = SpeechPlayer.defaultCacheDirectory, systemAudioControls: Bool = true,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard, credentialStore: any CredentialStore = KeychainCredentials()) {
         self.useMock = useMock
         self.personCheck = useMock ? .always : .device
         self.trust = useMock ? .memory() : .keychain
@@ -139,28 +151,76 @@ final class AppModel {
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
         self.defaults = defaults
+        self.credentialStore = credentialStore
         self.snapshotURL = LocalSnapshotStore.url(besideOutbox: outboxDirectory)
+        var read = credentialStore.read()
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
-        if !defaults.bool(forKey: AppModel.installedMarkerKey) {
-            Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
+        // A failed read says nothing about a fresh install (the app may have been woken before the first unlock): keep all.
+        if !defaults.bool(forKey: AppModel.installedMarkerKey), !read.isUnavailable {
+            credentialStore.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
             defaults.removeObject(forKey: "pairedPhoneId")
             defaults.set(true, forKey: AppModel.installedMarkerKey)
+            read = .missing
         }
-        let creds = Keychain.load()
+        let creds = read.credentials
+        // Unreadable credentials: the queue stays with the phone id it was paired as. An unknown owner opens nothing,
+        // so no queued item is dropped as "another phone's".
+        let owner = creds?.phoneId ?? (read.isUnavailable ? defaults.string(forKey: "pairedPhoneId") ?? "" : "")
         // Every stored property is set first; only then is `self` used (the Observation macros need that).
         let holder = ClientHolder()
-        let box = Outbox(directory: outboxDirectory, phone: creds?.phoneId ?? "")
+        let box = Outbox(directory: outboxDirectory, phone: owner)
         self.outbox = box
         self.speech = SpeechPlayer(fetch: { id, lang in try await holder.client().speech(messageId: id, lang: lang) },
                                    cacheDirectory: speechCache, systemControls: systemAudioControls)
-        if let c = creds { credentials = c; phase = .ready; if !useMock { TrustStore.savePhoneId(c.phoneId) } } else { box.wipe() }
-        if creds == nil, defaults.object(forKey: "pairedPhoneId") != nil {
-            message = AppModel.pairAgainMessage
-            defaults.removeObject(forKey: "pairedPhoneId")
-        }
         holder.make = { [weak self] in self?.client }
-        if let c = creds { restoreSnapshot(phoneId: c.phoneId) } else { LocalSnapshotStore.delete(at: snapshotURL) }
+        switch read {
+        case .found(let c):
+            credentials = c; phase = .ready; if !useMock { TrustStore.savePhoneId(c.phoneId) }
+            restoreSnapshot(phoneId: c.phoneId)
+        case .unavailable:
+            // Known owner: the last rows and the queue stay on screen. Unknown: the welcome screen, nothing wiped.
+            credentialsUnavailable = true; message = AppModel.credentialsUnavailableMessage
+            if !owner.isEmpty { phase = .ready; restoreSnapshot(phoneId: owner) }
+        case .missing:
+            box.wipe()
+            if defaults.object(forKey: "pairedPhoneId") != nil {
+                message = AppModel.pairAgainMessage
+                defaults.removeObject(forKey: "pairedPhoneId")
+            }
+            LocalSnapshotStore.delete(at: snapshotURL)
+        }
+    }
+
+    /// Reads the credentials again after an unavailable read (refresh, back in the app). Found: carry on with the same
+    /// queue and rows. Missing now: a real sign-out, handled like one at launch. Still unavailable: keep waiting.
+    func reloadCredentialsIfNeeded() {
+        guard credentialsUnavailable else { return }
+        let read = credentialStore.read()
+        if read.isUnavailable { return }
+        credentialsUnavailable = false
+        if !defaults.bool(forKey: AppModel.installedMarkerKey) {
+            // The launch could not tell a fresh install apart; now it can: drop the stale pairing quietly, as at launch.
+            credentialStore.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
+            reset()
+            defaults.set(true, forKey: AppModel.installedMarkerKey)
+            return
+        }
+        switch read {
+        case .unavailable: return
+        case .found(let c):
+            credentials = c; phase = .ready
+            if !useMock { TrustStore.savePhoneId(c.phoneId) }
+            defaults.set(c.phoneId, forKey: "pairedPhoneId")
+            if outbox.phone != c.phoneId { outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
+            if !hasLoaded && !restoredFromSnapshot { restoreSnapshot(phoneId: c.phoneId) }
+            if message == AppModel.credentialsUnavailableMessage { message = nil }
+        case .missing:
+            let paired = defaults.object(forKey: "pairedPhoneId") != nil
+            PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
+            reset()
+            if paired { message = AppModel.pairAgainMessage }
+        }
     }
 
     /// Cold launch: the last known rows, set through the normal setters (revision, groups) before the first frame.
@@ -363,7 +423,13 @@ final class AppModel {
     // MARK: Onboarding
 
     /// An `orch://pair?…` link (opened from the admin portal, pasted or scanned).
+    /// On a paired phone it only holds the link for the Add workspace confirmation: the pairing stays as it is.
     func openInvite(_ text: String) {
+        if credentials != nil {
+            guard let link = try? PairingLink(text) else { message = RelayError.badLink.localizedDescription; return }
+            incomingInvite = link; message = nil
+            return
+        }
         do {
             let link = try PairingLink(text)
             invite = link; inviteState = .found(host: link.host); message = nil; inviteNeedsReplacement = false
@@ -371,6 +437,15 @@ final class AppModel {
     }
 
     func openSampleInvite() { openInvite(PairingLink.sample.link) }
+
+    /// The Add workspace sheet takes the opened invitation; closing the sheet without Add drops it unused.
+    func takeIncomingInvite() -> PairingLink? { defer { incomingInvite = nil }; return incomingInvite }
+
+    /// The invitation is for the server this phone is paired with (only then may its code be sent).
+    func isForPairedServer(_ link: PairingLink) -> Bool {
+        guard let relay = credentials?.relay else { return false }
+        return IncomingInvite.sameOrigin(link.relay, relay)
+    }
 
     /// Drops the current invitation and goes back to scan / paste.
     func clearInvite() { invite = nil; inviteState = .none; inviteNeedsReplacement = false; message = nil }
@@ -383,7 +458,14 @@ final class AppModel {
             let key = try PhoneKey.makeNew()
             let r = try await client.pair(code: invite.code, name: phoneName, publicKey: PhoneKey.publicKeyText(key))
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
-            Keychain.save(c); credentials = c
+            guard credentialStore.save(c) else {
+                // The relay has used the code; without a stored token this phone can't sign in, so setup stops here.
+                PhoneKey.delete()
+                inviteState = .found(host: invite.host); inviteNeedsReplacement = true
+                message = AppModel.credentialsNotSavedMessage; errorTick += 1; announcement = message
+                return
+            }
+            credentials = c; credentialsUnavailable = false
             if !useMock { TrustStore.savePhoneId(c.phoneId) }   // the notification extension checks "for this phone"
             defaults.set(c.phoneId, forKey: "pairedPhoneId")
             if outbox.phone != c.phoneId { LocalSnapshotStore.delete(at: snapshotURL); outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
@@ -394,7 +476,7 @@ final class AppModel {
             inviteState = .found(host: invite.host)
             if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
                 inviteNeedsReplacement = true
-                message = "This invitation has expired or was already used. Create a new one in orch on your computer."
+                message = InviteWording.expired
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."
             } else { message = error.localizedDescription }
@@ -430,6 +512,7 @@ final class AppModel {
 
     /// `quiet`: the periodic refresh must not flip `isLoading`.
     func refresh(retry: Bool = true, quiet: Bool = false) async {
+        reloadCredentialsIfNeeded()
         guard phase == .ready || phase == .notifyStep, credentials != nil else { return }
         if !quiet { isLoading = true }
         defer { if !quiet { isLoading = false } }
@@ -753,7 +836,15 @@ final class AppModel {
                 takenBackRefused.insert(qid); applyTakenBack()
                 message = text; errorTick += 1; announcement = text
             case .sent: sendTick += 1; announcement = "Message sent"
-            case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
+            case .failed(let cid, let status, _):
+                // ORCH-1942: never the relay's own text; the bubble keeps the sentence after this goes.
+                let item = outbox.item(clientId: cid)
+                if item?.kind == .answer { message = NotSentNote.answer; announcement = NotSentNote.answer }
+                else {
+                    message = NotSentNote.banner(workspace: item.flatMap { workspace($0.workspace) }.map { displayName($0.name) })
+                    announcement = NotSentNote.spoken(NotSentNote.text(status: status))
+                }
+                errorTick += 1
             case .unauthorized: handle(RelayError.unauthorized)
             case .throttled: announcement = "Try again later"
             case .offline: break
@@ -803,6 +894,10 @@ final class AppModel {
     /// Group sends explicitly opt into fan-out; plain sends strip group-copy quotes first.
     func sendInternal(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
+        // ORCH-2125: only a written index survives a relaunch. Until then the composer's copy is the only safe one.
+        if await !outbox.waitUntilSaved(item.clientId), outbox.holdUnsaved(item.clientId, target: target) {
+            throw Outbox.SaveProblem.notSaved
+        }
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }
         // Already listed by the relay (so removed from the outbox): report it as sent.
@@ -818,7 +913,10 @@ final class AppModel {
         guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me else { return }
-        if events.contains(.offline) { transportDown = true; announcement = "No connection. The message waits on this phone." }
+        if events.contains(.offline) {
+            transportDown = true
+            announcement = outbox.lastSaveError == nil ? "No connection. The message waits on this phone." : "No connection."
+        }
         await handle(events)
         if events.contains(where: { if case .sent = $0 { true } else { false } }) { await reloadMessages(); await refreshUpdates() }
     }
@@ -952,14 +1050,18 @@ final class AppModel {
     /// An `orch://pair?...` link opened while already paired: adds its workspaces to this phone. Returns the added workspaces.
     @discardableResult
     func redeemInvitation(_ text: String) async -> [WorkspaceRef] {
+        guard let link = try? PairingLink(text) else { message = RelayError.badLink.localizedDescription; return [] }
+        // Never forward a code to a server it was not made for.
+        guard isForPairedServer(link) else { message = IncomingInvite.otherServer; return [] }
+        guard redeeming.insert(link.code).inserted else { return [] }
+        defer { redeeming.remove(link.code) }
         do {
-            let link = try PairingLink(text)
             let r = try await client.redeem(code: link.code)
             await refresh()
             return r.workspaces
         } catch {
-            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Create a new one in orch on your computer." }
-            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Create a new one in orch on your computer." }
+            if case RelayError.api(let status, _, _) = error, status == 410 { message = InviteWording.expired }
+            else if case RelayError.api(let status, _, _) = error, status == 404 { message = InviteWording.notValid }
             else { handle(error) }
             return []
         }
@@ -1056,7 +1158,7 @@ final class AppModel {
 
     func signOut() async {
         try? await client.signOut()
-        Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
+        credentialStore.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }
         reset()
     }
 
@@ -1071,7 +1173,7 @@ final class AppModel {
         readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
-        held = [:]; notValid = [:]; credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
+        held = [:]; notValid = [:]; credentials = nil; invite = nil; inviteState = .none; incomingInvite = nil; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
@@ -1080,7 +1182,7 @@ final class AppModel {
         if case RelayError.unauthorized = error {
             if credentials == nil && phase == .onboarding { return }   // already signed out by an earlier 401: keep its message
             let lost = SignOutWording.notSent(outbox.items)   // the reset wipes them: say so instead of losing them silently
-            Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset()
+            credentialStore.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset()
             message = SignOutWording.revoked(notSent: lost)
         }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
@@ -1093,7 +1195,7 @@ final class AppModel {
     func seedIfRequested() async {
         let d = UserDefaults.standard
         path = []   // a cold start always lands on the Chats list; only a push or `-open` below opens something
-        if d.bool(forKey: "resetState") { Keychain.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset() }
+        if d.bool(forKey: "resetState") { credentialStore.delete(); PhoneKey.delete(); trust.clear(); if !useMock { TrustStore.savePhoneId(nil) }; reset() }
         #if DEBUG
         // Signed-push check in the Simulator (scripts/signed-push-check.sh, ORCH-1296): the notification extension reads
         // the accepted key and the phone id from the shared keychain, also when the app runs on the mock relay.

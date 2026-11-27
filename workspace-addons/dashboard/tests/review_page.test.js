@@ -41,7 +41,7 @@ test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
   for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png', 'artifacts/../x.png', 'evidence/a/../../x.png', 'evidence/.orch/x.png', 'secrets/x.png', 'evidence/a\\b.png']) assert.equal(f(CARD, bad), '', String(bad));
   assert.equal(f({}, 'reviewed/0123456789ab/after.png'), '');
 });
-test('a Check result opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
+test('a Test results card opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
   const f = ctx({}).reviewApi().fileUrl;
   assert.equal(f(CARD, 'evidence/shop photo.png'), '/api/file?t=t_abcdef&k=evidence&n=shop%20photo.png');
   assert.equal(f(CARD, 'artifacts/out/poster.pdf'), '/api/file?t=t_abcdef&k=artifacts&n=out%2Fposter.pdf');
@@ -102,6 +102,15 @@ test('the page keeps its host and side list out of the reconcile (mounted once),
   assert.equal(calls.length, 1, 'mounted once'); assert.equal(calls[0].poll, 3000); assert.equal(typeof calls[0].onChange, 'function');
   assert.ok(c.mounts.has(host) && c.mounts.has(side));
   c.mounts.get(host).destroy(); assert.equal(calls.at(-1), 'destroy');
+});
+test('ORCH-2182: the page passes the decision-first switch to the deck, read from the settings at each draw', () => {
+  const calls = [];
+  const c = ctx({settings:{decision_first_on:false}}, {window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), side = h('aside'), queue = h('div');
+  c.mountReview({querySelectorAll: sel => sel === '[data-review-host]' ? [host] : sel === '[data-review-side]' ? [side] : [], querySelector: () => queue});
+  assert.equal(calls[0].decisionFirst(), false);
+  c.state.settings.decision_first_on = true;
+  assert.equal(calls[0].decisionFirst(), true);
 });
 // ---- Home and ticket ----
 function home(state, tickets = [], rows = []) {
@@ -240,12 +249,13 @@ test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)'
   const cardNode = c.reviewAutoCard();
   assert.match(text(cardNode), /^Auto Reviewer/);
   const sw = nodes(cardNode).filter(n => n.attrs?.role === 'switch');
-  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true]]);
+  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true], ['reviewer-mode-set', false]]);
   const rail = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
   assert.ok(nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
   await c.reviewSwitch('auto');
   await c.reviewSwitch('away');
-  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
+  await c.reviewSwitch('propose');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}], ['reviewer_mode.set', {on:true}]]);
   assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
   const snap = ctx({settings:{away_on:true}}, {snapshot:true});
   assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
@@ -262,7 +272,7 @@ test('Auto Reviewer: hidden on Review until a switch is on in Settings; plain wo
   const set = off.autoReviewerCard();
   assert.equal(set.attrs['data-key'], 'settings-auto-reviewer');
   assert.deepEqual(nodes(set).filter(n => n.attrs?.role === 'switch').map(n => [n.attrs['data-key'], n.attrs['data-action'], n.attrs['aria-checked']]),
-    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false]]);
+    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false], ['settings-switch-propose', 'reviewer-mode-set', false]]);
   const words = text(set);
   assert.match(words, /shows in the ticket\u2019s history, and you can undo it/);
   for (const w of ['Words, names', 'deploy', 'recommendation']) assert.ok(!words.includes(w), 'no orch-only word: ' + w);

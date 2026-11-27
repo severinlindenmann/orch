@@ -84,11 +84,12 @@ struct URLSessionRelayClient: RelayAPI {
     private struct ErrorBody: Decodable { let error: String?; let message: String? }
 
     private func request(_ method: String, _ path: String, body: (any Encodable)? = nil, auth: Bool = true,
-                         raw: (data: Data, type: String)? = nil, file: (url: URL, type: String)? = nil, accept: String = "application/json") async throws -> Data {
+                         raw: (data: Data, type: String)? = nil, file: (url: URL, type: String)? = nil, accept: String = "application/json",
+                         keepURLError: Bool = false) async throws -> Data {
         var req = URLRequest(url: URL(string: path, relativeTo: base)!.absoluteURL)
         req.httpMethod = method
         req.setValue(accept, forHTTPHeaderField: "Accept")
-        if auth, let c = credentials {
+        if auth, let c = credentials, RelayURL.isSafe(base) {
             req.setValue(c.phoneId, forHTTPHeaderField: "X-Orch-Phone")
             req.setValue("Bearer \(c.token)", forHTTPHeaderField: "Authorization")
         }
@@ -105,9 +106,10 @@ struct URLSessionRelayClient: RelayAPI {
         do {
             if let file {
                 req.setValue(file.type, forHTTPHeaderField: "Content-Type"); req.timeoutInterval = 120
-                (data, resp) = try await session.upload(for: req, fromFile: file.url)
-            } else { (data, resp) = try await session.data(for: req) }
+                (data, resp) = try await session.upload(for: req, fromFile: file.url, delegate: RelayRedirects.guardian)
+            } else { (data, resp) = try await session.data(for: req, delegate: RelayRedirects.guardian) }
         }
+        catch let e as URLError where keepURLError { throw e }   // the Outbox tells "never reached" from "maybe stored" (ORCH-2126)
         catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if (200..<300).contains(status) { return data }
@@ -142,7 +144,7 @@ struct URLSessionRelayClient: RelayAPI {
         try JSONCoding.decoder.decode(ListResponse<TicketUpdate>.self, from: try await request("GET", "/v1/phone/updates")).items
     }
     func answer(_ r: AnswerRequest) async throws -> SendReceipt {
-        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/answer", body: r))
+        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/answer", body: r, keepURLError: true))
     }
     func send(_ r: SendRequest) async throws -> SendReceipt {
         try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/send", body: r))
@@ -202,12 +204,12 @@ struct URLSessionRelayClient: RelayAPI {
     func signOut() async throws { _ = try await request("POST", "/v1/phone/signout") }
     func blob(id: String) async throws -> Data {
         guard BlobID.isValid(id) else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
-        guard let c = credentials else { throw RelayError.unauthorized }
+        guard let c = credentials, RelayURL.isSafe(base) else { throw RelayError.unauthorized }
         var req = URLRequest(url: URL(string: "/v1/phone/blobs/\(id)", relativeTo: base)!.absoluteURL)
         req.setValue(c.phoneId, forHTTPHeaderField: "X-Orch-Phone")
         req.setValue("Bearer \(c.token)", forHTTPHeaderField: "Authorization")
         let bytes: URLSession.AsyncBytes, resp: URLResponse
-        do { (bytes, resp) = try await session.bytes(for: req) } catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
+        do { (bytes, resp) = try await session.bytes(for: req, delegate: RelayRedirects.guardian) } catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw RelayError.api(status: status, code: "error", message: "Image not available.") }
         if resp.expectedContentLength > Int64(BlobID.maxBytes) { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }
@@ -217,6 +219,23 @@ struct URLSessionRelayClient: RelayAPI {
             if d.count > BlobID.maxBytes { throw RelayError.api(status: 413, code: "too_large", message: "Image too large.") }   // stop reading
         }
         return d
+    }
+}
+
+/// The token is sent as a header, and URLSession keeps headers on a redirect: a redirect may only stay on the same
+/// relay (same host and port) over a safe URL; anything else is not followed and the 3xx comes back as an error.
+final class RelayRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    static let guardian = RelayRedirects()
+
+    static func allows(from original: URL?, to target: URL?) -> Bool {
+        guard let original, let target, RelayURL.isSafe(target) else { return false }
+        return original.host?.lowercased() == target.host?.lowercased() && original.port == target.port
+            && (target.scheme?.lowercased() == "https" || original.scheme?.lowercased() == target.scheme?.lowercased())
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        Self.allows(from: task.originalRequest?.url, to: request.url) ? request : nil
     }
 }
 

@@ -66,7 +66,7 @@ focus-v4d.html stays the source of truth; nothing in the draft changed. The bar 
 sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
 line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
 when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
-("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+("Helper · Opus · open 38 min · stays open while it works"), updated in place every 3 s. The wall builds on the same
 list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
 guide: Live layer); click-through step 16.
 
@@ -113,6 +113,14 @@ the layer, then the wall. Not in this task: the pin button on a tile and renamin
 session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
 steps 4, 5, 8 and 11.
 
+## A search reaches a folded band (ORCH-2063, 25 Nov)
+
+The draft and the wall now agree on a search with folded bands: a folded band that holds a match opens by itself while
+the search runs (its chevron and `aria-expanded` follow what is on screen), so the match is visible and the next Tab
+stops on it. A fold click during the search counts for that search only; clearing the search brings back the folds the
+person saved, and their saved choice never changes. A long one-line title ends in an ellipsis instead of running over
+the line. No new control, no second search field.
+
 ## Pin and rename, built (ORCH-361, 18 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus every wall tile and
@@ -148,3 +156,26 @@ Terminal view of a pane shows the helper's log (its last lines, the master `.liv
 "On Windows helpers run in one step; the live screen is not there yet. This is the helper's log." Mockup state:
 `focus-v4d.html?page=focus&view=zoom&term=1&win=1`. Built: `orch run screen` and the live sessions API give a one-step
 run's log lines (redacted); `pages/liveterm.js` shows them instead of an empty terminal. No new component.
+
+## Wall polish: states, keyboard order, needs-you mark (ORCH-2106, 25 Nov)
+
+A pass over the built wall against this mockup and the master. The wall's states are the master empty state (kit
+`UI.state`) under the filter, each with one next step: loading is three tile-shaped skeletons (no "Reading the
+sessions…" line, and no "0 sessions" total while it loads); a sessions API that does not answer before the first list
+says "The sessions did not load" with Try again (before, the wall loaded for ever); no sessions says "No sessions yet";
+a filter that finds nothing has Clear filter, which puts the keyboard back in the filter. The summary, the filter and
+the bands now sit in that order in the page too, so Tab reaches the filter before the tiles (it came after every tile).
+An idle or no-session entry that asks carries the ◆ needs-you mark, as the summary counts it. At phone width the start
+buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
+a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
+same order); click-through steps 4, 5, 8, 30.
+
+## Focus after ship: Open chips, words on the phone bar, plain words (ORCH-1684, 25 Nov)
+
+The product bar now has the Open group of this draft: every session open in the layer that has no chip of its own
+(not needs you, not pinned) gets a chip, also a pane with no room in the panel (Add beside at 1280, or a quiet pane
+folded while the page has cards to answer; its tooltip "Not in sight in the panel: click to show it"). The "Room for 2
+sessions here, so … waits on the bar" line is said to a screen reader only, no toast over the page's cards. On a phone
+and beside the right dock each count keeps a short word ("2 need you", "3 working", "1 in line"); only the narrowest
+fold is the numbers alone (`BL` 4 here, `data-fold` 5 in the product, each still named). Words: "stays open while it
+works", "closed, you can continue it later" (no "stays warm", no "the conversation is kept").

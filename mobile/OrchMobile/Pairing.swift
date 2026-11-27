@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`
 struct PairingLink: Equatable, Sendable {
@@ -13,7 +14,7 @@ struct PairingLink: Equatable, Sendable {
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
               let relayText = items.first(where: { $0.name == "relay" })?.value,
               let relay = URL(string: relayText), let host = relay.host, !host.isEmpty,
-              ["https", "http"].contains(relay.scheme ?? ""),
+              RelayURL.isSafe(relay),
               let code = items.first(where: { $0.name == "code" })?.value,
               code.hasPrefix("pc_"), code.count > 6
         else { throw RelayError.badLink }
@@ -29,15 +30,34 @@ struct PairingLink: Equatable, Sendable {
     }
 }
 
-/// One wording for where an invitation comes from, used on every invitation screen.
+/// Where the phone may send its token. ATS does not cover IP addresses or `.local` names, so the app checks itself:
+/// https only, plain http just for this device's own loopback (the Simulator e2e talks to a local relay).
+enum RelayURL {
+    static func isSafe(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return ["127.0.0.1", "localhost", "::1"].contains(host)
+        default: return false
+        }
+    }
+}
+
+/// One wording for where an invitation comes from, used on every invitation screen (setup and Add workspace).
+/// A recipient gets a new invitation from the person who invited them; only the admin can create one (Add phone on
+/// the relay admin page), so those steps are kept apart and named for the admin.
 enum InviteWording {
-    static let source = "You get an invitation from orch on your computer."
-    static let stepsTitle = "Get an invitation"
+    static let source = "Ask the person who set up orch for you to send an invitation."
+    static let stepsTitle = "If you are the admin"
     static let steps = [
-        "On your computer, open the orch portal. orch must be set up and running there.",
-        "Choose Add phone and pick the workspaces you want on this phone.",
+        "Open the relay admin page on your private network.",
+        "Choose Add phone and pick the workspaces for this phone.",
         "Scan the QR code it shows, or send the link to this phone and paste it here.",
     ]
+    static let askForNew = "Ask the person who invited you for a new one."
+    static let expired = "This invitation has expired or was already used. \(askForNew)"
+    static let notValid = "This invitation is not valid. \(askForNew)"
+    static let badLink = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
 }
 
 /// Why the QR scanner cannot scan.
@@ -50,5 +70,15 @@ enum ScannerProblem: Equatable {
         case .noCamera: "This device has no camera. Paste the link instead."
         case .failed: "The camera didn't start. Close and try again, or paste the link instead."
         }
+    }
+}
+
+/// Reads an invitation link from the clipboard. A valid one is taken off the clipboard right away: the code works
+/// once, and leaving it there lets other apps (and Universal Clipboard on nearby devices) read it.
+enum InvitePaste {
+    @MainActor static func take(from pasteboard: UIPasteboard = .general) -> String? {
+        guard let value = pasteboard.string, (try? PairingLink(value)) != nil else { return nil }
+        if pasteboard.string == value { pasteboard.items = [] }
+        return value
     }
 }

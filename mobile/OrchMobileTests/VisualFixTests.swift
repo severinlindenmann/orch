@@ -47,6 +47,31 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(VoiceLoadResult.from(blobId: "b1", data: Data([1]), loaded: true), .loaded)
     }
 
+    /// ORCH-2064: the play button's label is its next action and matches the symbol; the value is only the state.
+    func testVoicePlayButtonSaysItsNextActionInEveryState() {
+        func says(_ state: VoicePlayState, _ symbol: String, _ label: String, _ value: String, line: UInt = #line) {
+            XCTAssertEqual(state.symbol, symbol, line: line)
+            XCTAssertEqual(state.label(duration: 24), label, line: line)
+            XCTAssertEqual(state.value, value, line: line)
+        }
+        let play = "Play voice message, \(clockText(24))", pause = "Pause voice message, \(clockText(24))"
+        // A spoken reply (m1) next to another one (m2): only the message that plays offers Pause.
+        says(.agent(.playing("m1"), id: "m1", listened: false), "pause.fill", pause, "Playing")
+        says(.agent(.playing("m1"), id: "m2", listened: false), "play.fill", play, "")
+        says(.agent(.playing("m1"), id: "m2", listened: true), "play.fill", play, "Listened")
+        says(.agent(.paused("m1"), id: "m1", listened: false), "play.fill", play, "Paused")
+        says(.agent(.loading("m1"), id: "m1", listened: false), "play.fill", play, "Loading")
+        says(.agent(.idle, id: "m1", listened: true), "play.fill", play, "Listened")
+        // The person's own sent memo.
+        says(.own(loadFailed: false, isAvailable: true, isPlaying: false, progress: 0), "play.fill", play, "")
+        says(.own(loadFailed: false, isAvailable: true, isPlaying: true, progress: 0.4), "pause.fill", pause, "Playing")
+        says(.own(loadFailed: false, isAvailable: true, isPlaying: false, progress: 0.4), "play.fill", play, "Paused")
+        says(.own(loadFailed: false, isAvailable: true, isPlaying: false, progress: 1), "play.fill", play, "Listened")
+        says(.own(loadFailed: false, isAvailable: false, isPlaying: false, progress: 0), "play.fill", play, "Loading")
+        says(.own(loadFailed: true, isAvailable: false, isPlaying: false, progress: 0), "arrow.clockwise", "Audio not available, try again", "")
+        XCTAssertEqual(VoicePlayState.ready.label(duration: 0), "Play voice message", "no length until it is known")
+    }
+
     func testResultSubtitleHasNoHashAndVoiceTimeCountsDown() {
         let pdf = ArtifactItem(id: "a", title: "Offer", kind: .pdf, rev: "2f7f62e9abc")
         XCTAssertEqual(pdf.subtitle(pages: 3), "PDF · 3 pages")
@@ -100,6 +125,9 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(ChatsRowRules.pinned(Array(qs.prefix(2))).count, 2)
         XCTAssertEqual(ChatsRowRules.titleLines(false), 1)
         XCTAssertEqual(ChatsRowRules.titleLines(true), 2)
+        XCTAssertEqual(ChatsRowRules.detailLines(false), 1)
+        XCTAssertEqual(ChatsRowRules.detailLines(false, 2), 2)
+        XCTAssertNil(ChatsRowRules.detailLines(true))
         XCTAssertTrue(ChatsRowRules.showsHeaderSubtitle(false))
         XCTAssertFalse(ChatsRowRules.showsHeaderSubtitle(true))
         XCTAssertNil(ChatsRowRules.needsYouSpoken(0))

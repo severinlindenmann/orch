@@ -5,6 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const wall = require('../src/orch_dashboard/web/pages/livewall.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
@@ -168,4 +169,144 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   assert.equal(wall.liveWallSummary([{id:'t2', status:'closed', needs:true}], 1)[0].text, '1 needs you');
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src, /Every ticket has a working helper/);
+});
+
+// ORCH-2045: a result to check without a session sits in Needs you; the filter finds it by "Needs you" (its band and the
+// summary's word) and by its own reason ("Check"), in 119 other sessions, pinned or in a group, never twice.
+test('the filter finds a result that needs you by "Needs you" and by its reason, and nothing it does not', () => {
+  const others = Array.from({length:119}, (_, i) => sess('t_' + i, 'ORCH-' + (3001 + i), ['working', 'in-line', 'idle', 'closed'][i % 4], {title:'Order form ' + i}));
+  const list = wall.liveWallWithNeeds(others, [{id:'t_chk', key:'ORCH-412', title:'Price page for schools', word:'Check'}]);
+  const hits = (q, pins = [], groups) => { const b = wall.liveWallBands(list, pins, q, groups); return {b, ids:[...b.pin, ...b.need, ...b.queue, ...b.idle].map(s => s.id)}; };
+  for (const q of ['Needs you', 'needs YOU', 'Check', 'orch-412', 'schools']) {
+    const {b, ids} = hits(q);
+    assert.deepEqual(ids, ['t_chk'], q);
+    assert.deepEqual(keys(b.need), ['ORCH-412'], q + ' sits in Needs you');
+    assert.equal(b.total, 120, 'the total is the workspace, not the hits');
+  }
+  assert.equal(hits('zebra crossing').b.shown, 0);
+  assert.equal(hits('').b.shown, 120, 'cleared: every entry again');
+  assert.equal(hits('working').ids.length, 30, '"working" finds the working sessions, never the result that asks');
+  assert.deepEqual(hits('Needs you', ['t_chk']).b.pin.map(s => s.id), ['t_chk'], 'pinned: found in Pinned only');
+  assert.deepEqual(hits('Needs you', ['t_chk']).ids, ['t_chk']);
+  // an idle session whose ticket asks reads "Idle" on its tile and is found by both words
+  const idle = wall.liveWallWithNeeds([sess('t_i', 'ORCH-9', 'idle'), sess('t_j', 'ORCH-10', 'idle')], [{id:'t_i', word:'Check'}]);
+  assert.deepEqual(keys(wall.liveWallBands(idle, [], 'needs you').need), ['ORCH-9']);
+  assert.equal(wall.liveWallBands(idle, [], 'idle').shown, 2);
+  // a group whose helper is the result to check: the one group entry is found by "Check" and by "Needs you", once
+  const groups = [{id:'g1', key:'ORCH-400', title:'Shop for schools', members:[{id:'t_0', key:'ORCH-3001', title:'Order form 0', status:'working', word:'Working', main:true},
+    {id:'t_chk', key:'ORCH-412', title:'Price page for schools', status:'closed', word:'No session'}]}];
+  for (const q of ['Check', 'Needs you']) {
+    const {b, ids} = hits(q, [], groups);
+    assert.deepEqual(ids, ['g1'], q + ' finds the group once, not its tickets on their own');
+    assert.equal(b.need[0].status, 'needs-you');
+  }
+  // the one rule: the band, the counts and the filter agree on who asks
+  assert.equal(wall.liveWallAsks({status:'closed', needs:true}), true);
+  assert.equal(wall.liveWallAsks({status:'working', needs:true}), false);
+  assert.equal(wall.liveWallCounts(list)['needs-you'], 1);
+});
+
+test('with a filter, a band without a match is left out and the filter is a plain search box', () => {
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  assert.match(src, /filter\(\(\[id\]\) => b\[id\]\.length \|\| !ui\.f\.trim\(\)\)/);
+  // typing only filters what is drawn: no form to submit, no action, no start
+  const input = src.slice(src.indexOf("document.addEventListener('input'"), src.indexOf("document.addEventListener('click'"));
+  assert.match(input, /(liveWallState\(\)|ui)\.f = e\.target\.value;[\s\S]*?liveWallRepaint\(\);/);
+  assert.doesNotMatch(input, /fetch|act\(|start|submit/i);
+  assert.doesNotMatch(src, /<form|h\('form'/);
+});
+
+// ORCH-2063: the page itself, drawn with a stand-in h(): 120 sessions with long, alike titles, Idle and no session folded
+// and saved; a search for one key shows its line in that band without touching the saved fold.
+test('ORCH-2063: a search opens a folded band that holds the match, for that search only', () => {
+  const mem = new Map([['orch.live.wall', JSON.stringify({Pilatus:{col:{idle:true}}})]]), on = {};
+  const h = (tag, attrs, ...children) => ({tag, attrs:attrs || {}, dataset:{}, querySelector:() => null, children:children.flat(Infinity).filter(x => x != null && x !== false)});
+  const word = {working:'Working', idle:'Idle', closed:'No session'};
+  const list = Array.from({length:120}, (_, i) => {
+    const n = 5001 + i, status = i < 10 ? 'working' : i < 100 ? 'idle' : 'closed';
+    return {id:'t_' + n, key:'ORCH-' + n, status, word:word[status], lines:[],
+      title:('Quarterly partner newsletter for the northern region: check every figure against the sales sheet, part ' + n + ' ').padEnd(200, 'x')};
+  });
+  const c = vm.createContext({h, state:{workspace:'Pilatus'}, ticketOf:() => null, array:v => Array.isArray(v) ? v : [], iconEl:n => h('svg', {'data-icon':n}),
+    liveName:s => s.title, liveNow:s => s.word, liveTool:() => '', liveWarm:() => '', liveMeta:() => [],
+    window:{addEventListener() {}, localStorage:{getItem:k => mem.get(k) ?? null, setItem:(k, v) => mem.set(k, String(v))},
+      LiveSessions:{ready:true, list, pins:['t_5003']}},
+    document:{addEventListener:(type, fn) => { on[type] = fn; }, querySelector:() => null}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8'), c);
+  const all = (node, ok, out = []) => { if (node && typeof node === 'object') { if (ok(node.attrs || {})) out.push(node); (node.children || []).forEach(x => all(x, ok, out)); } return out; };
+  const band = id => {
+    const root = vm.runInContext('liveWall()', c), sec = all(root, a => a['data-band'] === id)[0];
+    return {root, sec, open:sec && all(sec, a => a['data-wall-fold'] === id)[0].attrs['aria-expanded'], ids:sec ? all(sec, a => 'data-wall-open' in a).map(x => x.attrs['data-wall-open']) : []};
+  };
+  const type = value => on.input({target:{matches:() => true, value}});
+  const fold = (id, open) => on.click({target:{closest:sel => sel === '[data-wall-fold]' ? {dataset:{wallFold:id}, getAttribute:() => String(open)} : null}});
+  const saved = mem.get('orch.live.wall');
+  let b = band('idle');
+  assert.deepEqual(b.root.children.map(x => x.attrs['data-key']), ['wall-head', 'wall-tools', 'wall-body'], 'summary, filter, bands: Tab goes from the filter to the bands');
+  assert.equal(b.open, 'false');
+  assert.deepEqual(b.ids, [], 'folded: no lines');
+  type('ORCH-5087');
+  b = band('idle');
+  assert.equal(b.open, 'true', 'aria-expanded says what is on screen');
+  assert.deepEqual(b.ids, ['t_5087'], 'the one match is drawn in the folded band');
+  assert.match(JSON.stringify(all(b.sec, a => a['data-wall-fold'] === 'idle')[0]), /Idle and no session \(1\)/);
+  assert.equal(mem.get('orch.live.wall'), saved, 'the saved fold is not changed');
+  fold('idle', true);
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'a fold click during the search folds it for this search');
+  assert.equal(mem.get('orch.live.wall'), saved, 'and is not saved');
+  type('');
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'cleared: the saved fold is back');
+  type('ORCH-5099');
+  assert.deepEqual(band('idle').ids, ['t_5099'], 'the next search starts from the saved choice, not the old click');
+  type('ORCH-5003');
+  assert.deepEqual(band('pin').ids, ['t_5003'], 'a pinned match stays in Pinned');
+  type('zzqx nothing');
+  assert.match(JSON.stringify(band('idle').root), /No session matches “zzqx nothing”/, 'a true zero-result search says so');
+  type('');
+  fold('idle', false);
+  assert.deepEqual(JSON.parse(mem.get('orch.live.wall')).Pilatus.col, {}, 'outside a search a fold click is saved as before');
+});
+
+// Focus polish: the wall says when it is loading, when the sessions did not load, when there are none and when the
+// filter finds none; each is the kit's state with one next step, under the filter (keyboard order = visual order).
+test('the wall state: loading, error only before the first answer, empty, no match, bands', () => {
+  assert.equal(wall.liveWallView(false, false, 0, 0), 'wait');
+  assert.equal(wall.liveWallView(false, true, 0, 0), 'error');
+  assert.equal(wall.liveWallView(true, true, 3, 3), 'bands', 'a later failed read keeps the sessions on screen');
+  assert.equal(wall.liveWallView(true, false, 0, 0), 'empty');
+  assert.equal(wall.liveWallView(true, false, 4, 0), 'nomatch');
+  assert.equal(wall.liveWallView(true, false, 4, 2), 'bands');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  const order = ['data-key\':\'wall-head', 'data-key\':\'wall-tools', 'data-key\':\'wall-body'].map(k => src.indexOf(k, src.indexOf('function liveWall()')));
+  assert.ok(order.every((n, i) => n > 0 && (!i || n > order[i - 1])), 'summary, then the filter, then the bands');
+  for (const k of ['wall-error', 'Try again', 'data-wall-retry', 'Clear filter', 'data-wall-clear', 'skeleton sk-card']) assert.ok(src.includes(k), k);
+});
+
+test('a session without a live helper that asks shows the needs-you mark, as the summary counts it', () => {
+  for (const status of ['idle', 'closed']) {
+    assert.equal(wall.liveWallMark(sess('t_1', 'ORCH-1', status, {needs:true})), 'needs-you', status);
+    assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
+  }
+});
+
+test('ORCH-2271: a band draws its first 24 entries and the Tickets list mark for the rest', () => {
+  const list = Array.from({length: 480}, (_, i) => ({id: 't_' + i}));
+  assert.equal(wall.liveWallCut('need', list).shown.length, 480, 'without the paging of the Tickets page every entry shows');
+  const marks = [];
+  const caps = new Map();
+  global.IntersectionObserver = function () {};
+  global.capOf = (key, step) => caps.get(key) || step;
+  global.moreMark = (key, hidden, fetchMore, step) => { marks.push([key, hidden, step]); caps.set(key, (caps.get(key) || step) + step); return {mark: key}; };
+  try {
+    const cut = wall.liveWallCut('need', list);
+    assert.equal(cut.shown.length, wall.LIVE_WALL_FIRST);
+    assert.deepEqual(marks, [['wall-need', 480 - 24, 24]]);
+    assert.equal(wall.liveWallCut('need', list).shown.length, 48, 'each step brings 24 more');
+    assert.deepEqual(cut.more, {mark: 'wall-need'});
+    assert.equal(wall.liveWallCut('pin', list.slice(0, 3)).more, null, 'a short band has no mark');
+  } finally { delete global.capOf; delete global.moreMark; delete global.IntersectionObserver; }
+  const src = fs.readFileSync(path.join(WEB, 'pages', 'livewall.js'), 'utf8');
+  assert.match(src, /armLoadMore\(document\.querySelector\('main'\)\)/, 'a repaint of the wall arms the mark');
 });

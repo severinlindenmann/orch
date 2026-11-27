@@ -21,6 +21,7 @@ class N {
   fire(t, e = {}) { (this.listeners[t] || []).forEach(f => f({preventDefault() {}, ...e})); }
   all(pred, out = []) { if (pred(this)) out.push(this); this.children.forEach(c => c.all(pred, out)); return out; }
   byClass(c) { return this.all(n => n.className.split(' ').includes(c)); }
+  querySelector(sel) { const c = /\.([\w-]+)/.exec(sel)?.[1]; return c ? this.byClass(c)[0] || null : null; }
 }
 
 function load() {
@@ -73,6 +74,38 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketTitle, 'Home update');
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
+});
+test('ORCH-2182: mapCard carries If you wait and the facts, and leaves out what is empty or not text', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('f', {if_wait: 'The release waits.', facts: ['14 links point at it', '', 7, 'a', 'b', 'c']}), fakeApi([[]]), NOW);
+  assert.equal(it.ifWait, 'The release waits.');
+  assert.deepEqual([...it.facts], ['14 links point at it', 'a', 'b', 'c']);
+  const none = UI.review.mapCard(card('g'), fakeApi([[]]), NOW);
+  assert.equal(none.ifWait, ''); assert.equal(none.facts.length, 0);
+});
+test('ORCH-2186: mapCard carries the ideas (text only, at most 12); Save sends how they were sorted', async () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('i', {ideas: ['Customer story', '', 7, ...Array.from({length: 14}, (_, n) => 'idea ' + n)]}), fakeApi([[]]), NOW);
+  assert.equal(it.ideas.length, 12); assert.equal(it.ideas[0], 'Customer story');
+  assert.equal(UI.review.mapCard(card('j'), fakeApi([[]]), NOW).ideas.length, 0);
+  const sent = [];
+  const {decks} = await mount(fakeApi([[card('a', {ideas: ['A', 'B', 'C']})]], async b => { sent.push(b); return {ok: true}; }));
+  decks[0].o.onDecide(decks[0].items[0], 'ok', {ideas: {keep: [1], no: [3], later: []}});
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[0])), {id: 'a', digest: 'd-a', verdict: 'ok', picked: null, note: {ideas: {keep: [1], no: [3], later: []}}});
+});
+test('ORCH-2183: mapCard carries the quote with its day; words taken away or changed are dropped', () => {
+  const {UI} = load();
+  const at = new Date(NOW.getTime() - 5 * 864e5);
+  const it = UI.review.mapCard(card('s', {said: {who: 'person', name: 'Lea', src: 'chat', at: at.toISOString(), words: 'Keep it.', stale: null}}), fakeApi([[]]), NOW);
+  assert.equal(it.said.who, 'person'); assert.equal(it.said.name, 'Lea'); assert.equal(it.said.words, 'Keep it.');
+  assert.match(it.said.day, /^on \d+ [A-Z][a-z]{2}$/); assert.equal(it.said.stale, '');
+  const today = UI.review.mapCard(card('t', {said: {who: 'you', src: 'history', at: NOW.toISOString(), words: 'x'}}), fakeApi([[]]), NOW);
+  assert.equal(today.said.day, 'today');
+  const gone = UI.review.mapCard(card('g', {said: {who: 'you', src: 'chat', at: NOW.toISOString(), words: 'old', stale: 'changed'}}), fakeApi([[]]), NOW);
+  assert.equal(gone.said.words, ''); assert.equal(gone.said.stale, 'changed');
+  assert.equal(UI.review.mapCard(card('n', {said: {who: 'agent', words: 'made up'}}), fakeApi([[]]), NOW).said, undefined);
+  assert.equal(UI.review.mapCard(card('m'), fakeApi([[]]), NOW).said, undefined);
 });
 test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
   const {UI} = load();
@@ -195,6 +228,18 @@ test('other errors show the message and bring the card back', async () => {
   assert.equal(toasts[0].m, 'Not allowed.'); assert.equal(decks.length, 2);
 });
 
+test('ORCH-2182: the deck is drawn again when the decision-first switch changes (settings that came late too)', async () => {
+  let on = false;
+  const api = fakeApi([[card('a')]]);
+  const {decks, page} = await mount(api, {decisionFirst: () => on});
+  await page.tick(); await flush();
+  assert.equal(decks.length, 1, 'same stack, same switch: no rebuild');
+  on = true;
+  await page.tick(); await flush();
+  assert.equal(decks.length, 2, 'the switch turned on: drawn again');
+  await page.tick(); await flush();
+  assert.equal(decks.length, 2);
+});
 test('polling keeps the deck while nothing changed and while a sheet is open', async () => {
   const api = fakeApi([[card('a')], [card('a')], [card('a'), card('b')], [card('a'), card('b')]]);
   const {decks, page} = await mount(api);
@@ -361,7 +406,7 @@ test('a held answer keeps its card out of a refreshed stack; after Undo the card
   assert.deepEqual(decks[1].items.map(i => i.id), ['a', 'b', 'c'], 'the card taken back is waiting again');
 });
 
-// ORCH-183 A3: a Check result shows its own files (a picture, a page) as tiles.
+// ORCH-183 A3: a Test results card shows its own files (a picture, a page) as tiles.
 test('mapCard: the files of a Check card become tiles with urls; unknown types are plain files; no url, no tile', () => {
   const {UI} = load();
   const c = {id: 'core:review:t_x', ticket: 'T-1', key: 'review', digest: 'd', card: {kind: 'check', title: 'Done', then: 'x',
@@ -528,4 +573,121 @@ test('one tap on a question answered elsewhere (Home, the phone): says so and re
   await flush(); await flush();
   assert.equal(b.toasts[0].m, 'This card changed. Showing the new version.');
   assert.equal(b.decks[1].items[0].digest, 'd-new');
+});
+
+// Review overhaul (owner's picks 25 Nov 2026): the twelve card names, what holds up work first, the result card's title.
+test('R3 B: a card shows the name orch gave its kind; a card without one gets its lane from its plain kind', () => {
+  const {UI} = load();
+  const q = UI.review.mapCard(card('q', {card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}}), fakeApi([[]]), NOW);
+  assert.equal(q.kindLabel, 'Question'); assert.equal(q.icon, 'comment'); assert.equal(q.lane, 'holds_up'); assert.equal(q.laneName, 'Holds up work now');
+  const old = UI.review.mapCard(card('o'), fakeApi([[]]), NOW);
+  assert.equal(old.kindLabel, 'Draft'); assert.equal(old.lane, 'look');
+  const stuck = UI.review.mapCard(card('s', {card: {kind: 'stuck', title: 'x'}}), fakeApi([[]]), NOW);
+  assert.equal(stuck.lane, 'holds_up');
+  const bad = UI.review.mapCard(card('b', {card_kind: {name: 'X', lane: 'nowhere'}}), fakeApi([[]]), NOW);
+  assert.equal(bad.lane, 'look', 'an unknown lane is never trusted');
+});
+
+test('Test results keeps its check icon with the current and legacy card kind', () => {
+  const {UI} = load();
+  for (const kind of ['test_results', 'check_result']) {
+    const result = UI.review.mapCard(card('result', {card_kind: {family: 'look', kind, name: 'Test results', lane: 'look'}}), fakeApi([[]]), NOW);
+    assert.equal(result.kindLabel, 'Test results');
+    assert.equal(result.icon, 'check');
+    assert.equal(result.lane, 'look');
+  }
+});
+
+test('R2 A: the deck gets what holds up work first, the stack order inside a lane', async () => {
+  const look = (id) => card(id, {card_kind: {family: 'look', kind: 'pictures', name: 'Pictures', lane: 'look'}});
+  const ask = (id) => card(id, {card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}});
+  const live = (id) => card(id, {card_kind: {family: 'click', kind: 'put_live', name: 'Put it live', lane: 'click'}});
+  const {decks} = await mount(fakeApi([[look('l1'), ask('a1'), live('p1'), look('l2'), ask('a2')]]));
+  assert.deepEqual(decks.at(-1).items.map(i => i.id), ['a1', 'a2', 'p1', 'l1', 'l2']);
+});
+
+test('R6 A: a finished-work card says what changed as its title, the ticket stays in the quiet line', () => {
+  const {UI} = load();
+  const c = card('r', {ticket_title: 'Spring sale', card: {kind: 'check', title: 'Spring sale', preview: {type: 'doc', headline: 'The spring sale email is written, with a phone version.', paras: ['x']}}});
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.title, 'The spring sale email is written, with a phone version.');
+  assert.equal(it.ticketTitle, 'Spring sale');
+  assert.equal(it.preview.headline, undefined, 'the headline is not shown twice');
+});
+
+test('Reviewer mode propose: the card carries the proposal and suggests its button', () => {
+  const {UI} = load();
+  const c = card('p', {recommended: 'ok', proposal: {verdict: 'accept', why: 'every part has evidence'}, card: {kind: 'check', title: 'T'}});
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.deepEqual({...it.proposal}, {verdict: 'accept', why: 'every part has evidence'});
+  assert.equal(it.suggest, 'ok');
+  assert.equal(UI.review.mapCard(card('z', {proposal: {verdict: 'merge'}}), fakeApi([[]]), NOW).proposal, undefined);
+});
+
+// ORCH-2184 (Focused review C): attention groups, tiles over the deck, rounds of up to 5, behind decisionFirst
+const grp = (id, g, extra = {}) => card(id, {attention: {group: g, why: 'x'}, ...extra});
+const mountTiles = async (stack, o = {}) => {
+  const env = load(), host = new N('main');
+  env.UI.attentionTiles = (groups, to) => { const n = new N('div'); n.className = 'attn-tiles'; n.groups = groups; n.pick = to.onPick; return n; };
+  const answers = [];
+  const api = fakeApi([stack], async b => { answers.push(b); return {ok: true}; });
+  const page = env.UI.reviewPage(host, api, {poll: 0, now: NOW, hold: 0, decisionFirst: true, ...o});
+  await flush();
+  const attn = () => host.byClass('review-attn')[0];
+  return {...env, host, page, attn, answers};
+};
+test('ORCH-2184: mapCard carries the group (unknown is a Short decision, never quick) and a real due time', () => {
+  const {UI} = load(), m = c => JSON.parse(JSON.stringify(UI.review.mapCard(c, fakeApi([[]]), NOW)));
+  assert.deepEqual(m(grp('a', 'quick')).attention, {group: 'quick', name: 'Quick look', why: 'x'});
+  assert.equal(m(grp('a', 'fast')).attention.group, 'short');
+  assert.equal(m(card('a')).attention.group, 'short');
+  assert.equal(m(card('a', {due: '2026-11-16T08:00:00Z'})).due, '2026-11-16T08:00:00Z');
+  assert.equal(m(card('a', {due: 'Friday'})).due, '');
+  assert.equal(UI.review.fmtDue('2026-11-16T08:00:00', NOW), 'tomorrow 08:00');
+});
+test('ORCH-2184: more than 5 cards: three tiles over the deck; a tile starts a round of up to 5 of its group', async () => {
+  const stack = [grp('q1', 'quick'), grp('q2', 'quick'), grp('s1', 'short'), grp('s2', 'short'), grp('s3', 'short'), grp('s4', 'short'), grp('s5', 'short'), grp('s6', 'short'),
+    grp('t1', 'time', {due: '2026-11-16T08:00:00', card_kind: {family: 'answer', kind: 'question', name: 'Question', lane: 'holds_up'}})];
+  const {decks, attn} = await mountTiles(stack);
+  assert.equal(attn().hidden, false);
+  assert.equal(decks.at(-1).items.length, 9, 'the deck and the list keep every card');
+  const tiles = attn().byClass('attn-tiles')[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(tiles.groups.map(g => [g.group, g.count, g.hold]))), [['quick', 2, 0], ['short', 6, 0], ['time', 1, 1]]);
+  assert.equal(tiles.groups[2].deadline, 'Next deadline: Home block t1 · tomorrow 08:00');
+  tiles.pick('short');
+  const d = decks.at(-1);
+  assert.deepEqual([...d.items.map(i => i.id)], ['s1', 's2', 's3', 's4', 's5'], 'a round of 5');
+  assert.match(attn().textContent, /Short decision.*Back to the start/);
+  assert.match(attn().textContent, /Keys: the numbers answer, J next card, K card before, U undo, Esc close/);
+  assert.equal(typeof d.o.onEscape, 'function');
+  d.o.onEscape();
+  assert.equal(decks.at(-1).items.length, 9, 'Esc: back to the start');
+  assert.ok(attn().byClass('attn-tiles')[0]);
+});
+test('ORCH-2184: the round ends on What you decided, Still waiting and Next N; nothing is answered by itself', async () => {
+  const stack = [grp('q1', 'quick'), grp('q2', 'quick'), grp('q3', 'quick'), grp('s1', 'short'), grp('s2', 'short'), grp('s3', 'short')];
+  const {decks, attn, answers} = await mountTiles(stack);
+  attn().byClass('attn-tiles')[0].pick('quick');
+  const d = decks.at(-1);
+  assert.equal(answers.length, 0, 'starting a round answers nothing');
+  d.o.onDecide(d.items[0], 'ok'); d.o.onDecide(d.items[1], 'no'); d.o.onDecide(d.items[2], 'ok');
+  await flush();
+  assert.equal(answers.length, 3, 'only the three answers the person gave');
+  const end = d.o.endView();
+  assert.match(end.textContent, /^What you decided/);
+  assert.deepEqual(end.byClass('attn-decided-row').map(r => r.textContent), ['Home block q1Build it', "Home block q2Don't do", 'Home block q3Build it']);
+  assert.equal(end.byClass('attn-still')[0].textContent, 'Still waiting: 3 in Short decision');
+  const [next, back] = end.byClass('attn-end-acts')[0].children;
+  assert.equal(next.textContent, 'Next 3 in Short decision');
+  assert.equal(back.textContent, 'Back to the start');
+  next.onclick();
+  assert.deepEqual(decks.at(-1).items.map(i => i.id), ['s1', 's2', 's3']);
+});
+test('ORCH-2184: 5 cards or fewer, or the switch off: no tiles, the deck as today', async () => {
+  const few = await mountTiles([grp('a', 'quick'), grp('b', 'short')]);
+  assert.equal(few.attn().hidden, true);
+  const many = Array.from({length: 7}, (_, i) => grp('c' + i, 'short'));
+  const off = await mountTiles(many, {decisionFirst: false});
+  assert.equal(off.attn().hidden, true);
+  assert.equal(off.decks.at(-1).items.length, 7);
 });

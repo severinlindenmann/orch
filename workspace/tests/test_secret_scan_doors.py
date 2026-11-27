@@ -354,6 +354,61 @@ def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
     )
 
 
+# ---- ticket text doors: what a person or agent writes into a ticket (R5.2: secrets never go into tickets) --
+
+TEXT_DOORS = {
+    "edit-note": lambda t, v: ("ticket", "edit", t, "--note", f"saw {v}"),
+    "edit-title": lambda t, v: ("ticket", "edit", t, "--title", f"x {v}"),
+    "edit-done-when": lambda t, v: ("ticket", "edit", t, "--done-when", f"x {v}"),
+    "new": lambda t, v: ("ticket", "new", f"x {v}"),
+    "summary": lambda t, v: ("ticket", "summary", t, f"it was {v}"),
+    "outcome": lambda t, v: ("ticket", "outcome", t, "--why", f"x {v}"),
+    "tidy": lambda t, v: ("ticket", "tidy", t, "Clear title", "--description", f"x {v}"),
+    "log": lambda t, v: ("log", t, f"x {v}"),
+    "check-add": lambda t, v: ("check", "add", t, f"x {v}"),
+    "ask": lambda t, v: ("ask", t, f"is {v} ok?"),
+    "ask-option": lambda t, v: ("ask", t, "which?", "--option", f"x {v}", "--option", "b"),
+    "ask-because": lambda t, v: ("ask", t, "which?", "--option", "a", "--recommend", "a", "--because", v),
+    "answer": lambda t, v: ("answer", t, "q1", f"use {v}"),
+    "ref-add-url": lambda t, v: ("ref", "add", t, f"https://x.test/?a={v}"),
+    "ref-add-title": lambda t, v: ("ref", "add", t, "https://x.test/a", "--title", f"x {v}"),
+    "chat-say": lambda t, v: ("chat", "say", f"x {v}"),
+    "chat-say-ticket": lambda t, v: ("chat", "say", f"x {v}", "--ticket", t),
+    "report": lambda t, v: ("report", "problem", f"x {v}"),
+    "report-more": lambda t, v: ("report", "problem", "bad", "--more", f"x {v}"),
+    "report-expected": lambda t, v: ("report", "problem", "bad", "--expected", f"x {v}"),
+}
+
+
+@pytest.fixture(params=["github-token", "stored-key"])
+def planted_two(request, proj):
+    """The scanner's rules are tested per kind above; these doors only need a pattern and a stored key."""
+    if request.param == "stored-key":
+        keystore.add(proj, "planted-token", "token", STORED)
+        return request.param, STORED
+    return request.param, SAMPLES[request.param]
+
+
+@pytest.mark.parametrize("door", TEXT_DOORS)
+def test_ticket_text_is_scanned(proj, run, new_ticket, planted_two, door):
+    kind, value = planted_two
+    tid = new_ticket("Q3 invoice export")
+    assert run("ask", tid, "first?", "--option", "a", "--by", "human:tester")[0] == 0
+    before = _ticket_bytes(proj, tid)
+    reports = proj / ".orch" / "diag" / "reports"
+    code, out, err = run(*TEXT_DOORS[door](tid, value), "--by", "human:tester")
+    assert code != 0, "the write must be refused"
+    _clean(kind, value, out, err)
+    assert _ticket_bytes(proj, tid) == before, "nothing is written"
+    assert not reports.exists() or not any(p.is_file() for p in reports.rglob("*")), "no report is kept"
+
+
+def test_ticket_text_clean_still_goes_through(proj, run, new_ticket):
+    tid = new_ticket("Q3 invoice export")
+    assert run("ticket", "summary", tid, "Exported the CSV.", "--by", "human:tester")[0] == 0
+    assert run("log", tid, "all good", "--by", "human:tester")[0] == 0
+
+
 # ---- structural guard: a new door that skips the scanner fails here --------------------------------------
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch"
@@ -362,9 +417,10 @@ SCANS = {"find", "refuse_if_secret", "refuse_if_secret_in", "scan_outgoing", "sc
 OUTBOUND = {
     ("relay.py", "_api"): {"scan_blob", "scan_outgoing"},  # every relay HTTP body, bytes and JSON
     ("relay.py", "scan_blob"): {"refuse_if_secret"},
-    ("relay.py", "resend_outbox"): {"scan_outgoing"},  # an old outbox entry is scanned again before it posts
+    ("relay.py", "_flush_outbox"): {"scan_outgoing"},  # an old outbox entry is scanned again before it posts
     ("relay.py", "transcribe"): {"scan_blob"},  # the recording is scanned before it goes to the relay
     ("publish.py", "scan_files"): {"find"},  # every publish upload runs this on the plain bytes
+    ("publish.py", "scan_names"): {"find"},  # the shared name and every path inside (ORCH-2076)
     ("publish.py", "bundle"): {"scan_files"},
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
@@ -380,7 +436,7 @@ WIRE_CALLERS = {
     ("relay.py", "_api"): "scans itself",
     ("publish.py", "_api"): "its bodies are scanned by share_file (scan_files) and deploy (pack)",
     ("publish.py", "profile"): "net.profile scans the body (refuse_if_secret_in) before the PATCH",
-    ("relay.py", "_post_message"): "posts the outbox bytes after _message / resend_outbox scanned them",
+    ("relay.py", "_post_message"): "posts the outbox bytes after _message / _flush_outbox scanned them",
     ("relay.py", "transcribe"): "scans the recording itself (scan_blob) before the POST",
 }
 
