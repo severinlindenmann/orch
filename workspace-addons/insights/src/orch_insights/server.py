@@ -21,6 +21,7 @@ from .lists import KINDS, build_list
 from .models import build_models, build_week
 from .overview import build_overview, retries_view
 from .settings import build_settings
+from .weekly import view as build_weekly
 
 DEFAULT_PORT = 8431
 MAX_BODY = 4096
@@ -231,6 +232,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self._marked(view))
         if path == "/api/week":
             return self._json({"week": build_week(self._read("usage", "list", "--json"))})
+        if path == "/api/weekly":  # the same answer `orch insights week` prints (R4.3)
+            return self._json(build_weekly(self._read("insights", "week", "--json")))
         if path == "/api/models":
             return self._json(
                 build_models(self._read("tokens", "--days", "30", "--json"), chosen_person(self.root))

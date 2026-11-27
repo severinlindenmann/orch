@@ -19,7 +19,7 @@ GOLDEN = {
     "addon list --json": "[]\n",
     "start --help": "usage: orch start [-h] [--json] [--by BY] [--no-open] [--print-launch-url]\n\noptions:\n  -h, --help          show this help message and exit\n  --json              machine-readable output\n  --by BY             actor, agent:<tool> or human:<name> (default: detected)\n  --no-open           do not open the dashboard in the browser\n  --print-launch-url  a one-time sign-in link to open the dashboard elsewhere\n",
     "stop --help": "usage: orch stop [-h] [--json] [--by BY] [--all] [--pick] [PATH|NAME]\n\npositional arguments:\n  PATH|NAME   the workspace to stop\n\noptions:\n  -h, --help  show this help message and exit\n  --json      machine-readable output\n  --by BY     actor, agent:<tool> or human:<name> (default: detected)\n  --all       stop every running workspace\n  --pick      choose from the running workspaces\n",
-    "addon --help": "usage: orch addon [-h] {add,remove,uninstall,list} ...\n\npositional arguments:\n  {add,remove,uninstall,list}\n    add                 install add-ons and turn them on here\n    remove              turn an add-on off in this workspace\n    uninstall           uninstall an add-on\n\noptions:\n  -h, --help            show this help message and exit\n",
+    "addon --help": "usage: orch addon [-h] {add,remove,uninstall,list,check} ...\n\npositional arguments:\n  {add,remove,uninstall,list,check}\n    add                 install add-ons and turn them on here\n    remove              turn an add-on off in this workspace\n    uninstall           uninstall an add-on\n    check               check an add-on against the add-on contract\n\noptions:\n  -h, --help            show this help message and exit\n",
 }
 
 
