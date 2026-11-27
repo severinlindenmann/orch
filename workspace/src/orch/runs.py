@@ -1934,6 +1934,10 @@ def start(
         take_over=take_over,
         busy_text=None if _prepare else text,
         prepare=_prepare,
+        # until the wrapper is spawned this process holds the claim: when it is killed (the dashboard cuts a
+        # slow Start off after its time limit; on Windows that gives no clean-up) the claim reads dead at once and
+        # the next Start replaces it, instead of the ticket looking alive for the whole lease (ORCH-2362)
+        pid=os.getpid(),
     )
     notes += copy_notes
     try:

@@ -1890,6 +1890,8 @@ def _op_timeout(op, args) -> int:
         return 150
     if op == "checks.approve":  # the approved check runs once at once (checkfiles.TIMEOUT_MAX: 2 minutes)
         return 150
+    if op == "run.start":  # a slow computer: the copy step may wait for its lock (worktrees.LOCK_WAIT, 150 s); cutting
+        return 180  # the start off sooner kills it half way (ORCH-2362), so it must end by itself first
     return 75 if op == "config.agent.test" else 60
 
 
@@ -2062,6 +2064,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
             forget_static()
             return 504, "Still adding it. Check again in a minute.", None
+        if op == "run.start":
+            return 504, "Starting is slow on this computer. Wait a minute, then press Start again.", None
         return 504, "That took too long. Please try again.", None
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
