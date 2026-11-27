@@ -4,6 +4,8 @@ name: ci
 # that a green group proved runs them no more (only page-smoke, ORCH-1457). The Windows parts stay out of queue
 # groups (as since PR 1473): they run after the merge on every push to develop, on our own Windows VM
 # (WINDOWS_RUNNER=winvm, ORCH-1127) or on GitHub's machines, at night and in the release check.
+# Quarantined (ORCH-2363, owner 27 Nov): the click-throughs on QUARANTINED in the click-through runner and the suites at a
+# fake clock (clock.yml) are out of every run here; quarantine.yml runs them nightly and on release branches.
 # brand/tests/test_ci_queue_skip.py keeps ci.yml, addons.yml and docs/ci-checks.md in step.
 on:
   pull_request:
@@ -53,7 +55,6 @@ jobs:
       brand: ${{ steps.f.outputs.brand }}
       dashshots: ${{ steps.f.outputs.dashshots }}
       pagesmoke: ${{ steps.f.outputs.pagesmoke }}
-      clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
       # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
       # group (orch-queue/...: the full suite once, whatever files it touches); proven = a push to develop with the
@@ -99,8 +100,6 @@ jobs:
             pagesmoke: ['workspace-addons/focus/**', 'workspace-addons/insights/**', 'e2e/focus_insights*', 'e2e/focus_insights*/**']
             # the dashboard's pages and what takes their pictures (ORCH-312)
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
-            # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
-            clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
       # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
@@ -338,14 +337,8 @@ jobs:
     uses: ./.github/workflows/mobile.yml
     with:
       runs_on: '"macos-latest"'
-  # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
-  # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
-  clock:
-    needs: [changes, route]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
-    uses: ./.github/workflows/clock.yml
-    with:
-      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
+  # The suites at a fake clock (clock.yml, ORCH-390) are quarantined (ORCH-2363, owner 27 Nov): they made most red
+  # merge queue groups, so they run in quarantine.yml (nightly, release branches), never required here.
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds.
     # Always on GitHub's machines: brand/tests/test_edge_runner.py runs the edge runner's own hooks and setup, which
@@ -372,7 +365,7 @@ jobs:
       runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots]
+    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -104,6 +104,12 @@ ROLLUP_JOBS = {"gate"}  # a roll-up of the other jobs: the jobs themselves are j
 # INTO (main). main has none of its own today, so the roll-up. Never develop's: develop's banned-words is
 # skipped on release/* into main by design.
 REQUIRED_FALLBACK = ["gate"]
+# Flaky checks out of the merge queue run in this workflow (ORCH-2363): nightly on develop and on every push
+# to a release branch, never required. Its checks never count for a release pull request; a red nightly run
+# opens one "later" ticket (quarantine_red).
+QUARANTINE_WORKFLOW = "quarantine"
+QUARANTINE_FILE = "quarantine.yml"
+QUARANTINE_WORDS = "Quarantined CI checks are red (later)"
 # A job GitHub stopped at its timeout-minutes (the check run's annotation) whose log has no failed test runs
 # once more per release before the release is blocked or closed (ORCH-1050).
 TIME_LIMIT_RE = re.compile(r"exceeded the maximum execution time", re.I)
@@ -361,10 +367,18 @@ def known_name(name: str, names) -> str | None:
     return None
 
 
+def _ignored(c: dict, ignore) -> bool:
+    """A check that does not count: named in `ignore` (known red, roll-ups) or of the quarantine workflow."""
+    return (
+        c.get("workflowName") == QUARANTINE_WORKFLOW
+        or known_name(c.get("name") or c.get("context") or "", ignore) is not None
+    )
+
+
 def checks_green(rollup, ignore=frozenset()) -> str:
     """green, red or pending for a pull request's statusCheckRollup (newest run of each check counts); checks
-    named in `ignore` (known red, roll-ups) do not count."""
-    rollup = [c for c in rollup or [] if known_name(c.get("name") or c.get("context") or "", ignore) is None]
+    named in `ignore` (known red, roll-ups) and those of the quarantine workflow do not count."""
+    rollup = [c for c in rollup or [] if not _ignored(c, ignore)]
     if not rollup:
         return "pending"
     last: dict = {}
@@ -399,7 +413,7 @@ def _newest_failed(rollup, ignore=frozenset()) -> list[dict]:
     last: dict = {}
     for n, c in enumerate(rollup or []):
         name = c.get("name") or c.get("context") or ""
-        if known_name(name, ignore) is not None:
+        if _ignored(c, ignore):
             continue
         key, when = (c.get("workflowName"), name or n), str(c.get("startedAt") or "")
         if key not in last or when >= last[key][0]:
@@ -455,7 +469,7 @@ def not_reported(rollup, names) -> list[str]:
 def failed_checks(rollup, ignore=frozenset()) -> list[str]:
     out = []
     for c in rollup or []:
-        if known_name(c.get("name") or c.get("context") or "", ignore) is not None:
+        if _ignored(c, ignore):
             continue
         word = c.get("conclusion") if "status" in c else c.get("state")
         if (c.get("status") in (None, "COMPLETED")) and word not in PASSED and word not in (None, "PENDING"):
@@ -1382,6 +1396,7 @@ class World:
         done_when: str,
         priority: str = "high",
         over_limit: bool = False,
+        start: bool = True,
     ) -> str | None:
         def go():
             try:
@@ -1395,8 +1410,9 @@ class World:
                 )
             except Refused as e:
                 return f"not opened ({e})"
-            with contextlib.suppress(Exception):  # busy, paused or no agent: the ticket waits in line
-                runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
+            if start:
+                with contextlib.suppress(Exception):  # busy, paused or no agent: the ticket waits in line
+                    runs.start(self.root, t["id"], BY, priority=priority, over_limit=over_limit)
             return str(t.get("key") or t["id"])
 
         got = self.act(f"ticket:{title}", go)
@@ -2501,6 +2517,47 @@ def winvm_red(w: World, st: dict, role: str) -> list[str]:
     return []
 
 
+def quarantine_red(w: World, st: dict, role: str) -> list[str]:
+    """The quarantined checks (ORCH-2363, quarantine.yml) are never required: the newest finished nightly run
+    that is red opens one Backlog ticket with "later" in its title (not started, no revert, no rerun); while
+    that ticket is open each further red run adds a note to it. Once per run."""
+    try:  # a repository without the quarantine workflow has nothing to say here
+        rows = [r for r in w.runs(QUARANTINE_FILE, "schedule") if r.get("status") == "completed"]
+    except Refused:
+        return []
+    if not rows:
+        return []
+    r = max(rows, key=lambda x: str(x.get("createdAt")))
+    if r.get("conclusion") in ("success", "skipped", "cancelled"):
+        return []
+    rid = str(r.get("databaseId") or r.get("url") or r.get("createdAt"))
+    if st.get("quarantine_red_run") == rid:
+        return []
+    st["quarantine_red_run"] = rid
+    sha = str(r.get("headSha") or "")[:8]
+    note = (
+        f"The nightly quarantine run on develop {sha} is red: {r.get('url')}. These checks are out of the "
+        "merge queue because they are flaky (docs/ci-checks.md, Quarantine). Fix one, see it green in the "
+        "quarantine run, then move it back into ci.yml / addons.yml in the same pull request."
+    )
+    cur = open_red_ticket(w.tickets(), QUARANTINE_WORDS)
+    if cur:
+        key = str(cur.get("key") or cur["id"])
+        w.note(key, f"Release keeper: still red. {note}")
+        return [f"quarantine run red on develop {sha}: noted on {key}"]
+    tid = w.new_ticket(
+        role,
+        QUARANTINE_WORDS,
+        note,
+        "Every quarantined check is green and back in the merge queue",
+        start=False,
+    )
+    if not tid or str(tid).startswith("not opened"):
+        st.pop("quarantine_red_run", None)  # tried again next pass
+        return [f"quarantine run red on develop {sha}: the later ticket was {tid or 'not opened'}"]
+    return [f"quarantine run red on develop {sha}: opened later ticket {tid}"]
+
+
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     """One pass (see the module text). Test branches whose deletion failed are tried again first and kept in
     the state while they still fail (ORCH-1475)."""
@@ -2524,6 +2581,10 @@ def _pass(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         out += winvm_red(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
         out.append(f"the Windows VM check could not run: {e}")
+    try:
+        out += quarantine_red(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        out.append(f"the quarantine check could not run: {e}")
     try:  # every pass, so a review starts while a pull request is still open
         sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:

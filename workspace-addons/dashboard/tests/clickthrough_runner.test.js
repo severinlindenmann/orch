@@ -289,3 +289,30 @@ test('a lane whose browser was left logged out gets a fresh context; a logged-in
     }
   } finally { console.log = log; }
 });
+
+// ORCH-2363: quarantined click-throughs are out of every default run (so out of the merge queue) and run alone with
+// --quarantined, nightly; the features only they cover are not asked for in a default run.
+test('a default run leaves the quarantined click-throughs out, --quarantined runs only them, --only still names one', () => {
+  const { pick } = require('../clickthrough/run.cjs');
+  const all = ['a.cjs', 'f-x.cjs', 'q.cjs'].map(file => ({ file }));
+  const parked = { 'f-x.cjs': 'ORCH-1' };
+  const names = list => list.map(c => c.file);
+  assert.deepEqual(names(pick(all, {}, parked)), ['a.cjs', 'q.cjs']);
+  assert.deepEqual(names(pick(all, { quarantined: true }, parked)), ['f-x.cjs']);
+  assert.deepEqual(names(pick(all, { only: new Set(['f-x']) }, parked)), ['f-x.cjs']);
+});
+
+test('a default run does not ask for a feature only a quarantined click-through covers', () => {
+  const { notQuarantined } = require('../clickthrough/run.cjs');
+  const all = [{ file: 'a.cjs', covers: ['op:a', 'op:b'] }, { file: 'f-x.cjs', covers: ['op:b', 'op:x'] }];
+  assert.deepEqual(notQuarantined(all, ['op:a', 'op:b', 'op:x', 'op:nobody'], { 'f-x.cjs': 'ORCH-1' }), ['op:a', 'op:b', 'op:nobody']);
+});
+
+test('the quarantine list names the three flaky click-throughs, each an existing file with its ticket', () => {
+  const { QUARANTINED } = require('../clickthrough/run.cjs');
+  assert.deepEqual(Object.keys(QUARANTINED).sort(), ['a-board-families.cjs', 'f-sync-page.cjs', 'q-automation-repeats.cjs']);
+  for (const [file, ticket] of Object.entries(QUARANTINED)) {
+    assert.match(ticket, /^ORCH-\d+$/, `${file} names its ticket`);
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'clickthrough', 'features', file)), `${file} exists`);
+  }
+});
