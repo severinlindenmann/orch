@@ -559,6 +559,8 @@ def test_paused_closed_unplanned_and_not_repeating_are_left_out():
         {"id": "t_r", "status": "open", "ext": {"automation": {"cron": "* * * * *", "last_run": old}}},
         _rep("t_f", "not a time"),
         {"id": "t_plain", "status": "open"},
+        # turned off on purpose, its old time plan still on the ticket (ORCH-2356): not stopped
+        _rep("t_off", old, old, status="done", recurring=False),
         _rep("t_done", old, status="done"),  # a finished repeat still runs again: counted
     ]
     assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30)] == ["t_done"]

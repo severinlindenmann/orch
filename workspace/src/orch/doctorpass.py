@@ -392,14 +392,15 @@ def _utc(d: datetime) -> str:
 
 def overdue_repeats(rows: list[dict], now: datetime, late_min: float, root: Path | None = None) -> list[dict]:
     """Repeats that stopped: [{ticket, key, title, planned, last}]. A repeat is late when its planned next
-    run lies more than max(late_min, one interval, at most a day) in the past. Paused repeats, closed
-    tickets, repeats without a planned time (set before orch saved one; they get it with their next
+    run lies more than max(late_min, one interval, at most a day) in the past. Left out: paused repeats,
+    repeats turned off (recurring false: an old one can still carry its last planned time, ORCH-2356),
+    closed tickets, repeats without a planned time (set before orch saved one; they get it with their next
     run) and, with the workspace root, repeats whose add-on wrote on the ticket after the planned time (it
-    ran) are left out."""
+    ran)."""
     out = []
     for t in rows:
         name, a = _sched_of(t)
-        if not a or a.get("paused") is True:
+        if not a or a.get("paused") is True or a.get("recurring") is False:
             continue
         if t.get("status") not in (*REPEAT_OPEN, "done"):
             continue
