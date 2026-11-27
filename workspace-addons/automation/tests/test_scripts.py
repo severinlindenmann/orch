@@ -42,12 +42,12 @@ def runner_in_a_thread(ws, monkeypatch):
 
 @pytest.fixture
 def person(monkeypatch):
-    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: None)
 
 
 @pytest.fixture
 def agent(monkeypatch):
-    monkeypatch.setattr(scripts, "an_agent", lambda: "claude")
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: "claude")
 
 
 def tk(ws, tid):
@@ -83,6 +83,23 @@ def repeat_ticket(ws, tid, name, **kw):
 # ---- settings and the trust rule ------------------------------------------------------------------------
 
 
+def test_unattended_script_and_repeat_wait_for_a_person(ws, monkeypatch):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    scripts.add(ws, "watch", ["true"])
+    assert scripts.command(ws, "watch") is None
+    key = scripts.key(ws, "watch", ["true"])
+    with pytest.raises(scripts.ScriptError, match="Only a person"):
+        scripts.allow(ws, "watch", key)
+    repeat_ticket(ws, "t_scr00012", "watch")
+    with pytest.raises(cli.Refused, match="Only a person"):
+        cli.allow(ws, "t_scr00012", key)
+    with pytest.raises(actions.Bad, match="Only a person"):
+        actions.act(ws, "allow-script", "t_scr00012", value=key)
+    assert actions.act(ws, "allow-script", "t_scr00012", by="human:Pat", value=key)["allowed"]
+
+
 def test_a_person_adds_a_script_and_it_is_allowed(ws, person):
     scripts.add(ws, "watch", py("print('hi')") + ["a b", 'q"uote'])
     assert scripts.load(ws) == {"watch": py("print('hi')") + ["a b", 'q"uote']}
@@ -94,7 +111,7 @@ def test_an_agents_script_waits_for_a_person(ws, agent, monkeypatch):
     assert scripts.defined(ws, "watch") and scripts.command(ws, "watch") is None
     with pytest.raises(scripts.ScriptError, match="Only a person"):
         scripts.allow(ws, "watch", scripts.key(ws, "watch", py("print('hi')")))
-    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: None)
     with pytest.raises(scripts.ScriptError, match="changed"):
         scripts.allow(ws, "watch", "0" * 64)
     scripts.allow(ws, "watch", scripts.key(ws, "watch", py("print('hi')")))
@@ -266,7 +283,7 @@ def test_cli_agent_add_shows_the_key_and_a_person_allows(ws, agent, monkeypatch,
     (row,) = json.loads(capsys.readouterr().out)
     assert row["allowed"] is False and len(row["key"]) == 64
     assert cli.main(["--dir", str(ws), "script", "allow", "watch", "--key", row["key"]]) == 2  # an agent
-    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: None)
     assert cli.main(["--dir", str(ws), "script", "allow", "watch", "--key", row["key"]]) == 0
     assert scripts.command(ws, "watch") == ["true"]
 
@@ -306,7 +323,7 @@ def test_allow_script_from_the_dashboard_allows_only_what_was_shown(ws, agent, m
     with pytest.raises(actions.Bad, match="Only a person"):  # an agent calling act itself
         actions.act(ws, "allow-script", "t_scr00012", value=k)
     monkeypatch.setattr(
-        scripts, "an_agent", lambda: None
+        scripts, "an_agent", lambda by=None: None
     )  # the dashboard runs it without the agent's variables
     with pytest.raises(actions.Bad, match="Look at the command again"):
         actions.act(ws, "allow-script", "t_scr00012", value="bad")
@@ -342,7 +359,7 @@ def test_the_automation_tab_offers_allow_until_the_script_is_allowed(ws, agent, 
             "args": {"verb": "allow-script", "target": "t_scr00013", "review": True},
         },
     }
-    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: None)
     actions.act(ws, "allow-script", "t_scr00013", value=scripts.key(ws, "watch", ["true"]))
     assert row()["actions"][0]["label"] == "Start now"
 
@@ -487,7 +504,7 @@ def test_start_now_runs_every_script_of_the_group(ws, person):
 def test_the_tab_offers_allow_for_the_first_script_of_a_group_not_allowed(ws, agent, monkeypatch):
     scripts.add(ws, "a", ["true"])
     scripts.add(ws, "b", ["echo", "b"])
-    monkeypatch.setattr(scripts, "an_agent", lambda: None)
+    monkeypatch.setattr(scripts, "an_agent", lambda by=None: None)
     scripts.allow(ws, "a", scripts.key(ws, "a", ["true"]))
     group_ticket(ws, "t_grp00010", {"a": "*/5 * * * *", "b": "*/5 * * * *"})
     r = actions.review(ws, "allow-script", "t_grp00010")

@@ -3,6 +3,7 @@ tool is recorded as `agent:<tool>`, and nothing hands the person off to a dashbo
 
 import json
 
+import pytest
 from conftest import CONTRACTS  # noqa: F401
 from fakes import WS
 
@@ -70,8 +71,9 @@ def test_relay_allow_from_a_plain_terminal(proj, run, rel):
     assert rel.sent[0]["type"] == "allow"
 
 
-def test_answer_from_a_plain_terminal_is_the_persons(proj, run, new_ticket):
+def test_answer_from_a_plain_terminal_is_the_persons(proj, run, new_ticket, monkeypatch):
     tid, qid = _question(run, new_ticket)
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     code, out, err = run("answer", tid, qid, "a")
     assert code == 0, out + err
     _plain(out, err)
@@ -85,6 +87,38 @@ def test_an_agent_answer_is_recorded_as_the_agent(proj, run, new_ticket, monkeyp
     code, out, err = run("answer", tid, qid, "b", "--by", "human:pat")
     assert code == 0, out + err
     assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "agent:claude"
+
+
+def test_unattended_done_leaves_human_review_pending(proj, run, new_ticket, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: False)
+    tid = new_ticket()
+    run("check", "add", tid, "Write it")
+    assert run("check", "done", tid, "c1", "--note", "wrote it")[0] == 0
+    code, out, err = run("ticket", "status", tid, "done")
+    assert code == 0, out + err
+    assert tickets.load(proj, tid)["status"] == "review"
+
+
+@pytest.mark.parametrize(
+    "words,refusal",
+    [
+        (("ticket", "edit", "{tid}", "--human-review", "no"), "Only a person"),
+        (("config", "set", "workflow.reviewer_answers", "on"), "Only the owner"),
+        (("people", "on"), "Only the owner"),
+        (("github", "release-exception", "unit", "--ticket", "off"), "Only a person"),
+        (("run", "take-back", "{tid}", "p_nothere01"), "Only a person"),
+        (("chat", "say", "Hello"), "Only a person"),
+        (("chat", "contacts"), "Only a person"),
+        (("chat", "thread", PEER), "Only a person"),
+        (("chat", "sync", PEER), "Only a person"),
+        (("chat", "send", PEER, "Hello"), "Only a person"),
+    ],
+)
+def test_person_commands_refuse_an_unattended_caller(proj, run, new_ticket, words, refusal, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: False)
+    tid = new_ticket()
+    code, out, err = run(*(word.format(tid=tid) for word in words))
+    assert code == 2 and refusal in out + err
 
 
 def test_marking_done_from_a_plain_terminal(proj, run, new_ticket):
