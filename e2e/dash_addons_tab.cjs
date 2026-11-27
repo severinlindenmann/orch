@@ -65,7 +65,7 @@ async function open(browser, width) {
 // Every row drawn: in the page, not hidden, with a size and its name readable at its own spot on screen.
 async function rowsOnScreen(page) {
   const panel = page.locator('#settings-panel-addons');
-  await panel.getByRole('heading', {name: 'Installed add-ons'}).waitFor();
+  await panel.getByRole('heading', {name: 'Add-ons', exact: true}).waitFor();
   const rows = panel.locator('.ad-row');
   assert.equal(await rows.count(), ADDONS.length);
   for (const [, label] of ADDONS) {

@@ -95,16 +95,19 @@ function liveWallView(ready, failed, total, shown) {
 function liveWallMark(s) {
   return liveWallAsks(s) ? 'needs-you' : s.status;
 }
-// The line under the summary (draft D): "24 sessions · 8 of 8 helper places in use"; without a limit (Settings > Helper >
-// Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
+// The line under the summary (draft D): "24 sessions · 8 of 8 helpers working"; ORCH-1695: plain words, not "helper
+// places in use". Without a limit (Settings > Helper > Helpers at once) the counts above say it already: the sessions
+// only. p: {used, max} as the Start choice reads it (pages/live-start.js).
 function liveWallTotal(n, p) {
   if (!p || typeof p !== 'object') return liveWallSessions(n);
-  return liveWallSessions(n) + ' · ' + liveWallPlaces(p);
+  const max = Number.isInteger(p.max) && p.max > 0 ? p.max : null;
+  return max === null ? liveWallSessions(n) : liveWallSessions(n) + ' · ' + liveWallPlaces(p);
 }
-// "8 of 8 helper places in use", "3 helper places in use" (no limit): also under the bar's New menu (ORCH-1660).
+// "8 of 8 helpers working", "3 helpers working" (no limit): also under the bar's New menu (ORCH-1660).
 function liveWallPlaces(p) {
   const max = Number.isInteger(p?.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p?.used) ? Math.max(0, p.used) : 0;
-  return (max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places')) + ' in use';
+  const n = max === null ? used : max;
+  return (max === null ? '' : used + ' of ') + n + (n === 1 ? ' helper' : ' helpers') + ' working';
 }
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
