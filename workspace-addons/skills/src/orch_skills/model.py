@@ -188,16 +188,24 @@ _COPY_WHERE = {"orch": "comes with orch", "workspace": "in this workspace", "adm
 
 
 def _files(folder: Path, limit: int = 200) -> dict[str, bytes] | None:
-    """Every file of a skill folder by its path inside it (hidden ones left out); None when too many or unreadable."""
+    """Every file of a skill folder by its path inside it (hidden ones and links left out); None when too many,
+    too big or unreadable. The walk stops at the limit and never follows a link."""
     out: dict[str, bytes] = {}
+    seen = 0
     try:
-        for p in sorted(folder.rglob("*")):
-            rel = p.relative_to(folder)
-            if any(part.startswith(".") for part in rel.parts) or not p.is_file():
-                continue
-            if len(out) >= limit or p.stat().st_size > 1024 * 1024:
-                return None
-            out[rel.as_posix()] = p.read_bytes()
+        for top, dirs, names in os.walk(folder, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for n in sorted(names):
+                seen += 1
+                if seen > limit:
+                    return None
+                p = Path(top) / n
+                if n.startswith(".") or p.is_symlink():
+                    continue
+                st = p.lstat()
+                if st.st_size > 1024 * 1024:
+                    return None
+                out[p.relative_to(folder).as_posix()] = p.read_bytes()
     except OSError:
         return None
     return out
