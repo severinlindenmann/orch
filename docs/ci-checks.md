@@ -88,7 +88,8 @@ Increasing `max_group` does not help a PR that must run alone.
 | add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | page smoke (Focus and Insights pages, Focus click-through with axe-core: a serious or critical finding fails, #2420) | (ORCH-1118 q6) | required, always | runs, also when proven (ORCH-1457) | | required |
 | dashboard click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
-| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
+| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118), quarantined: `quarantine` workflow (ORCH-2363) | | | | shown (02:23 UTC) | shown (push to `release/*`) |
+| quarantined click-throughs (`QUARANTINED` in `clickthrough/run.cjs`), `quarantine` workflow (ORCH-2363) | | | | shown (02:23 UTC) | shown (push to `release/*`) |
 | contracts | required | required, always |
 | publish, relay (with the relay browser page click-through, #2495), transcription | (ORCH-1118 q6) | required | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
@@ -139,6 +140,25 @@ following with `gh workflow run` on develop:
 The `ci` nightly gets no catch-up. Every push to develop already runs macOS and Windows unless a green group proved it
 (ORCH-1107), and the release check runs everything again. The Development expert still reports a nightly that came
 late or did not come (ORCH-454).
+
+## Quarantine (ORCH-2363)
+
+Owner, 27 Nov: the merge queue was red 756 of 840 minutes because of flaky checks, so they left every required set
+until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and three click-throughs
+(`a-board-families`, `f-sync-page`, `q-automation-repeats`: `QUARANTINED` in
+`workspace-addons/dashboard/clickthrough/run.cjs`, each with the ticket that fixes it). `ci.yml` no longer calls
+`clock.yml`, and a default click-through run (pull request, queue group, develop, release) leaves the quarantined
+ones out; `--only <name>` still runs one (the light job does so for a click-through a pull request changes).
+
+They run in the `quarantine` workflow instead: nightly on develop (02:23 UTC), on every push to a `release/*` branch
+and by hand (`--quarantined` runs only the quarantined click-throughs). It has no pull request trigger, so no queue
+group or pull request sees these checks, and the release keeper leaves the workflow's checks out when it judges a
+release pull request. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
+keeper, not started, no rerun, no revert); while it is open, each further red run adds a note to it.
+
+**Back out of quarantine:** fix the check, see it green in the `quarantine` workflow, then in one pull request
+remove its `QUARANTINED` entry (or call `clock.yml` from `ci.yml` again), update this section and the table, and
+`brand/tests/test_ci_quarantine.py`.
 
 ## Windows on our own Windows VM (ORCH-1127)
 
@@ -244,8 +264,8 @@ Actions > Runners.
 
 ## Linux jobs on the orch edge test server (ORCH-1126)
 
-The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
-can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
+Relay, publish, the short e2e set and the Services add-on with its real Linux run (the clock tests too, until they
+were quarantined: ORCH-2363, they now run on GitHub's machines in the `quarantine` workflow) can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
 Never on a production server. There the jobs use uv's own Python builds (`UV_PYTHON_PREFERENCE=only-managed`), and
 the clock tests keep real file times as on GitHub (`NO_FAKE_STAT=1`: libfaketime would shift the file times a
 program reads but not the ones it sets).

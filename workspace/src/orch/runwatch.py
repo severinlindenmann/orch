@@ -617,6 +617,8 @@ def _rows(text: str, n: int) -> tuple[list[str], str | None]:
     raw = text.rstrip("\n").split("\n")
     rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
     hint = _suggestion(raw, rows)
+    # a row that held only the tool's notice goes, it does not stay behind as a blank one
+    rows = [c for r in rows if (c := _RIGHT_NOTICE.sub("", r)) or not r.strip()]
     rows = _below_frame_dropped(rows)
     rows = _banner_dropped(rows)
     rows = [r for r in rows if not (_is_frame(r) or _is_notice(r) or _is_tip(r))]
@@ -644,6 +646,9 @@ def _below_frame_dropped(rows: list[str]) -> list[str]:
 _RULE = re.compile(r"^[\s\u2500-\u257f\-=_~]{3,}$")  # a row of box lines or dashes
 _EMPTY_PROMPT = re.compile(r"^\s*[>\u276f\u203a]\s*$")
 _FOOTER = re.compile(r"^\s*(\? for shortcuts|\u23f5\u23f5)")
+# The tool's own right-aligned notice ("Update installed, /restart to apply") behind a long run of spaces
+# is frame, not work: cut it off, so neither the notice nor its padding reaches a tile (r-1127-0540-ws-2).
+_RIGHT_NOTICE = re.compile(r"\s{3,}(?:Update installed|Update available|Auto-update failed)\b.*$")
 
 
 def _is_frame(row: str) -> bool:

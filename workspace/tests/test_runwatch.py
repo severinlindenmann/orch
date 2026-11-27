@@ -688,6 +688,25 @@ def test_rows_drop_the_prompt_frame():
     assert hint is None
 
 
+def test_rows_drop_the_tools_right_aligned_update_notice():
+    # report r-1127-0540-ws-2: Live showed the notice with its long run of spaces
+    pad = " " * 60
+    text = "\n".join(
+        [
+            "did the work",
+            pad + "Update installed \u00b7 /restart to apply",
+            "ran 3 tests" + pad + "Update installed",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["did the work", "ran 3 tests"]
+
+
+def test_rows_keep_a_line_that_only_mentions_an_update():
+    rows, _ = runwatch._rows("Update installed, tests pass", 40)
+    assert rows == ["Update installed, tests pass"]
+
+
 def test_rows_keep_typed_prompt_text():
     rule = "\u2500" * 40
     rows, _ = runwatch._rows("\n".join(["work", rule, "\u276f fix it", rule]), 40)

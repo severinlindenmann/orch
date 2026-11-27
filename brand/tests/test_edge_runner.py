@@ -188,7 +188,8 @@ def test_the_route_job_also_decides_for_orch_edge_and_never_fails():
     assert "head.repo.full_name == github.repository" in cond and cond.endswith("|| ''")
 
 
-@pytest.mark.parametrize("job,inp", [("clock", "runs_on"), ("relay", "runs_on"), ("publish", "runs_on"),
+# clock: quarantined (ORCH-2363), called from quarantine.yml on GitHub's machines, no longer from ci.yml
+@pytest.mark.parametrize("job,inp", [("relay", "runs_on"), ("publish", "runs_on"),
                                      ("e2e-smoke", "runs_on"), ("addons", "linux_runs_on")])
 def test_ci_passes_the_route_to_every_linux_job_and_runs_all_of_them_on_orch_edge(job, inp):
     body = _job(CI, job)

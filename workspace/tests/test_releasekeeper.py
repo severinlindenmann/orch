@@ -2575,3 +2575,66 @@ def test_open_prs_reads_every_open_pull_request_not_just_the_newest_60(tmp_path)
     w = rk.World(None, cfg(tmp_path))
     w._run = fake_run
     assert len(w.open_prs()) == 106
+
+
+# ---- ORCH-2363: quarantined checks (quarantine.yml) never count; a red nightly run opens a later ticket
+def test_a_red_quarantine_run_opens_one_later_ticket_that_is_not_started(tmp_path, capsys):
+    runs = {
+        "quarantine.yml": [
+            run(DEV, "schedule", "failure", rid=91),
+            run(OLD, "schedule", at="2026-11-16T01:00:00Z"),
+        ]
+    }
+    out = go(tmp_path, capsys, runs=runs)
+    assert f"ticket:{rk.QUARANTINE_WORDS}" in out["did"]
+    assert "(later)" in rk.QUARANTINE_WORDS
+    assert out["state"]["quarantine_red_run"] == "91"
+    assert any("opened later ticket" in x for x in out["lines"])
+    again = go(tmp_path, capsys, state=out["state"], runs=runs)  # the same run: nothing new
+    assert not any(
+        d.startswith(f"ticket:{rk.QUARANTINE_WORDS}") or d.startswith("note:") for d in again["did"]
+    )
+
+
+def test_a_new_red_quarantine_run_notes_the_open_later_ticket(tmp_path, capsys):
+    runs = {"quarantine.yml": [run(DEV, "schedule", "failure", rid=92)]}
+    open_t = [{"id": "t_q", "key": "ORCH-900", "status": "open", "title": rk.QUARANTINE_WORDS}]
+    out = go(tmp_path, capsys, runs=runs, tickets=open_t, state={"quarantine_red_run": "91"})
+    assert not any(d.startswith(f"ticket:{rk.QUARANTINE_WORDS}") for d in out["did"])
+    assert any(d.startswith("note:Release keeper: still red. The nightly quarantine run") for d in out["did"])
+
+
+def test_a_green_or_running_quarantine_run_opens_nothing(tmp_path, capsys):
+    for r in (
+        run(DEV, "schedule", "success", rid=93),
+        run(DEV, "schedule", None, status="in_progress", rid=94),
+    ):
+        out = go(tmp_path, capsys, runs={"quarantine.yml": [r]})
+        assert not any(rk.QUARANTINE_WORDS in d for d in out["did"])
+
+
+def test_quarantine_checks_never_count_for_a_release_pull_request():
+    red_q = {
+        "workflowName": "quarantine",
+        "name": "clickthroughs",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE",
+    }
+    ok = {"workflowName": "ci", "name": "gate", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    assert rk.checks_green([ok, red_q]) == "green"
+    assert rk.failed_checks([ok, red_q]) == []
+    assert rk.failed_runs([ok, {**red_q, "detailsUrl": "https://x/actions/runs/5/job/1"}]) == []
+    assert rk.checks_green([ok, {**red_q, "workflowName": "ci"}]) == "red"
+
+
+def test_a_ticket_opened_without_start_never_starts_a_run(tmp_path, monkeypatch):
+    proj = tmp_path / "p"
+    (proj / ".orch").mkdir(parents=True)
+    w = rk.World.__new__(rk.World)
+    w.root, w.sim, w.dry, w.did = proj, None, False, []
+    started = []
+    monkeypatch.setattr(rk.tickets, "resolve", lambda root, ref: "t_role")
+    monkeypatch.setattr(rk.tickets, "create", lambda *a, **k: {"id": "t_new", "key": "ORCH-901"})
+    monkeypatch.setattr(rk.runs, "start", lambda *a, **k: started.append(a))
+    assert w.new_ticket("ORCH-1", rk.QUARANTINE_WORDS, "n", "d", start=False) == "ORCH-901"
+    assert started == []

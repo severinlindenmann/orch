@@ -4,7 +4,7 @@
 A pull request on its own runs only what its files can break: the words and style checks, ruff and the workspace
 tests that read the modules it changed, and the suite of every add-on it changed. Next to it ci.yml runs the e2e
 smoke and the CLI smoke when their files changed (R3.4, ORCH-1118 q6). The full suite (all add-ons, click-throughs,
-page smoke, clock, both Linux workspace parts, Windows for file, process or path code, relay, publish) runs once per
+page smoke, both Linux workspace parts, Windows for file, process or path code, relay, publish) runs once per
 merge queue group on top of develop (`orch-queue/...` branches), so nothing reaches develop without it
 (docs/ci-checks.md).
 

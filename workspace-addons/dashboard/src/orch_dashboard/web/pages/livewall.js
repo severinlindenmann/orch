@@ -109,7 +109,8 @@ function liveWallPlaces(p) {
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
-  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '')).filter(x => x.trim()).slice(-n).join('\n');
+  // a terminal pads right-aligned text with a long run of spaces: two spaces in a peek (report r-1127-0540-ws-2)
+  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '').replace(/(\S)[ \t\u00a0]{3,}(?=\S)/g, '$1  ')).filter(x => x.trim()).slice(-n).join('\n');
 }
 // ORCH-2063: is a band shown folded? While a search runs, a band the person folded opens by itself when it holds a
 // match (their saved choice stays as it is). A fold click during the search counts for that search only (ui.sf, never
@@ -139,7 +140,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallFolded, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, liveWallCut, LIVE_WALL_MANY, LIVE_WALL_FIRST};
+  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallFolded, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallBandTitle, liveWallRead, liveWallWrite, liveWallCut, LIVE_WALL_MANY, LIVE_WALL_FIRST};
 }
 
 // --- the page ---
@@ -255,11 +256,15 @@ function liveWallCut(id, list) {
   const cap = paged ? capOf('wall-' + id, LIVE_WALL_FIRST) : list.length;
   return {shown:list.slice(0, cap), more:paged && list.length > cap ? moreMark('wall-' + id, list.length - cap, null, LIVE_WALL_FIRST) : null};
 }
+// A band's heading with its count. Needs you and working has none: the summary above already says how many need you
+// and how many work, and its tiles (one per ticket) never add up to that number of things to answer (owner, report
+// r-1127-0540-ws-2: '162 need you · 4 working' above 'Needs you and working (142)').
+function liveWallBandTitle(id, title, n) { return id === 'need' ? title : title + ' (' + n + ')'; }
 function liveWallBand(id, title, empty, list, ui, many) {
   const col = liveWallFolded(id, ui, list.length), tiles = id === 'pin' || id === 'need', cut = liveWallCut(id, list);
   return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
     h('h2', {className:'wall-bh'}, h('button', {type:'button', className:'wall-bt', 'data-wall-fold':id, 'data-key':'wall-fold-' + id, 'aria-expanded':String(!col)},
-      h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), title + ' (' + list.length + ')')),
+      h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), liveWallBandTitle(id, title, list.length))),
     col ? null : list.length
       ? h('div', {className:tiles ? 'wall-tiles' : 'wall-lines', 'data-key':'wall-list-' + id, 'data-many':many && list.length > 4 ? '1' : null},
         cut.shown.map(s => tiles ? liveWallTile(s, id === 'pin') : liveWallLine(s, false)), cut.more)

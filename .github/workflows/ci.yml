@@ -8,6 +8,8 @@ name: ci
 # A ready pull request into develop runs only the quick set (ORCH-1118 q6): banned-words, the light job (words, style,
 # ruff, picked tests), the e2e smoke and the Windows + macOS CLI smoke when it touches their files (R3.4), plus the
 # contracts, the phone smoke set and the dashboard pictures by path. Everything heavy runs once in its queue group.
+# Quarantined (ORCH-2363, owner 27 Nov): the click-throughs on QUARANTINED in the click-through runner and the suites at a
+# fake clock (clock.yml) are out of every run here; quarantine.yml runs them nightly and on release branches.
 # brand/tests/test_ci_queue_skip.py keeps ci.yml, addons.yml and docs/ci-checks.md in step.
 on:
   pull_request:
@@ -56,7 +58,6 @@ jobs:
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
       dashshots: ${{ steps.f.outputs.dashshots }}
-      clock: ${{ steps.f.outputs.clock }}
       perf: ${{ steps.f.outputs.perf }}
       oscode: ${{ steps.os.outputs.oscode }}
       # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
@@ -108,8 +109,6 @@ jobs:
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
             # the dashboard's pages and what takes their pictures (ORCH-312)
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
-            # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
-            clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
             # orch at 10,000 tickets against develop (ORCH-1609): the CLI, the add-on pages it measures, its scripts
             perf: ['workspace/**', 'workspace-addons/**', 'install.sh', 'e2e/perf/**', '.github/workflows/perf.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/check_contracts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
@@ -364,14 +363,8 @@ jobs:
     uses: ./.github/workflows/mobile.yml
     with:
       runs_on: '"macos-latest"'
-  # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
-  # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
-  clock:
-    needs: [changes, route]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
-    uses: ./.github/workflows/clock.yml
-    with:
-      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
+  # The suites at a fake clock (clock.yml, ORCH-390) are quarantined (ORCH-2363, owner 27 Nov): they made most red
+  # merge queue groups, so they run in quarantine.yml (nightly, release branches), never required here.
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds.
     # Always on GitHub's machines: brand/tests/test_edge_runner.py runs the edge runner's own hooks and setup, which
@@ -428,7 +421,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots, perf]
+    needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, brand, dash-shots, perf]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
