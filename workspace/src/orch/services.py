@@ -318,9 +318,7 @@ def _call(
     if sub == "start" and (pref := last_port(root, name)):
         env["ORCH_PREFERRED_PORT"] = str(pref)  # sticky ports: the add-on tries this one first
     if sub == "start":
-        env = launchenv.with_tmux(
-            env
-        )  # a short PATH never hides an installed tmux from the service (ORCH-2367)
+        env = launchenv.with_tmux(env)  # a short PATH never hides an installed tmux (ORCH-2367)
     try:
         r = subprocess.run(
             [sys.executable, "-P", "-m", m["run"], sub, "--json"],

@@ -557,7 +557,7 @@ def test_a_service_started_with_a_short_path_still_finds_an_installed_tmux(tmp_p
     for name in (
         "a",
         "b",
-    ):  # a short PATH with no tmux in it (never /usr/bin: a Linux machine has tmux there)
+    ):  # a short PATH without tmux (never /usr/bin: Linux has tmux there)
         (tmp_path / name).mkdir()
     short = os.pathsep.join([str(tmp_path / "a"), str(tmp_path / "b")])
     assert launchenv.with_tmux({"PATH": short}, (empty, brew))["PATH"] == os.pathsep.join([short, brew])
