@@ -212,8 +212,8 @@ def test_a_miss_is_measured_again_and_the_better_number_counts():
 
 
 def test_a_page_time_is_the_middle_of_three_fresh_loads(tmp_path, monkeypatch):
-    """ORCH-2370: First load was one sample, 1.02 s in one run and 3.12 s in the next on a slow CI runner. Every
-    page is measured three times on a freshly started dashboard and the middle time counts: one slow load does
+    """ORCH-2370: First load was one sample, 1.02 s in one run and 3.12 s in the next on a slow CI runner.
+    Every page is measured three times on a freshly started dashboard and the middle time counts: one slow load does
     not turn the check red, a page that is slow every time still does. The idle minute is waited for once."""
     mod = _limits_module()
 
