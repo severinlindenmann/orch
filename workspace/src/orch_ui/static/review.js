@@ -246,7 +246,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  let deck=null,view='deck',timer=null,alive=true,dirty=false,loading=false;const gone=new Set();/* id@digest answered here */
  const holdMs=o.hold==null?6000:o.hold,held=new Map();/* id -> {body, it, t}: answers not saved yet */
  const sig=it=>it.id+'@'+it.digest;
- const waitCount=n=>{bWait.lastChild.textContent=n?String(n):'';bWait.setAttribute('aria-pressed',String(view==='deck'))};
+ const extraNow=()=>typeof o.extra==='function'?Math.max(0,o.extra()|0):0;/* ORCH-2339: rows the page lists beside the cards count in the tab, so the tab, the heading and the menu badge are one number */
+ const waitCount=(n,withExtra)=>{n=n+(withExtra?extraNow():0);bWait.lastChild.textContent=n?String(n):'';bWait.setAttribute('aria-pressed',String(view==='deck'))};
  const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';attnEl.hidden=v!=='deck'||!attnEl.childElementCount;if(v==='answered')drawAnswered();else if(deck)deckEl.focus({preventScroll:true})};
  const signIn=()=>{deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}));waitCount(0)};
  const isAuth=e=>e&&(e.code==='needs_person'||e.status===401||e.status===403);
@@ -288,7 +289,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
   dfDrawn=dfNow();deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,decisionFirst:o.decisionFirst,...(round?{endView:roundEnd,onEscape:toStart}:{}),start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
-  waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
+  waitCount(items.length-Object.keys(deck.answers).length,true);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{lastCards=cards;const all=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
   if(round&&!dfNow())round=null;lastItems=all;const items=round?all.filter(i=>round.ids.has(i.id)):all;drawAttn(all);
