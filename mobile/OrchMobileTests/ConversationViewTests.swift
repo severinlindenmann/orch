@@ -267,7 +267,7 @@ final class ConversationViewTests: XCTestCase {
         input.outbox = []
         XCTAssertEqual(ConversationBuilder.items(id, input), listed)
         input.messages = []; pending.sentMessageId = nil; pending.failure = "Refused"; input.outbox = [pending]
-        XCTAssertEqual(ConversationBuilder.items(id, input).first?.receipt, .failed("Refused"))
+        XCTAssertEqual(ConversationBuilder.items(id, input).first?.receipt, .failed(NotSentNote.generic), "never the relay's own text")
     }
 
     func testGeneralStartedChipHidesItsAckBubble() {
@@ -332,6 +332,51 @@ final class ConversationModelTests: XCTestCase {
         let waiting = m.outbox.items.first { $0.text == "slow down" }
         XCTAssertEqual(ThrottleNote.text(for: waiting), "Try again later")
         XCTAssertEqual(m.conversationItems(.general(workspace: MockRelay.pilatus)).last?.receipt, .queued)
+    }
+
+    /// ORCH-1942: two refused messages each say why and what to do (never the relay's text); retry sends only the one picked,
+    /// and the sentence stays on the other bubble after the transient banner is gone.
+    func testNotSentBubblesSaySafeSentenceAndRetryOne() async throws {
+        let m = await paired()
+        let gen = ConversationID.general(workspace: MockRelay.pilatus)
+        await m.mock!.queueSendFailures([422, 422])
+        _ = try await m.send(MessageDraft(text: "first"), to: .general(workspace: MockRelay.pilatus))
+        XCTAssertEqual(m.announcement, "Not sent. " + NotSentNote.generic, "VoiceOver hears one safe sentence")
+        XCTAssertEqual(m.message, NotSentNote.banner(workspace: m.workspace(MockRelay.pilatus).map { displayName($0.name) }))
+        XCTAssertFalse((m.message ?? "").contains("Try again later."), "the relay's text is not the banner")
+        _ = try await m.send(MessageDraft(text: "second"), to: .general(workspace: MockRelay.pilatus))
+        m.message = nil   // the transient banner is gone
+        let failed = m.conversationItems(gen).filter { if case .failed? = $0.receipt { true } else { false } }
+        // Both sends can share one second, so their order is not fixed: pick by text, not by position.
+        XCTAssertEqual(failed.map(\.text).sorted(), ["first", "second"])
+        XCTAssertTrue(failed.allSatisfy { $0.receipt == .failed(NotSentNote.generic) })
+        let first = try XCTUnwrap(failed.first { $0.text == "first" }?.clientId)
+        await m.retrySend(first)
+        let after = m.conversationItems(gen)
+        XCTAssertNotEqual(after.first { $0.text == "first" }?.receipt, .failed(NotSentNote.generic), "the retried one went")
+        XCTAssertEqual(after.first { $0.text == "second" }?.receipt, .failed(NotSentNote.generic), "the other one keeps its sentence")
+        let sent = await m.mock!.requests.filter { $0.text == "second" }
+        XCTAssertTrue(sent.isEmpty, "retry sends only the one picked")
+    }
+
+    /// ORCH-1942: a phone the workspace no longer takes names that cause and what to do, in the bubble and for VoiceOver.
+    func testNotSentForAWorkspaceThatRemovedThePhone() async throws {
+        let m = await paired()
+        _ = try? await m.send(MessageDraft(text: "hi"), to: .general(workspace: "ws_nope000001"))
+        let o = try XCTUnwrap(m.outbox.items.first { $0.text == "hi" })
+        XCTAssertEqual(o.failureStatus, 403)
+        XCTAssertEqual(NotSentNote.text(for: o), NotSentNote.text(status: 403))
+        XCTAssertEqual(m.announcement, "Not sent. " + NotSentNote.text(status: 403))
+        XCTAssertFalse(m.announcement!.contains("may not reach"), "never the relay's own text")
+    }
+
+    /// ORCH-1942: offline is waiting, not failure: no Not sent sentence, the clock stays.
+    func testOfflineSendWaitsAndIsNotNotSent() async throws {
+        let m = await paired()
+        await m.mock!.setOffline(true)
+        _ = try await m.send(MessageDraft(text: "later"), to: .general(workspace: MockRelay.pilatus))
+        XCTAssertEqual(m.conversationItems(.general(workspace: MockRelay.pilatus)).last?.receipt, .queued)
+        XCTAssertNotEqual(m.announcement, "Not sent. " + NotSentNote.generic)
     }
 
     func testOpenConversationStaysReadWhenNewMessagesArrive() async throws {

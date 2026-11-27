@@ -557,3 +557,19 @@ def test_a_closed_order_wakes_nobody_and_its_run_ends(ws, run, monkeypatch, stat
     assert watch.once(ws) == [] and len(runs(ws)) == n
     assert run("next", order) == {"order": order, "step": "done", "closed": True}
     assert [o["stage"] for o in run("list") if o["order"] == order] == [status]
+
+
+def test_a_core_stale_edit_refusal_has_the_conflict_code():
+    """Core's --if-revision refusal prints error, revision, changed_by and current, with no code: the retries of
+    refresh and handover look for "conflict" (e2e A20 failed on a loaded machine without it)."""
+    stale = {
+        "error": "Ticket was changed by agent:factory at 15:00.",
+        "revision": 7,
+        "changed_by": "agent:factory",
+    }
+    with pytest.raises(Refused) as got:
+        orchcli._value(2, stale)
+    assert got.value.code == "conflict"
+    with pytest.raises(Refused) as other:
+        orchcli._value(2, {"error": "No."})
+    assert other.value.code == "refused"

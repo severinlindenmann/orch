@@ -1,6 +1,8 @@
 # 25 Nov invitation opened on a paired phone (ORCH-2127)
 - An invitation link opened while the phone is already paired opens the Add workspace confirmation (Add this workspace?) over Chats. Closing it adds nothing and keeps the pairing.
 - An invitation for another server is never sent: the sheet says "This invitation is for another server" with "Use a different link". Review trigger: Add workspace › Pairing errors › Another server.
+# 25 Nov Not sent says why and what to do (ORCH-1942)
+- New page `not-sent.html`: a refused message keeps Not sent, Retry and Discard, plus one safe sentence under it: "This workspace no longer takes messages from this phone. Ask its owner to add your phone again." (403), "A file in it is no longer on the server. Retry uploads it again." (404), else "Try sending this message again.". The server's own text never shows; VoiceOver reads Not sent and the sentence once. The Chats line names the workspace and points to the chat.
 
 # 25 Nov swipe rows and Reduce Motion (ORCH-2049)
 - Needs your OK rows (Hide) and ticket chat rows (Archive / Delete): with Reduce Motion on, the row still follows the finger, but reveal, spring back, close and hide jump to where they end instead of sliding. Buttons, Undo, long-press menu and VoiceOver actions are unchanged; with Reduce Motion off nothing changes.
@@ -100,6 +102,9 @@ New page `team-chat.html`: in a ticket chat a strip under the title names who is
 ## 25 Nov fingerprint text size (ORCH-2128)
 
 The fingerprint to compare (Accept card on a workspace chat, "This phone" in Settings) is monospaced and follows the phone's text size like the words around it (15 pt at the default size). At accessibility sizes it wraps between groups of four, stays selectable as one value, and VoiceOver reads the whole value. Not mocked: the mockup has no large-text mode and no fingerprint screen.
+## 25 Nov who replaces an invitation (ORCH-2129)
+
+Setup and Add workspace no longer send a recipient to orch on their own computer. The hint says "Ask the person who set up orch for you to send an invitation."; the steps behind it are titled "If you are the admin" and name the relay admin page and Add phone. An expired, used or unknown link says "… Ask the person who invited you for a new one." (the same words as the relay's error), and so does a link that does not look right.
 
 ## 25 Nov voice play button says its next action (ORCH-2064)
 

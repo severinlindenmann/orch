@@ -26,6 +26,16 @@ actor MockRelay: RelayAPI {
     func queueUploadFailures(_ s: [Int]) { uploadFailures = s }
     func queueSendFailures(_ s: [Int]) { sendFailures = s }
     private(set) var uploadCalls = 0
+    /// Every answer request that reached the relay, duplicates included (ORCH-2126: a retry carries the original id and body).
+    private(set) var answerRequests: [AnswerRequest] = []
+    /// Test hooks (ORCH-2126): `holdAnswers` stores an answer, then keeps its reply back until `releaseAnswers`;
+    /// `loseNextAnswerReply` stores the next answer and then fails like a dropped connection.
+    private var holdAnswers = false, loseNextAnswerReply = false
+    private var heldReplies: [CheckedContinuation<Void, Never>] = []
+    var heldAnswerCount: Int { heldReplies.count }
+    func setHoldAnswers(_ v: Bool) { holdAnswers = v }
+    func releaseAnswers() { let h = heldReplies; heldReplies = []; for c in h { c.resume() } }
+    func setLoseNextAnswerReply() { loseNextAnswerReply = true }
     /// Review stack: every verdict the relay accepted (question message id, verdict, plain answer), for tests.
     private(set) var verdicts: [(question: String, verdict: ReviewVerdict, answer: String)] = []
     /// The workspace's result for a verdict: `-mockReviewResult changed|applied` (nothing when unset: the card stays "Sent").
@@ -515,6 +525,7 @@ actor MockRelay: RelayAPI {
         try await check()
         // Simulator evidence hook `-mockFailAnswers YES`: reads work, sending an answer fails like no network (the card stays "Saved on this phone").
         if UserDefaults.standard.bool(forKey: "mockFailAnswers") { throw URLError(.notConnectedToInternet) }
+        answerRequests.append(r)
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
         guard all.contains(where: { $0.id == r.questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
         // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.
@@ -553,6 +564,8 @@ actor MockRelay: RelayAPI {
             let mode = reviewResultOverride ?? reviewResult
             if let mode { deliverReviewResult(q, mode: mode, summary: r.answer) }
         }
+        if loseNextAnswerReply { loseNextAnswerReply = false; throw URLError(.networkConnectionLost) }
+        if holdAnswers { await withCheckedContinuation { heldReplies.append($0) } }
         return SendReceipt(id: id, clientId: r.clientId)
     }
     /// A workspace result text for a phone verdict (never pushed; the phone's "Received").
