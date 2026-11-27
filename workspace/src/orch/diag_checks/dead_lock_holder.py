@@ -3,6 +3,7 @@
 from orch.diag_checks import data, verdict
 
 NAME = "dead_lock_holder"
+FIX = "If no orch command is running, delete the lock file named here, then run orch doctor again."
 
 
 def check(snap):
