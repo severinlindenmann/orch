@@ -376,7 +376,9 @@ for i in range(5):
 """
 
 
-def test_two_processes_mixing_check_evidence_history_lose_nothing(proj, subprocess_home, new_ticket):
+def test_two_processes_mixing_check_evidence_history_lose_nothing(
+    proj, subprocess_home, new_ticket, child_trust
+):
     """R8.2: two processes editing one ticket at once (checklist add, evidence, history) both fully land."""
     tid = new_ticket()
     base = read(proj, tid)["revision"]

@@ -446,6 +446,43 @@ def subprocess_home(proj, monkeypatch):
     shutil.rmtree(d, ignore_errors=True)
 
 
+_CHILD_TRUST = '''\
+"""TEST-ONLY (tests/conftest.py child_trust): a child orch of the test suite uses its ORCH_HOME as the orch
+home, like _legacy_trust does in the test process. Its workspace sits in pytest's temp folder, which the real
+pairing refuses for a test install; without this the child cannot read its saved keys and evidence refuses."""
+import os
+
+if os.environ.get("ORCH_TEST_CHILD_TRUST") == "1" and os.environ.get("ORCH_HOME"):
+    from pathlib import Path
+
+    from orch import home as _orch_home
+    from orch import winacl as _winacl
+
+    def _test_home(root):
+        home = Path(os.environ["ORCH_HOME"])
+        home.mkdir(parents=True, exist_ok=True)
+        os.chmod(home, 0o700)
+        _winacl.allow_home(home)
+        return home
+
+    _orch_home.guarded_home = _test_home
+'''
+
+
+@pytest.fixture
+def child_trust(proj, tmp_path_factory, monkeypatch):  # after proj, which clears unknown env
+    """For tests whose child processes (python -m orch, a fake agent that calls orch) write evidence: the
+    child gets the same test home as _legacy_trust gives this process, through a sitecustomize.py on
+    PYTHONPATH that only acts with ORCH_TEST_CHILD_TRUST=1. No product code has a switch for it. Returns the
+    folder, for a test that builds its own PYTHONPATH."""
+    d = tmp_path_factory.mktemp("childtrust")
+    (d / "sitecustomize.py").write_text(_CHILD_TRUST, encoding="utf-8")
+    old = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(d), *([old] if old else [])]))
+    monkeypatch.setenv("ORCH_TEST_CHILD_TRUST", "1")
+    return d
+
+
 @pytest.fixture
 def run(capsys):
     def _run(*argv):

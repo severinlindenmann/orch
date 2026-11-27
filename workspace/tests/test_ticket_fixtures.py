@@ -236,13 +236,14 @@ def test_a_persons_done_and_wont_do_are_plain(proj, run):
     assert done["history"][-1]["by"] == "human:tester"
 
 
-def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj):
+def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj, child_trust):
     """A fresh process, a fresh orch home (no key folder): a person marks an item Done and the ticket Done
     from the CLI; both are recorded as human:<name>."""
     src = Path(__file__).resolve().parents[1] / "src"
     home = proj.parent / f"{proj.name}_fresh_home" / "orchhome"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_", "ORCH_"))}
-    env.update(PYTHONPATH=str(src), ORCH_HOME=str(home))
+    path = os.pathsep.join([str(child_trust), str(src)])
+    env.update(PYTHONPATH=path, ORCH_HOME=str(home), ORCH_TEST_CHILD_TRUST="1")
 
     def orch(*argv):
         r = subprocess.run(

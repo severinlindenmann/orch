@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests 
 
 
 @pytest.fixture
-def gen(proj, monkeypatch, subprocess_home):
+def gen(proj, monkeypatch, subprocess_home, child_trust):
     """The generic fake agent as the folder's agent; its log says what it was told."""
     log = proj.parent / f"{proj.name}-agent.log"
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")

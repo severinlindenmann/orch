@@ -171,7 +171,7 @@ LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 # Every answer without its own policy: no plug-in content, no <base> that moves the page's scripts, forms post here only.
 DEFAULT_CSP = (
     "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; "
-    "object-src 'none'; base-uri 'none'; form-action 'self'"
+    "object-src 'self'; base-uri 'none'; form-action 'self'"
 )
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the

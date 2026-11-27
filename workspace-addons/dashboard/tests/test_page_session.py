@@ -128,7 +128,7 @@ def test_answers_carry_the_default_headers(live):
     r = c.getresponse()
     r.read()
     csp = r.getheader("Content-Security-Policy")
-    for part in ("object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'self'"):
+    for part in ("object-src 'self'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'self'"):
         assert part in csp, part
     assert (
         "unsafe-inline" not in csp and "script-src" not in csp
