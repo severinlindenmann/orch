@@ -233,7 +233,7 @@ if (typeof module === 'object' && module.exports) {
       return h('div', {className:where === 'wall' ? 'live-prow wall-runs' : 'live-prow', role:'group', 'aria-label':'Runs on', 'data-key':k},
         h('span', {className:'meta'}, 'Runs on'), h('span', {className:'start-run'}, tool, model));
     }
-    // The helper places in use, under the choices (draft D): a new helper takes one, or waits in line when all are taken.
+    // The helpers working (of how many may), under the choices (draft D): a new helper takes one, or waits in line when all are taken.
     function placesLine() {
       const p = typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null;
       if (!p || typeof liveWallPlaces !== 'function') return null;

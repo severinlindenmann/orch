@@ -1877,6 +1877,8 @@ function localStamp(at, withTime = true) {
 function ticketPaused(t, run) {
   return ['open', 'ready'].includes(t.status) && !run?.running && array(t.sessions).length > 0;
 }
+// The word of the one Start button on this page (pages/start.js): the sentence names the button it means (ORCH-1696).
+const ticketStartWord = t => array(t.sessions).length ? 'Continue' : 'Start helper';
 // ---- The ticket page: header (actions, title, one state line, stepper), tabs Overview / Tasks / Files / Activity, Properties.
 const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do && changeTask(c.text, c.origin));
 // One strip at the top of the ticket in every state: one status pill, one sentence, one main action (no stepper).
@@ -1901,7 +1903,10 @@ function ticketStripModel(t, run, fresh) {
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   // ORCH-415: a helper that may be stuck is passed too (helperState gives null when none runs), so the pill never says no helper
   const s = window.UI.ticketState(t, window.DashHelpers.helperState(run, t));
-  const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
+  // ORCH-1696: one word per state, the same as the tickets list: sent back reads Changes asked, a stopped helper Paused
+  const word = s.helper || s.pill !== 'todo' || s.word === 'Waiting' || ticketPrepare(t) ? s.word
+    : window.DashHelpers.changesAsked(t) ? 'Changes asked' : ticketPaused(t, run) ? 'Paused' : s.word;
+  const m = sentence => ({pill:s.pill, word, helper:s.helper || undefined, sentence});
   // ORCH-548: Looks good given on the Review page and still being saved (Undo there for a few seconds)
   if (t.status === 'done' && t.accept_saving) return m('Done: your Looks good is being saved.');
   if (t.status === 'done') {
@@ -1926,7 +1931,7 @@ function ticketStripModel(t, run, fresh) {
   const prep = ticketPrepare(t);
   if (prep) {
     const said = {waiting:'In line to be prepared. Start still works.', preparing:'Preparing: reading the links and filling in the ticket.',
-      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '. Press Start to begin.', not_prepared:'Not prepared yet. Start still works.'}[prep.state];
+      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '. Press ' + ticketStartWord(t) + ' to begin.', not_prepared:'Not prepared yet. Start still works.'}[prep.state];
     return {...m(said), prepare:prep.state};
   }
   if (run?.running || run?.state === 'maybe-stale') {
@@ -1934,11 +1939,11 @@ function ticketStripModel(t, run, fresh) {
     if (s.helper) return m((s.helper.detail || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
-  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press ' + ticketStartWord(t) + ' to begin now.');
   // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
   // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
-  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m('Your helper begins when you press Start.'), word:'Not started'};
-  if (fresh) return m('Not started. Your helper begins when you press Start.');
+  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m('Your helper begins when you press ' + ticketStartWord(t) + '.'), word:'Not started'};
+  if (fresh) return m('Not started. Your helper begins when you press ' + ticketStartWord(t) + '.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
   if (t.status === 'active' && run?.state !== 'maybe-stale') return m('No helper is working on it right now.');
@@ -2119,7 +2124,7 @@ function ticketProperties(t, parent) {
       field('I review the result', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', doneWhenField(t), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
@@ -2127,6 +2132,11 @@ function ticketProperties(t, parent) {
     propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
+}
+// ORCH-1696: a long Done when reads three lines, then Show more (the master's UI.moreText); a click on it still edits it.
+function doneWhenField(t) {
+  const field = inlineField(t, 'done_when');
+  return window.UI?.moreText ? window.UI.moreText(clean(t.done_when), {node:field}) : field;
 }
 // Created and updated (or finished) in one quiet line at the foot of the rail.
 function railStamp(t) {

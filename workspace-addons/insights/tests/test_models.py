@@ -135,6 +135,12 @@ def test_time_without_cost_has_no_dash_sentence_and_says_why():
     assert build_team(usage(seconds=0, cost=6, finished=2, team=[]))["each"] == "about $3.00 each"
 
 
+def test_orch1694_a_dash_for_helper_time_says_why():
+    no_time = build_team(usage(seconds=0, cost=6, finished=2, team=[]))
+    assert no_time["time"] == "–" and no_time["time_note"] == "Not recorded in the last 30 days"
+    assert build_team(usage(seconds=240, cost=0, finished=2, team=[]))["time_note"] == "Last 30 days"
+
+
 def test_page_has_the_team_section():
     from importlib import resources
 

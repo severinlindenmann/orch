@@ -28,10 +28,21 @@ function parentLine(t) {
 const finishedAt = t => parse(window.DashHelpers.doneAt(t));
 
 // A finished row says its result right under the title (ORCH-1849): the outcome or completion note the helper or a
-// person wrote, in at most about 3 lines of the narrow side card; with none written it says so, never a made-up line.
+// person wrote, in at most about 3 lines of the narrow side card. With none written it says the ticket's summary (the
+// ticket page's "In short"), else names the result file of a finished task (ORCH-2297: the two pages said different
+// things); "No result written yet" only when the ticket has none of them, never a made-up line.
 const FINISHED_CHARS = 110;
+function finishedSaid(t) {
+  const words = changedWords(t), said = words ? plainChanged(changedText(words), FINISHED_CHARS) : '';
+  if (said) return said;
+  const short = plainChanged(clean(t.summary || ''), FINISHED_CHARS);
+  if (short) return short;
+  const files = [...new Set(array(t.checklist).filter(c => c.done && !c.wont_do).flatMap(c => array(c.evidence))
+    .filter(ev => (ev.type || ev.kind) === 'file').map(ev => clean(ev.title || String(ev.ref || '').split(/[\\/]/).pop())).filter(Boolean))];
+  return files.length ? 'Result: ' + files[0] + (files.length > 1 ? ' and ' + (files.length - 1) + ' more' : '') : '';
+}
 function ticketRow(t) {
-  const at = finishedAt(t), words = changedWords(t), said = words ? plainChanged(changedText(words), FINISHED_CHARS) : '';
+  const at = finishedAt(t), said = finishedSaid(t);
   // The time sits under the title (not beside it), so a title fits on one line in the narrow side card.
   const when = [at ? 'Finished ' + time(at) : '', said ? '' : 'No result written yet'].filter(Boolean).join(' · ');
   return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t),
@@ -880,16 +891,20 @@ function home() {
   const title = needCount || anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
   // ORCH-1616 (owner): the number lives only on the Review badge, so the line under the heading is the date alone
+  // ORCH-1699: a workspace with no ticket yet never links to "All 0 tickets"; its empty page names the first step
   const head = heading(title, today, {
     // ORCH-1698: the top bar (and its New ticket) is hidden under the phone tabs, so Home offers it itself on a phone
     actions:fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
-      h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')))});
+      all.length ? h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')) : null)});
   const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
   if (!anyNeeds && !helpers.length && !inProgress.length && !notStarted.length) {
     // D4 (26 Nov): the master's one empty page: what is missing, one sentence, the first step right there
     const step = typeof newButton === 'function' ? newButton() : null;
-    return fragment(head, banner, tiles, logins.stopped.length ? null : window.UI?.pageEmpty ? window.UI.pageEmpty({title:'All clear', text:'Questions and results to review show up here.', step, dataKey:'empty'})
-      : h('section', {className:'card page-empty', 'data-key':'empty'}, h('h2', {}, 'All clear'), h('p', {}, 'Questions and results to review show up here.'), step),
+    // ORCH-1699: with no ticket at all the page says so and what a ticket is, not "All clear"
+    const title = all.length ? 'All clear' : 'No tickets yet';
+    const text = all.length ? 'Questions and results to review show up here.' : 'Describe a job in plain words and a helper takes it from there.';
+    return fragment(head, banner, tiles, logins.stopped.length ? null : window.UI?.pageEmpty ? window.UI.pageEmpty({title, text, step, dataKey:'empty'})
+      : h('section', {className:'card page-empty', 'data-key':'empty'}, h('h2', {}, title), h('p', {}, text), step),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
       // D4: a workspace where nothing finished yet is the empty page alone (no "Finished · Nothing finished yet" card)
       finished.length || all.some(t => t.status === 'done') ? card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)) : null, changedCard);

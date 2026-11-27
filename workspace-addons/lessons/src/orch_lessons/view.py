@@ -89,7 +89,7 @@ def build(root) -> dict:
     view = {
         "schema": "orch.addon-view/1",
         "generated_at": store.now(),
-        "header": {"link": {"label": "← Installed add-ons", "to": "app:settings/addons"}},
+        "header": {"link": {"label": "← Add-ons", "to": "app:settings/addons"}},
         "blocks": [block],
     }
     notes = []
