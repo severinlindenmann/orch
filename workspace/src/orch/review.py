@@ -1263,6 +1263,21 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
     )
 
 
+def _check_why(problem: str, rows: list, open_parts: list, uncovered: bool, failed: bool) -> str:
+    """The line under a finished-work card's title (R6 A, owner 25 Nov): a problem first; else what the
+    person asked for is done and tested (every part has its evidence and no check failed), or everything else
+    is when a part is still open; the old plain line only when orch cannot say either."""
+    if problem:
+        return f"Check this: {problem}"
+    proven = all(said for st, _, said in rows if st == "Done")
+    if rows and proven and not uncovered and not failed:
+        if not open_parts:
+            return "Everything you asked for is done and tested."
+        if len(open_parts) < sum(1 for st, _, _ in rows if st != "Won't do"):
+            return "Everything else you asked for is done and tested."
+    return "The helper says this is ready for your check."
+
+
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Test results card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
     the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
@@ -1299,10 +1314,13 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             "What to do: send it back and say which part is missing,"
             " or approve it if that part does not matter."
         )
+    chips = _checks_chips(ticket)
+    failed = any(c.get("tone") == "bad" for c in chips)
+    open_parts = [{"asked": text, "got": _clip(said, 300)} for st, text, said in rows if st == "Open"]
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
-        "why": f"Check this: {problem}" if problem else "The helper says this is ready for your check.",
+        "why": _check_why(problem, rows, open_parts, bool(uncovered), failed),
         "then": _accept_then(ticket, root, bool(uncovered)),
         "ok_label": "Looks good",
     }
@@ -1312,6 +1330,8 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     if blocked:  # the page turns Looks good off and shows this line instead of "If you approve"
         card["blocked"] = blocked
         card["need"] = "Looks good is off"
+    if open_parts:  # R6 A (owner, 25 Nov): "You asked for / You got" for each part still open, on top
+        card["open_parts"] = open_parts[:5]
     url = _check_open(ticket)
     if url:
         card["open"] = url
@@ -1326,7 +1346,6 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             pv["headline"] = _short(summary_text, 200)
         if total:
             pv["progress"] = {"done": done, "total": total}
-        chips = _checks_chips(ticket)
         if problem:
             chips.insert(0, {"text": "Problem found", "tone": "bad"})
         if uncovered:

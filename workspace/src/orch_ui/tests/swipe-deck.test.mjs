@@ -24,6 +24,8 @@ class N {
   replaceChildren(...c) { this.children.forEach(x => { x.parent = null; }); this.children = []; this.own = ''; this.append(...c); }
   remove() { if (this.parent) { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; } }
   setAttribute(k, v) { this.attrs[k] = String(v); }
+  removeAttribute(k) { delete this.attrs[k]; }
+  after(x) { const p = this.parent; if (!p) return; const [c] = p.adopt(x); p.children.splice(p.children.indexOf(this) + 1, 0, c); }
   getAttribute(k) { return this.attrs[k] ?? null; }
   addEventListener(t, f) { (this.listeners[t] ||= []).push(f); }
   removeEventListener() {}
@@ -51,13 +53,15 @@ function deck(items, o = {}, extra = {}) {
   return {d, host, decided, toasts, viewed, noBtn, talkBtn, okBtn, undoBtn, note};
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
+// R4 A (ORCH-2316): Comment first turns on pointing when the card has something to point at; "Whole card" opens the box
+const comment = (host, talkBtn) => { talkBtn.click(); const w = host.querySelector('.swipe-commenting'); if (w) w.querySelectorAll('button').find(b => b.textContent === 'Whole card').click(); return host.querySelector('.swipe-sheet'); };
 const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Check', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
 const draft = id => ({id, kind: 'draft', kindLabel: 'Draft', title: 'Home block ' + id, preview: {type: 'doc', heading: 'Words', paras: ['x']}});
 
-test('a Check card: Send back opens the text box (nothing is sent without words), no second Comment button', async () => {
+test('a Check card: Send back opens the text box (nothing is sent without words); Comment shows too (R4 A, ORCH-2316)', async () => {
   const {d, host, decided, noBtn, talkBtn} = deck([check('a'), check('b')]);
   assert.equal(noBtn.textContent.includes('Send back'), true);
-  assert.equal(talkBtn.hidden, true, 'Comment would open the same box: left out on a Check card');
+  assert.equal(talkBtn.hidden, false, 'one Comment on every card, a result too (R4 A)');
   noBtn.click();
   const sheet = host.querySelector('.swipe-sheet');
   assert.ok(sheet, 'the text box opens');
@@ -196,7 +200,7 @@ test('ORCH-246: on a question with options the words box sends my answer, not "S
 test('ORCH-295: Add note saves the words, answers nothing, and keeps the card; Send back stays its own button', async () => {
   const notes = [];
   const {d, host, decided, talkBtn} = deck([draft('a'), draft('b')], {onNote: async (it, text) => { notes.push({id: it.id, text}); return {ok: true}; }});
-  talkBtn.click();
+  comment(host, talkBtn);
   const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
   const add = sheet.querySelectorAll('button').find(b => b.textContent === 'Add note');
   const back = sheet.querySelectorAll('button').find(b => b.textContent === 'Send back for changes');
@@ -212,7 +216,7 @@ test('ORCH-295: Add note saves the words, answers nothing, and keeps the card; S
 
 test('ORCH-295: a failed note keeps the sheet and the words', async () => {
   const {host, decided, talkBtn} = deck([draft('a')], {onNote: async () => ({ok: false, error: {message: 'Could not save the note.'}})});
-  talkBtn.click();
+  comment(host, talkBtn);
   const sheet = host.querySelector('.swipe-sheet'), ta = sheet.querySelector('textarea');
   ta.value = 'hello'; ta.listeners.input.forEach(f => f());
   sheet.querySelectorAll('button').find(b => b.textContent === 'Add note').click(); await wait(20);
@@ -223,7 +227,7 @@ test('ORCH-295: a failed note keeps the sheet and the words', async () => {
 
 test('ORCH-295: without onNote there is no Add note button', () => {
   const {host, talkBtn} = deck([draft('a')]);
-  talkBtn.click();
+  comment(host, talkBtn);
   assert.equal(host.querySelectorAll('button').some(b => b.textContent === 'Add note'), false);
 });
 test('what just happened is one line in the top row, a long title goes by its ticket, never cut mid-word (ORCH-421)', async () => {
@@ -580,10 +584,10 @@ test('decision first: 1 2 3 answer, digits show on the buttons, J and K move, U 
   key(host, '2'); await wait(160);
   assert.deepEqual(decided.map(x => x.v), ['ok', 'no']);
 });
-test('decision first: a Check card has two answers, so 1 and 2; M opens More; Esc goes to o.onEscape', () => {
+test('decision first: a Check card has three answers (Comment, Send back, Looks good), so 1 2 3; M opens More; Esc goes to o.onEscape', () => {
   let esc = 0;
   const {host, noBtn, okBtn} = deck([check('a', {open: 'https://example.com/pr/1'}), check('b')], {decisionFirst: true, onEscape: () => { esc++; }});
-  assert.deepEqual([noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['1', '2']);
+  assert.deepEqual([noBtn, okBtn].map(b => b.querySelector('kbd').textContent), ['2', '3'], 'Comment is 1 (R4 A: on every card)');
   const sm = host.querySelector('.swipe-more summary');
   let opened = 0; sm.onclick = () => { opened++; };
   key(host, 'm'); assert.equal(opened, 1);
@@ -704,4 +708,69 @@ test('decision first: o.moreItems adds the page rows to More and a click gets th
   assert.deepEqual(got, ['q1']);
   const off = deck([asked()], {moreItems: items}).host;
   assert.equal(off.querySelectorAll('.swipe-more-item').length, 0, 'off: no page rows');
+});
+// ORCH-2316: the gaps of the Review overhaul against the approved drafts (R2 A, R3 B, R4 A, R6 A)
+test('R4 A: Comment turns on pointing (paragraphs light up), Whole card and Done; a paragraph comment names it', async () => {
+  const {host, decided, talkBtn} = deck([draft('a'), draft('b')]);
+  talkBtn.click();
+  const bar = host.querySelector('.swipe-commenting');
+  assert.ok(bar, 'Comment is on');
+  assert.match(bar.textContent, /Comment is on\. Click a paragraph, or write about the whole card\./);
+  assert.ok(host.querySelector('.swipe-card').classList.contains('commenting'));
+  const para = host.querySelectorAll('.swipe-point').find(x => x.textContent === 'x');
+  assert.ok(para, 'the paragraph can be pointed at');
+  para.onkeydown({key: 'Enter', preventDefault() {}, stopPropagation() {}});
+  const sheet = host.querySelector('.swipe-sheet');
+  assert.ok(sheet, 'a paragraph opens the comment box');
+  assert.ok(sheet.textContent.includes('On this paragraph: “x”'));
+  const ta = sheet.querySelector('textarea'); ta.value = 'Shorter'; ta.listeners.input.forEach(f => f());
+  sheet.querySelectorAll('button').find(b => b.textContent === 'Send back for changes').click(); await wait(260);
+  assert.equal(decided[0].note.changes.text, '“x”'.replace(/^/, 'On ') + ': Shorter');
+});
+test('R4 A: Done turns pointing off; a card with nothing to point at opens the box at once', () => {
+  const {host, talkBtn} = deck([draft('a'), draft('b')]);
+  talkBtn.click();
+  host.querySelector('.swipe-commenting').querySelectorAll('button').find(b => b.textContent === 'Done').click();
+  assert.equal(host.querySelector('.swipe-commenting'), null);
+  assert.equal(host.querySelectorAll('.swipe-point').length, 0);
+  const q = {id: 'q', kind: 'choice', kindLabel: 'Question', title: 'Which day?', preview: {type: 'options', options: [{id: 'Tue', title: 'Tue'}, {id: 'Thu', title: 'Thu'}]}};
+  const two = deck([q, draft('b')]);
+  two.talkBtn.click();
+  assert.ok(two.host.querySelector('.swipe-sheet'), 'nothing to point at: the box opens');
+});
+test('R4 A: old and new wording side by side is never made bigger; pictures still are', () => {
+  const words = {id: 'w', kind: 'draft', kindLabel: 'Changed words', title: 'Intro', preview: {type: 'compare', before: {type: 'doc', paras: ['old']}, after: {type: 'doc', paras: ['new']}}};
+  const pics = {id: 'p', kind: 'draft', kindLabel: 'Before and after', title: 'Header', preview: {type: 'compare', before: {type: 'img', src: 'a.png'}, after: {type: 'img', src: 'b.png'}}};
+  const a = deck([words, pics]);
+  assert.equal(a.host.querySelector('.swipe-expand'), null, 'no Make bigger on words');
+  assert.equal(a.host.querySelector('.cmp-zoom'), null, 'no zoom per side on words');
+  assert.ok(a.host.querySelector('.swipe-preview').classList.contains('no-zoom'));
+  const b = deck([pics, words]);
+  assert.ok(b.host.querySelector('.swipe-expand'), 'pictures open large');
+});
+test('R3: a release only you may make says Put it live and See the changes', () => {
+  const live = {id: 'l', kind: 'link', cardKind: 'put_live', kindLabel: 'Put it live', title: 'Release 50', okLabel: 'Merge', open: 'https://example.com/pull/50'};
+  const {host, okBtn} = deck([live, draft('b')]);
+  assert.equal(okBtn.querySelector('.act-word').textContent, 'Put it live');
+  assert.ok(host.querySelectorAll('a').some(a => a.textContent === 'See the changes'));
+});
+test('R6 A: a part still open shows You asked for / You got on top; finished steps fold under What the helper did', () => {
+  const open = check('a', {blocked: '1 step is not finished. Send it back to get it done.', openParts: [{asked: 'Pictures at three widths', got: 'two'}]});
+  const a = deck([open, check('b')]);
+  const b = a.host.querySelector('.swipe-open');
+  assert.ok(b.textContent.includes('One part is still open'));
+  assert.ok(b.textContent.includes('You asked for: Pictures at three widths. You got: two.'));
+  const done = check('c', {preview: {type: 'doc', headline: 'Pages say what to do', steps: ['Write it — PR #1', 'Test it — Ran: pytest']}});
+  const c = deck([done, check('d')]);
+  const fold = c.host.querySelector('.doc-steps');
+  assert.ok(fold, 'the steps are one click away');
+  assert.equal(fold.querySelector('summary').textContent, 'What the helper did: 2 steps, each with its evidence');
+});
+test('R2 A: the list is called by o.listTitle and a Review row says why it waits and its ticket', () => {
+  const ask = {...draft('a'), lane: 'holds_up', laneName: 'Holds up work now', ticket: 'DEM-4'};
+  const pic = {...check('b'), lane: 'look', laneName: 'Look at the result', ticket: 'DEM-7', kindLabel: 'Pictures', files: [{label: 'a.png', type: 'img', src: 'a'}, {label: 'b.png', type: 'img', src: 'b'}]};
+  const {d} = deck([ask, pic], {listTitle: 'Needs you'});
+  const list = new N('div'); d.drawList(list);
+  assert.equal(list.querySelector('.review-list-title').textContent, 'Needs you');
+  assert.deepEqual(list.querySelectorAll('.review-row-sub').map(x => x.textContent), ['A helper waits for this · DEM-4', '2 pictures · DEM-7']);
 });

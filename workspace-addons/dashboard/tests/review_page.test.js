@@ -26,12 +26,12 @@ function ctx(state, extra = {}) {
 test('the page reads cards and decisions from state.review and counts the cards', () => {
   const c = ctx({workspace:'Demo', review:{cards:[CARD, {...CARD, id:'core:review:t_abcdef', key:'review'}], answered:[{id:'x'}]}});
   assert.equal(c.reviewCount(), 2);
-  assert.match(c.reviewSubtitle(), /^2 things wait on you, most urgent first\.$/);
+  assert.match(c.reviewSubtitle(), /^2 things need you\.( .*)?$/);
   const api = c.reviewApi();
   return Promise.all([api.stack(), api.answered()]).then(([s, a]) => { assert.equal(s.length, 2); assert.equal(a.length, 1); assert.equal(api.workspace, 'Demo'); });
 });
 test('one card and none: plain words', () => {
-  assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing waits on you/);
+  assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing needs you\./);
   assert.equal(ctx({}).reviewSubtitle(), 'Nothing waits for you.');
   assert.equal(ctx({}).reviewCount(), 0);
 });
@@ -90,7 +90,7 @@ test('the All cards list is drawn by the kit into the queue, on the left of the 
   const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
   assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
   const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
-  assert.equal(side.attrs['aria-label'], 'All cards');
+  assert.equal(side.attrs['aria-label'], 'Needs you');
   assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
@@ -139,7 +139,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
   const factory = {...CARD, id:'core:q:t_fffaaa:q1', ticket:'t_fffaaa', key:'q1', kind:'choice', card:{kind:'choice', title:"Start 'Services'?"}};
   const c = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2], rows);
   assert.equal(c.needsToday().count, 2);
-  assert.equal(c.reviewSubtitle(), '2 things wait on you, most urgent first.');
+  assert.equal(c.reviewSubtitle(), '2 things need you.');
   // owner 16 Nov: the number is open questions plus results to check, so it equals the cards here. A helper idle at its
   // prompt, or a ticket that only waits for another ticket, has no card and is not counted.
   const idle = {id:'core:stuck:t_ccccdd', source:'core', kind:'stuck:idle', ticket:'t_ccccdd', since:'2026-11-15T11:00:00Z', title:'Docs', text:'The helper waits at its prompt', tone:'warn'};
@@ -148,7 +148,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
   const cards = [CARD, factory, check];
   const more = home({...base, review:{cards, answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}, waits, {id:'t_eeeeff', title:'Report', status:'review', questions:[]}], [...rows, idle]);
   assert.equal(more.needsToday().count, 3); assert.equal(more.needsToday().count, more.reviewCount());
-  assert.equal(more.reviewSubtitle(), '3 things wait on you, most urgent first.');
+  assert.equal(more.reviewSubtitle(), '3 things need you.');
   assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
@@ -173,7 +173,7 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
 
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
-  assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
+  assert.match(c.reviewSubtitle(), /^1 thing needs you\./);
 });
 
 test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
@@ -346,7 +346,7 @@ test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuc
   const stack = await c.reviewApi().stack();
   assert.equal(stack.length, n.count, 'one card per thing counted');
   assert.equal(c.reviewCount(), n.count);
-  assert.equal(c.reviewSubtitle(), n.count + ' things wait on you, most urgent first.');
+  assert.equal(c.reviewSubtitle(), n.count + ' things need you.');
   const stuck = stack.filter(x => x.card.kind === 'stuck');
   assert.deepEqual([...stuck.map(x => x.ticket)], ['t_aaaa01', 't_aaaa02', 't_aaaa03', 't_aaaa04', 't_aaaa06'], 'first in line, as on Home; the unsure ticket in Check has only its Check card');
   assert.equal(stack.indexOf(stuck[0]), 0);
@@ -585,4 +585,11 @@ test('ORCH-2185: the panel keeps its tab when it follows the card; Run it opens 
   assert.equal(panelCtx('#review', {}, {extra:{route:() => ({kind:'review'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'switch off: the live layer as before');
   assert.equal(panelCtx('#review', undefined, {extra:{route:() => ({kind:'review'}), liveLayerPhone:() => true}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'a phone keeps the live layer');
   assert.equal(panelCtx('#home', undefined, {extra:{route:() => ({kind:'home'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'Home keeps the live layer');
+});
+test('ORCH-2316 (R2 A, draft r2-a): the subtitle says how many need you and how many hold up work now', () => {
+  const ask = {...CARD, card_kind:{family:'answer', kind:'question', name:'Question', lane:'holds_up'}};
+  const look = {...CARD, id:'core:review:t_abcdef', key:'review', card:{kind:'check', title:'Done'}, card_kind:{family:'look', kind:'document', name:'Document', lane:'look'}};
+  assert.equal(ctx({review:{cards:[ask, look]}}).reviewSubtitle(), '2 things need you. 1 holds up work now.');
+  assert.equal(ctx({review:{cards:[ask, {...ask, id:'core:q:t_abcdef:q4'}, look]}}).reviewSubtitle(), '3 things need you. 2 hold up work now.');
+  assert.equal(ctx({review:{cards:[look]}}).reviewSubtitle(), '1 thing needs you.');
 });
