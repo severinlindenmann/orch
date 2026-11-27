@@ -20,6 +20,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, `start`, `stop`, `status`, `run`, `record`, `job`, `secret`, `conn`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
 | `version`, `description` | `x.y.z`; one plain sentence (shown in `orch addon list` and `orch --help`) |
 | `run` | Top-level module. `orch <name> <args>` = subprocess `<orch's python> -m <run> <args>` |
+| `event_formats` | Optional list of adapter `oneshot.events` or `live.events` format IDs (e.g. `claude-stream-json/1`, `claude-transcript/1`). Only a workspace with this add-on active uses its `<run>.collector` module: `collect(lines, writer, ctx)` and `hook_line(payload)` for one-shot events, `describe_tool(name, input)` for live events. If multiple active add-ons handle the same format, the first by add-on name is used. Without a provider, the command still runs and existing records remain readable. |
 | `skill` | Folder with `SKILL.md` → copied to `.agents/skills/orch-<name>/` |
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
@@ -91,6 +92,15 @@ shows them in a separate "Available" group:
 `[{"name", "version", "description", "source": "built-in"|"local", "installed": bool, "active": bool,
 "dashboard": {label, icon, order, panel, title?, subtitle?} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
 dashboard uses (it shows the entries with `active: true`).
+
+`orch addon check <name|./folder> [--json]` checks an add-on against this contract without importing or running it:
+the entry point (exactly one `<name> = "<module>"` in `orch.addons` of `pyproject.toml`, or of the installed package),
+`orch-addon.toml` beside `<module>/__init__.py` (the same check as `orch addon add`), the entry point and the manifest
+agree on `name` and `run`, the skill's `SKILL.md` front matter says `name: orch-<name>` and a `description`, the AGENTS
+block is not empty, and the `ext.<name>` schema is a valid JSON Schema of an object that has every `[[ticket_view]]`
+field and `show_on_card` key. A name is a built-in add-on, a shipped add-on in the local source folder, or an installed
+one. `--json`: `{"name", "folder", "ok": bool, "problems": ["<plain sentence>", …]}`; exit 0 when `ok`, 1 when not.
+CI runs it over every package in `workspace-addons/` (`workspace/tests/test_addon_check.py`).
 
 `orch update` updates orch **and every installed add-on together** (one `uv tool install --reinstall` with all of them),
 then refreshes skills and AGENTS blocks of the active add-ons in this workspace. Add-ons never update on their own.

@@ -196,13 +196,14 @@ Write the question for a person who has not seen your work, in plain words:
 **To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
 
     orch ask <id> "Home: which layout?" --choose "Home layout" --option "A=As today:files/a.png" --option "B=Recent first:files/b.png" --suggest B --then "I build the one you pick."
-    orch ask <id> "New intro text" --draft "Intro" --file files/intro.md --then "I use it." --ok "Use it"
+    orch ask <id> "New intro text" --draft "Intro" --file artifacts/intro.md --then "I use it." --ok "Use it"
     orch ask <id> "Before or after?" --draft "Header" --before files/old.png --after files/new.png --then "I ship the new one."
     orch review wait <id>        # wait until the card is answered
     orch ticket show <id>        # "What applies now" and the answers, in the owner's words
     orch review list             # what still waits for the owner
     orch review link             # the address of the review page, to send the owner
 
+A card file is a project path or `artifacts/<name>`: the file in this ticket's own folder (`orch ticket artifacts-dir`).
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 The question text is shown on the card in full: write the Now / Proposal there, keep `--why` to one line. Mark what you
 recommend: `--suggest <option>` on a choice, `--suggest ok` or `--suggest no` on another card. A choice can show how it

@@ -9,7 +9,8 @@
 #
 # What it sets up (the same safety as the Mac's runner after its security review ORCH-1233):
 # - packages the Linux jobs need that a job cannot install itself without sudo: faketime (clock tests), a C
-#   toolchain for cargo, tmux, Chromium's system libraries (Playwright), nftables for the network rule
+#   toolchain for cargo, tmux, Chromium's system libraries (Playwright), nftables for the network rule, and a git
+#   as current as GitHub's (GIT_VER below, built from source into /opt/orch-edge-git, linked from /usr/local/bin)
 # - a user `orch-ci` with its own group and a closed home; lingering on, so the Services add-on's real Linux run
 #   has a user service manager
 # - everything of the runner in /usr/local/orch-edge-runner, owned by root (orch-ci can change none of it): the GitHub
@@ -42,6 +43,11 @@ VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de94
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
 PW_E2E_VER=1.64.1   # .github/workflows/e2e.yml
+# git as current as on GitHub's ubuntu-latest (ORCH-1932): Debian 13 ships 2.47.3, whose `git merge-tree` ignores
+# merge.renames=false and reports a rename conflict the sync add-on never gets elsewhere (queue group #3338).
+# Built once from the kernel.org release (checksum checked) into $GIT_DIR; edge-job-home refuses an older git.
+GIT_VER=2.56.1; GIT_SHA=f0b0bf89264b9bd2e1c640363e7529643989da76281600473c50745cd34a607f
+GIT_DIR=/opt/orch-edge-git
 B=/usr/local/orch-edge-runner; HOOKS=$B
 UNIT=/etc/systemd/system/orch-edge-runner.service; LOOP=/etc/systemd/system/orch-edge-runner-loop.service
 SRC=$(cd "$(dirname "$0")" && pwd)
@@ -117,7 +123,21 @@ RUN_MAX=${RUN_MAX}M; POOL_MAX=${POOL_MB}M; USER_MAX=${USER_MB}M
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq faketime build-essential pkg-config git curl tmux nodejs npm jq nftables >/dev/null
+apt-get install -y -qq faketime build-essential pkg-config git curl tmux nodejs npm jq nftables \
+  libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev >/dev/null
+if [ "$("$GIT_DIR/bin/git" --version 2>/dev/null)" != "git version $GIT_VER" ]; then
+  echo "  git $GIT_VER (Debian's $(/usr/bin/git --version | cut -d' ' -f3) is too old for the tests)"
+  GT=$(mktemp -d); trap 'rm -rf "$GT"' EXIT
+  curl -fsSL -o "$GT/git.tar.xz" "https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VER.tar.xz"
+  echo "$GIT_SHA  $GT/git.tar.xz" | sha256sum -c --quiet - || { echo "git $GIT_VER: checksum wrong; stopped." >&2; exit 1; }
+  tar -xJf "$GT/git.tar.xz" -C "$GT"
+  # built for its final path (git finds its helpers there), staged in DESTDIR: a failed build leaves the old copy
+  make -s -C "$GT/git-$GIT_VER" -j"$(nproc)" prefix="$GIT_DIR" NO_GETTEXT=1 NO_TCLTK=1 NO_PYTHON=1 NO_RUST=1 DESTDIR="$GT/root" install >/dev/null
+  rm -rf "$GIT_DIR"; mv "$GT/root$GIT_DIR" "$GIT_DIR"; chown -R root:root "$GIT_DIR"
+  rm -rf "$GT"; trap - EXIT
+fi
+# first on the runner's PATH (/usr/local/bin comes before /usr/bin, the unit below); the hooks keep /usr/bin/git
+for f in "$GIT_DIR"/bin/*; do ln -sfn "$f" "/usr/local/bin/${f##*/}"; done
 
 # orch edge gets an IPv6 default route from its network but no public IPv6 address: a download from a host with
 # IPv6 addresses (pypi, raw.githubusercontent.com) then fails with "No route to host". Prefer IPv4 (RFC 6724 table).

@@ -30,7 +30,7 @@ module.exports = {
     await box.fill('Can you cook for twelve on Friday?');
     // the Send of this chat's own message box: a second Send button (left by an earlier click-through on the same
     // server; seen in two CI runs) can be on the page too (ORCH-1629)
-    await act('chat.send_ws', () => page.locator('form.chat-compose').filter({ has: box }).getByRole('button', { name: 'Send' }).click());
+    await act('chat.send_ws', () => page.locator('.chat-composer-area').filter({ has: box }).getByRole('button', { name: 'Send' }).click());
     await page.getByText('Delivered').first().waitFor({ timeout: 20000 }).catch(async () => { throw new Error('the message was not delivered:\n' + (await text()).slice(0, 500)); });
     await reload();
     await page.locator('text=Can you cook for twelve on Friday? >> visible=true').first().waitFor({ timeout: 20000 })
@@ -46,7 +46,7 @@ module.exports = {
     await until(s => members(s).includes('ws_kitchen001'), 'the group with Kitchen');
     await open('#chat');
     await page.locator('[data-chat-action="select"]').filter({ hasText: 'Plan the summer party' }).first().click();
-    const draft = page.locator('.chat-page .chat-draft');
+    const draft = page.locator('.chat-page textarea[data-thread]');
     await draft.waitFor({ timeout: 20000 });
     await draft.fill('Kitchen, can you bring the dessert?');
     await act('group.say', () => draft.press('Enter'));

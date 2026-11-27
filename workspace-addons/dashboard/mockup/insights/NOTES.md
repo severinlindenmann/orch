@@ -61,3 +61,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   the button from screen readers; its sentence is plainer ("Not enough days of work yet to draw a chart."). Table
   cells wrap between words only (no "workspac/e" on a phone). Master design system: no new rule (`mockup.css` cell rule
   gains `overflow-wrap:break-word`).
+
+## Last 7 days (ORCH-2037)
+
+- insights.html: a "Last 7 days" card after the team section: Done and Time to done tiles, then Done and Stuck now lists by name (stuck rows carry the reason). The empty view shows the card's empty state. Same words and parts as the product (`orch insights week`).

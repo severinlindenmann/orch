@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not sent in the app</title><link rel="stylesheet" href="archive.css">
+</head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
+<h1>Not sent</h1>
+<p class="muted">ORCH-1942 (UX round three, draft 3). A message the server refused stays in the chat with <b>Not sent</b>, one short sentence that says why (when the phone knows) and what to do, and Retry / Discard. The server's own words never show. VoiceOver reads “Not sent” and the sentence once, as one line. Waiting offline is not a failure: it keeps the clock.</p>
+<div class="tc-grid">
+<div><p class="cap"><b>1</b> Two messages not sent</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4>General</h4><div class="tc-sub">Pilatus</div></div></div><div class="tc-chat"><div class="tc-day">Today</div>
+<div class="tc-b">Draft for the newsletter is ready.<time>09:12</time></div>
+<div class="tc-b mine">Can you add the March numbers?<time>09:14 · <span class="bad">Not sent</span></time><time>Try sending this message again.</time><time><span class="tc-sub" style="color:var(--brand)">Retry &nbsp; Discard</span></time></div>
+<div class="tc-b mine">📎 report-march.pdf<time>09:15 · <span class="bad">Not sent</span></time><time>A file in it is no longer on the server. Retry uploads it again.</time><time><span class="tc-sub" style="color:var(--brand)">Retry &nbsp; Discard</span></time></div>
+</div>
+<div class="tc-comp"><span class="tc-in">Message</span><span class="tc-send">↑</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">Each bubble keeps its own sentence, so you can come back later and retry just that one. Retry sends only that message; the other one stays as it is.</p></div>
+<div><p class="cap"><b>2</b> Workspace took the phone off</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4>General</h4><div class="tc-sub">Rigi</div></div></div><div class="tc-chat"><div class="tc-day">Today</div>
+<div class="tc-b mine">Please send me the offer.<time>10:02 · <span class="bad">Not sent</span></time><time>This workspace no longer takes messages from this phone. Ask its owner to add your phone again.</time><time><span class="tc-sub" style="color:var(--brand)">Retry &nbsp; Discard</span></time></div>
+</div>
+<div class="tc-comp"><span class="tc-in">Message</span><span class="tc-send">↑</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">VoiceOver: “10:02, Not sent. This workspace no longer takes messages from this phone. Ask its owner to add your phone again.” then Retry, Discard. Any other refusal says “Try sending this message again.”</p></div>
+<div><p class="cap"><b>3</b> Right after: the line on Chats</p><div class="phone"><div class="p-nav"><h4>Chats</h4></div><div class="p-body"><div class="pb" style="border-color:var(--danger);background:var(--danger-soft)">⚠︎ A message to Pilatus was not sent. Open the chat to retry it.</div><div class="row"><div class="av g">P</div><div class="m"><b>Pilatus</b><small>Can you add the March numbers?</small></div><time>09:14</time></div><div class="row"><div class="av">R</div><div class="m"><b>Rigi</b><small>Please send me the offer.</small></div><time>10:02</time></div></div><div class="p-tab"><span>Chats</span><span>Settings</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">The line goes away; the bubble keeps the reason. A refused answer says “Your answer was not sent. Try answering again.”</p></div>
+<div><p class="cap"><b>4</b> Offline: waiting, not failed</p><div class="phone"><div class="p-nav"><span>&lsaquo;</span><div style="flex:1;min-width:0"><h4>General</h4><div class="tc-sub">Pilatus</div></div></div><div class="tc-chat"><div class="tc-day">Today</div>
+<div class="tc-b mine">See you at 3.<time>11:20 · 🕓</time><time>Waiting · will send when online</time></div>
+</div>
+<div class="tc-comp"><span class="tc-in">Message</span><span class="tc-send">↑</span></div></div>
+<p class="muted" style="margin-top:8px;font-size:12px">No connection keeps the message on the phone with the clock; it sends by itself later.</p></div>
+</div>
+<h2 style="margin-top:28px">Before</h2>
+<p class="muted">Until ORCH-1942 the bubble said only “Not sent” with Retry / Discard. The server's sentence was a VoiceOver hint and also became the error line on Chats, so it could say things like “This phone may not reach that workspace.” and vanished with that line.</p>
+</div></body></html>
