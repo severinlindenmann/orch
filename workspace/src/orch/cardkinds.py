@@ -12,7 +12,8 @@ Families and kinds (`card_kind` on every `orch review list` item, additive):
 - help (the work needs you in person): try_yourself, stuck
 
 Lanes (the list's groups, in this order): holds_up (every answer and every stuck card: work waits on it now),
-click, help, look, and proposed (in Reviewer mode "propose": what the Reviewer checked and proposes).
+click ("Put it live"), help ("Try it yourself", with Run it),
+look, and proposed (in Reviewer mode "propose": what the Reviewer checked and proposes).
 """
 
 from __future__ import annotations
@@ -41,10 +42,11 @@ KINDS = {  # kind -> (family, the name on the card)
     "try_yourself": ("help", "Try it yourself"),
     "stuck": ("help", "Stuck"),
 }
-LANES = {  # lane -> the group's heading, in the order the list shows them
+# lane -> the group's heading, in the order the list shows them (the approved draft r2-a, ORCH-2316)
+LANES = {
     "holds_up": "Holds up work now",
-    "click": FAMILIES["click"],
-    "help": FAMILIES["help"],
+    "click": "Put it live",
+    "help": "Try it yourself",
     "look": FAMILIES["look"],
     "proposed": "Checked by the Reviewer",
 }
@@ -58,8 +60,10 @@ def _of_preview(pv) -> str | None:
     if not isinstance(pv, dict):
         return None
     t = pv.get("type")
-    if t == "compare":
-        return "before_after"
+    if t == "compare":  # old and new wording is Changed words; a picture on either side is Before and after
+        sides = [pv.get(k) for k in ("before", "after")]
+        pics = any(isinstance(x, dict) and x.get("type") in _PICTURE_FILES for x in sides)
+        return "before_after" if pics else "changed_words"
     if t in ("img", "page"):
         return "pictures"
     if t == "table":
@@ -120,7 +124,17 @@ def look(card, *, question_kind: str | None = None, merge: bool = False, propose
     """{family, kind, name, lane}: what every surface shows and groups by."""
     kind = kind_of(card, question_kind=question_kind, merge=merge)
     family, name = KINDS[kind]
-    lane = "proposed" if proposed else "holds_up" if family == "answer" or kind == "stuck" else family
+    # one command only you may run sits with the other things you do yourself (r3-a: "steps to try, a sign-in,
+    # one command"), so the "Put it live" group holds only releases
+    lane = (
+        "proposed"
+        if proposed
+        else "holds_up"
+        if family == "answer" or kind == "stuck"
+        else "help"
+        if kind == "run_it"
+        else family
+    )
     return {"family": family, "kind": kind, "name": name, "lane": lane}
 
 
