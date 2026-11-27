@@ -88,6 +88,12 @@ def test_the_same_text_in_both_places_says_same_skill(ws, tmp_path):
     shutil.copytree(ws / ".agents/skills/release-walk", tmp_path / "home/.claude/skills/release-walk")
     rows = [i for i in model.build(ws)["skills"] if i["name"] == "release-walk"]
     assert {r["copy"] for r in rows} == {"Same skill also on your computer", "Same skill also in this workspace"}
+    (tmp_path / "home/.claude/skills/release-walk/run.sh").write_text("echo other\n")  # a file only one copy has
+    rows = [i for i in model.build(ws)["skills"] if i["name"] == "release-walk"]
+    assert {r["copy"] for r in rows} == {
+        "A different copy is also on your computer",
+        "A different copy is also in this workspace",
+    }
 
 
 def test_off_and_on_for_an_orch_skill_unlinks_and_relinks(ws):

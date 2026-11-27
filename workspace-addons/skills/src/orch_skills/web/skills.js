@@ -131,10 +131,11 @@
   const WORDS = {github: 'GitHub', gitlab: 'GitLab', openai: 'OpenAI', api: 'API', ui: 'UI', ux: 'UX', cli: 'CLI', mcp: 'MCP',
     ai: 'AI', pdf: 'PDF', url: 'URL', vps: 'VPS', ssh: 'SSH', css: 'CSS', html: 'HTML', json: 'JSON', e2e: 'E2E', ios: 'iOS',
     macos: 'macOS', vm: 'VM', pr: 'PR', crm: 'CRM', sql: 'SQL', orch: 'orch'};
+  const word = x => (Object.hasOwn(WORDS, x.toLowerCase()) ? WORDS[x.toLowerCase()] : null);  // "constructor" is a word too
   const plain = name => {
-    const w = String(name || '').replace(/[-_]+/g, ' ').trim().split(/\s+/).filter(Boolean).map(x => WORDS[x.toLowerCase()] || x);
+    const w = String(name || '').replace(/[-_]+/g, ' ').trim().split(/\s+/).filter(Boolean).map(x => word(x) || x);
     if (!w.length) return '';
-    if (!WORDS[w[0].toLowerCase()]) w[0] = w[0][0].toUpperCase() + w[0].slice(1);
+    if (!word(w[0])) w[0] = w[0][0].toUpperCase() + w[0].slice(1);
     return w.join(' ');
   };
   // a skill's own description is written for helpers: the list shows its first sentence in plain words, without
@@ -143,7 +144,7 @@
     let s = String(text || '').replace(/\s*\([^()]*(?:\)|$)/g, '').replace(/\s+/g, ' ').trim();
     const end = s.search(/[.!?](\s|$)/);
     if (end > 0) s = s.slice(0, end + 1);
-    s = s.replace(/\b([A-Z]{3,})\b/g, (m, x) => (WORDS[x.toLowerCase()] ? m : x.toLowerCase()))
+    s = s.replace(/\b([A-Z]{3,})\b/g, (m, x) => (word(x) ? m : x.toLowerCase()))
       .replace(/^Use (?:this )?(?:skill )?(when|for|before|after|while|if) /i, (m, x) => x[0].toUpperCase() + x.slice(1) + ' ')
       .replace(/\s+([,.;:])/g, '$1');
     return s;

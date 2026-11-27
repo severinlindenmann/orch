@@ -187,11 +187,26 @@ _COPY_WHERE = {"orch": "comes with orch", "workspace": "in this workspace", "adm
                "mine": "on your computer"}  # fmt: skip
 
 
-def _same_text(a: Path, b: Path) -> bool:
+def _files(folder: Path, limit: int = 200) -> dict[str, bytes] | None:
+    """Every file of a skill folder by its path inside it (hidden ones left out); None when too many or unreadable."""
+    out: dict[str, bytes] = {}
     try:
-        return (a / "SKILL.md").read_bytes() == (b / "SKILL.md").read_bytes()
+        for p in sorted(folder.rglob("*")):
+            rel = p.relative_to(folder)
+            if any(part.startswith(".") for part in rel.parts) or not p.is_file():
+                continue
+            if len(out) >= limit or p.stat().st_size > 1024 * 1024:
+                return None
+            out[rel.as_posix()] = p.read_bytes()
     except OSError:
-        return False
+        return None
+    return out
+
+
+def _same_text(a: Path, b: Path) -> bool:
+    """The two copies hold the same files with the same text (its scripts and notes too, not only SKILL.md)."""
+    fa = _files(a)
+    return fa is not None and fa == _files(b)
 
 
 def _mark_copies(items: list[dict]) -> None:

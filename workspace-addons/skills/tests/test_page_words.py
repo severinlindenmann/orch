@@ -96,10 +96,11 @@ def test_names_keep_their_spelling_and_the_line_is_one_plain_sentence():
                 _skill("github-links", workspace_copy),
                 _skill("openai-api-credit", "Use when the owner says use openai (or GPT API) for a task. More text."),
                 _skill("orch-ux-checklist", "Use for ANY orch UI work, a new page or a state."),
+                _skill("constructor", "A skill whose name is also a word of every script object."),
             ]
         }
     )
-    assert set(by) == {"GitHub links", "OpenAI API credit", "orch UX checklist"}
+    assert set(by) == {"GitHub links", "OpenAI API credit", "orch UX checklist", "Constructor"}
     assert "Link GitHub issues and pull requests to tickets." in by["GitHub links"]["text"]
     assert "Workspace copy" not in by["GitHub links"]["text"] and "Keep their" not in by["GitHub links"]["text"]
     assert "When the owner says use openai for a task." in by["OpenAI API credit"]["text"]
