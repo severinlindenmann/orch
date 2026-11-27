@@ -1043,7 +1043,8 @@ async function staysOpen(page, dash, width) {
   // ORCH-1616 (owner): the Review badge, the Review heading and what the page lists are one number
   const nums = await page.evaluate(() => {
     const badge = document.querySelector('.sidebar a[href="#review"] .count, #tabbar [data-tab="review"] .count, .tabbar a[href="#review"] .count');
-    const line = /(\d+) things? waits?/.exec(document.querySelector('main [data-key="heading"]')?.innerText || '');
+    const line = /(\d+) things? (?:needs?|waits?)/.exec(  // ORCH-2316 (R2 A): "N things need you."
+      document.querySelector('main [data-key="heading"]')?.innerText || '');
     const extra = document.querySelectorAll('[data-key="review-extra"] .card-row').length;
     const cards = document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length;
     return { badge: Number(badge?.textContent || 0), line: line ? Number(line[1]) : 0, listed: extra + cards };
