@@ -24,31 +24,37 @@ const tcHash = id => '#chat/' + encodeURIComponent(String(id || ''));
 const tcToday = at => at && chatLocalDay(new Date(at)) === chatLocalDay(new Date(state?.now || Date.now()));
 const tcWhen = (at, inThread = false) => !at ? '' : tcToday(at) && window.UI?.clock ? window.UI.clock(at) : inThread ? time(at) : date(at);
 function tcRow(r) {
-  const unread = tcUnread(r);
+  const unread = tcUnread(r), last = chatPreview(tcPlain(r.last?.text));
   return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-ticket', 'data-id':r.id, 'data-key':'row-' + r.id,
     'aria-current':chatUi.open === r.id ? 'true' : null},
-    h('span', {className:'avatar chat-avatar', 'aria-hidden':'true'}, '#'),
+    h('span', {className:'avatar chat-avatar chat-ticket-pic', 'aria-hidden':'true'}, iconEl('ticket')),
     h('span', {className:'chat-row-text'}, chatText('strong', '', r.title || r.key),
-      chatText('small', 'chat-row-meta', [r.key, chatPreview(tcPlain(r.last?.text))].filter(Boolean).join(' · ')),
-      r.open_questions ? chip('Needs you', 'attn') : null),
+      // "Needs you" is written in the row (option A), with what it is about
+      r.open_questions ? chatText('small', 'chat-row-preview chat-needs-you', ['Needs you', last].filter(Boolean).join(' · '))
+        : chatText('small', 'chat-row-preview', last || r.key)),
     h('span', {className:'chat-row-time'}, tcWhen(r.last_at), unread ? h('span', {className:'count', 'aria-label':unread + ' unread'}, unread) : null));
 }
-
-// The list: "Ticket chats" first (as in the draft), then the workspace chats chat.js draws.
+// The list: your helper on top, then "Tickets", then the workspace chats chat.js draws.
 const tcListWithoutTickets = chatList;
 chatList = function () {
   const aside = tcListWithoutTickets(), rows = tcRows();
   if (!rows.length) return aside;
-  const query = chatUi.search.toLowerCase(), history = chatUi.open === 'history', drawn = rows.map(tcRow);
-  drawn.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
-  const first = aside.querySelector('h2:not(.chat-list-title)') || aside.querySelector('.chat-list-row');
-  const heading = drawn.some(row => !row.hidden) ? h('h2', {'data-key':'ticket-chats-heading'}, 'Ticket chats') : null;
+  const query = chatUi.search.toLowerCase(), drawn = rows.map(tcRow);
+  drawn.forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
+  const after = aside.querySelector('.chat-list-rule');
+  const heading = drawn.some(row => !row.hidden) ? h('h2', {'data-key':'ticket-chats-heading'}, 'Tickets') : null;
   if (tcId(chatUi.open)) aside.querySelectorAll('.chat-list-row[aria-current]').forEach(row => row.removeAttribute('aria-current'));
-  aside.insertBefore(fragment(heading, ...drawn), first);
+  tcInsertAfter(aside, after, fragment(heading, ...drawn));
   // chat.js said "No chats match." looking only at its own rows
   if (drawn.some(row => !row.hidden)) aside.querySelector(':scope > p.chat-muted:last-child')?.remove();
   return aside;
 };
+// After the rule under your helper (a real page: insertBefore; the tests' small tree: its children list).
+function tcInsertAfter(aside, after, node) {
+  if (aside.insertBefore && after) return aside.insertBefore(node, after.nextSibling);
+  const list = aside.children, i = after ? list.indexOf(after) : -1;
+  list.splice(i + 1, 0, node);
+}
 const tcRichWithoutTickets = chatRich;
 chatRich = () => tcRichWithoutTickets() || tcRows().length > 0 || tcId(chatUi.open);
 const tcBadgeWithoutTickets = chatBadge;
@@ -114,29 +120,26 @@ function tcHeader(t) {
   const who = !others ? 'You and your helper' : others === 1 ? 'You and one other workspace' : 'You and ' + others + ' other workspaces';
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
-      h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', (t.key || '') + ' · ' + who),
-        h('h2', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title))),
-      tcCanAdd(t) ? chatButton('+ Add', 'ticket-add', {'data-key':'ticket-chat-add', 'aria-label':'Add a workspace to this chat', 'aria-haspopup':'dialog'}) : null),
-    others ? tcChips(g) : null,
-    h('a', {className:'chat-ticket-link', href:href(t.id), 'data-key':'ticket-chat-open-ticket'}, 'Open the ticket ›'));
+      h('span', {className:'avatar chat-avatar chat-ticket-pic', 'aria-hidden':'true'}, iconEl('ticket')),
+      h('div', {className:'chat-head-text'}, h('h2', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title)),
+        chatText('p', 'chat-head-meta', [t.key || '', who].filter(Boolean).join(' · '))),
+      tcCanAdd(t) ? chatButton('+ Add', 'ticket-add', {className:'btn outline sm', 'data-key':'ticket-chat-add', 'aria-label':'Add a workspace to this chat', 'aria-haspopup':'dialog'}) : null,
+      h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'ticket-chat-open-ticket'}, 'Open the ticket')),
+    others ? tcChips(g) : null);
 }
 function tcComposer(t) {
   if (snapshot) return chatText('p', 'chat-readonly', 'This is a shared copy.');
   if (['done', 'dropped'].includes(t.status)) return chatText('div', 'chat-archive-banner', 'This ticket is closed · you can read, not reply');
-  const draft = chatUi.drafts[t.id] || '', sending = chatUi.sending.has(t.id);
-  // into the group, the chat starts no helper: plain Send
-  const label = tcShared(tcGroupOf(t)) || typeof ticketTalkLabel !== 'function' ? 'Send' : ticketTalkLabel(t, state?.runs?.[t.id]);
-  return h('form', {className:'chat-compose', 'data-key':'form-' + t.id},
-    h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + t.id, 'data-chat-input':'draft', 'data-thread':t.id,
-      'aria-label':(tcShared(tcGroupOf(t)) ? 'Message everyone in the chat about ' : 'Message your helper about ') + clean(t.title),
-      placeholder:tcShared(tcGroupOf(t)) ? 'Message everyone in this chat' : 'Message your helper'}, draft),
-    h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'ticket-chat-send', disabled:sending || !draft.trim()}, sending ? 'Sending…' : label));
+  const shared = tcShared(tcGroupOf(t));
+  // the one message box (option A); into a group no files (they go through the ticket page)
+  return h('div', {className:'chat-composer-area', 'data-key':'composer-' + t.id},
+    chatBox(t.id, {label:shared ? 'Message everyone in this chat' : 'Message your helper about this ticket', attach:!shared, max:2000}));
 }
 function tcThread(t) {
   const items = tcItems(t), g = tcGroupOf(t);
   return h('div', {className:'chat-main', 'data-key':'ticket-chat-' + t.id}, tcHeader(t),
     h('div', {className:'chat-log', 'data-key':'log-' + t.id, role:'log', 'aria-live':'polite', 'aria-label':'Ticket chat'},
-      items.length ? items.map((item, i) => item.kind === 'line' ? tcLine(item, items[i - 1], g) : item.kind === 'answer' ? tcAnswer(item, items[i - 1], g) : item.kind === 'event' ? chatText('div', 'chat-system', item.text) : tcQuestion(t, item, items[i - 1], g))
+      items.length ? items.map((item, i) => fragment(item.at && (!items[i - 1]?.at || chatDayWord(items[i - 1].at) !== chatDayWord(item.at)) ? chatDayLine(chatDayWord(item.at), item.key) : null, item.kind === 'line' ? tcLine(item, items[i - 1], g) : item.kind === 'answer' ? tcAnswer(item, items[i - 1], g) : item.kind === 'event' ? chatText('div', 'chat-system', item.text) : tcQuestion(t, item, items[i - 1], g)))
         : chatText('p', 'chat-empty', 'No messages yet. Write to your helper below.')),
     typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'chat') : null,  // the helper's browser, small and live (ORCH-1494)
     tcComposer(t));
@@ -177,15 +180,13 @@ chatPage = function () {
   if (!t) return tcPageWithoutTickets();
   // the master's panes: the list, the chat and the ticket in one frame (stacked under 900 px; the open list hides the
   // ticket, and the frame drops its column)
-  const page = h('section', {className:'chat-page panes' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'},
+  const page = h('section', {className:'chat-page chat-frame chat-with-side' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'},
     chatList(), tcThread(t), tcPanel(t, chatUi.listOpen));
   page.addEventListener('click', chatClick); page.addEventListener('input', chatInput); page.addEventListener('keydown', chatKeydown);
   // only the chat box: a question card's own answer form submits by itself
   page.addEventListener('submit', e => { if (e.target.matches('.chat-compose')) { e.preventDefault(); chatSend(); } });
-  page.addEventListener('scroll', event => {
-    if (event.target.matches('.chat-log')) chatScroll.set(event.target, {near:event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80, stamp:chatLogStamp(event.target)});
-  }, true);
-  return fragment(heading('Chat'), page);
+  page.addEventListener('scroll', chatOnScroll, true);
+  return fragment(page);
 };
 
 async function tcMarkRead(id) {
@@ -219,20 +220,27 @@ const tcSendWithoutTickets = chatSend;
 chatSend = async function () {
   const t = tcOpen();
   if (!t) return tcSendWithoutTickets();
-  const id = t.id, text = (chatUi.drafts[id] || '').trim();
-  if (snapshot || !text || chatUi.sending.has(id) || ['done', 'dropped'].includes(t.status)) return;
+  const id = t.id, typed = (chatUi.drafts[id] || '').trim(), files = array(chatUi.outFiles);
+  if (snapshot || (!typed && !files.length) || chatUi.sending.has(id) || ['done', 'dropped'].includes(t.status)) return {ok:false, text:''};
   const original = chatUi.drafts[id];
   chatUi.sending.add(id); render();
-  let said = null;
   if (tcShared(tcGroupOf(t)) && !tcGroupOf(t).closed) {  // everyone in the chat gets it (orch relay group say --dashboard); a line on the ticket too
-    const ok = await chatOperation('group.say', {ticket:id, text}, 'Could not send your message.');
+    const ok = await chatOperation('group.say', {ticket:id, text:typed}, 'Could not send your message.');
     chatUi.sending.delete(id);
     if (ok && chatUi.drafts[id] === original) chatUi.drafts[id] = '';
-    render(); chatFocus('.chat-draft'); return;
+    render(); return ok ? {ok:true, text:''} : {ok:false, text:'Not sent. Try again.'};
   }
+  // files go onto the ticket first (ticket.attach), the words then name them, as Add to this ticket does
+  let text = typed;
+  if (files.length && typeof ticketAttachFiles === 'function') {
+    const kept = await ticketAttachFiles(id, files);
+    if (!kept.ok) { chatUi.sending.delete(id); render(); return {ok:false, text:kept.text}; }
+    text = ticketTalkText(typed, kept.names);
+  }
+  let said = null;
   try { said = await act('chat.say', {ticket:id, text}); } catch { said = null; }
   chatUi.sending.delete(id);
-  if (!said?.ok) { render(); window.orch.toast('Could not send your message. Try again.', 'error'); return; }
+  if (!said?.ok) { render(); return {ok:false, text:'Not sent. Check the connection and try again.'}; }
   if (chatUi.drafts[id] === original) chatUi.drafts[id] = '';
   const r = said.state?.send_result;
   if (r && r.state === 'none' && !r.delivered) {
@@ -240,7 +248,7 @@ chatSend = async function () {
     const started = starter ? await starter.start(id, [['run.start', {ticket:id}]]) : await act('run.start', {ticket:id});
     window.orch.toast(started?.ok || started?.again || started?.queued ? 'Sent. A helper starts and reads it first.' : 'Saved in the chat. Start the helper to go on.', started?.ok || started?.again || started?.queued ? 'ok' : 'info');
   }
-  render(); chatFocus('.chat-draft');
+  render(); return {ok:true, text:''};
 };
 
 // #chat/<ticket id> opens that ticket's chat (the ticket page's Open chat, a shared link).

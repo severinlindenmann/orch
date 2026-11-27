@@ -1463,8 +1463,8 @@ body.mk-focus-v4d .mw-bg[data-g=wait] .mw-bl{color:var(--needs-you);font-weight:
 body.mk-focus-v4d .mw-bl .ic,body.mk-focus-v4d .mw-grp .ic{width:14px;height:14px}
 body.mk-focus-v4d .mw-cn{max-width:none}
 body.mk-focus-v4d .mw-swb{padding-inline:var(--s2)}
-body.mk-focus-v4d .mw-bar[data-fold="3"]{gap:var(--s1);padding-inline:var(--s3)}
-body.mk-focus-v4d .mw-bar[data-fold="3"] .mw-sw{gap:var(--s1)}
+body.mk-focus-v4d .mw-bar:is([data-fold="3"],[data-fold="4"]){gap:var(--s1);padding-inline:var(--s3)}
+body.mk-focus-v4d .mw-bar:is([data-fold="3"],[data-fold="4"]) .mw-sw{gap:var(--s1)}
 body.mk-focus-v4d .mw-bar .mw-pop.mw-pop-list{width:min(420px,calc(100vw - var(--s5)))}
 body.mk-focus-v4d .mw-lrow{grid-template-columns:auto auto minmax(0,1fr);text-align:left}
 body.mk-focus-v4d .mw-lrow .mw-rn{font-weight:400}

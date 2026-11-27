@@ -14,7 +14,7 @@ const clickConfirm = async page => {
 };
 
 module.exports = {
-  name: 'Add-ons: start Factory, Focus needs no start, its Typing and Plain terminal switches, a Lessons button, uninstall refused',
+  name: 'Add-ons: start Factory, Focus needs no start, its Typing switch, the Plain terminal switch in People, a Lessons button, uninstall refused',
   covers: ['addon.start', 'typing.set', 'terminal-typing.set', 'addon.act', 'addon.uninstall'],
   async run({ page, open, reload, act, must, text, orchAsPerson, addonOn, until, addonOff, shot }) {
     addonOn('factory');
@@ -36,9 +36,10 @@ module.exports = {
     await reload();
     must(await page.locator('[data-key="background"]').count() === 0, 'the "not running" note is still on Home after Start and a reload');
 
-    // the Focus Typing switch and the plain terminal's own switch (ORCH-261), and no Preview switch
-    await open('#settings/addons/focus');
-    for (const [key, op] of [['addon-detail-typing', 'typing.set'], ['addon-detail-terminal-typing', 'terminal-typing.set']]) {
+    // the Focus Typing switch (ORCH-261) on the add-on page, the plain terminal's own switch in People (ORCH-1684:
+    // a shell with the owner's logins belongs in the owner's tab), and no Preview switch
+    for (const [route, key, op] of [['#settings/addons/focus', 'addon-detail-typing', 'typing.set'], ['#settings/people', 'settings-terminal-typing-switch', 'terminal-typing.set']]) {
+      await open(route);
       const sw = page.locator(`[data-key="${key}"]`);
       await sw.waitFor({ timeout: 20000 });
       const before = await sw.getAttribute('aria-checked');
@@ -47,10 +48,13 @@ module.exports = {
       await sw.waitFor({ timeout: 20000 });
       must(await sw.getAttribute('aria-checked') !== before, `${op}: the switch is back to ${before} after a reload`);
     }
+    const shell = page.locator('[data-key="settings-terminal-typing-switch"]');  // put the shell switch back off
+    if (await shell.getAttribute('aria-checked') === 'true') { await act('terminal-typing.set', () => shell.click()); await reload(); }
+    await open('#settings/addons/focus');
+    await page.locator('[data-key="addon-detail-typing"]').waitFor({ timeout: 20000 });
+    must(await page.locator('[data-key="addon-detail-terminal-typing"]').count() === 0, 'the plain terminal switch is still on the Focus add-on page');
     must(await page.locator('[data-key="addon-detail-live-preview"]').count() === 0, 'Focus settings still show a Preview switch');
     await shot('focus-switches');
-    const shell = page.locator('[data-key="addon-detail-terminal-typing"]');  // put the shell switch back off
-    if (await shell.getAttribute('aria-checked') === 'true') { await act('terminal-typing.set', () => shell.click()); await reload(); }
 
     // a button of the Lessons page (the add-on's own action)
     await open('#addon/lessons');

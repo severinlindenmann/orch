@@ -43,6 +43,34 @@ test('counts read right: "1 session", "2 sessions", "9 in line", "Pinned (1)", "
   assert.equal(bar.liveBarCountText('idle', 8, true), '8');
 });
 
+test('ORCH-1684: at phone width each symbol keeps a short word; only the last fold is the numbers alone', () => {
+  assert.equal(bar.liveBarCountText('wait', 1, true, true), '1 needs you');
+  assert.equal(bar.liveBarCountText('wait', 3, true, true), '3 need you');
+  assert.equal(bar.liveBarCountText('run', 2, true, true), '2 working');
+  assert.equal(bar.liveBarCountText('queue', 1, true, true), '1 in line');
+  assert.equal(bar.liveBarCountText('pin', 2, true, true), '2 pinned');
+  assert.equal(bar.liveBarCountText('more', 3, true, true), '3 more');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livebar.js'), 'utf8');
+  assert.match(src, /count\(all, l, true, fold < 5\)/, 'folds 3 and 4 show words');
+  assert.match(src, /fold < 5 && sw\.scrollWidth/, 'the bar folds once more, to the numbers alone, only when words do not fit');
+  assert.match(fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8'), /\.lbar\[data-fold="5"\] \.lbar-sw/);
+});
+
+test('ORCH-1684: every open session without a chip of its own gets one in the Open group; one not in sight is marked', () => {
+  const all = bar.liveBarModel([sess('t_a', 'ORCH-1', 'needs-you'), sess('t_b', 'ORCH-2', 'working'), sess('t_c', 'ORCH-3', 'idle'),
+    sess('t_d', 'ORCH-4', 'working'), sess('t_e', 'ORCH-5', 'in-line')], ['t_d']);
+  const rows = bar.liveBarOpenRows(all, ['t_a', 't_b', 't_c', 't_d'], ['t_a', 't_b']);
+  assert.deepEqual(rows.map(o => [o.key, o.held]), [['ORCH-2', false], ['ORCH-3', true]], 'needs you and pinned have their chips; ORCH-5 is not open');
+  assert.deepEqual(bar.liveBarOpenRows(all, ['t_c'], null).map(o => o.held), [false], 'no panel in sight (the bar or side place): nothing is held');
+  assert.deepEqual(bar.liveBarOpenRows(all, [], null), []);
+  assert.deepEqual(bar.liveBarOpenRows(null, null, null), []);
+  const layer = fs.readFileSync(path.join(WEB, 'pages/live-layer.js'), 'utf8');
+  const say = layer.slice(layer.indexOf('function liveBesideSay'), layer.indexOf('const liveIc'));
+  assert.doesNotMatch(say, /toast/, 'the panes with no room are said to a screen reader, no toast covers the cards');
+  assert.match(say, /role:'status'/);
+  assert.match(layer, /liveLayerTell\(s\);/, 'a paint that changes what fits tells the bar');
+});
+
 test('loaded before app.js, served as a page module, painted on every render, names no add-on', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   assert.ok(index.indexOf('pages/livebar.js') > 0 && index.indexOf('pages/livebar.js') < index.indexOf('src="app.js"'));
@@ -71,7 +99,7 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
   assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
   assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
-  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => bar\.panes\.includes\(id\)\)/, 'a chip is current when its session (or one of its group, ORCH-345) is open');
+  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => \(bar\.shown \|\| bar\.panes\)\.includes\(id\)\)/, 'a chip is current when its session (or one of its group, ORCH-345) is in sight');
   assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');

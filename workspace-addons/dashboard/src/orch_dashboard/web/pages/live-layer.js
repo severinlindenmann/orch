@@ -407,9 +407,21 @@ function liveLayerDo(act, after) {
   liveLayerPaint();
   if (after) document.querySelector('#live-dock ' + after)?.focus({preventScroll:true});
   if (act.type === 'beside') liveBesideSay(next);
-  window.dispatchEvent(new CustomEvent('orch:live-layer', {detail:{mode:liveLayerWhere(next, liveLayerPhone()), panes:[...next.panes]}}));
+  liveLayerTell(next, true);
 }
-// After Add beside: the panes that found no room are named (ORCH-1659: at 1280 the third quietly hid one).
+// The bar hears which sessions are open and which of them are in sight ({mode, panes, shown}): a pane with no room
+// gets its own chip there (ORCH-1684). Told after every change of the layer, and when a paint changes what fits.
+let liveLayerTold = '';
+function liveLayerTell(s, always) {
+  const mode = liveLayerWhere(s, liveLayerPhone());
+  const shown = s.panes.length && mode !== 'bar' && mode !== 'side' ? [...liveLayerView(s, mode).shown] : null;
+  const detail = {mode, panes:[...s.panes], shown}, key = JSON.stringify(detail);
+  if (!always && key === liveLayerTold) return;
+  liveLayerTold = key;
+  window.dispatchEvent(new CustomEvent('orch:live-layer', {detail}));
+}
+// After Add beside: the panes that found no room are named (ORCH-1659: at 1280 the third quietly hid one). Said to a
+// screen reader only: the bar shows each of them as a chip, so no toast lies over the page's cards (ORCH-1684).
 function liveBesideSay(s) {
   const where = liveLayerWhere(s, liveLayerPhone());
   if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
@@ -419,7 +431,13 @@ function liveBesideSay(s) {
   const hush = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [], quiet = s.panes.some(k => !hush.includes(k)) ? hush : [];
   const wait = s.panes.filter(k => !v.shown.includes(k) && !quiet.includes(k)).map(k => liveLayerSession(k)?.title || k);
   const text = liveBesideHidden(v.n, wait);
-  if (text) window.orch?.toast?.(text, 'ok');
+  if (text) liveLayerSay(text);
+}
+function liveLayerSay(text) {
+  let el = document.getElementById('live-say');
+  if (!el) { el = h('div', {id:'live-say', className:'sr-only', role:'status', 'aria-live':'polite', 'data-key':'live-say'}); document.body.append(el); }
+  el.textContent = '';
+  setTimeout(() => { el.textContent = text; }, 50);  // a fresh text is read even when it is the same as last time
 }
 const liveIc = name => { const s = h('span', {className:'ic-wrap', 'aria-hidden':'true'}); s.innerHTML = icon(name, 18); return s; };
 function liveBtn(cls, act, label, glyph, extra = {}, word = '') {
@@ -861,6 +879,7 @@ function liveLayerPaint() {
     // the panes in sight: one that comes into sight (a pane closed and one that did not fit takes its room) slides in
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...(v?.shown || s.panes)];
   }
+  liveLayerTell(s);
   // the room for the layer first (ORCH-1686): a part below that fails must not leave the page's last row and the
   // Review answers under the bar
   document.body.dataset.liveLayer = where;
