@@ -211,7 +211,7 @@ test('a server error and a slow answer have their own words; only a failure hold
   assert.match(toasts.at(-1), /orch had a problem/);
   ctx.connectionNotice(connection, true, 'slow');
   assert.equal(connection.children[0].children[0].children[0], 'Still loading');
-  assert.ok(connection.children[1] == null, 'no Try again for an answer that is only late');
+  assert.equal(connection.children.length, 1, 'no Try again, and no null child (it would show as the word null)');
   assert.equal(ctx.changeUnavailable(), false);
 });
 test('while offline the Start and Try again buttons are off and come back with the connection', () => {
