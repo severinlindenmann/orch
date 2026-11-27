@@ -224,32 +224,37 @@ chatSend = async function () {
   if (snapshot || (!typed && !files.length) || chatUi.sending.has(id) || ['done', 'dropped'].includes(t.status)) return {ok:false, text:''};
   const original = chatUi.drafts[id];
   chatUi.sending.add(id); render();
-  if (tcShared(tcGroupOf(t)) && !tcGroupOf(t).closed) {  // everyone in the chat gets it (orch relay group say --dashboard); a line on the ticket too
+  const r = await tcSay(t, typed, files);
+  chatUi.sending.delete(id);
+  if (r.ok && chatUi.drafts[id] === original) chatUi.drafts[id] = '';
+  render(); return r;
+};
+// The one send of a ticket chat line ({ok, text}), for the Chats page and Review's side panel (ORCH-2185): into a
+// shared chat everyone gets it (orch relay group say --dashboard, a line on the ticket too, no files); else files go
+// onto the ticket first (ticket.attach), the words name them, and a helper starts when none was there to read it.
+async function tcSay(t, typed, files = []) {
+  const id = t.id;
+  if (tcShared(tcGroupOf(t)) && !tcGroupOf(t).closed) {
     const ok = await chatOperation('group.say', {ticket:id, text:typed}, 'Could not send your message.');
-    chatUi.sending.delete(id);
-    if (ok && chatUi.drafts[id] === original) chatUi.drafts[id] = '';
-    render(); return ok ? {ok:true, text:''} : {ok:false, text:'Not sent. Try again.'};
+    return ok ? {ok:true, text:''} : {ok:false, text:'Not sent. Try again.'};
   }
-  // files go onto the ticket first (ticket.attach), the words then name them, as Add to this ticket does
   let text = typed;
   if (files.length && typeof ticketAttachFiles === 'function') {
     const kept = await ticketAttachFiles(id, files);
-    if (!kept.ok) { chatUi.sending.delete(id); render(); return {ok:false, text:kept.text}; }
+    if (!kept.ok) return {ok:false, text:kept.text};
     text = ticketTalkText(typed, kept.names);
   }
   let said = null;
   try { said = await act('chat.say', {ticket:id, text}); } catch { said = null; }
-  chatUi.sending.delete(id);
-  if (!said?.ok) { render(); return {ok:false, text:'Not sent. Check the connection and try again.'}; }
-  if (chatUi.drafts[id] === original) chatUi.drafts[id] = '';
+  if (!said?.ok) return {ok:false, text:'Not sent. Check the connection and try again.'};
   const r = said.state?.send_result;
   if (r && r.state === 'none' && !r.delivered) {
     const starter = window.UI?.startStarter;
     const started = starter ? await starter.start(id, [['run.start', {ticket:id}]]) : await act('run.start', {ticket:id});
     window.orch.toast(started?.ok || started?.again || started?.queued ? 'Sent. A helper starts and reads it first.' : 'Saved in the chat. Start the helper to go on.', started?.ok || started?.again || started?.queued ? 'ok' : 'info');
   }
-  render(); return {ok:true, text:''};
-};
+  return {ok:true, text:''};
+}
 
 // #chat/<ticket id> opens that ticket's chat (the ticket page's Open chat, a shared link).
 function tcRoute() {

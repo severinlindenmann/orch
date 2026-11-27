@@ -284,6 +284,8 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
        With it (ORCH-2186, Focused review E), item.ideas (2 to 12 lines) draws one row per idea with Keep / Later / No in
        place of the preview; the ok answer is "Save" ("Save, N left for later" when some stay) and answers ok with
        note.ideas = {keep:[n], no:[n], later:[n]} (numbers from 1). Nothing sorted: Save asks to sort one first
+       With it (ORCH-2185, Focused review D), o.moreItems(item) gives the page's own rows for the More menu
+       ([{label, icon, href, onClick(item, event), key}]; the Review page: Ask about this, Watch the helper)
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -496,6 +498,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const tl=!layer&&typeof o.ticketLink==='function'?o.ticketLink(it):'';
   if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
+  /* ORCH-2185 (Focused review D): o.moreItems(item) adds the page's own rows to More ({label, icon, href, onClick, key}): Ask about this, Watch the helper */
+  if(df&&!layer&&typeof o.moreItems==='function')(o.moreItems(it)||[]).forEach(m=>{if(!m||!m.label)return;const a=el('a','btn ghost sm swipe-more-item');a.href=m.href||'#';if(m.key)a.dataset.key=m.key;if(m.icon)a.append(ic(m.icon,14));a.append(m.label);a.addEventListener('pointerdown',e=>e.stopPropagation());if(typeof m.onClick==='function')a.addEventListener('click',e=>{if(!m.href)e.preventDefault();m.onClick(it,e)});row.append(a)});
   if(df)moreMenu(row);/* ORCH-2182: the card's links and Open sit in one More menu; the answers stay in the bar */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   const sd=df&&it.said?saidLine(it):null;/* ORCH-2183: what the person said, copied by orch from its record */

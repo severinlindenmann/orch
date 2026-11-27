@@ -178,6 +178,13 @@ both to the right at 1280 to 1920). Two or more cards show the list in the left 
   list with Looks good (keeps them all).
 
 - 26 Nov (ORCH-2173 merge repair): Test results retains the master check icon for both the current `test_results` card kind and older `check_result` data. No layout or wording change.
+- 27 Nov (ORCH-2185, Focused review D): with `?decide=1`, the panel beside the card (`&ticket=<id>`) has the tabs
+  Ticket / Chat / What the helper does in place of its "Ticket" heading ("Terminal" with `&term=1`: the plain
+  terminal's typing setting is on), and "Open full page" is a small icon (on Chat it opens the whole chat). The card's
+  More has "Ask about this" (opens Chat with "About: <the decision>" in the box) and "Watch the helper" (only while a
+  helper with a live screen works on the ticket). `&tab=chat`, `&tab=helper` (the helper's screen, watching until Let
+  me type), `&tab=helper&none=1` (no helper works on this now). Run it on a sign-in card shows the plain terminal in
+  the helper tab beside the card; a phone keeps the live view. Words: owner, 26 Nov ("take the recommended").
 
 ## Gaps against the approved Review drafts (26 Nov 2026, ORCH-2316)
 
@@ -190,3 +197,8 @@ card (results and Try it yourself too) and turns on pointing: "Comment is on. Cl
 about the whole card." with Whole card and Done. A finished result says "Everything you asked for is done and tested."
 and folds the steps under "What the helper did: N steps, each with its evidence"; a part still open reads "You asked
 for: … You got: …" on top.
+
+## Required-check fix (27 Nov 2026, ORCH-2185)
+
+The shared card links sit above the title through 480 px, including 390 px phones. The mockup uses the same
+master rule as the product. This preserves the 24 px clearance from the pinned answer bar with Linux font wrapping.

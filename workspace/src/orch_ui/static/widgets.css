@@ -2365,6 +2365,18 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket .ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}
 .review-ticket .btn.primary{background:transparent;border-color:var(--border-strong);color:var(--text)}
 .review-ticket .btn.primary:hover{background:var(--surface-2);border-color:var(--border-strong)}
+/* ORCH-2185 (Focused review D, with decisionFirst): the panel's tabs Ticket / Chat / What the helper does (a .segmented
+   row of links in the panel's header, in place of its "Ticket" heading). Chat: the ticket's chat lines over the Chat
+   message box (UI.composer layout box), the box stays at the bottom of the panel. The helper's screen (UI.term) fills
+   the panel's height, watching until "Let me type". */
+.review-ticket-h:has(.review-ticket-tabs){flex-wrap:wrap}
+.review-ticket-tabs{flex:0 1 auto;flex-wrap:nowrap;margin-right:auto}
+.review-ticket-tabs .btn,.review-ticket-h>.btn{white-space:nowrap;text-decoration:none}
+.review-ticket[data-tab=chat] .review-ticket-b,.review-ticket[data-tab=helper] .review-ticket-b{display:flex;flex-direction:column;min-height:0}
+.review-panel-chat{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-log{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-box{position:sticky;bottom:0;padding-top:var(--s2);background:var(--surface)}
+.review-panel-term{display:flex;flex-direction:column;flex:1 1 auto;min-height:calc(var(--s9) * 5)}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
 @media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
 
@@ -3088,6 +3100,6 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
  .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
  .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
 }
-/* ORCH-2316: on a very narrow phone the title wraps and the pinned bar's lines wrap too, so under the title is still
-   covered (CI, 320 wide): the links go above the title there */
-@media (max-width:360px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}
+/* ORCH-2185 / ORCH-2316: narrow phones need the links above the title: Linux font wrapping at 390 px
+   leaves only 21 px before the pinned answer bar. Keep the same safe placement through 480 px. */
+@media (max-width:480px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}

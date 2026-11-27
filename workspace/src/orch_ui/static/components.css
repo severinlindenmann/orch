@@ -254,7 +254,7 @@ input[type=checkbox],input[type=radio]{width:16px;height:16px;accent-color:var(-
 .switch:checked:after,.switch[aria-checked=true]:after{background:var(--on-brand);transform:translateX(12px)}
 .segmented,.view-toggle{display:inline-flex;align-items:center;gap:4px;padding:4px;border:1px solid var(--border);background:var(--sidebar);border-radius:8px;width:fit-content;max-width:100%;flex-wrap:wrap}
 .segmented .btn,.view-toggle .btn,.view-toggle .seg,.segmented label{border:0;min-height:32px;padding:4px 12px;border-radius:4px;color:var(--text-muted);background:transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:14px}
-.segmented [aria-pressed=true],.segmented label:has(input:checked),.view-toggle .active,.view-toggle [aria-pressed=true]{background:var(--surface-3);color:var(--text)}
+.segmented [aria-pressed=true],.segmented [aria-current=true],.segmented label:has(input:checked),.view-toggle .active,.view-toggle [aria-pressed=true]{background:var(--surface-3);color:var(--text)}
 .segmented label:focus-within{outline:2px solid var(--brand);outline-offset:2px}
 .tabs{display:flex;align-items:stretch;gap:16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .tabs a,.tabs button{min-height:40px;padding:8px 4px;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-muted);text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500}

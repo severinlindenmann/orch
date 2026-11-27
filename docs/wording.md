@@ -20,6 +20,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | the task a question belongs to, on its card | About: <task text> | `--check c1` | Regarding, Subject |
 | the suggested option | Suggested | `recommended` | Recommended |
 | how much attention a Review card needs (owner, 26 Nov, ORCH-2184) | Quick look / Short decision / Take your time (tiles over the lanes); a round of up to 5 ends on What you decided | `attention.group` quick, short, time; `orch review list --group` | Decide (as a group name), about N min |
+| the panel beside a Review card (owner, 26 Nov, ORCH-2185) | Ticket / Chat / What the helper does (tabs; "Terminal" only when the plain terminal's typing setting is on); in the card's More: Ask about this, Watch the helper | `#review?ticket=<id>&tab=chat\|helper` | Session, Open the session, Remind me |
 | put a Review card off (owner, 26 Nov) | Later (one button; the choices under it are times only) | - | Remind me |
 | sort a list of ideas on Review (owner, 26 Nov, ORCH-2186) | Keep / Later / No per idea; Save (Save, N left for later) | `orch ask --idea`, `ideas`, `left_from` | Approve, Reject, Maybe, Remind me |
 | evidence on a task | Evidence | `evidence` | Proof, Artifact |

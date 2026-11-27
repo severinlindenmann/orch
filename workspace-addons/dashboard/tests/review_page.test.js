@@ -516,6 +516,76 @@ test('ORCH-1804: the deck gets the "Open ticket" address, and an open panel foll
   assert.equal(moved.length, 1, 'closed: the card never opens it');
 });
 
+// ORCH-2185 (Focused review D, behind workflow.decision_first): the panel beside the card has Ticket, Chat and
+// "What the helper does" ("Terminal" with the plain terminal's typing on); it keeps its tab when it follows the card,
+// "Ask about this" opens Chat with "About: <the decision>" and Run it on a sign-in shows the terminal in the panel.
+const jeq = (a, b, m) => assert.equal(JSON.stringify(a), JSON.stringify(b), m);
+const panelCtx = (hash, settings = {decision_first_on:true}, more = {}) => ctx({settings, runs:more.runs || {}}, {location:{hash}, snapshot:false, array:v => Array.isArray(v) ? v : [], history:{state:null, replaceState(){}},
+  ticketOf:id => id === 't_abcdef' ? {id, key:'DT-41', status:more.status || 'open', history:[]} : null, detail:t => h('div', {className:'ticket-page'}, 'ticket ' + t.key), missingTicket:id => h('p', {}, 'gone ' + id),
+  tcItems:() => more.items || [], tcGroupOf:() => null, tcLine:item => h('article', {}, 'line ' + item.e.text), tcAnswer:item => h('article', {}, 'answer ' + item.q.answer),
+  tcLineShell:(item, prev, g, ...b) => h('article', {}, ...b), ...more.extra});
+const panelOf = c => nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-ticket');
+test('ORCH-2185: off, the panel is as before; on, three tabs and the address keeps the tab', () => {
+  assert.match(text(panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', {}))), /^Ticket/, 'switch off: the heading, the ticket page, no tabs');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=chat', {}).reviewPanelTab(), 'ticket');
+  const c = panelCtx('#review?card=x&ticket=t_abcdef');
+  const tabs = nodes(panelOf(c)).find(n => n.attrs?.['data-key'] === 'review-ticket-tabs');
+  const links = nodes(tabs).filter(n => n.tag === 'a');
+  jeq(links.map(text), ['Ticket', 'Chat', 'What the helper does']);
+  jeq(links.map(a => a.attrs.href), ['#review?card=x&ticket=t_abcdef', '#review?card=x&ticket=t_abcdef&tab=chat', '#review?card=x&ticket=t_abcdef&tab=helper']);
+  assert.equal(links[0].attrs['aria-current'], 'true');
+  assert.match(text(panelOf(c)), /ticket DT-41/, 'the Ticket tab is the ticket page');
+  jeq(nodes(panelOf(panelCtx('#review?ticket=t_abcdef', {decision_first_on:true, terminal_typing_on:true}))).filter(n => n.attrs?.['data-key'] === 'review-tab-helper').map(text), ['Terminal'], 'Terminal only with the plain terminal setting on');
+  assert.equal(c.reviewTicketHref('t_abcdef', 'helper', 't_term01'), '#review?card=x&ticket=t_abcdef&tab=helper&term=t_term01');
+  assert.equal(c.reviewTicketHref('t_abcdef', 'chat', 't_term01'), '#review?card=x&ticket=t_abcdef&tab=chat', 'a terminal only on the helper tab');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=helper&term=t_term01').reviewTicketHref(''), '#review', 'Close drops the ticket, its tab and terminal');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=evil').reviewPanelTab(), 'ticket', 'only the three tabs');
+});
+test('ORCH-2185: the Chat tab shows the chat lines, open questions as plain lines and the message box; closed: no box', () => {
+  const items = [{kind:'line', key:'h1', at:'2026-11-26T09:00:00Z', e:{by:'human:me', text:'Keep it short'}}, {kind:'question', key:'q-q1', at:'2026-11-26T10:00:00Z', q:{id:'q1', text:'Send it today?'}}];
+  const p = panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {items}));
+  assert.match(text(p), /line Keep it short/);
+  assert.match(text(p), /Send it today\?/);
+  assert.ok(nodes(p).some(n => n.attrs?.['data-review-chat-box'] === 't_abcdef'), 'the message box host');
+  const closed = panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {status:'done'}));
+  assert.ok(!nodes(closed).some(n => n.attrs?.['data-review-chat-box']), 'a closed ticket takes no reply');
+  assert.match(text(closed), /No messages yet/);
+});
+test('ORCH-2185: the helper tab: the live screen, the plain terminal Run it started, or a plain empty state', () => {
+  const live = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper', undefined, {runs:{t_abcdef:{running:true, claim:{mode:'tmux'}}}}));
+  assert.ok(nodes(live).some(n => n.attrs?.['data-review-term'] === 't_abcdef'));
+  const oneshot = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper', undefined, {runs:{t_abcdef:{running:true, claim:{mode:'oneshot'}}}}));
+  assert.match(text(oneshot), /No helper works on this now/, 'a one-step helper has no live screen');
+  const term = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper&term=t_term01'));
+  const host = nodes(term).find(n => n.attrs?.['data-review-term']);
+  assert.equal(host.attrs['data-review-term'], 't_term01'); assert.equal(host.attrs['data-review-plain'], 'yes');
+  assert.doesNotMatch(text(term), /session/i, 'never "session" on screen');
+});
+test('ORCH-2185: More gets Ask about this (and Watch the helper with a live helper); Ask prefills the box once', () => {
+  const off = panelCtx('#review', {});
+  jeq(off.reviewMoreItems({ticketId:'t_abcdef'}), [], 'switch off: nothing');
+  const c = panelCtx('#review', undefined, {runs:{t_abcdef:{running:true, claim:{}}}});
+  const items = c.reviewMoreItems({id:'core:q:t_abcdef:q1', ticketId:'t_abcdef', text:'Send the newsletter today?'});
+  jeq(items.map(i => i.label), ['Ask about this', 'Watch the helper']);
+  jeq(items.map(i => i.href), ['#review?ticket=t_abcdef&tab=chat', '#review?ticket=t_abcdef&tab=helper']);
+  jeq(panelCtx('#review').reviewMoreItems({ticketId:'t_abcdef'}).map(i => i.label), ['Ask about this'], 'no live helper: no Watch');
+  items[0].onClick();
+  assert.equal(vm.runInContext('reviewChatDrafts', c).get('t_abcdef'), 'About: Send the newsletter today?\n');
+  vm.runInContext('reviewChatDrafts', c).set('t_abcdef', 'my own words');
+  items[0].onClick();
+  assert.equal(vm.runInContext('reviewChatDrafts', c).get('t_abcdef'), 'my own words', 'never over words already typed');
+});
+test('ORCH-2185: the panel keeps its tab when it follows the card; Run it opens the terminal in the panel', () => {
+  const moved = [];
+  const c = panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {extra:{setTimeout(){}, history:{state:null, replaceState:(s, t, u) => moved.push(u)}, route:() => ({kind:'review'})}});
+  c.reviewTicketFollow({items:[{id:'b', ticketId:'t_abc999'}], index:0, answers:{}});
+  jeq(moved, ['#review?ticket=t_abc999&tab=chat']);
+  assert.equal(c.reviewPanelRun('t_term01', 't_abcdef'), true);
+  assert.equal(c.location.hash, '#review?ticket=t_abcdef&tab=helper&term=t_term01');
+  assert.equal(panelCtx('#review', {}, {extra:{route:() => ({kind:'review'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'switch off: the live layer as before');
+  assert.equal(panelCtx('#review', undefined, {extra:{route:() => ({kind:'review'}), liveLayerPhone:() => true}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'a phone keeps the live layer');
+  assert.equal(panelCtx('#home', undefined, {extra:{route:() => ({kind:'home'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'Home keeps the live layer');
+});
 test('ORCH-2316 (R2 A, draft r2-a): the subtitle says how many need you and how many hold up work now', () => {
   const ask = {...CARD, card_kind:{family:'answer', kind:'question', name:'Question', lane:'holds_up'}};
   const look = {...CARD, id:'core:review:t_abcdef', key:'review', card:{kind:'check', title:'Done'}, card_kind:{family:'look', kind:'document', name:'Document', lane:'look'}};
