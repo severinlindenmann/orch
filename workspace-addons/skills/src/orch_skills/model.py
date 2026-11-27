@@ -12,6 +12,7 @@ import contextlib
 import os
 import re
 import shutil
+import stat
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -203,6 +204,8 @@ def _files(folder: Path, limit: int = 200) -> dict[str, bytes] | None:
                 if n.startswith(".") or p.is_symlink():
                     continue
                 st = p.lstat()
+                if not stat.S_ISREG(st.st_mode):  # a pipe or device would block the read
+                    continue
                 if st.st_size > 1024 * 1024:
                     return None
                 out[p.relative_to(folder).as_posix()] = p.read_bytes()
