@@ -50,6 +50,26 @@ def test_claim_writes_a_valid_record_and_release_removes_it(proj, new_ticket):
     assert not (proj / ".orch/run/tickets" / f"{tid}.lock").exists()
 
 
+def test_release_writes_the_runs_end_before_the_claim_goes(proj, new_ticket, monkeypatch):
+    """ORCH-2215: the claim went first and the run's record got its end a moment later, so whoever waited
+    for the claim to go (a test, a page) could read a run with no end. The end is written while the claim
+    still stands."""
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
+    tickets.run_started(proj, tid, rec["run"], "claude")
+    seen = []
+    real = runs._release_locked
+
+    def release_locked(root, t, r):
+        seen.append(tickets.load(root, t)["runs"][-1].get("ended"))
+        real(root, t, r)
+
+    monkeypatch.setattr(runs, "_release_locked", release_locked)
+    assert runs.release(proj, tid, rec["run"])["released"] is True
+    assert seen and seen[0] and runs.read(proj, tid) is None
+    assert tickets.load(proj, tid)["runs"][-1]["ended"] == seen[0]
+
+
 def test_busy_ticket_exits_2_queues_the_event_once(proj, new_ticket, run):
     tid = new_ticket()
     runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
