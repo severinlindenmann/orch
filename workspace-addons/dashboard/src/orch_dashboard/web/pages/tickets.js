@@ -358,7 +358,9 @@ function ticketNext(t) {
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
-    if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
+    // one word per state, the ticket page's (ORCH-1696): a sent-back ticket reads Changes asked, never Paused
+    if (window.DashHelpers.changesAsked(t)) text = 'Changes asked';
+    else if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
@@ -556,7 +558,7 @@ function boardSignal(t, lane, parts) {
     const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp)).replace(/^Waits /, '').replace(/^until /, 'Until ');
     if (text) return h('span', {className:'tile-sig', title:text}, text);
   }
-  if (ticketIsPaused(t) && ['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running) return h('span', {className:'tile-sig'}, 'Paused');
+  if (ticketIsPaused(t) && ['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running) return h('span', {className:'tile-sig'}, window.DashHelpers.changesAsked(t) ? 'Changes asked' : 'Paused');
   if (parts.length && !t.release && !t.epic) return boardPartsBar(t, parts, boardPartsOpen.has(t.id));
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
   if (quiet) return h('span', {className:'tile-sig'}, quiet);
@@ -1239,6 +1241,8 @@ function calendarAction(action, control) {
 function list() {
   syncTicketAddress();
   const visible = filteredTickets();
+  // ORCH-1699: no ticket at all: no views, filters or search, only the first step
+  if (!tickets().length) return fragment(heading('Tickets'), ticketsEmpty());
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));

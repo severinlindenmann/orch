@@ -403,7 +403,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-shot.taken .opt-thumb{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
 .decision-shot.dim .opt-thumb{opacity:.7}  /* the not-picked options stay readable: 4.5:1 or more (ORCH-1360) */
 .decision-shot b{color:var(--text)}
-.more-text{display:grid;gap:var(--s1);justify-items:start}.more-text>p{margin:0;overflow-wrap:anywhere}.more-text.clamped>p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.more-text{display:grid;gap:var(--s1);justify-items:start}.more-text>p{margin:0;overflow-wrap:anywhere}.more-text.clamped>p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.more-text.clamped .ed{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}  /* an editable field (Done when) is cut the same way; a click still edits it (ORCH-1696) */
 .decision-words{display:grid;gap:var(--s2);padding:var(--s3);border-left:2px solid var(--warning);background:var(--surface-2);border-radius:0 var(--radius) var(--radius) 0}
 .decision-words p{margin:0;font-size:14px;line-height:20px}
 .decision-foot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;font-size:13px;line-height:18px;color:var(--text-muted)}
@@ -1335,7 +1335,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-grip::after{content:"";position:absolute;border-radius:2px;background:var(--border-strong);transition:background-color var(--dur-fast) var(--ease-move)}
 .live-grip:hover::after,.live-grip:focus-visible::after,.live-grip[data-drag]::after{background:var(--brand)}
 .live-panel[data-mode=bottom] .live-grip{top:calc(-1 * var(--s2));left:0;right:0;height:var(--s4);cursor:ns-resize}
-.live-panel[data-mode=bottom] .live-grip::after{top:calc(var(--s2) - 2px);left:50%;width:var(--s7);height:4px;transform:translateX(-50%)}
+.live-panel[data-mode=bottom] .live-grip::after{top:calc(var(--s2) + 2px);left:50%;width:var(--s7);height:4px;transform:translateX(-50%)}
 .live-panel[data-mode=right] .live-grip{top:0;bottom:0;left:calc(-1 * var(--s2));width:var(--s4);cursor:ew-resize}
 .live-panel[data-mode=right] .live-grip::after{left:calc(var(--s2) - 2px);top:50%;width:4px;height:var(--s7);transform:translateY(-50%)}
 .live-panel[data-mode=full] .live-grip{display:none}
@@ -1349,8 +1349,10 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
    bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
 @media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
-   phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
-body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
+   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695):
+   the bar drops its "Updated" time and goes onto a second row when they do not fit beside the page name */
+body[data-live-narrow] .topbar{flex-wrap:wrap}
+body[data-live-narrow] .topbar #updated{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 /* ORCH-2202 (owner pick I a): the ticket page beside Focus goes to one column: Properties under Progress, in the page
    (not the sticky side column), so no step text is cut; the side menu folds to its icon rail and Focus takes that room */

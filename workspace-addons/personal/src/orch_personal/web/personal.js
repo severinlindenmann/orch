@@ -1009,7 +1009,8 @@
     else if (INBOX[screen]) { head(INBOX[screen].label, INBOX[screen].sub); out = await inboxScreen(screen, rest.join('/') || null); }
     else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
     else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }
-    $('add-link').hidden = screen === 'parts';
+    // ORCH-1697: on Home with parts the grid's own Add a part tile is the one; with nothing added the header link stays
+    $('add-link').hidden = screen === 'parts' || (!screen && !!(today && today.parts && today.parts.length));
     nav(screen === 'parts' ? null : (screen || ''));
     view.replaceChildren(...out);
     view.setAttribute('aria-busy', 'false');

@@ -316,6 +316,7 @@ def queue_blocks(root, data: dict, alive: bool, now: float, tz: tzinfo | None = 
                 "empty": {
                     "title": "Nothing in the merge queue",
                     "text": "A pull request put in the merge queue shows here with the group it is checked in.",
+                    "button": {"label": "Open tickets", "to": "app:tickets"},  # ORCH-1697: one next step
                 },
             }
         ]
