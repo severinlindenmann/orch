@@ -230,8 +230,10 @@ def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
 
         for anc in path.parents:
             if anc.name.lower() == ".orch":
-                skills.ensure_gitignore(anc.parent)
-                harness.check_private_path(anc.parent, path)
+                root = anc.parent
+                rel = path.absolute().relative_to(root.absolute()).as_posix()
+                known = skills.ensure_gitignore(root, rel)  # one git run each for tracked and ignored
+                harness.check_private_path(root, path, known)
                 break
         else:
             raise skills.Refused(f"{path} is not inside .orch; orch will not store private files there.")
