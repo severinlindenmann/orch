@@ -34,12 +34,10 @@ module.exports = {
     await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });
     await page.evaluate(id => window.LiveLayer.open(id), ids.budget);
     const pane = page.locator('#live-dock .live-pane').first();
-    const history = pane.locator('[data-key="live-history"]');
-    if (await history.count()) await history.click();
-    else {
-      await pane.locator('[data-key="live-pane-more"]').click();
-      await pane.locator('[data-key="live-history-item"]').click();
-    }
+    // History is only in the pane's More menu (no History button in the header any more)
+    must(!(await pane.locator('[data-key="live-history"]').count()), 'the pane header still has a History button');
+    await pane.locator('[data-key="live-pane-more"]').click();
+    await pane.locator('[data-key="live-history-item"]').click();
     const reopen = pane.getByRole('button', { name: /^Reopen the session from/ });
     await reopen.waitFor({ timeout: 10000 });
     must(await pane.getByText('Read the menu and pick three dishes').count(), 'the History tab does not show the earlier session');

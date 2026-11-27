@@ -2,17 +2,24 @@
    A real terminal: xterm.js 5.5.0 with its WebGL renderer, vendored next to this file (xterm.js,
    xterm-addon-webgl.js, xterm-addon-fit.js; licence and checksums in LICENSE-xterm.txt). The WebGL renderer is loaded
    before the terminal opens, so xterm adds no <style> element and the page's style-src 'self' stays as it is.
-   Watching only by default: the terminal takes no input until the person turns on "Let me type"; the server decides
-   again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
-   or the whole screen; a paste with a line end asks once. The helper's screen follows the size of its box (onSize):
+   Without WebGL (switched off, no graphics card, the context lost) xterm's normal renderer draws it (ORCH-2204): the
+   rules it writes into its own <style> elements, which the page's policy blocks, are copied into a style sheet made
+   with CSSOM (adoptedStyleSheets), which the policy allows; they are scoped to that one terminal.
+   ORCH-2199 (owner pick B a, M a): no switch. A click into the screen (or Enter on it) sends the keys there, Esc twice or
+   a click outside stops, Shift+Tab goes to the helper like every other key; dragging still selects and copies. The
+   server decides again (the workspace setting, so watch-only stays a setting, and the sign-in). Copy says what it
+   copies: "Copy selection" or "Copy all". A paste goes in as one block without a question, and never presses Enter by
+   itself (its last line ends are dropped). The helper's screen follows the size of its box (onSize):
    while typing, and while watching too when typing is allowed and no other page types (ORCH-1758, owner: the last
    page opened or resized sets the size). A screen of another size (another page set it, or typing is off in
    Settings) is drawn with a smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways), and
    the box follows the newest line and the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
-     UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
+     UI.term({label, plain, toolsOut, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
+       toolsOut                           the page puts handle.tools itself (a Focus pane header); else a slim row on top
        handle.el                          the element to put in the page
+       handle.tools                       the typing icon (keyboard), Copy and Turn typing on
        handle.hello({typing_allowed})     the bridge's first word: may this workspace type at all
        handle.typingBy('you'|'other'|'none')  who types into this session now; 'other' stops typing here
        handle.screen({cols, rows, data})  the whole screen (data: base64 terminal bytes), first and after a gap
@@ -22,9 +29,9 @@
        handle.show('loading'|'error')     while (re)connecting
        handle.setTyping(on) / handle.typing()
        handle.back()                      put the keyboard back after the page drew the pane again
-       handle.dispose()                   free the terminal (its WebGL context)
-   Pure parts for tests: UI.term.pasteAsk, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
-   UI.term.followTop, UI.term.plainText, UI.term.fitFont.
+       handle.dispose()                   free the terminal (its WebGL context or its copied style sheet)
+   Pure parts for tests: UI.term.pasteText, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
+   UI.term.followTop, UI.term.plainText, UI.term.fitFont, UI.term.domSheet.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -34,16 +41,13 @@
   /* --- the pure part --- */
   /* Lines in a paste (a line end at the very end counts as Enter, not as a line); 0 for no text. */
   const lineCount = text => { const t = String(text || '').replace(/\r\n?/g, '\n'); return t ? t.replace(/\n$/, '').split('\n').length : 0; };
-  /* What a paste with a line end asks first; '' = it goes in without asking (no line end in it). */
-  function pasteAsk(text, where) {
-    const t = String(text || '').replace(/\r\n?/g, '\n'), w = where || 'the helper’s screen';
-    if (!t.includes('\n')) return '';
-    const n = lineCount(t);
-    return n === 1 ? 'Paste 1 line and press Enter in ' + w + '?' : 'Paste ' + n + ' lines into ' + w + '?';
-  }
   /* Pasted text before it goes in: no control characters but tab and line ends (an escape could end the bracketed
      paste early and act as keys, Ctrl+C as a stop), and so no paste markers either. */
   const cleanPaste = text => String(text || '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
+  /* What a paste hands to the terminal (ORCH-2199, owner pick M a): no question; the line ends at its very end are
+     dropped so it never presses Enter by itself. The terminal sends it as one block when the program asked for that. */
+  const pasteText = text => cleanPaste(text).replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  const ESC_TWICE = 500;  // ms: a second Esc within this stops typing; a single Esc goes to the helper after it
   /* base64 from the bridge -> the bytes xterm writes (it decodes UTF-8 itself, also across two messages) */
   function bytes(b64) {
     try {
@@ -100,12 +104,12 @@
     return n;
   }
   const WORDS = {
-    watch: 'Watching · select text to copy it',
-    type: 'Typing: your keys go to the helper · Shift+Tab stops',
-    typePlain: 'Typing: your keys go to this terminal · Shift+Tab stops',
-    off: 'Watching only · typing is off in Settings',
-    offLink: 'Watching only',  // ORCH-1600: with the Turn typing on link beside it, the line says it once
-    taken: 'Watching · another page is typing into this screen now',
+    watch: 'Click the screen to type into it',
+    type: 'Typing into the helper · Esc twice or a click outside stops',
+    typePlain: 'Typing into this terminal · Esc twice or a click outside stops',
+    off: 'Watch only · typing is off in Settings',
+    offLink: 'Watch only',  // ORCH-1600: with the Turn typing on link beside it, the line says it once
+    taken: 'Another page is typing here',
     loading: 'Connecting to the helper’s screen…',
     error: 'The screen stopped updating. orch keeps trying; the helper keeps working.',
     ended: 'The helper’s screen has closed.',
@@ -134,61 +138,117 @@
     } catch (e) { return false; }
   };
 
+  /* The normal renderer's rules into a CSSOM sheet of the page (the policy drops its <style> elements): its style
+     elements are watched, and the sheet follows each change (a new size, a new font). Returns stop(). */
+  function domSheet(hostEl, doc) {
+    const d = doc || (typeof document === 'object' ? document : null);
+    const Sheet = typeof CSSStyleSheet === 'function' ? CSSStyleSheet : null;
+    if (!d || !Sheet || !Array.isArray(d.adoptedStyleSheets) || !hostEl || typeof hostEl.querySelectorAll !== 'function') return () => {};
+    let sheet;
+    try { sheet = new Sheet(); } catch (e) { return () => {}; }
+    d.adoptedStyleSheets = [...d.adoptedStyleSheets, sheet];
+    const seen = new Set();
+    const sync = () => {
+      const els = [...hostEl.querySelectorAll('style')];
+      for (const x of els) if (!seen.has(x)) { seen.add(x); if (obs) obs.observe(x, {childList: true, characterData: true, subtree: true}); }
+      try { sheet.replaceSync(els.map(x => x.textContent || '').join('\n')); } catch (e) { /* a rule the browser cannot read is left out */ }
+    };
+    const obs = typeof MutationObserver === 'function' ? new MutationObserver(sync) : null;
+    sync();
+    return () => {
+      if (obs) obs.disconnect();
+      d.adoptedStyleSheets = d.adoptedStyleSheets.filter(x => x !== sheet);
+    };
+  }
+
   function term(opts) {
     const o = opts || {};
     const label = o.label || 'the helper';
+    /* only a state worth a word shows (watch only, another page types); the rest is the keyboard icon's tooltip */
     const say = el('span', {className: 'meta term-say', role: 'status'});
-    const sw = el('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Let me type into the screen of ' + label, 'data-key': 'term-type'});
-    const swRow = el('label', {className: 'term-sw', hidden: true}, sw, el('span', {text: 'Let me type'}));
-    const copy = el('button', {type: 'button', className: 'btn xs ghost', 'data-key': 'term-copy', text: 'Copy', title: 'Copy the selected text, or all of the terminal\u2019s text', hidden: true});
+    /* the typing icon (owner pick B a): a keyboard, lit while your keys go to the screen; a click turns typing on or off */
+    const sw = el('button', {type: 'button', className: 'btn xs ghost icon term-kbd', 'aria-pressed': 'false', 'aria-label': 'Type into the screen of ' + label, 'data-key': 'term-type', hidden: true});
+    if (typeof window.icon === 'function') sw.innerHTML = window.icon('keyboard', 16); else sw.textContent = '\u2328';
+    /* Copy: its icon and word; a narrow pane keeps the icon, the word stays its name and tooltip */
+    const copyW = el('span', {className: 'term-copy-w', text: 'Copy all'});
+    const copy = el('button', {type: 'button', className: 'btn xs ghost term-copy', 'data-key': 'term-copy', hidden: true});
+    if (typeof window.icon === 'function') copy.innerHTML = window.icon('copy', 16);
+    copy.append(copyW);
     /* ORCH-1600: "typing is off in Settings" takes the person straight to that switch (the page gives the address) */
     const turnOn = o.settingsHref ? el('a', {className: 'btn xs ghost', href: o.settingsHref, 'data-key': 'term-settings', text: 'Turn typing on', hidden: true}) : null;
-    const bar = el('div', {className: 'term-bar'}, say, el('span', {className: 'term-tools'}, turnOn, swRow, copy));
-    const askText = el('span', {});
-    const askGo = el('button', {type: 'button', className: 'btn xs primary', 'data-key': 'term-paste-go', text: 'Paste'});
-    const askNo = el('button', {type: 'button', className: 'btn xs ghost', 'data-key': 'term-paste-no', text: 'Cancel'});
-    const ask = el('div', {className: 'term-ask', role: 'alert', hidden: true}, askText, askGo, askNo);
+    const tools = el('span', {className: 'term-tools', 'data-key': 'term-tools'}, say, turnOn, sw, copy);
+    const bar = o.toolsOut ? null : el('div', {className: 'term-bar'}, tools);
     const host = el('div', {className: 'term-host'});
     const screen = el('div', {className: 'term-screen', role: 'group', 'aria-label': 'Screen of ' + label}, host);
     const loading = el('div', {className: 'term-state'}, el('span', {className: 'skeleton line'}), el('span', {className: 'skeleton line'}), el('span', {className: 'skeleton line short'}));
     const note = el('p', {className: 'term-state meta', hidden: true});
-    const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, ask, screen, loading, note);
+    const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, screen, loading, note);
 
-    let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null, taken = false;
+    let state = 'loading', live = false, typing = false, allowed = false, canType = true, taken = false, escAt = 0, escTimer = null;
     let stick = true, autoTop = -1, followAsked = false;
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
     let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null, baseFont = 13;
     let fresh = false, sizeNo = false, baseCell = null;  // fresh: the first screen after a hello sizes the window; sizeNo: refused (403)
+    let noGL = false, unsheet = null;  // noGL: draw with the normal renderer (WebGL failed or its context was lost)
 
     /* xterm is made with the first screen (it measures its font in the page) */
     function make() {
       if (xt || tried) return !!xt;
       tried = true;
       const T = window.Terminal, GL = window.WebglAddon && window.WebglAddon.WebglAddon, Fit = window.FitAddon && window.FitAddon.FitAddon;
-      if (typeof T !== 'function' || typeof GL !== 'function' || !hasGL()) { state = 'nogl'; words(); return false; }
+      if (typeof T !== 'function') { state = 'nogl'; words(); return false; }
+      if (typeof GL !== 'function' || !hasGL()) noGL = true;  // no WebGL here: the normal renderer draws it
       const cs = typeof getComputedStyle === 'function' ? getComputedStyle(screen) : null;
       baseFont = Math.round(parseFloat(cs && cs.fontSize) || 13);
       xt = new T({cols, rows, disableStdin: true, cursorBlink: false, scrollback: 2000,
         fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: baseFont, lineHeight: 1.2,
         theme: theme(root), screenReaderMode: false,
         linkHandler: {allowNonHttpProtocols: false, activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer'); }}});
-      const gl = new GL();
-      try { xt.loadAddon(gl); } catch (e) { xt.dispose(); xt = null; state = 'nogl'; words(); return false; }
-      gl.onContextLoss(() => {  // the graphics card took the drawing back: stop typing, draw again with the next screen
-        setTyping(false);
-        if (xt) { xt.dispose(); xt = null; }
-        host.textContent = ''; tried = false; live = false; state = 'loading'; words();
-      });
+      if (!noGL) {
+        const gl = new GL();
+        try {
+          xt.loadAddon(gl);
+          gl.onContextLoss(() => {  // the graphics card took the drawing back: stop typing, draw again with the next screen, now without WebGL
+            setTyping(false);
+            noGL = true;
+            unmake();
+            state = 'loading'; words();
+          });
+        } catch (e) { noGL = true; xt.dispose(); xt = null; tried = false; return make(); }
+      }
       if (typeof Fit === 'function') { fit = new Fit(); xt.loadAddon(fit); }
-      try { xt.open(host); } catch (e) { xt.dispose(); xt = null; state = 'nogl'; words(); return false; }
+      try { xt.open(host); } catch (e) {
+        unmake();
+        if (noGL) { state = 'nogl'; words(); return false; }
+        noGL = true; return make();  // WebGL failed while it opened: once more with the normal renderer
+      }
+      if (noGL) { unsheet = domSheet(host); root.dataset.renderer = 'dom'; }
       xt.onData(d => { if (typing) { out += d; schedule(); } });  // watching: xterm takes no input at all (disableStdin)
       xt.attachCustomKeyEventHandler(keyFilter);
+      if (typeof xt.onSelectionChange === 'function') xt.onSelectionChange(copyWord);
       return true;
     }
-    /* keys xterm must leave alone: Shift+Tab stops typing; Ctrl+C or Cmd+C with a selection copies it; other Cmd keys */
+    /* free the terminal and its copied style sheet; the next screen makes it again */
+    function unmake() {
+      if (xt) { try { xt.dispose(); } catch (e) { /* already gone */ } xt = null; }
+      if (unsheet) { unsheet(); unsheet = null; }
+      fit = null; host.textContent = ''; tried = false; live = false;
+    }
+    /* keys xterm must leave alone: Esc twice stops typing (a single Esc goes to the helper a moment later); Enter on the
+       screen while not typing starts it; Ctrl+C or Cmd+C with a selection copies it; other Cmd keys. Shift+Tab is the
+       helper's (ORCH-2199: it switches the helper's mode) and goes in like any key. */
     function keyFilter(e) {
       if (e.type !== 'keydown') return true;
-      if (typing && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); setTyping(false); return false; }
+      if (!typing && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); setTyping(true); return false; }
+      if (typing && e.key === 'Escape' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const now = Date.now();
+        clearTimeout(escTimer); escTimer = null;
+        if (escAt && now - escAt < ESC_TWICE) { escAt = 0; setTyping(false); return false; }
+        escAt = now;
+        escTimer = setTimeout(() => { escTimer = null; escAt = 0; if (typing) { out += '\x1b'; schedule(); } }, ESC_TWICE);
+        return false;
+      }
       const k = String(e.key || '').toLowerCase();
       if ((e.ctrlKey || e.metaKey) && !e.altKey && k === 'c' && xt && xt.hasSelection()) { copyText(xt.getSelection()); e.preventDefault(); return false; }
       if (e.metaKey) return false;
@@ -197,10 +257,14 @@
     function words() {
       const w = !live ? WORDS[state] || WORDS.none : typing ? (o.plain ? WORDS.typePlain : WORDS.type)
         : allowed && canType ? (taken ? WORDS.taken : WORDS.watch) : turnOn && !allowed ? WORDS.offLink : WORDS.off;
-      if (say.textContent !== w) say.textContent = w;
-      swRow.hidden = !(live && allowed && canType);
+      // no explaining line (owner pick H a): only a state worth a word (watch only, another page types, reconnecting)
+      const shown = live ? (taken || !(allowed && canType) ? w : '') : (state === 'loading' || state === 'error') && xt ? w : '';
+      if (say.textContent !== shown) say.textContent = shown;
+      say.hidden = !shown;
+      sw.hidden = !(live && allowed && canType && typing);  // lit only while your keys go there (owner pick B a)
+      sw.setAttribute('title', w);
       if (turnOn) turnOn.hidden = !(live && !allowed);
-      sw.setAttribute('aria-checked', String(typing));
+      sw.setAttribute('aria-pressed', String(typing));
       root.dataset.typing = typing ? 'on' : 'off';
       root.dataset.state = live ? 'live' : state;
       screen.hidden = !(live || ((state === 'error' || state === 'loading') && xt));  // the last screen stays while it reconnects
@@ -208,6 +272,7 @@
       note.hidden = live || state === 'loading' || state === 'error';
       note.textContent = note.hidden ? '' : WORDS[state] || WORDS.none;
       copy.hidden = !live;
+      copyWord();
     }
     function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; fresh = true; sizeNo = false; if (typing && !allowed) setTyping(false); words(); }
     /* who types into this session now: another page took it, so this one goes back to watching (ORCH-883) */
@@ -274,7 +339,7 @@
       live = false; allowed = false; state = next; words();
     }
     function setTyping(on, byOther) {
-      if (!on && held) { held = null; ask.hidden = true; }
+      if (!on) { clearTimeout(escTimer); escTimer = null; escAt = 0; }
       const want = !!on && live && allowed && canType && !!xt;
       if (want) taken = false;
       if (want === typing) { words(); return; }
@@ -304,27 +369,45 @@
         return;
       }
     }
-    /* a paste: nothing while watching; with a line end it asks first; then xterm sends it (bracketed when the
-       program asked for that) */
+    /* a paste goes in as one block, no question, never with an Enter at its end (owner pick M a); a paste into the
+       screen while watching turns typing on first, as a click would (xterm sends it bracketed when the program asked) */
     root.addEventListener('paste', e => {
       if (!screen.contains(e.target)) return;
-      const t = cleanPaste((e.clipboardData && e.clipboardData.getData('text')) || '');
+      const t = pasteText((e.clipboardData && e.clipboardData.getData('text')) || '');
       e.preventDefault(); e.stopPropagation();  // every paste goes in cleaned, never as the browser hands it to xterm
-      if (!typing || !t) return;
-      const q = pasteAsk(t, o.plain ? 'this terminal' : '');
-      if (!q) { xt.paste(t); return; }
-      held = t; askText.textContent = q; ask.hidden = false; askGo.focus();
+      if (!t) return;
+      if (!typing) setTyping(true);
+      if (typing && xt) xt.paste(t);
     }, true);
-    const unask = () => { held = null; ask.hidden = true; if (typing && xt) xt.focus(); };
-    askGo.addEventListener('click', () => { const t = held; unask(); if (t && typing && xt) xt.paste(t); });
-    askNo.addEventListener('click', unask);
-    ask.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); unask(); } });
+    /* a click into the screen types there (owner pick B a); a drag selects text to copy and changes nothing */
+    let downAt = null;
+    screen.addEventListener('pointerdown', e => { downAt = e.button === 0 || e.button == null ? {x: e.clientX, y: e.clientY} : null; });
+    screen.addEventListener('pointerup', e => {
+      const d = downAt; downAt = null;
+      if (!d || typing || Math.abs((e.clientX || 0) - (d.x || 0)) > 4 || Math.abs((e.clientY || 0) - (d.y || 0)) > 4) return;
+      if (xt && xt.hasSelection()) return;
+      setTyping(true);
+    });
+    /* a click anywhere outside the screen (and its tools) stops typing */
+    const outside = e => { if (typing && !root.contains(e.target) && !tools.contains(e.target)) setTyping(false); };
+    if (typeof document === 'object' && typeof document.addEventListener === 'function') document.addEventListener('pointerdown', outside, true);
     sw.addEventListener('click', e => { e.preventDefault(); setTyping(!typing); });
+    /* Copy says what it copies (ORCH-2199): the selection when there is one, else all of the screen's text */
+    const COPY_SEL = 'Copy selection', COPY_ALL = 'Copy all';
+    let copyBusy = false;
+    function copyWord() {
+      if (copyBusy) return;
+      const w = xt && xt.hasSelection() ? COPY_SEL : COPY_ALL;
+      if (copyW.textContent !== w) copyW.textContent = w;
+      copy.setAttribute('title', w);
+      copy.setAttribute('aria-label', w);
+    }
     async function copyText(text) {
       let ok = false;
       try { await navigator.clipboard.writeText(text); ok = true; } catch (err) { ok = false; }
-      copy.textContent = ok ? 'Copied' : 'Select and press Ctrl+C';
-      setTimeout(() => { copy.textContent = 'Copy'; }, 1600);
+      copyBusy = true;
+      copyW.textContent = ok ? 'Copied' : 'Select and press Ctrl+C';
+      setTimeout(() => { copyBusy = false; copyWord(); }, 1600);
     }
     function allText() {
       if (!xt) return '';
@@ -385,24 +468,29 @@
       }, now ? 0 : 250);
     }
     if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => { measure(false); if (!typing) { fitWidth(); follow(); } }); watcher.observe(screen, {box: 'border-box'}); }  // a scroll bar coming or going is no new size
-    root.addEventListener('focusin', e => { lastFocus = e.target; });
+    root.addEventListener('focusin', e => { lastFocus = e.target; });  // the screen's own text area
     root.addEventListener('focusout', e => { if (e.relatedTarget && !root.contains(e.relatedTarget)) lastFocus = null; });
     words();
     return {
-      el: root, hello, typingBy, screen: screenNow, write, size, end, show, setTyping,
+      el: root, tools, hello, typingBy, screen: screenNow, write, size, end, show, setTyping,
       typing: () => typing,
-      /* after the page drew the pane again: the keyboard goes back where it was in this terminal (the screen or the
-         paste question), and only when nothing else on the page has it now */
+      /* after the page drew the pane again: the keyboard goes back into the screen while typing, and only when nothing
+         else on the page has it now */
       back() {
         const a = document.activeElement;
-        if (!(typing || !ask.hidden) || !lastFocus || !root.contains(lastFocus) || (a && a !== document.body && !root.contains(a))) return;
+        if (!typing || !lastFocus || !root.contains(lastFocus) || (a && a !== document.body && !root.contains(a))) return;
         if (a !== lastFocus) lastFocus.focus({preventScroll: true});
       },
-      dispose() { setTyping(false); if (watcher) watcher.disconnect(); if (xt) { xt.dispose(); xt = null; } }
+      dispose() {
+        setTyping(false);
+        if (typeof document === 'object' && typeof document.removeEventListener === 'function') document.removeEventListener('pointerdown', outside, true);
+        if (watcher) watcher.disconnect();
+        unmake();
+      }
     };
   }
-  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont;
-  term.pasteAsk = pasteAsk; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
+  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont; term.domSheet = domSheet;
+  term.pasteText = pasteText; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;
 })();

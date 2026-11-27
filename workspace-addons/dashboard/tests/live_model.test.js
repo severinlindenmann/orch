@@ -41,7 +41,7 @@ test('the Empty helper (no ticket in the list) names its model from the sessions
   assert.equal(M.liveModelPick(M.liveModelLine(run(), t, agents, null)), 'Model: Opus');
   assert.equal(M.liveModelSessionTicket([{id:'t_chat', kind:'chat'}], 't_chat'), null);
   const layer = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/live-layer.js'), 'utf8');
-  assert.match(layer, /sess\?\.running && \(!sess\.kind \|\| sess\.kind === 'empty'\) && typeof window\.liveModelRow/);
+  assert.match(layer, /typeof window\.liveModelChoices === 'function' && \(!sess\.kind \|\| sess\.kind === 'empty'\)/, 'the status popover (ORCH-2199)');
 });
 
 test('the page loads it before the layer and the server serves it', () => {

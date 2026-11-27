@@ -45,8 +45,10 @@ press the option in the card, where orch confirms it is you. Outside the dashboa
 At a stop you can ask a connected workspace for its view first: press **Ask another workspace** on the stop (the button
 only shows when another workspace is connected to yours). You pick who, and the dialog shows exactly what leaves this
 computer: one line about the stop, the items you tick and their pictures. Nothing else goes: no other orders, no crew logs,
-no budget, no chat. orch checks the pictures for passwords and keys when the dialog opens; a picture with a hit stays
-unticked and nothing is sent until you remove it.
+no budget, no chat. orch checks the pictures for passwords and keys when the dialog opens. When one picture has a hit
+(or could not be checked, for example because it is missing), its whole item is unticked and stays here; the dialog says
+which item, why, and what is still sent. The title, the line and the question go even with no item ticked. Send checks
+every picture again before anything leaves.
 
 Their answer shows on the stop as "Design says: ..." (or "Design's helper says: ..."). **Add to my comments** copies it,
 quoted, so you can paste it into your own comments; it is never sent by itself. An answer is advice: **Ship it** and

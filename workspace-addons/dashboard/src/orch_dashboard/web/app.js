@@ -397,9 +397,10 @@ function pageRoute() {
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // `orch review link` prints .../#/review: the same page
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
-  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change
+  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change,
+  // nor is a switch of its tab (tab=, term=; ORCH-2185)
   if (hash === '#review') {
-    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !p.startsWith('ticket=')).join('&');
+    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !/^(ticket|tab|term)=/.test(p)).join('&');
     return {kind:'review', hash:'#review' + (rest ? '?' + rest : '')};
   }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
