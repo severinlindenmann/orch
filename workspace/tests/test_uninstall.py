@@ -11,7 +11,9 @@ from orch import adapters, cli_leave
 @pytest.fixture(autouse=True)
 def claude_found(monkeypatch):
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
 
 
