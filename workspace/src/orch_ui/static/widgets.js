@@ -110,13 +110,13 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Review',done:'Done',dropped:"Won't do"};
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
- if(t.status==='review')return {pill:'check',word:'Check',helper:null};
+ if(t.status==='review')return {pill:'check',word:'Review',helper:null};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};

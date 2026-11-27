@@ -213,7 +213,12 @@
 .ticket-page .properties.compact .ticket-details{gap:12px}
 @media(max-width:760px){.ticket-page .ticket-strip .strip-h{flex-wrap:wrap}.ticket-page .ticket-strip .ticket-strip-text{flex:1 1 100%;order:-1}.ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}}  /* the action row may shrink: it wraps instead of scrolling the page sideways (report r-1117-1256-ws-2) */
 .ticket-page .ticket-strip .ticket-strip-actions .menu{flex:none;position:relative}
-.ticket-page .ticket-strip .ticket-strip-actions .menu>summary{width:32px;min-width:32px;padding:0;justify-content:center}
+/* ORCH-2155 (draft A): the bar under the title (master .btn-bar), the state word that opens Move to, the Actions menu */
+.ticket-page .ticket-strip .ticket-bar{margin-top:12px}
+.ticket-page .ticket-strip .strip-kicker .ticket-pill-menu>summary.pill{cursor:pointer;min-height:0;gap:4px}
+.ticket-page .ticket-strip .ticket-pill-menu>.menu-pop{left:0;right:auto;min-width:208px}
+.ticket-page .ticket-strip .ticket-actions-pop{min-width:min(380px,calc(100vw - 32px))}
+.ticket-page .ticket-strip .ticket-actions-dev{display:grid;border-top:1px solid var(--border);padding-top:4px}
 .ticket-page .ticket-strip:not(.strip-plain) h1 .ed-title,.ticket-page .ticket-strip:not(.strip-plain) h1 .ed{padding-left:0;margin-left:0;border-color:transparent;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .ticket-page .ticket-strip .ticket-strip-text{min-width:0;flex:1 1 360px}  /* the title keeps 360 px; the buttons wrap under it (report r-1122-0538) */
 .ticket-page .ticket-strip .ticket-strip-actions details.menu{border:0;background:none;box-shadow:none;width:auto;min-width:0;padding:0;margin:0}

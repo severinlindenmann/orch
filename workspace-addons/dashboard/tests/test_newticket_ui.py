@@ -10,13 +10,13 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     assert "What should the helper do? A sentence or a long text; it is split into tasks." in js
     # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
     assert "More options" not in js
-    assert "el('div', 'new-ticket-options')" in js
     assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
     assert "'Done when'" in js
-    # ORCH-1852: Save ticket sits beside the request (#2813); the options follow under one plain "Optional" heading
-    assert "el('h2', 'new-ticket-more-title', 'Optional')" in js
-    assert "requestRow.append(label, saveCol)" in js
-    assert "form.append(fields, error, more, actions, reload)" in js
+    # ORCH-2162 (option A): request with its files and parts, the helper, Save ticket and Start now side by side,
+    # then one plain "Optional" box
+    assert "el('h2', 'new-ticket-side-title', 'Optional')" in js
+    assert "form.append(fields, ...(helperBox ? [helperBox] : []), go, more, reload)" in js
+    assert "startCell.append(startBtn, startLine, planLabel)" in js
     assert "'Describe what needs doing before you continue.'" in js
     for removed in ("One point per line", "Something new", "Something broken", "Small job"):
         assert removed not in js
@@ -37,7 +37,7 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach'" in js
+    assert "button('＋ Add files', 'btn outline sm new-ticket-attach'" in js
     assert "At most" not in js  # no file-count limit
     assert "up to 25 MB each" in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form

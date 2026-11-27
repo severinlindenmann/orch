@@ -575,7 +575,7 @@ def test_ticket_details_hide_raw_id_and_home_badge_is_named():
 def test_settings_wording_and_one_toast_at_a_time():
     js = webjs.all_js()
     for text in (
-        "A helper may mark its own ticket Done. When this is off it asks you to check first.",
+        "A helper may mark its own ticket Done. When this is off it asks you to review first.",
         "Example: the helper fixes a typo and closes the ticket; you find it under Done.",
         "'Sharing and finished work'",
         "Shared. Your team can now see this workspace.",

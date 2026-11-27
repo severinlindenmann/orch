@@ -74,15 +74,28 @@ test('an answered question leaves at once, the count drops, the answer goes afte
   assert.equal(c.acts[0][1].answer, 'Blue');
 });
 
-test('G2: a quiet Working ticket is one "Quiet since" row on Home, never a need', () => {
-  const at = new Date(2026, 10, 15, 9, 20), t = {id:'q', title:'Order cups', status:'active', quiet_since:at.toISOString()};
-  const c = ctx({now:() => new Date(2026, 10, 15, 20, 0), tickets:() => [t], ticketOf:() => t});
-  assert.match(text(c.quietRow(t)), /^Quiet since 09:20: Order cups$/);
+test('G2: a quiet Working ticket says "Quiet since" in its In progress row, never a need', () => {
+  const at = new Date(2026, 10, 15, 9, 20), t = {id:'q', title:'Order cups', status:'active', quiet_since:at.toISOString(), checklist:[{id:'c1', text:'Pick a size', done:true}, {id:'c2', text:'Pay'}]};
+  const c = ctx({now:() => new Date(2026, 10, 15, 20, 0), tickets:() => [t], ticketOf:() => t, titleTag:() => null});
+  assert.match(text(c.inProgressRow(t)), /Order cups1 of 2 tasks doneNext task: PayNo helper is on it right now · Quiet since 09:20$/);
   const home = read('pages/home.js');
-  assert.match(home, /card\('quiet-now'/);
-  assert.match(home, /quiet = working\.filter\(t => t\.quiet_since && !helperIds\.has\(t\.id\)\)/, 'a helper row is never also a Quiet row');
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
   for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows Quiet since');
+});
+test('ORCH-2140 W1: four numbers, then In progress and Not started from the core count, five each', () => {
+  const mk = (id, extra) => ({id, key:'PIL-' + id, title:'T' + id, status:'open', created_at:'2026-11-14T10:00:00Z', checklist:[], ...extra});
+  const list = [...[1, 2, 3, 4, 5, 6, 7].map(i => mk('n' + i)), mk('p1', {status:'active', checklist:[{id:'c1', text:'Book the table'}]})];
+  const c = ctx({tickets:() => list, ticketOf:id => list.find(t => t.id === id), titleTag:() => null});
+  c.state.counts = {in_progress:['p1'], not_started:list.slice(0, 7).map(t => t.id), running:0, tickets:{p1:{helper:null}}};
+  const {inProgress, notStarted} = c.openLists(list, new Set());
+  assert.deepEqual([inProgress.length, notStarted.length], [1, 7]);
+  const tiles = text(c.homeTiles(2, inProgress, notStarted, []));
+  assert.equal(tiles, 'Needs you2Questions and results belowIn progress1No helper right nowNot started7Nobody is on them yetFinished today0Nothing yet today');
+  const card = c.openCard('not-started', 'Not started', notStarted, c.notStartedRow);
+  assert.equal(nodes(card).filter(n => /^not-started-n/.test(n.attrs['data-key'] || '')).length, 5, 'five rows');
+  assert.match(text(card), /7 tickets/); assert.match(text(card), /All tickets →/);
+  assert.match(text(c.inProgressRow(inProgress[0])), /No helper is on it right now/);
+  assert.equal(c.openCard('in-progress', 'In progress', [], c.inProgressRow), null, 'an empty list is no card');
 });
 test('"What changed" shows at most about 3 plain lines per ticket, never commit ids, file or test names (ORCH-407)', () => {
   const c = ctx({tickets:() => [], ticketOf:() => null});

@@ -57,7 +57,7 @@
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
-const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
+const KIND={draft:['Draft','page'],check:['Review','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
 /* The twelve kinds of card in four families (owner's pick R3 B, 25 Nov 2026; orch/cardkinds.py names them on every
    stack item as card_kind {family, kind, name, lane}). A card without one (a page's own card: stuck, a Factory draft)
    gets its lane from its plain kind. Lanes are the list's groups, in order (R2 A): what holds up work first. */
