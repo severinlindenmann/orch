@@ -1,6 +1,7 @@
 """Guarded home, key folder, loose-file reset, install record."""
 
 import contextlib
+import json
 import os
 import re
 from pathlib import Path
@@ -51,12 +52,20 @@ def test_test_workspace_uses_test_home(tws):
     assert hp.guarded_home(tws) == tws.parent / "home"
 
 
-def test_windows_scheduler_workspace_works_with_test_install(tws):
-    script = Path(__file__).resolve().parents[2] / "e2e/windows/scheduler-flow.ps1"
-    relative = re.search(r'\$p = "\$env:USERPROFILE\\([^"]+)"', script.read_text()).group(1)
-    workspace = tws.parent.parent.joinpath(*relative.split("\\"))
-    workspace.mkdir(parents=True)
-    assert hp.guarded_home(workspace) == tws.parent / "home"
+def test_windows_scheduler_smoke_can_create_tickets(tws, monkeypatch, run):
+    # Use the flow's actual path: outside .orch-test, a test install refuses ticket writes.
+    flow = Path(__file__).resolve().parents[2] / "e2e/windows/scheduler-flow.ps1"
+    suffix = re.search(r'\$p = "\$env:USERPROFILE([^"\n]+)"', flow.read_text()).group(1)
+    ws = tws.parent.parent.joinpath(*suffix.strip("\\").split("\\"))
+    ws.mkdir(parents=True)
+    assert hp.guarded_home(ws) == tws.parent / "home"
+    monkeypatch.chdir(ws)
+    assert run("init")[0] == 0
+    for title in ("Scheduled smoke", "Wake-up smoke"):
+        code, out, err = run("ticket", "new", title, "--json", "--by", "human:owner")
+        assert code == 0, (out, err)
+        tid = json.loads(out)["id"]
+        assert run("check", "add", tid, "Say hello", "--by", "human:owner")[0] == 0
 
 
 def test_normal_install_real_workspace_with_env_home_is_refused(tws, monkeypatch):

@@ -184,6 +184,8 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
         lambda t: t.replace('run = "orch_hello"', 'run = "os.path"'),
+        lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["unversioned"]'),
+        lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["test/1"]'),
         lambda t: t.replace("background = false", 'background = false\nsetup = "setup"'),
         lambda t: t.replace("background = false", 'background = false\nsetup = ["../x"]'),
     ],

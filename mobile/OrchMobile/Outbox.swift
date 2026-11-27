@@ -124,6 +124,10 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     // progress
     /// The relay stored it (first tick). The item stays until `/messages` lists it, so a restart in between never sends twice.
     var sentMessageId: String? = nil
+    /// ORCH-2126: the answer's POST went out and its reply did not come back (yet): the relay may already hold exactly this body.
+    /// Saved before the request leaves, cleared only when the relay refused it for sure or the phone never reached it.
+    /// While set the answer is final: a retry resends the same client_id and body (the relay answers a known client_id as a duplicate).
+    var mayBeStored: Bool? = nil
     /// A permanent refusal (4xx): shown as "Not sent"; `retry` clears it.
     var failure: String? = nil
     var attempts: Int = 0
@@ -139,8 +143,9 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     var id: String { clientId }
     var isNewTopic: Bool { kind == .send && ticket == nil && !general && joinAfter == nil }
     var isWaiting: Bool { sentMessageId == nil && failure == nil }
-    /// A review verdict can still be changed while it only lives on this phone (M4): not stored by the relay yet.
-    var canChangeVerdict: Bool { kind == .answer && verdict != nil && sentMessageId == nil }
+    /// A review verdict can still be changed while it only lives on this phone (M4): not stored by the relay yet, and no
+    /// request that may have been stored is on its way or unanswered (ORCH-2126).
+    var canChangeVerdict: Bool { kind == .answer && verdict != nil && sentMessageId == nil && mayBeStored != true }
     /// Waiting and past its backoff.
     func isDue(now: Date = Date()) -> Bool {
         guard isWaiting else { return false }
@@ -526,7 +531,7 @@ final class Outbox {
         }
         let done = items.filter {
             ($0.kind == .send && known.contains($0.clientId))
-                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && (resulted["\($0.workspace)|\($0.questionMessageId ?? "")"] ?? "") >= $0.createdAt)
+                || ($0.kind == .answer && $0.verdict != nil && ($0.sentMessageId != nil || $0.mayBeStored == true) && (resulted["\($0.workspace)|\($0.questionMessageId ?? "")"] ?? "") >= $0.createdAt)
         }
         guard !done.isEmpty else { return }
         for d in done { removeFolder(d.clientId) }
@@ -633,6 +638,22 @@ final class Outbox {
         if let f = i.feedback { for k in f.pins.indices { i.feedback?.pins[k].voice?.blobId = nil } }
     }
 
+    /// True when a failed request certainly left nothing on the relay: the phone never reached it, or the relay refused it
+    /// (4xx except 408). A lost connection, a timeout, a 5xx or a reply the phone could not read stay uncertain.
+    nonisolated static func neverStored(_ error: Error) -> Bool {
+        if let u = error as? URLError {
+            let notReached: Set<URLError.Code> = [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+                                                  .internationalRoamingOff, .dataNotAllowed, .callIsActive, .secureConnectionFailed,
+                                                  .appTransportSecurityRequiresSecureConnection, .badURL, .unsupportedURL]
+            return notReached.contains(u.code)
+        }
+        switch error as? RelayError {
+        case .unauthorized?: return true
+        case .api(let status, _, _)?: return (400..<500).contains(status) && status != 408
+        default: return false
+        }
+    }
+
     private func mark(_ id: String, _ change: (inout OutboxItem) -> Void) {
         guard let i = items.firstIndex(where: { $0.clientId == id }) else { return }
         change(&items[i]); save()
@@ -646,9 +667,16 @@ final class Outbox {
                 try await uploadMissing(item.clientId, client)  // the answer changed during the upload: its new files
             }
             guard let item = self.item(clientId: item.clientId), !item.files.contains(where: { $0.blobId == nil }) else { throw RelayError.network("gone") }
+            // From here on the relay may store this body: no Change or Undo, also after a relaunch (on disk before the request leaves).
+            mark(item.clientId) { $0.mayBeStored = true }; flushWrites()
             var req = Self.answerRequest(for: item)
             req.envelope = answerSignature(for: req, item: item)
-            let r = try await client.answer(req)
+            let r: SendReceipt
+            do { r = try await client.answer(req) }
+            catch {
+                if Self.neverStored(error) { mark(item.clientId) { $0.mayBeStored = nil } }
+                throw error
+            }
             if item.verdict != nil { mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil } }   // stays until the result
             else { discard(item.clientId) }
             return .answered(clientId: item.clientId, questionMessageId: item.questionMessageId ?? r.id, answer: item.answer ?? "")

@@ -286,6 +286,7 @@ $ orch sync needs                  # choices waiting for you
 
 The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml`
 ([contract](../contracts/addon-manifest.md)). Try it with `orch addon add ./my-addon`.
+`orch addon check ./my-addon` first lists anything that does not follow the contract, in plain words.
 
 | Key | Meaning |
 |---|---|

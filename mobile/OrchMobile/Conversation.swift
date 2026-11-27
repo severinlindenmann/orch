@@ -61,7 +61,7 @@ enum Receipt: Equatable, Sendable {
     case sent                 // ✓ the relay stored it
     case delivered            // ✓✓ the workspace has it (delivered_at)
     case started              // ✓✓ + "Started": an ack/working update names it (reply_to)
-    case failed(String)       // "Not sent": the relay refused it; Retry / Discard
+    case failed(String)       // "Not sent" + NotSentNote's safe recovery sentence (never the relay's text); Retry / Discard
     var ticks: Int {
         switch self { case .queued, .failed: 0; case .sent: 1; case .delivered, .started: 2 }
     }
@@ -314,7 +314,7 @@ enum ConversationBuilder {
         item.queuedFiles = o.files + (o.voice.map { [$0.file] } ?? [])
         if let v = o.voice { item.voice = VoiceMemo(blobId: v.file.blobId ?? "", transcript: v.transcript, lang: v.lang, langSource: v.langSource) }
         if let f = o.feedback { item.feedback = Feedback(artifactId: f.artifactId, artifactRev: f.artifactRev, verdict: f.verdict) }
-        item.receipt = o.failure.map { .failed($0) } ?? (o.sentMessageId != nil ? .sent : .queued)
+        item.receipt = o.failure != nil ? .failed(NotSentNote.text(for: o)) : (o.sentMessageId != nil ? .sent : .queued)
         return item
     }
 

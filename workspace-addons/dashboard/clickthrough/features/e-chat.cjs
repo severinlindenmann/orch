@@ -7,8 +7,8 @@ module.exports = {
   covers: ['page:chat', 'chat.say', 'chat.make_ticket'],
   async run({ page, open, reload, act, must, text, orch }) {
     await open('#chat');
-    await page.locator('.chat-page .chat-draft').fill('Please plan the Friday lunch menu');
-    await act('chat.say', () => page.locator('.chat-compose [type="submit"]').click());
+    await page.locator('.chat-page textarea[data-thread]').fill('Please plan the Friday lunch menu');
+    await act('chat.say', () => page.locator('.chat-page [data-key="send"]').click());
     await reload();
     must((await text()).includes('Please plan the Friday lunch menu'), 'the Chat message is gone after a reload');
 

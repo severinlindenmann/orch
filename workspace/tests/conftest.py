@@ -399,6 +399,38 @@ def proj(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def install_collector(tmp_path, monkeypatch):
+    """Expose the shipped collector package and its entry point without changing the test interpreter."""
+    import tomllib
+
+    folder = CONTRACTS.parent / "workspace-addons" / "insights"
+    metadata = tomllib.loads((folder / "pyproject.toml").read_text())["project"]
+    [(name, package)] = metadata["entry-points"]["orch.addons"].items()
+
+    def install(root):
+        site = tmp_path / "provider"
+        info = site / f"{package}-{metadata['version']}.dist-info"
+        info.mkdir(parents=True)
+        (info / "entry_points.txt").write_text(f"[orch.addons]\n{name} = {package}\n")
+        for path in (folder / "src", site):
+            monkeypatch.syspath_prepend(str(path))
+        addons._save_registry([{"name": name, "source": "built-in", "version": metadata["version"]}])
+        addons._save_active(root, {name: {}})
+        addons.record_consent(root, name)
+        return os.pathsep.join((str(site), str(folder / "src")))
+
+    return install
+
+
+@pytest.fixture
+def collect_claude(proj, install_collector):
+    install_collector(proj)
+    module = adapters.collector("claude", proj)
+    assert module is not None
+    return module
+
+
+@pytest.fixture
 def subprocess_home(proj, monkeypatch):
     """For tests that start `orch` as a child process: it cannot see the faked real_home, so ORCH_HOME must
     be a folder the child trusts too: a fresh one under ~/.orch-test (never ~/.orch-tool), removed by path."""

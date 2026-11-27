@@ -1,0 +1,35 @@
+name: Linux check runner
+on:
+  workflow_call:
+    secrets:
+      runner_status:
+        required: false
+    outputs:
+      machine:
+        value: ${{ jobs.pick.outputs.machine || '"ubuntu-latest"' }}
+jobs:
+  pick:
+    # No checkout: the runner-list credential is used only by the hosted lookup.
+    if: >-
+      vars.EDGE_RUNNER == 'orch-edge-queue' && github.repository == 'severinlindenmann/orch' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+       (github.event_name == 'pull_request' && github.base_ref == 'develop' &&
+        github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'orch-queue/')) ||
+       (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/copilot/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      machine: ${{ steps.pick.outputs.machine }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ secrets.runner_status }}
+        run: |
+          set -o pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/actions/runners?per_page=100" |
+             jq -e 'any(.runners[]; .status == "online" and
+               (["self-hosted","Linux","ARM64","orch-edge"] - [.labels[].name] == []))' >/dev/null; then
+            echo 'machine=["self-hosted","Linux","ARM64","orch-edge"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No online Linux check runner confirmed; using ubuntu-latest"
+          fi
