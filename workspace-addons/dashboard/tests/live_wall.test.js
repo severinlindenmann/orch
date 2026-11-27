@@ -312,3 +312,10 @@ test('ORCH-2271: a band draws its first 24 entries and the Tickets list mark for
   const src = fs.readFileSync(path.join(WEB, 'pages', 'livewall.js'), 'utf8');
   assert.match(src, /armLoadMore\(document\.querySelector\('main'\)\)/, 'a repaint of the wall arms the mark');
 });
+
+test('the Needs you and working heading carries no number of its own; the other bands keep theirs', () => {
+  // report r-1127-0540-ws-2: '162 need you · 4 working' sat above 'Needs you and working (142)'
+  assert.equal(wall.liveWallBandTitle('need', 'Needs you and working', 142), 'Needs you and working');
+  assert.equal(wall.liveWallBandTitle('queue', 'In line', 5), 'In line (5)');
+  assert.equal(wall.liveWallBandTitle('pin', 'Pinned', 1), 'Pinned (1)');
+});
