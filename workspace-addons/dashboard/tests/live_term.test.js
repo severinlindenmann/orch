@@ -240,3 +240,25 @@ test('ORCH-2203: liveTermSend says what to do when the terminal does not open', 
   assert.equal(r.ok, false);
   assert.match(r.text, /try again/i);
 });
+
+// ORCH-2185 (Focused review D): Review's side panel shows a session's terminal in its own host, the same one terminal
+// and stream as a live pane's; a terminal a pane shows now stays there; the tick closes it once the panel is gone.
+test('the side panel mounts the one terminal of a session, never takes it from a pane, and closes it when gone', () => {
+  const {api, made, streams} = load();
+  const host = new N(); host.attached = true;
+  assert.equal(api.liveTermMount(host, '../x', 'Helper'), false, 'only a session id');
+  assert.equal(api.liveTermMount(host, 't_abcdef', 'Helper'), true);
+  assert.equal(made.length, 1); assert.equal(streams.length, 1);
+  assert.equal(made[0].el.parentNode, host);
+  assert.match(streams[0].url, /ticket=t_abcdef$/);
+  assert.equal(api.liveTermMount(host, 't_abcdef', 'Helper'), true, 'drawn again: the same terminal');
+  assert.equal(made.length, 1); assert.equal(streams.length, 1, 'one stream per session');
+  const {b} = body('t_pane01');
+  api.liveTermApply(b, {id: 't_pane01'});
+  const other = new N(); other.attached = true;
+  assert.equal(api.liveTermMount(other, 't_pane01', 'Helper'), false, 'a pane shows it: it stays there');
+  assert.equal(made[1].el.parentNode, b);
+  host.attached = false;
+  api.liveTermTick();
+  assert.equal(streams[0].closed, true, 'no page shows it: the stream closes');
+});

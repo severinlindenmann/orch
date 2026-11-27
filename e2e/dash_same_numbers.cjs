@@ -179,7 +179,8 @@ test('same numbers: every page shows the same count, date and state for the same
     await page.waitForSelector('[data-review-queue] .review-row', {timeout: 10_000}).catch(() => null);
     const review = await page.evaluate(() => {
       const main = document.querySelector('main');
-      return {line: (/(\d+) things? waits? on you|(\d+) things? wait on you/.exec(main.innerText) || [])[0] || '', chrome: null,
+      // ORCH-2316 (R2 A): the line reads "N things need you."; older builds said "N things wait on you"
+      return {line: (/(\d+) things? (?:needs?|waits?) (?:on )?you/.exec(main.innerText) || [])[0] || '', chrome: null,
         waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
         queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length,
         // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed above
