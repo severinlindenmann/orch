@@ -1,19 +1,14 @@
 // Helper logins: a check of this workspace's own (a harmless command that fails, set up here in the throw-away
 // home) shows on Home as something that needs renewing. The person presses "Check again" and the page asks orch
 // to run every check once more and says what came out. The real helper logins (Renew) are never opened here.
-const { execFileSync } = require('node:child_process');
-const path = require('node:path');
 
 module.exports = {
   name: 'Logins: check again',
   covers: ['page:home', 'logins.check'],
-  async run({ page, open, reload, act, must, text }) {
+  async run({ page, open, reload, act, must, text, orchAsPerson: orch }) {   // checks of its own: a person's step
     await open('#home');
     const ws = await page.evaluate(() => state.settings?.folder || null) || await (async () => { await open('#settings/general'); return page.evaluate(() => state.settings.folder); })();
     must(/\.orch-test[\\/]clickthrough-/.test(ws), 'not the throw-away workspace: ' + ws);
-    const home = path.dirname(ws), repo = path.resolve(__dirname, '..', '..', '..', '..');
-    const orch = (...a) => execFileSync('env', ['-i', 'PATH=' + path.join(home, 'bin') + path.delimiter + process.env.PATH, 'HOME=' + home, 'USERPROFILE=' + home, 'ORCH_HOME=' + home + '/orch', 'ORCH_HOME_STRICT=1',
-      'UV_CACHE_DIR=' + (process.env.UV_CACHE_DIR || path.join(require('node:os').homedir(), '.cache', 'uv')), 'uv', 'run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a], { cwd: ws, encoding: 'utf8' });
     orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
     orch('logins');   // keeps the result the page shows
     // the check and its result are watched files (#1402): the page's server builds its state again by itself
