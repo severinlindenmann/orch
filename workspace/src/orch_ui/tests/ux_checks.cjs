@@ -73,15 +73,25 @@ function layoutProblems() {
   // inside a <label> counts with its label; visually hidden native controls (1-2 px, the custom select) are skipped.
   const box = el => { const lab = el.closest('label') || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`));
     return (lab && shown(lab) ? lab : el).getBoundingClientRect(); };
+  // The part of a neighbour a person can see and hit: a link cut off by its cell (overflow hidden, "Show the in…")
+  // does not reach under the next cell's link, though its own box does (the gallery's pull request table with
+  // Linux fonts, merge queue group #3413). Only the neighbour is cut; a target's own size stays its full box.
+  const cutBox = (el, r) => { let { left, top, right, bottom } = r;
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const s = getComputedStyle(p); const c = p.getBoundingClientRect();
+      if (/hidden|clip/.test(s.overflowX)) { left = Math.max(left, c.left); right = Math.min(right, c.right); }
+      if (/hidden|clip/.test(s.overflowY)) { top = Math.max(top, c.top); bottom = Math.min(bottom, c.bottom); }
+    }
+    return { left, top, right, bottom, gone: right <= left || bottom <= top }; };
   const targets = [...document.querySelectorAll(controls)].filter(el => shown(el) && !el.classList.contains('skip-link'))
-    .map(el => ({ el, r: box(el) })).filter(t => t.r.width > 2 && t.r.height > 2);
+    .map(el => ({ el, r: box(el) })).filter(t => t.r.width > 2 && t.r.height > 2).map(t => ({ ...t, v: cutBox(t.el, t.r) }));
   const near = (r, o) => { const cx = r.left + r.width / 2; const cy = r.top + r.height / 2;
     const dx = Math.max(o.left - cx, 0, cx - o.right); const dy = Math.max(o.top - cy, 0, cy - o.bottom);
     return Math.hypot(dx, dy) < 12; };
   for (const t of targets) {
     const { el, r } = t;
     if (inSentence(el) || (r.width >= 23.5 && r.height >= 23.5)) continue;
-    const crowded = targets.some(o => o !== t && !o.el.contains(el) && !el.contains(o.el) && near(r, o.r));
+    const crowded = targets.some(o => o !== t && !o.el.contains(el) && !el.contains(o.el) && !o.v.gone && near(r, o.v));
     if (crowded) out.push(`target ${Math.round(r.width)}x${Math.round(r.height)} px under 24x24 with another target too close: ${label(el)}`);
   }
   // H6 label in name (WCAG 2.5.3): a control whose aria-label does not hold the words on it can't be said by voice control.
