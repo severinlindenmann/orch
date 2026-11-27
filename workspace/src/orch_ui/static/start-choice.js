@@ -14,7 +14,8 @@
        fresh), caretOnly (true: only the caret and the Start choice; the page keeps its own main button, the composer's
        Send and start helper, given as mainEl: it sits left of the caret and is disabled while it starts), caretHidden
        (true: no caret now, e.g. a helper already works), hasSessions (false: the ticket never ran, so no Continue while
-       the earlier sessions load), inline (true: the Start choice itself, drawn in place with no
+       the earlier sessions load), why (ORCH-2201, inline only: {question:{id,text,options}|null, review:{text}|null, href, answer(text)->Promise<{ok,text}>}: a ticket that
+       waits for the person; the choice starts with a "Why it waits" box, then Continue and a small Fresh start link), inline (true: the Start choice itself, drawn in place with no
        button or caret: the live page's pane of a ticket with no helper)}
    Returns {el, update(changes), open(), close(), start(how), starting()}: start() is the main button's click from
    elsewhere on the page (a keyboard key, a second Start in the feed); start('fresh') a fresh start on the usual tool
@@ -137,16 +138,19 @@
       const p = S.places(o.runs, o.settings, o.line), at = S.inLine(p, o.ticket);
       const box = el('div', 'live-start');
       if (starter.starting(o.ticket)) box.setAttribute('aria-busy', 'true');
+      const waits = o.inline && o.why && (o.why.question || o.why.review) ? o.why : null;
       const head = el('div', 'start-pop-h');
-      head.append(el('h3', 'live-start-h', 'Start a helper'));
+      if (!waits) head.append(el('h3', 'live-start-h', 'Start a helper'));
       const pl = el('span', 'meta live-places', S.placesShort(p));
       if (p.full) pl.dataset.full = '';
       if (pl.textContent) head.append(pl);
-      box.append(head);
+      if (waits) box.append(whyBox(waits));
+      if (head.children.length) box.append(head);
       if (at) {
         box.append(el('p', 'meta', name + ' is number ' + at.at + ' of ' + at.of + ' in line. It starts by itself when a place is free.'));
         return box;
       }
+      if (waits) { box.append(waitsActions(hasLast, name)); if (freshOpen) box.append(freshList(hasLast)); const e0 = earlier(v); if (e0) box.append(e0); return box; }
       const list = el('ul', 'start-opts');
       if (hasLast) {
         const b = attr(el('button', 'btn outline sm', 'Continue'), {type: 'button', 'aria-label': 'Continue the last conversation on ' + name});
@@ -162,6 +166,72 @@
       const e = earlier(v);
       if (e) box.append(e);
       return box;
+    }
+    /* ORCH-2201 (owner, ORCH-2188 K a): why the ticket waits comes first: the open question with a field to answer it, or the
+       review that waits with Open. Starting without that is the person's call, so Continue stays, and Fresh start is a small link. */
+    let freshOpen = false;
+    function whyBox(w) {
+      const box = attr(el('section', 'live-why'), {'aria-label': 'Why it waits'});
+      box.dataset.key = 'start-why';
+      box.append(el('h4', 'live-why-h', 'Why it waits'));
+      if (w.question) {
+        const q = w.question, line = el('p', 'live-why-q');
+        line.append(document.createTextNode('The helper asked: '), el('b', '', q.text));
+        box.append(line);
+        const send = async text => {
+          const a = String(text || '').trim();
+          if (!a || box.dataset.busy || !w.answer) return;
+          box.dataset.busy = '1';
+          const r = await w.answer(a);
+          delete box.dataset.busy;
+          if (r && r.ok) toast('Answered: ' + a, 'ok'); else toast((r && r.text) || 'Could not send your answer.', 'error');
+        };
+        if ((q.options || []).length) {
+          const row = el('div', 'live-why-opts');
+          q.options.forEach(op => { const b = attr(el('button', 'btn outline sm', op), {type: 'button'}); b.addEventListener('click', () => send(op)); row.append(b); });
+          box.append(row);
+        }
+        const input = attr(el('input', 'input'), {type: 'text', placeholder: 'Your answer', 'aria-label': 'Your answer'});
+        input.dataset.key = 'start-why-text';
+        const go2 = attr(el('button', 'btn outline sm', 'Send'), {type: 'button'});
+        go2.dataset.key = 'start-why-send';
+        go2.addEventListener('click', () => send(input.value));
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
+        const f = el('div', 'live-why-line');
+        f.append(input, go2);
+        box.append(f);
+      } else {
+        const row = el('div', 'live-why-line');
+        row.append(el('p', 'live-why-q', w.review.text));
+        const open = attr(el('a', 'btn outline sm', 'Open'), {href: w.href || '#', 'aria-label': 'Open the review of ' + (o.name || 'this ticket')});
+        open.dataset.key = 'start-why-open';
+        row.append(open);
+        box.append(row);
+      }
+      return box;
+    }
+    function waitsActions(hasLast, name) {
+      const row = el('div', 'live-why-act');
+      const main = attr(el('button', 'btn primary', hasLast ? 'Continue' : 'Start'), {type: 'button', 'aria-label': (hasLast ? 'Continue the last conversation on ' : 'Start a helper on ') + name});
+      main.dataset.start = hasLast ? 'continue' : 'fresh';
+      main.addEventListener('click', () => { if (hasLast) go([['run.start', {ticket: o.ticket}]], 'continue'); else { const pk = pickOf(); go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh'); } });
+      const reason = hasLast ? S.why('continue', ctx()) : S.why('fresh', ctx({how: 'fresh'}));
+      if (reason) { main.disabled = true; row.append(main, el('p', 'start-why', reason)); } else row.append(main);
+      if (hasLast) {
+        const fl = attr(el('button', 'btn ghost sm live-why-link', 'Fresh start…'), {type: 'button', 'aria-expanded': String(freshOpen)});
+        fl.dataset.key = 'start-fresh-link';
+        fl.addEventListener('click', () => { freshOpen = !freshOpen; render('[data-key="start-fresh-link"]'); });
+        row.append(fl);
+      }
+      return row;
+    }
+    function freshList(hasLast) {
+      const fb = attr(el('button', 'btn outline sm', 'Start again'), {type: 'button', 'aria-label': 'Fresh start on ' + (o.name || 'this ticket')});
+      fb.dataset.start = 'fresh';
+      fb.addEventListener('click', () => { const pk = pickOf(); go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh'); });
+      const list = el('ul', 'start-opts');
+      list.append(opt('start-fresh', 'Fresh start', 'Starts over without the earlier talk', fb, S.why('fresh', ctx({how: 'fresh'})), runRow()));
+      return list;
     }
     let more = false; /* the earlier sessions folded out (owner, ORCH-484: the newest one shows, the rest behind Show more) */
     function earlier(v) {
@@ -305,7 +375,7 @@
         if (changes && changes.send) sendNow = changes.send;
         if (o.running) starter.seen(o.ticket, true);
         /* polling calls this often: draw again only when what the button shows changed, so an open picker stays open */
-        const sig = JSON.stringify([o.unavailable, o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
+        const sig = JSON.stringify([o.unavailable, o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, o.why ? [o.why.question, o.why.review, o.why.href] : null, starter.starting(o.ticket)]);
         if (sig === lastSig) return;
         lastSig = sig;
         /* a click opens the menu now, its toggle event (isOpen) comes a moment later: a refresh in between kept it shut */

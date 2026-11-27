@@ -29,6 +29,7 @@ from . import (
     rolefiles,
     selfupdate,
     sessionlist,
+    sessiontalk,
     ticketfiles,
     tokenlogin,
 )
@@ -1081,6 +1082,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/term/confirm":  # the helper's confirm prompt for the OK card (ORCH-2197)
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # what the helper's screen shows: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            from . import termsession
+
+            tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
+            prompt = termsession.confirm(self.root, self.orch_bin, tid)
+            return self._send(
+                200,
+                json.dumps({"prompt": prompt}).encode(),
+                "application/json",
+                {"Cache-Control": "no-store"},
+            )
         if (
             path == "/api/term/stream"
         ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
@@ -1278,6 +1296,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 200,
                 json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
+            )
+        m = re.fullmatch(r"/api/talk/(t_[a-z0-9]{6,16})", path)
+        if m:  # the newest turns of the helper's real conversation for the pane's Chat (ORCH-2204), read only
+            return self._send(
+                200, json.dumps(sessiontalk.talk(self.root, m.group(1))).encode(), "application/json"
             )
         m = re.fullmatch(r"/api/role/(t_[a-z0-9]{6,16})", path)
         if m:  # a repeating ticket's runs, results, findings and totals for the role page (ORCH-827)
@@ -1545,6 +1568,36 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         if code != 200:
             return self._send(code, str(out).encode(), "text/plain; charset=utf-8")
         self._send(200, json.dumps(out).encode(), "application/json")
+
+    def _term_confirm(self):
+        """POST /api/term/confirm {ticket, answer: yes|no, digest}: Allow once or Don't allow on the OK card
+        (ORCH-2197). The person's own dashboard session only (cookie + page secret, as /api/term/keys); only the
+        confirm prompt the card showed (its digest, read again from the screen now), only its plain Yes or its No.
+        Not behind the typing setting: a person who only uses Chat must be able to answer it (owner, ORCH-2188 C)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 4096:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "answer", "digest"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import termsession
+
+        code, text = termsession.answer(
+            self.root, self.orch_bin, str(body["ticket"]), body["answer"], body["digest"]
+        )
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
     def _term_keys(self):
         """Type into the live helper session: the person's own dashboard session only (cookie + page secret: the
@@ -1865,6 +1918,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/term/confirm":
+            return self._term_confirm()
         if path == "/api/browse/stop":
             return self._browse_stop()
         if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)

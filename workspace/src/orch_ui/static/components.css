@@ -502,30 +502,30 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 }
 /* The menu closed with its button (ORCH-1184): from 1280 px the same icon rail as 721-1279, until it is opened again. */
 @media(min-width:1280px){
-.shell[data-side=rail]{--sidebar-width:64px}
-.shell[data-side=rail] .sidebar{padding:16px 8px}
-.shell[data-side=rail] .brand{padding:0 12px}
-.shell[data-side=rail] .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
-.shell[data-side=rail] .side-head{flex-direction:column;gap:12px}
-.shell[data-side=rail] .ws-switch{padding:8px;justify-content:center}
-.shell[data-side=rail] .sidebar .nav-item{justify-content:center;padding:8px}
-.shell[data-side=rail] .nav-item .count{position:absolute;top:0;right:0;min-width:16px;min-height:16px;height:16px;padding:0 4px}
-.shell[data-side=rail] .nav-group{position:relative}
-.shell[data-side=rail] .nav-group>summary:after{display:none}
-.shell[data-side=rail] .phone-toggle{padding:8px 4px}
-.shell[data-side=rail] .side-foot{gap:8px}
-.shell[data-side=rail] .side-foot.person-row{flex-direction:column;align-items:stretch}
-.shell[data-side=rail] .side-foot.person-row .phone-toggle{width:100%}
-.shell[data-side=rail] .side-foot .side-settings{flex-direction:column}
-.shell[data-side=rail] .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
-.shell[data-side=rail] .person-menu>summary>:not(.avatar),.shell[data-side=rail] .session-state[data-state=signed-in],.shell[data-side=rail] .session-state>:not(.chip),.shell[data-side=rail] .session-state:after{display:none}
-.shell[data-side=rail] .session-state{justify-content:center}
-.shell[data-side=rail] .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
-.shell[data-side=rail] .person-menu>.menu-pop{position:fixed;top:auto;bottom:16px;left:calc(var(--sidebar-width) + 8px);right:auto;width:216px}
-.shell[data-side=rail] .workspace .menu{left:48px;top:0}
-.shell[data-side=rail] .sidebar-scroll{overflow:visible}
-.shell[data-side=rail] .sidebar-scroll.cramped{overflow-x:hidden;overflow-y:auto}
-.shell[data-side=rail] .nav-item:focus-visible:after,.shell[data-side=rail] .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
+.shell:is([data-side=rail],[data-live-rail]){--sidebar-width:64px}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar{padding:16px 8px}
+.shell:is([data-side=rail],[data-live-rail]) .brand{padding:0 12px}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.shell:is([data-side=rail],[data-live-rail]) .side-head{flex-direction:column;gap:12px}
+.shell:is([data-side=rail],[data-live-rail]) .ws-switch{padding:8px;justify-content:center}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar .nav-item{justify-content:center;padding:8px}
+.shell:is([data-side=rail],[data-live-rail]) .nav-item .count{position:absolute;top:0;right:0;min-width:16px;min-height:16px;height:16px;padding:0 4px}
+.shell:is([data-side=rail],[data-live-rail]) .nav-group{position:relative}
+.shell:is([data-side=rail],[data-live-rail]) .nav-group>summary:after{display:none}
+.shell:is([data-side=rail],[data-live-rail]) .phone-toggle{padding:8px 4px}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot{gap:8px}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot.person-row{flex-direction:column;align-items:stretch}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot.person-row .phone-toggle{width:100%}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot .side-settings{flex-direction:column}
+.shell:is([data-side=rail],[data-live-rail]) .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
+.shell:is([data-side=rail],[data-live-rail]) .person-menu>summary>:not(.avatar),.shell:is([data-side=rail],[data-live-rail]) .session-state[data-state=signed-in],.shell:is([data-side=rail],[data-live-rail]) .session-state>:not(.chip),.shell:is([data-side=rail],[data-live-rail]) .session-state:after{display:none}
+.shell:is([data-side=rail],[data-live-rail]) .session-state{justify-content:center}
+.shell:is([data-side=rail],[data-live-rail]) .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
+.shell:is([data-side=rail],[data-live-rail]) .person-menu>.menu-pop{position:fixed;top:auto;bottom:16px;left:calc(var(--sidebar-width) + 8px);right:auto;width:216px}
+.shell:is([data-side=rail],[data-live-rail]) .workspace .menu{left:48px;top:0}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar-scroll{overflow:visible}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar-scroll.cramped{overflow-x:hidden;overflow-y:auto}
+.shell:is([data-side=rail],[data-live-rail]) .nav-item:focus-visible:after,.shell:is([data-side=rail],[data-live-rail]) .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
 }
 @media(max-width:899px){:root{--page-gutter:16px}.columns{grid-template-columns:minmax(0,1fr)}.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{gap:8px}.topbar-actions{flex-wrap:wrap}.page{padding-top:24px}.table-wrap table{min-width:560px}}
 @media(max-width:720px){.shell{display:block}

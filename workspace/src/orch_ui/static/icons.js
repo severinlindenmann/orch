@@ -70,6 +70,11 @@
     'dock-side': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M18 4v16"/><path d="m10 9 3 3-3 3"/>',
     'full-screen': '<path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/>',
     'full-exit': '<path d="M3 8h5V3m8 0v5h5M3 16h5v5m8 0v-5h5"/>',
+    // A Focus pane (ORCH-2199, ORCH-2200): split right, split down, typing goes into the screen, a plain terminal
+    'split-right': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>',
+    'split-down': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>',
+    keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+    terminal: '<path d="m5 8 4 4-4 4M12 16h7"/>',
   };
   window.iconNames = () => Object.keys(P);
   window.icon = (name, size = 16, cls = '') =>

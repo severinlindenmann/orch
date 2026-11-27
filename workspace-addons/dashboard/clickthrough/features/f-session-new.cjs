@@ -2,7 +2,7 @@
 // the demo has none, so the page's state says it is on (nothing else is changed). The
 // click is real: the server runs this checkout's `orch session new terminal` in the demo workspace. The plain terminal
 // is the kind that starts no process (a placeholder until the terminal stage), so no helper runs. After a reload the
-// session is still listed by orch and shown in the bar.
+// session is still listed by orch and shown in the bar's Helpers menu.
 const LIVE = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
   description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
   dashboard: { label: 'Focus', icon: 'target', order: 20 } };
@@ -29,11 +29,16 @@ module.exports = {
     await act('session.new', () => page.locator('#live-bar [data-lbar-kind="terminal"]').click());
     const pane = page.locator('#live-dock .live-pane .live-pt', { hasText: 'Plain terminal' });
     await pane.first().waitFor({ timeout: 20000 });
+    // a plain terminal's header is the >_ icon, its title and the workspace folder: no status pill, no Open ticket
+    must(await page.locator('#live-dock .live-pane .live-pfolder').count(), 'the plain terminal does not show its workspace folder');
+    must(!(await page.locator('#live-dock .live-pane [data-key="live-status"]').count()), 'a plain terminal has a status pill');
     must(!(await page.locator('#live-dock [data-key="live-open-ticket"]').count()), 'a session without a ticket offers Open ticket');
 
     const listed = JSON.parse(orch('session', 'list', '--json'));
     must(listed.sessions.some(s => s.kind === 'terminal' && s.open), 'orch does not list the plain terminal as open');
     await reload();
-    await page.locator('#live-bar', { hasText: 'Plain terminal' }).first().waitFor({ timeout: 20000 });
+    // the bar's Helpers menu lists it (ORCH-2198: the bar row has no chips)
+    await page.locator('#live-bar [data-lbar-list="helpers"]').click();
+    await page.locator('#live-bar [data-key="lbar-pop"]', { hasText: 'Plain terminal' }).first().waitFor({ timeout: 20000 });
   },
 };
