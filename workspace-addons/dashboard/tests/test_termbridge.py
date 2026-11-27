@@ -352,9 +352,10 @@ def test_resize_changes_the_window_and_every_page_hears_it(helper, server, tmp_p
 
 
 def test_typing_needs_the_person_the_setting_and_a_page_that_watches(helper, server, tmp_path):
+    typing_on(tmp_path, False)  # watch only is a setting (on by default: ORCH-2314, tests/test_term.py)
     port = server().server_address[1]
     s = Stream(port)
-    assert json.loads(s.next("hello")[1])["typing_allowed"] is False  # watching only by default
+    assert json.loads(s.next("hello")[1])["typing_allowed"] is False
     s.next("screen")
     code, body = post(port, "/api/term/input", {"ticket": TID, "data": "x"})
     assert code == 403 and b"Typing into the helper's screen is off" in body
