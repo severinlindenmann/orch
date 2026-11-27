@@ -92,7 +92,7 @@ struct AddWorkspaceView: View {
         showField = true
         guard !clean.isEmpty else { error = "Paste the link you were sent first. It starts with orch://."; return }
         guard let parsed = try? PairingLink(clean) else {
-            error = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
+            error = InviteWording.badLink
             return
         }
         link = parsed; error = nil

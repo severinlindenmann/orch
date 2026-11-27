@@ -134,9 +134,9 @@ final class AppModel {
     /// The Chats list shows the loading placeholder only when there is nothing to show yet.
     var showsLoadingPlaceholder: Bool { !hasLoaded && !restoredFromSnapshot }
     static let installedMarkerKey = "installedMarker"
-    static let pairAgainMessage = "This phone needs to be paired again. Open the invitation from your computer to connect."
     static let credentialsUnavailableMessage = "orch can't read this phone's sign-in right now. Unlock your iPhone, then open orch again."
     static let credentialsNotSavedMessage = "This iPhone couldn't save its sign-in, so setup did not finish. Restart your iPhone, then open a new invitation."
+    static let pairAgainMessage = "This phone needs to be paired again. Ask the person who invited you for a new invitation."
 
     init(useMock: Bool = AppModel.configuredMock, session: URLSession = .shared,
          voiceMode: VoiceInput.Mode = AppModel.configuredVoice, outboxDirectory: URL = Outbox.defaultDirectory(),
@@ -476,7 +476,7 @@ final class AppModel {
             inviteState = .found(host: invite.host)
             if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
                 inviteNeedsReplacement = true
-                message = "This invitation has expired or was already used. Create a new one in orch on your computer."
+                message = InviteWording.expired
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."
             } else { message = error.localizedDescription }
@@ -836,7 +836,15 @@ final class AppModel {
                 takenBackRefused.insert(qid); applyTakenBack()
                 message = text; errorTick += 1; announcement = text
             case .sent: sendTick += 1; announcement = "Message sent"
-            case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
+            case .failed(let cid, let status, _):
+                // ORCH-1942: never the relay's own text; the bubble keeps the sentence after this goes.
+                let item = outbox.item(clientId: cid)
+                if item?.kind == .answer { message = NotSentNote.answer; announcement = NotSentNote.answer }
+                else {
+                    message = NotSentNote.banner(workspace: item.flatMap { workspace($0.workspace) }.map { displayName($0.name) })
+                    announcement = NotSentNote.spoken(NotSentNote.text(status: status))
+                }
+                errorTick += 1
             case .unauthorized: handle(RelayError.unauthorized)
             case .throttled: announcement = "Try again later"
             case .offline: break
@@ -1052,8 +1060,8 @@ final class AppModel {
             await refresh()
             return r.workspaces
         } catch {
-            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Create a new one in orch on your computer." }
-            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Create a new one in orch on your computer." }
+            if case RelayError.api(let status, _, _) = error, status == 410 { message = InviteWording.expired }
+            else if case RelayError.api(let status, _, _) = error, status == 404 { message = InviteWording.notValid }
             else { handle(error) }
             return []
         }
