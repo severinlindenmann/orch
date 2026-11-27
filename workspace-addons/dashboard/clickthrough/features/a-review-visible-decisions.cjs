@@ -61,8 +61,8 @@ module.exports = {
       });
       must(!overlap, `expand overlaps progress at ${width}`);
     }
-    // ORCH-2316: on a phone the pinned answer bar never covers the card's Open ticket (under the title; above it at 360 and less)
-    for (const [width, height] of [[390,844], [320,844]]) {
+    // ORCH-2316: on a phone the pinned answer bar never covers the card's Open ticket (under the title; above it at 480 and less)
+    for (const [width, height] of [[480,844], [390,844], [320,844]]) {
       await page.setViewportSize({width,height});
       await page.evaluate(() => window.scrollTo(0,0));
       await page.waitForTimeout(300);

@@ -187,3 +187,8 @@ card (results and Try it yourself too) and turns on pointing: "Comment is on. Cl
 about the whole card." with Whole card and Done. A finished result says "Everything you asked for is done and tested."
 and folds the steps under "What the helper did: N steps, each with its evidence"; a part still open reads "You asked
 for: … You got: …" on top.
+
+## Required-check fix (27 Nov 2026, ORCH-2185)
+
+The shared card links sit above the title through 480 px, including 390 px phones. The mockup uses the same
+master rule as the product. This preserves the 24 px clearance from the pinned answer bar with Linux font wrapping.

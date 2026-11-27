@@ -2969,6 +2969,6 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
  .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
  .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
 }
-/* ORCH-2316: on a very narrow phone the title wraps and the pinned bar's lines wrap too, so under the title is still
-   covered (CI, 320 wide): the links go above the title there */
-@media (max-width:360px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}
+/* ORCH-2185 / ORCH-2316: narrow phones need the links above the title: Linux font wrapping at 390 px
+   leaves only 21 px before the pinned answer bar. Keep the same safe placement through 480 px. */
+@media (max-width:480px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}
