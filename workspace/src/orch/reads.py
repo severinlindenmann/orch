@@ -150,9 +150,20 @@ def _plain(root: Path, data):
     return json.loads(json.dumps(history.shown_json(root, data), ensure_ascii=False))
 
 
+_LISTS = (["ticket", "list"], ["review", "list"], ["chat", "list"], ["needs"])
+
+
 def answer(root: Path, argv: list[str]):
     """The parsed JSON `orch <argv>` would print. Refused when the command would refuse (exit 2), NotHere when
-    this argv is not one of the reads above."""
+    this argv is not one of the reads above. A list is one read-only pass, so it looks at the ticket files
+    once (ORCH-2289: the rows and their shown fields each stat'ed every ticket file)."""
+    if list(argv[:2]) in _LISTS or list(argv[:1]) in _LISTS:
+        with ticketindex.reuse():
+            return _answer(root, argv)
+    return _answer(root, argv)
+
+
+def _answer(root: Path, argv: list[str]):
     a = list(argv)
     if not a or a[-1] != "--json":
         raise NotHere(" ".join(a))

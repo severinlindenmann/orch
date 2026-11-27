@@ -186,6 +186,41 @@ def test_late_addon_answers_from_its_fresh_saved_answer_and_refreshes(na, proj, 
     assert not (proj / ".orch/run/needs-cache/hello.refreshing").exists()
 
 
+def test_an_addon_that_was_late_is_not_waited_for_the_next_time(na, proj, run, monkeypatch):
+    """ORCH-2289: at 10,000 tickets one add-on answered late on every call, so every `orch needs` waited the
+    whole FAST_BUDGET for it, stopped it and started a refresh anyway. Now the call after a late one shows the
+    saved answer at once; the refresh asks it, and a quick answer there puts it back in line."""
+    _rows(run)
+    (proj / "mode.txt").write_text("late")
+    compute(proj)  # late: remembered
+    started = []
+    real = needs_mod._Pull.start
+    monkeypatch.setattr(needs_mod._Pull, "start", lambda self: started.append(self.name_) or real(self))
+    t0 = time.monotonic()
+    rows = compute(proj)
+    assert time.monotonic() - t0 < needs_mod.FAST_BUDGET - 0.1
+    assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)]
+    assert started == [] and na.spawned == ["hello", "hello"]  # not asked in line; refreshed behind
+    assert needs_mod.refresh(proj, "hello") is True  # still slow (1.2 s): stays out of line
+    started.clear()  # the refresh's own asking
+    assert compute(proj) and started == []
+    (proj / "rows.json").write_text(json.dumps([_row(key="new")]), encoding="utf-8")
+    (proj / "mode.txt").write_text("ok")
+    monkeypatch.setattr(needs_mod, "FAST_BUDGET", 30)  # "quick" on any machine, however busy
+    assert needs_mod.refresh(proj, "hello") is True  # quick again: asked in line from now on
+    started.clear()
+    assert [r["id"] for r in compute(proj)] == ["hello:new"] and started == ["hello"]
+
+
+def test_a_late_addon_whose_refresh_fails_is_asked_in_line_again(na, proj, run):
+    _rows(run)
+    (proj / "mode.txt").write_text("late")
+    compute(proj)
+    (proj / "mode.txt").write_text("broken")
+    assert needs_mod.refresh(proj, "hello") is False
+    assert [(r["id"], r["stale"]) for r in compute(proj)] == [("hello:x", True)]  # asked: answer not good
+
+
 def test_first_answer_is_waited_for_without_a_saved_one(na, proj, run):
     (proj / "mode.txt").write_text("late")
     rows = compute(proj)
