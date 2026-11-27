@@ -1958,6 +1958,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
         return login_input(root, orch_bin, op, args, session)
+    if op == "link.connect":  # the admin's whole text, pasted on the Publish page: on stdin only (RP2)
+        return publish_connect(root, orch_bin, args, session)
     if op in ("person.set", "person.add"):  # "You: <name>": a name only, kept here, nothing runs
         if not isinstance(args, dict):
             raise BadRequest("The arguments must be an object.")
@@ -2335,6 +2337,57 @@ def login_input(
         out = None
     if r.returncode == 0:
         return 200, "", out if isinstance(out, dict) else None
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
+
+
+# The Publish page's paste box (ORCH-2170, RP2): the admin's whole text goes on stdin to `orch publish connect
+# --paste`, the same path as the terminal (orch finds the connect line itself). The token is never in an argv, a
+# log line or the answer; the page gets only the name it is connected as.
+PUBLISH_PASTE_MAX = 8192
+
+
+def publish_connect(root: Path, orch_bin: str | None, args, session: bool) -> tuple[int, str, dict | None]:
+    if not isinstance(args, dict):
+        raise BadRequest("The arguments must be an object.")
+    _only(args, ("text",))
+    if not session:
+        raise NeedsPerson(SIGNIN)
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise BadRequest("Paste the text from your admin first.")
+    if len(text) > PUBLISH_PASTE_MAX or "\x00" in text:
+        raise BadRequest("That text is too long. Paste only the text your admin sent you.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if not _addon_is_on(root, orch_bin, "publish"):
+        raise BadRequest("That add-on is not on in this workspace.")
+    try:
+        r = _run(
+            [*argv0(orch_bin), "publish", "connect", "--paste", "--by", actor(root), "--json"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            input=text,
+            encoding="utf-8",
+            timeout=60,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    forget_static()
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0:
+        name = out.get("name") if isinstance(out, dict) else None
+        return 200, "", {"name": name[:80]} if isinstance(name, str) else {}
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")

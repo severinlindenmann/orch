@@ -1240,8 +1240,9 @@ def test_relay_resolve_wording_is_generic(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
     connect(run, rel)
     code, _, err = run("relay", "send", "nobody", "x")
-    assert code == 2 and "No reachable workspace called nobody. Ask the admin." in err
-    assert "Reports" in err
+    assert code == 2 and "nobody is not in your list yet: your admin chooses who you can write to" in err
+    assert "relay admin page" in err and "run: orch relay refresh" in err
+    assert "Reports" in err and "No reachable" not in err
 
 
 # ---- W1-L4 PR2: received files, clean text, update flag -----------------------------------------
@@ -3175,9 +3176,57 @@ def test_relay_status_checks_that_the_relay_answers(proj, run, rel):
     assert json.loads(run("relay", "status", "--json")[1])["reachable"] is True
     rel.stop()
     code, out, _ = run("relay", "status")
-    assert code == 0 and "Connected" not in out and "does not answer right now" in out
+    assert code == 0 and "Connected" not in out and "Can't reach " in out
+    assert "Messages wait here and go out by themselves." in out
+    assert out.strip().splitlines()[-1] == "Next: carry on; check again later: orch relay status"
     shown = json.loads(run("relay", "status", "--json")[1])
     assert shown["reachable"] is False and shown["error"]
+
+
+def test_relay_status_not_connected_says_how_to_connect(proj, run, rel):
+    assert run("addon", "add", "relay", "--yes")[0] == 0
+    code, out, _ = run("relay", "status")
+    assert code == 0 and out.startswith("Not connected yet.")
+    assert (
+        "Next: run the lines from the text your admin gave you (they start with: orch relay connect)." in out
+    )
+
+
+def test_addon_add_relay_says_it_is_not_connected_and_how_to_connect(proj, run, rel):
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "relay is turned on in this workspace." in out
+    assert "It is not connected yet." in out
+    last = out.strip().splitlines()[-1]
+    assert last == (
+        "Next: run the lines from the text your admin gave you (they start with: orch relay connect)."
+    )
+    assert "orch addon list" not in out
+
+
+def test_addon_add_publish_says_how_to_connect(proj, run, rel):
+    code, out, _ = run("addon", "add", "publish", "--yes")
+    assert code == 0 and "It is not connected yet." in out
+    assert out.strip().splitlines()[-1].endswith("(they start with: orch publish connect).")
+
+
+def test_connected_but_nobody_to_write_to_is_the_admins_step(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = []
+    code, out, _ = run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)
+    assert code == 0 and "You can write to: nobody yet. Your admin chooses that on the admin page." in out
+    assert out.strip().splitlines()[-1] == "Next: when your admin has done it, run: orch relay refresh"
+    code, out, _ = run("relay", "status")
+    assert "You can write to: nobody yet." in out and "Next: when your admin has done it" in out
+
+
+def test_relay_commands_end_with_a_line_that_fits_the_command(proj, run, rel):
+    connect(run, rel)
+    for cmd, want in (
+        (("relay", "inbox"), "nothing new; carry on with your ticket."),
+        (("relay", "outbox"), "nothing waits; carry on with your ticket."),
+    ):
+        out = run(*cmd)[1]
+        assert out.strip().splitlines()[-1] == f"Next: {want}", cmd
+    assert "a reply comes in on your next run" not in run("relay", "whoami")[1]
 
 
 def test_invite_adds_and_connects_a_second_folder(proj, run, rel, monkeypatch):

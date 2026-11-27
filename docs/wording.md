@@ -34,6 +34,8 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | the add-on that turns an idea into finished work, step by step (owner D3 B, 26 Nov, ORCH-2284) | Factory (menu, page, Home, Settings) | `orch factory` | Projects |
 | something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
 | a tool's way in that a helper needs (owner, ORCH-43) | Login / Connection / Key (caption under each name) | - | Token, Credential |
+| the add-on for messages between workspaces and phones (owner, ORCH-2166, RP8 B) | Relay | `orch relay` | Contacts, Phone link |
+| the add-on that shares files by private link (owner, ORCH-2166, RP8 B) | Publish | `orch publish` | Shared, Shared pages, Shared links (as its name; "Share a file" as an action is fine) |
 | list of every login, connection and key (Settings, Helper tab; owner, ORCH-43) | What helpers need | - | Logins and keys, Helper access |
 | a site's sign-in kept for helpers (ORCH-1845, design) | Keep me signed in / Signed in / Sign-in ended / Forget sign-in | `orch browse signin forget <site>` | Profile, Session, Vault, Cookies, Remember me |
 | one script in Personal that reaches one source on the person's own computer (Teams, Mail, a folder; owner, ORCH-605/ORCH-649) | Way in ("Teams: the way in stopped working") | - | Connector, Integration, Plugin |

@@ -1329,7 +1329,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "publish-links",
    "icon": "upload",
-   "title": "Shared: private links",
+   "title": "Publish: private links",
    "one": "Share a file by link. For files, the server never sees what is in it.",
    "steps": [
     {
