@@ -57,7 +57,9 @@ module.exports = {
     // 2. The menu at the bottom: groups with counts, inside the window
     await openMenu();
     const heads = await menu.locator('.lbar-gh').evaluateAll(els => els.map(e => e.innerText.replace(/\s+/g, ' ').trim().toLowerCase()));
-    must(heads.join('|') === 'needs you 1|working 1|quiet 1', `the groups read "${heads.join(' | ')}"`);
+    // Needs you counts the workspace's one needs-you number (ORCH-1643): click-throughs before this one may have left
+    // questions, so it is at least this session; Working and Quiet are the sessions alone
+    must(/^needs you [1-9]\d*\|working 1\|quiet 1$/.test(heads.join('|')), `the groups read "${heads.join(' | ')}"`);
     await inside('at the bottom');
     await shot('helpers-bottom', page.locator('#live-bar'));
 
