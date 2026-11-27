@@ -19,7 +19,9 @@ Nothing here reads the screen to decide anything, with one exception: a run stil
 fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
 own wrapper passes the harmless first-run ones (theme, notes, trust of the `orch init` folder) with the
 adapter's keys, once each; any other (a login) and a start not up after STARTUP_SECONDS are shown as
-waiting for a person instead of "working".
+waiting for a person instead of "working". The wrapper also looks for a dialog: a tool's confirm prompt sets
+attention (check_confirm, ORCH-2197) and a dialog that went away sets working again (check_attention); neither
+ever answers it.
 """
 
 from __future__ import annotations
@@ -1292,6 +1294,8 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
                         retry_deliver(root, tid, run, memo, end=proc.terminate, stop=stop)
                     if not (stop is not None and stop.is_set()):
                         check_attention(root, tid, run, memo, stop=stop)
+                    if not (stop is not None and stop.is_set()):
+                        check_confirm(root, tid, run, memo, stop=stop)
         except Exception:  # never take the wrapper down
             continue
 
@@ -1390,6 +1394,198 @@ def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | Non
         runs._write(root, cur)
     diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state="working", why="dialog_gone")
     runhooks.fire("run_state", root=root, tid=tid, run=run, state="working")
+    return True
+
+
+# ORCH-2197: a tool's own confirm prompt, read from the whole dialog at the bottom of the pane. A tool's hook
+# confirm ("Hook PreToolUse:Bash requires confirmation ... Do you want to proceed? ❯ 1. Yes  2. No") sends no
+# Notification, so the run stayed "working" while the helper waited. Recognised only as a whole: a question
+# that ends in "?", right under it numbered options 1..n with the select cursor on one of them, a "Yes" and a
+# "No" among them, and at most a short footer ("Esc to cancel") below. Anything else is not a confirm prompt
+# (no buttons, never a guess).
+# the same prompt on two looks this far apart: the helper waits (a redraw is not a prompt)
+CONFIRM_SECONDS = 1.0
+CONFIRM_TAIL = 60  # rows from the bottom the dialog may take (a long command wraps over many rows)
+_OPTION = re.compile(r"^(?:[>❯›]\s*)?([1-9])\.\s+(\S.*?)\s*$")
+_SELECTED = re.compile(r"^[>❯›]")
+_SEPARATOR = re.compile(r"^[─-╿\-=_.·• ]{10,}$")
+_TOOL_HEAD = re.compile(r"^([A-Z][\w ]{0,30}?) command$")  # "Bash command" (a tool's title of a shell call)
+_HOOK_HEAD = re.compile(r"^Hook \S+ requires confirmation", re.IGNORECASE)
+_SIDES = "│┃║|"  # a dialog drawn in a box: its side bars are not text
+
+
+def _dialog_rows(pane: str) -> list[str]:
+    rows = []
+    for ln in _ANSI.sub("", pane).replace("\r", "").split("\n"):
+        s = ln.strip()
+        s = s[1:] if s[:1] and s[0] in _SIDES else s
+        s = s[:-1] if s[-1:] and s[-1] in _SIDES else s
+        rows.append(s.rstrip())
+    while rows and not rows[-1].strip():
+        rows.pop()
+    return rows
+
+
+def _unwrap(lines: list[str]) -> str:
+    """Rows of a block as written: a row cut at the full width (a long word) goes on without a break, so a
+    long path is copied whole; any other row ends a line as on the screen."""
+    lines = [ln.strip() for ln in lines if ln.strip() and not _SEPARATOR.fullmatch(ln.strip())]
+    if not lines:
+        return ""
+    width = max(len(ln) for ln in lines)
+    out = lines[0]
+    for prev, ln in zip(lines, lines[1:], strict=False):
+        out += ("" if len(prev) >= width and width >= 40 and " " not in prev[-1:] else "\n") + ln
+    return out
+
+
+def confirm_prompt(pane: str) -> dict | None:
+    """The confirm prompt at the bottom of a pane, or None. {question, options: [labels], yes: "<digit>", no:
+    "<digit>", command: <the call as shown, or None>, reason: <the hook's words, or None>, unclear: <True when
+    the dialog could not be read with certainty: show no command and offer no answer>, digest}. yes is
+    the plain "Yes" (once, never "Yes, and don't ask again"), no the first option that starts with "No"."""
+    rows = _dialog_rows(pane)[-CONFIRM_TAIL:]
+    filled = [i for i, r in enumerate(rows) if r.strip()]
+    opts: list[tuple[int, str, str, bool]] = []  # (row, digit, label, selected)
+    for i in reversed(filled[-12:]):
+        m = _OPTION.match(rows[i].strip())
+        if m:
+            opts.insert(0, (i, m.group(1), m.group(2), bool(_SELECTED.match(rows[i].strip()))))
+        elif opts:
+            break
+    if len(opts) < 2 or [o[1] for o in opts] != [str(n) for n in range(1, len(opts) + 1)]:
+        return None
+    if [o[0] for o in opts] != list(range(opts[0][0], opts[0][0] + len(opts))):
+        return None  # the options are one block of rows
+    if sum(o[3] for o in opts) != 1 or len([i for i in filled if i > opts[-1][0]]) > 3:
+        return None  # one select cursor, and at most a short footer under the options
+    above = [i for i in filled if i < opts[0][0]]
+    if not above or not rows[above[-1]].strip().endswith("?"):
+        return None
+    qrow = above[-1]
+    question = rows[qrow].strip()
+    labels = [o[2] for o in opts]
+    yes = next((o[1] for o in opts if o[2].strip().lower().rstrip(".") == "yes"), None)
+    no = next((o[1] for o in opts if re.match(r"no\b", o[2].strip(), re.IGNORECASE)), None)
+    if yes is None or no is None:
+        return None
+    # The command is the helper's own text and could imitate the dialog's rows (a "Bash command" line, a line
+    # of dashes, a "Hook ... requires confirmation" line). The dialog must be bounded (its top border in the
+    # rows read) and hold exactly one title, at most one hook line and 0 or 2 separators; anything else is
+    # unclear: no command is shown and no answer is offered (the card sends the person to the terminal).
+    tops = [i for i in above if _SEPARATOR.fullmatch(rows[i].strip()) and len(rows[i].strip()) >= 20]
+    heads = [i for i in above if _TOOL_HEAD.match(rows[i].strip())]
+    hooks = [i for i in above if _HOOK_HEAD.match(rows[i].strip())]
+    command = reason = None
+    unclear = len(heads) > 1 or len(hooks) > 1 or (bool(heads) and not any(t < heads[0] for t in tops))
+    if heads and not unclear:
+        head = heads[0]
+        hook = hooks[0] if hooks and hooks[0] > head else None
+        body = rows[head + 1 : hook if hook is not None else qrow]
+        seps = [k for k, r in enumerate(body) if _SEPARATOR.fullmatch(r.strip())]
+        filled_body = [k for k, r in enumerate(body) if r.strip()]
+        top = rows[max(t for t in tops if t < head)].strip()
+        if top[:1] in (
+            "\u256d",
+            "\u250c",
+        ):  # a boxed dialog has no inner lines: any line is the command's own
+            unclear = bool(seps)
+        elif len(seps) == 2 and seps[0] <= 2 and seps[1] == filled_body[-1]:
+            body = body[seps[0] + 1 : seps[1]]  # a newer look: the words, a line, the command, a line
+        elif seps:
+            unclear = True
+        command = None if unclear else (_unwrap(body) or None)
+        if hook is not None and not unclear:
+            said = []
+            for r in rows[hook + 1 : qrow]:
+                if not r.strip():
+                    break
+                said.append(r.strip())
+            said = [r for r in said if not re.search(r"to update hooks$", r)]  # the tool's own hint
+            reason = " ".join(" ".join(said).split()) or None
+    digest = hashlib.sha256(
+        "\x00".join([question, *labels, command or "", reason or ""]).encode("utf-8")
+    ).hexdigest()[:16]
+    return {
+        "question": question,
+        "options": labels,
+        "yes": yes,
+        "no": no,
+        "command": command,
+        "reason": reason,
+        "unclear": unclear,
+        "digest": digest,
+    }
+
+
+def _screen_now(root: Path, tid: str) -> str | None:
+    """The visible pane as plain text, or None when it cannot be read or is scrolled up (the prompt may be
+    below)."""
+    r = tmux(
+        root, "capture-pane", "-e", "-N", "-p", "-t", target(tid), ";",
+        "display-message", "-p", "-t", target(tid),
+        "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x} #{alternate_on} #{cursor_flag} #{pane_width}",
+        timeout=QUICK,
+    )  # fmt: skip
+    body, _, state = r.stdout.rpartition("@@orch ")
+    fields = state.split()
+    if r.returncode != 0 or not fields or fields[0] != "0":
+        return None
+    return _ANSI.sub("", body[:-1] if body.endswith("\n") else body)
+
+
+def _asks_line(root: Path, prompt: dict) -> str | None:
+    """The call as one short line for the run record (Needs you, the phone's list): never a line the scan
+    flags."""
+    from orch import secretscan
+
+    text = " ".join(str(prompt.get("command") or "").split())
+    if not text or secretscan.find(text, root):
+        return None
+    return text[: ASKS_MAX - 1] + "…" if len(text) > ASKS_MAX else text
+
+
+def check_confirm(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
+    """A working run whose pane shows a confirm prompt (confirm_prompt) on two looks CONFIRM_SECONDS apart
+    waits for the person: its state becomes attention with the call it asks about, so Needs you, the pane's
+    card and the phone show it within seconds, also when the tool sent no notice (a hook confirm,
+    ORCH-2197). check_attention sets it back to working once the prompt is gone. Nothing is answered here.
+    True when the state was changed."""
+    t = time.time() if now is None else now
+    rec = runs.read(root, tid)
+    live = (rec or {}).get("live") or {}
+    if not rec or rec["run"] != run or live.get("state") != "working" or not rec.get("up"):
+        memo.pop("confirm_seen", None)
+        return False
+    if (stop is not None and stop.is_set()) or t - memo.get("confirm_look", 0.0) < CONFIRM_SECONDS:
+        return False  # one look per CONFIRM_SECONDS, not one per poll of the wrapper
+    memo["confirm_look"] = t
+    pane = _screen_now(root, tid)
+    prompt = confirm_prompt(pane) if pane is not None else None
+    if prompt is None:
+        memo.pop("confirm_seen", None)
+        return False
+    seen = memo.get("confirm_seen")
+    if not seen or seen[0] != prompt["digest"] or seen[2] != live.get("since"):
+        memo["confirm_seen"] = (prompt["digest"], t, live.get("since"))
+        return False
+    if t - seen[1] < CONFIRM_SECONDS:
+        return False
+    memo.pop("confirm_seen", None)
+    asks = _asks_line(root, prompt)
+    with runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        lv = (cur or {}).get("live") or {}
+        if not cur or cur["run"] != run or lv.get("state") != "working" or lv.get("since") != seen[2]:
+            return False  # a hook wrote a newer state in the meantime: it wins
+        cur["live"] = {"state": "attention", "since": tickets.now(), **({"asks": asks} if asks else {})}
+        cur["renewed_at"] = tickets.now()
+        cur.pop("maybe_stale_since", None)
+        runs._write(root, cur)
+    diag.log(
+        "run.live_state", "info", root=root, ticket=tid, run=run, state="attention", why="confirm_on_screen"
+    )
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state="attention")
     return True
 
 
