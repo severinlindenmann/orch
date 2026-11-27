@@ -86,7 +86,7 @@
       const timedOut = new Promise(resolve => {
         waitTimer = clock.setTimeout(() => resolve({status: 0, message: 'orch did not answer in time. Your answer may not have been sent. Try again.'}), opts.sendTimeoutMs || SEND_TIMEOUT_MS);
       });
-      try { res = await Promise.race([opts.send(answer, actionId), timedOut]); } catch (e) { res = {status: 0, message: 'Could not reach orch.'}; }
+      try { res = await Promise.race([opts.send(answer, actionId), timedOut]); } catch (e) { res = {status: 0, message: 'orch did not answer. Try again in a moment.'}; }
       if (waitTimer !== null) clock.clearTimeout(waitTimer);
       clear();
       if (res && res.status >= 200 && res.status < 300) set({phase: 'sent', answer, who: res.who, via: res.via});

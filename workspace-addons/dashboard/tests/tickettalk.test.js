@@ -95,7 +95,7 @@ test('files on the ticket but the message refused: the text stays, the files are
 test('orch unreachable says so in plain words', async () => {
   const {ctx} = setup({results:{'run.send':{ok:false, status:0, text:''}}});
   const result = await ctx.ticketTalkSend('t_talk0001', {text:'Hi', files:[]});
-  assert.deepEqual(plain(result), {ok:false, dropFiles:false, text:"Can't reach orch. Nothing was sent."});
+  assert.deepEqual(plain(result), {ok:false, dropFiles:false, text:"Can't reach orch. Nothing was sent; try again in a moment."});
 });
 
 test('the card is on open tickets only, never on a shared copy or a done ticket', () => {

@@ -34,7 +34,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
     x = a.add_parser("uninstall", parents=[common], help="uninstall an add-on")
     x.add_argument("name")
-    x = a.add_parser("list", parents=[common])
+    x = a.add_parser("list", parents=[common], help="the add-ons and whether each is on here")
     x.add_argument("--catalog", action="store_true", help=argparse.SUPPRESS)  # installation choices
     x = a.add_parser("check", parents=[common], help="check an add-on against the add-on contract")
     x.add_argument(
@@ -88,6 +88,9 @@ def _add(args, root: Path) -> None:
             addonjob.detach()
     if args.project_only:
         _out(args, {"ok": True}, f"{names[0]} is turned on in this workspace.")
+    if not args.json and not args.project_only and len(names) == 1 and names[0] in ("relay", "publish"):
+        if not nextstep.configured(root, names[0]):
+            print("It is not connected yet.")
     if not args.json:
         from orch import harness
 

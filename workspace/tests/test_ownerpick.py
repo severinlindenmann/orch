@@ -176,7 +176,7 @@ def test_plain_cards_and_questions_answer_from_the_terminal_as_before(proj, run,
     q = _choose(proj, run, tid, pictures=False)
     code, out, err = run("review", "answer", tid, q["id"], "--verdict", "ok", "--picked", "A", "--by", ME)
     assert code == 0, out + err
-    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     code, out, err = run("answer", tid, "q2", "Yes", "--by", ME)
     assert code == 0, out + err
 
@@ -362,7 +362,7 @@ def test_an_unneeded_grant_is_used_up_and_never_reaches_a_child(proj, run, new_t
     from orch import renew
 
     tid = new_ticket()
-    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     person_grant(proj)
     code, out, err = run("answer", tid, "q1", "Yes", "--by", ME)
     assert code == 0, out + err

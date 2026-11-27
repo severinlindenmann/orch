@@ -202,8 +202,8 @@ async function ajStart(names) {
   if (!res) {
     const r = await ajRead();
     if (r.ok && ajLive(r.job)) { aj.phase = 'job'; aj.picked.clear(); ajFollow(r.job); return; }
-    aj.err = 'Could not reach orch.';
-  } else aj.err = String(text || 'That did not work.').slice(0, 300);
+    aj.err = 'orch did not answer. Try again in a moment.';
+  } else aj.err = String(text || 'That did not work. Try again.').slice(0, 300);
   ajPaint();
 }
 

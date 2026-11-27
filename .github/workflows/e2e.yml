@@ -1,11 +1,17 @@
 name: e2e
 # Manual or nightly, never on a PR. Local mode: publish + relay are built and started on localhost.
+# When GitHub drops the nightly, a push to develop starts it as "e2e (catch-up)" (scripts/ci_catch_up.py, #2657).
+run-name: ${{ inputs.catch_up && 'e2e (catch-up)' || github.workflow }}
 on:
   workflow_dispatch:
     inputs:
       scenario:
         description: "scenario id, comma list, group letter (W A P R M F) or all"
         default: all
+      catch_up:
+        description: "started by scripts/ci_catch_up.py for a nightly GitHub dropped (read like the nightly)"
+        type: boolean
+        default: false
   schedule:
     - cron: "17 3 * * *"
 permissions:

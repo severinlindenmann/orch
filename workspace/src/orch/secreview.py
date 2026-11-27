@@ -686,6 +686,21 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
     return None, [], None
 
 
+def _drop_stale(w, n: int, old: str, e: dict) -> list[str]:
+    """#2403: the review ticket of an older head can never record its verdict (the verdict is bound to the
+    head it was started on), so it ends as superseded by the new review, whatever its status (Review, or
+    sent back to Working)."""
+
+    def go():
+        with contextlib.suppress(Refused, OSError, ValueError):
+            tickets.log(w.root, old, f"Pull request #{n} moved on to {str(e.get('sha') or '')[:12]}: "
+                        f"the review {e.get('key') or e.get('tid')} replaces this one.", BY)  # fmt: skip
+            tickets.set_status(w.root, old, "dropped", BY, superseded_by=e.get("tid"))
+
+    w.act(f"drop-review:#{n} {old}", go)
+    return [f"#{n}: the review of its older commit ({old}) ended, replaced by {e.get('key') or e.get('tid')}"]
+
+
 def _members_ok(sec: dict, e: dict, verdicts: dict) -> bool:
     """Every member a group's kept OK came from still has its OK for the head in the group (no list: no)."""
     if not isinstance(e.get("members"), list):
@@ -716,14 +731,45 @@ def _call_gone(w, n: int, e: dict, verdicts: dict) -> list[str]:
     return [f"#{n}: the first-look call ended without an answer; {w.start_review_helper(e['tid'])}"]
 
 
-def _merged_rows(w, pats: tuple[str, ...]) -> tuple[list[dict], list[str]]:
+def _fixers(verdicts: dict) -> dict[int, int]:
+    """{fix pull request: the pull request whose "problems" verdict it fixes} from the fixed-by links."""
+    out: dict[int, int] = {}
+    for k, v in verdicts.items():
+        with contextlib.suppress(TypeError, ValueError):
+            if isinstance(v, dict) and v.get("verdict") == "problems" and int(v.get("fixed_by") or 0) > 0:
+                out[int(v["fixed_by"])] = int(k)
+    return out
+
+
+def _fix_hits(files: list[str], of: int) -> list[str]:
+    """#1568: a linked fix is reviewed whatever files it changes: its own files, or one plain line."""
+    return [f for f in files if not _TEST.search(f)] or [f"the fix of the security finding of #{of}"]
+
+
+def _merged_rows(
+    w, pats: tuple[str, ...], fixers: dict[int, int] | None = None
+) -> tuple[list[dict], list[str]]:
     """What is really in the next release: every first-parent change on develop since main, its full file
     list (renames as both names) and its pull request. A matched change no pull request can be found for, or
-    whose merged head is unknown, holds the release."""
+    whose merged head is unknown, holds the release. A pull request linked as the fix of a "problems" verdict
+    (fixers) counts as matched, also as a member of a merge queue group (#1568)."""
+    from orch.releasekeeper import queue_merge
+
     prs: dict[int, dict] = {}
     holds: list[str] = []
     for c in w.changes():
         hits = matched(c.get("files") or [], pats)
+        if not hits and fixers:
+            sq = re.search(r"\(#(\d+)\)\s*$", str(c.get("title") or ""))
+            hint = c.get("pr") or (int(sq[1]) if sq else None)
+            if hint in fixers:
+                hits = _fix_hits(list(c.get("files") or []), fixers[hint])
+            elif c.get("pr") and c.get("head") and queue_merge(str(c.get("title") or ""), w.cfg.repo or ""):
+                for m, mh, _ in w.group_steps(int(c["pr"]), str(c["head"]), pats) or []:
+                    if m in fixers and m not in prs:
+                        url = f"https://github.com/{w.cfg.repo}/pull/{m}"
+                        line = _fix_hits([], fixers[m])
+                        prs[m] = {"number": m, "title": line[0], "url": url, "headRefOid": mh, "hits": line}
         if not hits:
             continue
         sha = str(c.get("sha") or "")[:8]
@@ -757,7 +803,8 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
     cap = limit(getattr(w.cfg, "security_limit", None))
     lines: list[str] = _limit_answered(w, sec, role, window)
     waiting: dict[str, str] = {}  # merged pull requests the limit holds back: {number: merged head}
-    merged, holds = _merged_rows(w, pats)
+    fixers = _fixers(verdicts)
+    merged, holds = _merged_rows(w, pats, fixers)
     heads = {int(p["number"]): str(p.get("headRefOid") or "") for p in merged}
     rows = [(p, True) for p in merged]
     rows += [(p, False) for p in w.open_prs() if not p.get("isDraft")]
@@ -765,6 +812,8 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
     for pr, is_merged in rows:
         n = int(pr["number"])
         hits = pr["hits"] if is_merged else open_hits(pr, pats)
+        if not hits and not is_merged and n in fixers:
+            hits = _fix_hits(file_paths(pr), fixers[n])
         if not hits:
             continue
         e = sec["prs"].get(str(n))
@@ -795,8 +844,10 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
             if is_merged:
                 holds.append(f"#{n} (security review ended without a verdict)")
             continue
-        if not e or (e.get("sha") != head and not _open(w, e.get("tid"))) or (ended and e.get("sha") == head):
+        moved = bool(e) and e.get("sha") != head and (bool(head) or not _open(w, e.get("tid")))
+        if not e or moved or (ended and e.get("sha") == head):
             tries = int(e.get("tries") or 1) + 1 if e and e.get("sha") == head else 1
+            old = e.get("tid") if e and e.get("sha") != head and _open(w, e.get("tid")) else None
             if _used(sec, window) >= _allowed(sec, window, cap):
                 used = _used(sec, window)
                 lines.append(f"#{n}: waits for a security review ({used} started for this release already)")
@@ -806,6 +857,8 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
                 continue
             lines.append(_start(w, sec, role, pr, hits, window, since))
             e = sec["prs"].get(str(n))
+            if old and e and e.get("tid") != old:
+                lines += _drop_stale(w, n, old, e)
             if e and e.get("sha") == head:
                 e["tries"] = tries
             if not e:

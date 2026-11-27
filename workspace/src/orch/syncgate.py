@@ -269,7 +269,7 @@ def hold(root: Path, step_id: str = "sync"):
     )
     stmp = sp.with_name(f"{sp.name}.tmp")
     stmp.write_text(step_text, encoding="utf-8")
-    os.replace(stmp, sp)  # atomic: a reader never sees half a record
+    procs.replace(stmp, sp)  # atomic: a reader never sees half a record
     try:
         for i in range(5):
             if _publish(root, text):

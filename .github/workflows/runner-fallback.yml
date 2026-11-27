@@ -1,0 +1,28 @@
+name: runner fallback
+# The second half of the runner watch (ORCH-1932, scripts/runner_watch.py): a ci run that the watch cancelled because
+# its jobs waited 10 minutes for our own runners while none was online starts again as a whole. Its new attempt reads
+# the runner list again (check-runner.yml, route) and sends the jobs to GitHub's machines. Only runs that carry the
+# watch's artifact `runner-fallback` (a run cancelled for any other reason stays cancelled), at most twice per run.
+# No checkout: nothing of the run's code runs here.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          n=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts?name=runner-fallback" --jq '.total_count')
+          if [ "${n:-0}" = 0 ]; then echo "cancelled for another reason; nothing to do"; exit 0; fi
+          echo "the runner watch cancelled run $RUN_ID: our own runners were offline; starting it again"
+          gh run rerun "$RUN_ID" --repo "$REPO"

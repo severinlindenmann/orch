@@ -25,7 +25,7 @@ BY = "agent:triage"
 OPEN = ("open", "ready", "active", "waiting", "review")
 # lane id -> its board name (the same nine lanes as the board, ORCH-152)
 LANES = {"backlog": "Backlog", "todo": "To do", "working": "Working", "needs-you": "Needs you",
-         "waiting": "Waiting", "check": "Check", "done": "Done", "wont-do": "Won't do",
+         "waiting": "Waiting", "check": "Review", "done": "Done", "wont-do": "Won't do",
          "superseded": "Superseded"}  # fmt: skip
 DEFAULT_LANES = ("backlog", "todo", "working", "needs-you", "waiting", "check")
 CLOSED_LANES = ("done", "wont-do", "superseded")

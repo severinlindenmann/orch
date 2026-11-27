@@ -232,10 +232,24 @@ def _after(verb: str) -> str:
     return "Remove it and send again." if verb == "sent" else "Remove it and try again."
 
 
-def refuse_if_secret_in(root: Path | None, body, what: str = "message", *, verb: str = "sent") -> None:
+def _unreadable(what: str, verb: str, root: Path | None) -> Refused:
+    why = keys_unreadable_reason(root)
+    return Refused(f"orch could not compare the {what} with your saved keys, so nothing was {verb}: {why}")
+
+
+def _first_hit(found: list[dict]) -> dict | None:
+    """A real hit before "keys unreadable": removing it is the first thing to do."""
+    return next((f for f in found if f["kind"] != "keys-unreadable"), found[0] if found else None)
+
+
+def refuse_if_secret_in(
+    root: Path | None, body, what: str = "message", *, verb: str = "sent", strict: bool = False
+) -> None:
     """R5.2: nothing leaves this machine (relay, publish) with a secret in it. The one scanner, run on every
     string of the body. A hit raises Refused with one sentence naming the kind and the field, never the value.
-    Fails closed when the scan itself breaks. verb: what did not happen ("sent"; "saved" for evidence)."""
+    Fails closed when the scan itself breaks. verb: what did not happen ("sent"; "saved" for evidence).
+    strict (local evidence writes): saved keys that cannot be compared refuse too; only sends skip that
+    comparison with a note (contracts/secrets.md)."""
     leaves = list(_leaves(body))
     if not leaves:
         return
@@ -247,14 +261,16 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message", *, verb:
         parts.append(text)
         lines += text.count("\n") + 1
     try:
-        found = find("\n".join(parts), root, strict=False)
+        found = find("\n".join(parts), root, strict=strict)
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
             f"orch could not check the {what} for secrets, so nothing was {verb}. Try again."
         ) from None
-    if not found:
+    first = _first_hit(found)
+    if first is None:
         return
-    first = found[0]
+    if first["kind"] == "keys-unreadable":
+        raise _unreadable(what, verb, root)
     field = next(f for ln, f in reversed(starts) if ln <= first["line"])
     more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
     kind = WORDS.get(first["kind"], "a secret")
@@ -364,7 +380,7 @@ def _text_lines(view: str) -> str:
     return "\n".join(out)
 
 
-def _scan_bytes(data: bytes, root: Path | None) -> list[dict]:
+def _scan_bytes(data: bytes, root: Path | None, strict: bool = False) -> list[dict]:
     from orch import pngpixels
 
     step, overlap = MAX_BYTES, 65536
@@ -374,9 +390,9 @@ def _scan_bytes(data: bytes, root: Path | None) -> list[dict]:
         for start in range(0, max(len(blob), 1), step - overlap):
             for text in _views(blob[start : start + step]):
                 if text_only:
-                    found = find(text, root, strict=False, labels=False) or find(_text_lines(text))
+                    found = find(text, root, strict=strict, labels=False) or find(_text_lines(text))
                 else:
-                    found = find(text, root, strict=False, labels=labels)
+                    found = find(text, root, strict=strict, labels=labels)
                 if found:
                     return found
             if start + step >= len(blob):
@@ -385,23 +401,26 @@ def _scan_bytes(data: bytes, root: Path | None) -> list[dict]:
 
 
 def refuse_if_secret(
-    data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
+    data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent", strict: bool = False
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
-    runs are kept from the label rules only (passes). A zip, gzip or tar is scanned inside as well."""
+    runs are kept from the label rules only (passes). A zip, gzip or tar is scanned inside as well.
+    strict: as in refuse_if_secret_in."""
     found: list[dict] = []
     try:
         for blob in _unpacked(data, [_UNPACK_LIMIT]):
-            found = _scan_bytes(blob, root)
+            found = _scan_bytes(blob, root, strict)
             if found:
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
             f"orch could not check the {what} for secrets, so nothing was {verb}. Try again."
         ) from None
-    if found:
+    first = _first_hit(found)
+    if first is not None and first["kind"] == "keys-unreadable":
+        raise _unreadable(what, verb, root)
+    if first is not None:
         raise Refused(
-            f"The {what} has {WORDS.get(found[0]['kind'], 'a secret')}, so nothing was {verb}. "
-            + _after(verb)
+            f"The {what} has {WORDS.get(first['kind'], 'a secret')}, so nothing was {verb}. " + _after(verb)
         )

@@ -46,6 +46,7 @@ ask; its list replaces the one above.
     orch ticket list --waiting            # waiting on a person (a question); --blocked: on a time, a ticket or the outside
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
+    orch ticket export <id>               # the ticket as markdown to paste into another agent (secrets refused)
     orch ticket status <id> active
     orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
@@ -55,6 +56,7 @@ ask; its list replaces the one above.
                                         # files, no new command or setting, no look or words); owner / due only where
                                         # their text says them (their title stays in the history)
     orch ticket kind <id> <kind>          # change the kind later; a kind a person set only a person changes
+    orch changes --since <date|tag>       # release notes: done tickets by kind, with their evidence links
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
@@ -174,7 +176,7 @@ switches when its turn ends.
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A
-    orch ask <id> "<question>" --check <c>        # tie it to a step
+    orch ask <id> "<question>" --option A --option B --recommend A --check <c>  # tie it to a step
     orch ask <id> "<question>" ... --if-wait "<what happens while nobody answers>" --fact "<a fact that decides it>"  # optional, one line each, up to 4 --fact
     orch ask <id> "<question>" ... --said <m_... | history:<time> | rules:<line>>  # quote the person: their chat line id, the time of their line, or a line of .orch/ask-when.md; orch copies the words (never type a quote)
     orch ask <id> "<question>" ... --due 2026-12-01T09:00  # optional: when the answer is needed; Review shows it as the next deadline
@@ -186,7 +188,7 @@ Every question for the person goes on the ticket this way, never only in your re
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
-- Offer short answer options a person can click. Keep the question to one sentence or two.
+- Offer at least two short answer options a person can click and recommend one with `--recommend` (the person can still answer in their own words). Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - When the person must run one command (a setting only a person may change, an install), make it a run card: `orch ask <id> "Turn on release walks?" --run "orch config set github.release_walks install,services" --option "Leave it off for now"` (the other answer is one of: Not now, Leave it off for now, Leave it as it is, Skip it, Do it later). The card shows the command with Copy and Run it now; one click runs it for the person and answers I ran it, with what it printed. orch writes what it changes and how to undo it, never you. Only some orch settings, the commands an add-on that is on offers for cards (its skill names them) and `brew install|uninstall|upgrade <plain names>` get Run it now; any other command (and a sign-in such as `codex login`) still gets the card, with Copy only, and the person runs it in their own terminal. You never answer a run card yourself.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.

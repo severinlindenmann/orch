@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from orch import adapters, addons, cli_leave, diag, diag_collect, safegit, services
+from orch import adapters, addons, cli_leave, diag, diag_collect, procs, safegit, services
 
 _REAL_UV_FAILS = cli_leave._uv_fails
 
@@ -15,10 +15,13 @@ _REAL_UV_FAILS = cli_leave._uv_fails
 def tools_found(monkeypatch):
     diag._dropped.clear()  # a process-wide counter other tests may have raised
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}")
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")
+    monkeypatch.setattr(procs, "launcher_problem", lambda: None)  # the faked orch works (ORCH-2138)
     monkeypatch.setattr(cli_leave, "_uv_fails", lambda uv: None)
     plenty = type("U", (), {"free": 10**11, "total": 10**12})()  # never the real (maybe full) disk
     monkeypatch.setattr(diag_collect.shutil, "disk_usage", lambda p: plenty)
@@ -51,7 +54,7 @@ def test_doctor_json(proj, run, monkeypatch):
     assert run("init")[0] == 0
     calls = []
     detect = adapters.detect
-    monkeypatch.setattr(adapters, "detect", lambda: calls.append(1) or detect())
+    monkeypatch.setattr(adapters, "detect", lambda **k: calls.append(1) or detect(**k))
     code, out, _ = run("doctor", "--json")
     d = json.loads(out)
     assert code == 0 and d["ok"] and d["problems"] == 0, [r for r in d["checks"] if not r["ok"]]

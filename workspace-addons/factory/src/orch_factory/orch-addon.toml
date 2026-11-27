@@ -15,10 +15,10 @@ checks_own_stop = true                     # `stop <order> --file` is a stop rev
 
 [page]
 path = "/"
-label = "Open Projects"
+label = "Open Factory"
 
 [dashboard]
-label = "Projects"
+label = "Factory"
 icon = "hammer"
 order = 15
 

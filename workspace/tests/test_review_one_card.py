@@ -14,6 +14,7 @@ import pytest
 from orch import counts, needs, review, reviewer, stuck, tickets
 
 PR = "https://github.com/acme/app/pull/12"
+pytestmark = pytest.mark.usefixtures("queue_on")
 
 
 @pytest.fixture(autouse=True)

@@ -28,6 +28,8 @@ def _ask(run, tid):
         "CSV",
         "--option",
         "XLSX",
+        "--recommend",
+        "CSV",
         "--phone",
         "--json",
         "--by",
@@ -310,5 +312,17 @@ def test_any_other_refusal_is_final(proj, run, conn, monkeypatch):  # noqa: F811
 
 def test_relay_off_sends_nothing(proj, run):
     tid = _new_ticket(run)
-    run("ask", tid, "Which format?", "--option", "CSV", "--option", "XLSX", "--by", "agent:x")
+    run(
+        "ask",
+        tid,
+        "Which format?",
+        "--option",
+        "CSV",
+        "--option",
+        "XLSX",
+        "--recommend",
+        "CSV",
+        "--by",
+        "agent:x",
+    )
     assert relay.sync_closed(proj) == []

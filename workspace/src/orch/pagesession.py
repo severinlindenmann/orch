@@ -36,11 +36,11 @@ import time
 from http.cookies import SimpleCookie
 from pathlib import Path
 
-from orch import pagelaunch, tickets
+from orch import pagelaunch, procs, tickets
 from orch.errors import Refused
 
 PAGE_HEADER = "X-Orch-Page"  # the header that carries the page secret (the second half of a page session)
-SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
+SELF = procs.SELF  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE_PREFIX = "orch_page"
 SERVERS = ("dashboard", "insights")
 _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
@@ -77,7 +77,7 @@ def restart_watch_only(record: dict | None) -> bool:
 
 def argv0(orch_bin: str | None) -> list[str]:
     """The command prefix. SELF = this interpreter in isolated mode; any other value is a TEST fake."""
-    return [sys.executable, "-I", "-P", "-m", "orch"] if orch_bin == SELF else [str(orch_bin)]
+    return procs.orch_python_argv() if orch_bin == SELF else [str(orch_bin)]
 
 
 def child_env(env: dict, orch_bin: str | None) -> dict:

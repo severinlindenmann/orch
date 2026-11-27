@@ -72,7 +72,14 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
         else:
             raise Refused("orch can only send text or a file here, so nothing was sent.")
     cfg = _cfg(root)
-    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
+    try:
+        return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
+    except Refused as e:
+        if getattr(e, "status", 0) is None and not getattr(e, "blocked", False):  # no answer at all
+            err = Refused("The relay can't be reached right now. Check your internet and try again.")
+            err.status = None
+            raise err from None
+        raise
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
@@ -327,8 +334,10 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
         except PermissionError:
             # Windows: a lock file another holder is deleting right now ("delete pending") refuses O_EXCL with
             # EACCES instead of EEXIST; it is gone a moment later (winvm red on develop e38df1fc).
-            if not _WINDOWS or time.monotonic() > end:
+            if not _WINDOWS:
                 raise
+            if time.monotonic() > end:
+                raise Refused("The relay inbox is busy right now. Try again in a moment.") from None
             time.sleep(0.02)
         except FileExistsError:
             try:
@@ -498,6 +507,17 @@ def _directory(root: Path) -> list[dict]:
     return [*d.get("workspaces", []), *d.get("phones", [])]
 
 
+def shown_names(root: Path) -> list[str]:
+    """The names in workspaces.json as orch prints them: the relay sent them, so they are data (R3.2). Control
+    and invisible characters go, line breaks become a space, each is cut to 60 characters."""
+    out = []
+    for w in _directory(root):
+        name = " ".join(clean_untrusted(str(w.get("name") or ""), 60).split())
+        if name:
+            out.append(name)
+    return out
+
+
 def resolve(root: Path, target: str) -> str:
     """ws_/ph_ id, 'phones', or a workspace or phone name from workspaces.json."""
     if re.fullmatch(r"ws_[a-z0-9]{10}|phones|ph_[a-z0-9]{10}", target):
@@ -517,11 +537,11 @@ def resolve(root: Path, target: str) -> str:
             raise Refused(
                 f"{count} {label} are called {target}: {', '.join(h['id'] for h in hits)}. Send to the id."
             )
-    names = [w["name"] for w in _directory(root) if w.get("name")]
+    names = shown_names(root)
     known = " You can message: " + ", ".join(names) + "." if names else ""
     raise Refused(
-        f"No reachable workspace called {target}. Ask the admin.{known} "
-        "Run: orch relay refresh to update the list."
+        f"{target} is not in your list yet: your admin chooses who you can write to on the relay admin page."
+        f"{known} After that, run: orch relay refresh"
     )
 
 
@@ -3982,7 +4002,8 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 more = [*r.get("messages", []), msg["id"]]
                 tickets.ext_set(root, t["id"], "relay", json.dumps({"messages": more[-20:]}), by)
                 return t["id"]
-        title = f"Relay task {b['key']}"
+        # outside text is data: the key is cleaned and cut as the inbox line and the allow question show it
+        title = f"Relay task {' '.join(clean_untrusted(str(b['key']), 48).split()) or 'without a name'}"
     else:
         if copy := _linked_copy(root, msg):
             # the sender's ticket was handed over before: this ticket is the copy, its title, checklist and

@@ -42,7 +42,7 @@ def test_agent_finish(proj, run, new_ticket, path):
     t = tickets.load(proj, tid)
     assert t["status"] == "review"
     assert any(
-        h["by"] == "agent:generic" and h["text"] == "agent:generic finished the work and sent it to Check"
+        h["by"] == "agent:generic" and h["text"] == "agent:generic finished the work and sent it to Review"
         for h in t["history"]
     )
 

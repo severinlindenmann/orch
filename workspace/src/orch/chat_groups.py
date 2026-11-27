@@ -726,7 +726,9 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         try:
             data = safefile.open_file_ref(Path(root), "/".join(parts), FILE_MAX + 1)
         except safefile.TooLarge:
-            raise Refused("The file is bigger than 25 MB, so it was not shared") from None
+            raise Refused(
+                "The file is bigger than 25 MB, so it was not shared. Share a smaller file."
+            ) from None
         if data is None:
             raise Refused(f"{path} can't be shared (not a plain file of this workspace).")
         return data
@@ -747,7 +749,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
             raise Refused(f"{path} changed while it was read.")
         if st.st_size > FILE_MAX:
-            raise Refused("The file is bigger than 25 MB, so it was not shared")
+            raise Refused("The file is bigger than 25 MB, so it was not shared. Share a smaller file.")
         with os.fdopen(os.dup(fd), "rb") as f:
             return f.read(FILE_MAX + 1)
     finally:
@@ -1208,7 +1210,7 @@ def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side:
     """The mime of an allowed file, else Refused with the plain line. Unchecked when the file can't
     be scanned; allow_unchecked is only for a person's click that saw the warning."""
     if len(data) > FILE_MAX:
-        raise Refused("The file is bigger than 25 MB, so it was not shared")
+        raise Refused("The file is bigger than 25 MB, so it was not shared. Share a smaller file.")
     mime = sniff(data, name)
     if mime not in FILE_TYPES:
         raise Refused(ONLY_THESE)
@@ -2497,7 +2499,7 @@ def delegate(
                 raise Refused("This group has used up its message numbers.")
             msg = _send(root, ws, "delegate", body, tid, mid=mid)
             if msg is None:  # not sent: nothing is recorded, the caller may still send a plain delegate
-                raise Refused("The task could not be sent to the group.")
+                raise Refused("The task could not be sent to the group. Try again.")
             sent = True
             g["delegates"].setdefault(ws, []).append(mid)  # recorded only after a successful send (G9)
             g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
@@ -2564,7 +2566,7 @@ def share_file(
     blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
     sha = hashlib.sha256(data).hexdigest()
     if blob.get("sha256") != sha or blob.get("size") != len(data):
-        raise Refused("The relay stored something different from the file. Not sent.")
+        raise Refused("The relay stored something different from the file. Not sent; try again.")
     errors: list = []
     with _state(root) as st:
         g = st["hosted"][gid]
@@ -4015,7 +4017,7 @@ def share_member(
         blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
         sha = hashlib.sha256(data).hexdigest()
         if blob.get("sha256") != sha or blob.get("size") != len(data):
-            raise Refused("The relay stored something different from the file. Not sent.")
+            raise Refused("The relay stored something different from the file. Not sent; try again.")
         name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
         ttl = _line(title or name, 120) or name
         body = {

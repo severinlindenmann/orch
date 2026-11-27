@@ -22,6 +22,10 @@ nothing is stored.
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
   with no live process has no helper and is not working.
 - stuck: the ticket rule (tickets.stuck_why) or a stuck helper, one reason.
+- in_progress / not_started (ORCH-2140, Home and `orch counts`): the open tickets that do not need the person
+  now. Not started = Backlog or Ready, no task finished, no live helper and no Send back open; in progress =
+  every other one (Working, Waiting, a Send back, a ticket with a task finished). In Review, finished,
+  and a ticket that needs you are in neither.
 """
 
 from __future__ import annotations
@@ -88,12 +92,13 @@ def quiet(root, tickets: list[dict]) -> dict:
     (the queue woke it to repair the pull request); it comes back once the queue gives up on it. folded = the
     ticket has another card already: an open question (the Check card follows once it is answered) or the
     "passed its checks but was not merged" row. Never raises: what cannot be read shows its card."""
-    from orch import stuck
+    from orch import mergequeue, stuck
     from orch import tickets as core
 
     out: dict = {"queue": [], "folded": []}
+    queue = mergequeue.Queue(root)
     try:
-        ready = stuck.unmerged_ids(root, tickets)
+        ready = stuck.unmerged_ids(root, tickets, queue)
     except Exception:  # noqa: BLE001 - no cache, no row: the Check card shows
         ready = set()
     for t in tickets:
@@ -102,7 +107,7 @@ def quiet(root, tickets: list[dict]) -> dict:
         try:
             pulls = stuck.open_pulls(t)  # every open one in the queue: one left out still needs the person
             held = bool(pulls) and (
-                all(core.in_merge_queue(root, [u]) for u in pulls) or stuck.helper_busy(root, t)
+                all(u.lower() in queue.waiting for u in pulls) or stuck.helper_busy(root, t)
             )
         except Exception:  # noqa: BLE001 - a broken run record or ref: the Check card shows
             held = False
@@ -216,6 +221,16 @@ def stuck(ticket: dict, run: dict | None = None, now: datetime | None = None) ->
         return None
 
 
+def started(ticket: dict, helper_state: str | None = None) -> bool:
+    """ORCH-2140: work on an open ticket began: Working or Waiting, a live helper, a task finished
+    or a Send back."""
+    from orch import tickets as core
+
+    if ticket.get("status") not in ("open", "ready"):
+        return True
+    return bool(helper_state) or progress(ticket)["finished"] > 0 or core.changes_asked(ticket)
+
+
 def live_runs(root) -> dict:
     """{ticket id: {running, state, helper}} for every run this workspace knows (runwatch.list_runs)."""
     from orch import runwatch
@@ -243,8 +258,8 @@ def summary(
     stopped: list | None = None,
 ) -> dict:
     """Everything a page counts, from one pass: {needs_you, helpers: {state: n}, working, running, stuck,
-    tickets: {id: {step, progress, helper, stuck}}}. runs: {ticket id: run status dict}; stopped: the needs
-    rows of work that stopped (stuck.rows)."""
+    in_progress: [ids], not_started: [ids], tickets: {id: {step, progress, helper, stuck}}}.
+    runs: {ticket id: run status dict}; stopped: the needs rows of work that stopped (stuck.rows)."""
     runs = runs or {}
     per: dict[str, dict] = {}
     helpers = dict.fromkeys(HELPER_STATES, 0)
@@ -262,8 +277,21 @@ def summary(
         if why:
             stuck_ids.append(t["id"])
         per[t["id"]] = {"step": step(t), "progress": progress(t), "helper": h, "stuck": why}
+    from orch import tickets as core
+
+    need = needs_you(tickets, hidden, stopped)
+    waits = set(need["tickets"])
+    in_progress, not_started = [], []
+    for t in tickets:
+        if not isinstance(t, dict) or t.get("id") not in per or t["id"] in waits:
+            continue
+        if t.get("status") in (*OPEN_DONE, "review") or core.is_hidden(t):
+            continue
+        (in_progress if started(t, per[t["id"]]["helper"]) else not_started).append(t["id"])
     return {
-        "needs_you": needs_you(tickets, hidden, stopped),
+        "needs_you": need,
+        "in_progress": in_progress,
+        "not_started": not_started,
         "helpers": helpers,
         "working": sum(helpers[k] for k in WORKING),
         "running": sum(helpers.values()),  # every live helper process, whatever its state

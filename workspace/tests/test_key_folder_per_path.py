@@ -300,6 +300,42 @@ def test_winner_seen_late_is_kept(proj, monkeypatch):
     assert (proj / ".orch" / ".local-id").read_text().strip() == winner
 
 
+@pytest.mark.parametrize("dirfd", [True, False], ids=["dir-fd", "by-path"])
+def test_no_hard_links_keeps_a_valid_id_without_replace(proj, monkeypatch, dirfd):
+    """#585: a file system without hard links (EPERM on link) fell through and replaced a valid id."""
+    from orch import addons
+
+    if dirfd and not addons._dirfd_ok():
+        pytest.skip("no dir-fd code path here")
+    first = secrets.token_hex(16)
+    _forge(proj, first)
+    monkeypatch.setattr(addons, "_dirfd_ok", lambda: dirfd)
+
+    def no_links(*a, **k):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "link", no_links)
+    assert addons.put_local_id(proj, secrets.token_hex(16)) == first
+    assert _id(proj) == first
+    fresh = secrets.token_hex(16)
+    assert addons.put_local_id(proj, fresh, replace=True) == fresh  # replace still replaces
+
+
+def test_an_unreadable_own_binding_is_a_plain_refusal(proj, monkeypatch):
+    """#585: a PermissionError reading the own binding escaped as a traceback instead of a refusal."""
+    d = orch_home.key_dir(proj)
+    real = orch_home._read_guarded
+
+    def denied(path):
+        if path == d / "binding.json":
+            raise PermissionError(13, "Permission denied")
+        return real(path)
+
+    monkeypatch.setattr(orch_home, "_read_guarded", denied)
+    with pytest.raises(Refused, match="Try again"):
+        orch_home._check_binding(proj, d)
+
+
 @pytest.mark.parametrize("replace", [True, False])
 def test_a_folder_planted_at_local_id_is_refused(proj, replace):
     from orch import addons
