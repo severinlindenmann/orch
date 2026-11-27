@@ -4054,7 +4054,7 @@ def schedule_sweep(root: Path) -> None:
         if not pending:
             with _scoped(root):
                 rc, refs, _ = _git(
-                    ["for-each-ref", "--format=%(refname)", "refs/heads/orch/"], root, read_only=True
+                    ["for-each-ref", "--format=%(refname:short)", "refs/heads/orch/"], root, read_only=True
                 )
             pending = rc == 0 and any(_TID.fullmatch(n.removeprefix("orch/")) for n in refs.splitlines())
         if pending:
