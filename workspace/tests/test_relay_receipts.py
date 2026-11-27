@@ -408,7 +408,7 @@ def test_the_sender_sees_declined_on_the_task_and_the_ticket(proj, run, rel, new
 
 
 def test_declined_about_a_text_is_just_delivered(proj, run, rel, new_ticket):
-    """The line counts only for a task we handed over: a text cannot be declined (R3.2: their words are data)."""
+    """The line counts only for a task we handed over: a text cannot be declined (R3.2: words are data)."""
     _listed(rel)
     connect(run, rel)
     tid = new_ticket("Ask them")
