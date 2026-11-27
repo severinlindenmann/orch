@@ -29,6 +29,10 @@ from orch import (
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
+# No idle cleanup before these: a hook must stay quiet, and the reads answer what is saved. The cleanup looks
+# at every run and starts tickets waiting in line (seconds on a busy computer); the dashboard reads `run
+# history` per ticket through its three read workers, so a slow one held up every page (r-1127-0535-ws).
+NO_CLEANUP = ("event", "history", "session")
 SUBCOMMANDS = (
     "claim",
     "release",
@@ -532,7 +536,7 @@ def dispatch(args, root: Path) -> bool:
         text = "\n\n".join(f"{runs_live.ref(root, t)}:\n" + "\n".join(v["lines"]) for t, v in shots.items())
         _out(args, {"screens": shots}, text or "No live session among these tickets.")
         return True
-    if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
+    if sub not in NO_CLEANUP:  # everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):
             runs_live.cleanup(root)
     by = args.by or tickets.current_actor()
