@@ -10,6 +10,7 @@ ticket_ext = "ext.schema.json"
 background = true
 recommended = false
 runs_agents = true
+event_formats = ["claude-stream-json/1", "claude-transcript/1"]
 needs = true
 requires = []
 gitignore = [".orch/addons/focus/cache/", "received/"]

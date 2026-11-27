@@ -5,6 +5,7 @@ version = "0.1.0"
 description = "See what your helpers used in the last 30 days."
 docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_insights"
+event_formats = ["claude-stream-json/1", "claude-transcript/1"]
 skill = "skills/orch-insights"
 agents_block = "skills/orch-insights/AGENTS-block.md"
 needs = true                               # orch insights needs --json
