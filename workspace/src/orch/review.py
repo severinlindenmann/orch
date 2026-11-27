@@ -1441,7 +1441,11 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
     from orch import ghmerge
 
     retry = ghmerge.RETRY_PHONE if via == "phone" else None  # the relay inbox waits for this answer
-    got = ghmerge.merge(url, q["action"].get("head"), retry_for=retry)
+    try:
+        got = ghmerge.merge(url, q["action"].get("head"), retry_for=retry)
+    except ghmerge.OwnPullRequest as e:
+        _own_pull_request(root, tid, url, e, by, via)
+        return
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]
@@ -1451,6 +1455,24 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
 
     with contextlib.suppress(Refused, OSError):  # merged; the answer itself is written next
         tickets.note_history(root, tid, by, line, via)
+
+
+def _own_pull_request(root: Path, tid: str, url: str, e, by: str, via: str) -> None:
+    """ORCH-1118: the person clicked Merge on their own pull request and GitHub wants a review it never takes
+    from the author. With the merge queue on for its base branch the Merge stands: the answer is saved and the
+    queue (another login) approves and merges that commit once its checks are green. Else it is sent back."""
+    import contextlib
+
+    from orch import ghmerge
+    from orch.cli import _queue_bases
+
+    if not e.base or e.base not in _queue_bases(root):
+        raise ghmerge.MergeFailed(
+            "GitHub does not let you approve your own pull request, so nothing was merged: "
+            "someone else who may approve it approves it on GitHub."
+        )
+    with contextlib.suppress(Refused, OSError):  # the answer itself is written next
+        tickets.note_history(root, tid, by, f"{ghmerge.OWN_PR} {url}", via)
 
 
 def excused_red(got: dict, known_red: dict | None) -> tuple[list[str], frozenset] | None:

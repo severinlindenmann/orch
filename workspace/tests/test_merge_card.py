@@ -35,6 +35,7 @@ class FakeGh:
         self.offline = 0  # ORCH-1415: this many next gh calls get no answer (GitHub refuses the connection)
         self.review_err = ""  # #1764: GitHub refuses the APPROVE review with this text
         self.lost = 0  # this many next merges land on GitHub but their answer gets lost on the way back
+        self.author = "helper-bot"  # who wrote the pull request (ORCH-1118)
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
@@ -68,7 +69,8 @@ class FakeGh:
         if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
+            out = f"{self.state}\t{self.review}\t{self.head}\t{self.author}\tdevelop\n"
+            return subprocess.CompletedProcess(argv, 0, out, "")
         if args[:3] == ["api", "-X", "POST"]:
             if self.review_err:
                 return subprocess.CompletedProcess(argv, 1, "", self.review_err)
@@ -312,6 +314,49 @@ def test_a_refused_review_is_said_not_only_the_branch_policy(tk, run, gh):
     change = _q(root, tid)["decision"]["changes"][0]
     assert "did not add your review (Can not approve your own pull request (HTTP 422))" in change
     assert "base branch policy prohibits" in change
+
+
+def test_own_pull_request_needing_a_review_goes_to_the_merge_queue(tk, run, gh, monkeypatch):
+    """ORCH-1118 (#2829 q9): GitHub refuses an author's own review (HTTP 422), so the click never tries it;
+    with the merge queue on for its base branch the Merge stands and the queue approves and merges it."""
+    from orch import cli
+
+    monkeypatch.setattr(cli, "_queue_bases", lambda root: ["develop"])
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.review, gh.author = "REVIEW_REQUIRED", "PAT-GH"  # GitHub logins ignore case
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    # no review and no merge is tried
+    assert [c[:2] for c in gh.calls] == [["api", "user"], ["pr", "view"], ["pr", "view"]]
+    q = _q(root, tid)
+    assert q["answer"] == "Merge" and q["decision"]["action"] == "approve"
+    hist = [h["text"] for h in tickets.load(root, tid)["history"]]
+    assert f"{ghmerge.OWN_PR} {PR}" in hist
+
+
+def test_own_pull_request_without_the_merge_queue_is_sent_back_with_what_to_do(tk, run, gh, monkeypatch):
+    from orch import cli
+
+    monkeypatch.setattr(cli, "_queue_bases", lambda root: [])
+    root, tid = tk
+    gh.files = [_wf_file("    timeout-minutes: 10")]
+    assert _ask(run, tid)[0] == 0
+    gh.review, gh.author = "", "pat-gh"  # a rule set's code-owner review on a workflow change
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    assert not [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]] and not gh.merges
+    q = _q(root, tid)
+    assert q["decision"]["action"] == "send_back"
+    assert "does not let you approve your own pull request" in q["decision"]["changes"][0]
+
+
+def test_own_pull_request_that_needs_no_review_merges_as_before(tk, run, gh):
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.review, gh.author = "APPROVED", "pat-gh"
+    assert run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)[0] == 0
+    assert gh.merges and _q(root, tid)["decision"]["action"] == "approve"
 
 
 def test_no_review_when_none_is_required(tk, run, gh):

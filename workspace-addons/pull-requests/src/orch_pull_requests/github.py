@@ -6,7 +6,7 @@ import json
 import shutil
 from urllib.parse import quote
 
-from .store import Refused
+from .store import Refused, parse_url
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
@@ -16,6 +16,11 @@ VIEW = (
 MARK = "orch/merge-queue"
 GONE = ("reference does not exist", "not found", "http 404")
 RUNS_MOST = 1000  # GitHub's limit for a search of workflow runs by time
+
+
+def _first_line(text: str) -> str:
+    line = next((x.strip() for x in (text or "").splitlines() if x.strip()), "no reason given")
+    return line.removeprefix("X ").removeprefix("! ")[:200]
 
 
 class GitHub:
@@ -339,6 +344,22 @@ class GitHub:
     def set_variable(self, repo: str, name: str, value: str) -> bool:
         """Set a repository's Actions variable (a write: the caller takes a slot of the write limit first)."""
         return self._run("variable", "set", name, "--repo", repo, "--body", value).returncode == 0
+
+    def approve(self, url: str, head: str, body: str) -> str:
+        """Approve exactly this commit of the pull request with the queue's login (ORCH-1118: after a person's
+        Merge on its card). '' when GitHub took the review, else GitHub's words."""
+        repo, number = parse_url(url)
+        got = self._run(
+            "api", "-X", "POST", f"repos/{repo}/pulls/{number}/reviews",
+            "-f", f"commit_id={head}", "-f", "event=APPROVE", "-f", f"body={body}",
+        )  # fmt: skip
+        return "" if got.returncode == 0 else _first_line(got.stderr or got.stdout)
+
+    def merge_pr(self, url: str, head: str) -> str:
+        """Merge the pull request itself, only while its newest commit is head. '' when merged, else GitHub's
+        words."""
+        got = self._run("pr", "merge", url, "--merge", "--match-head-commit", head)
+        return "" if got.returncode == 0 else _first_line(got.stderr or got.stdout)
 
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""

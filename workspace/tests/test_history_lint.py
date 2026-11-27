@@ -139,6 +139,10 @@ SHOWN = {
         "workspace-addons/pull-requests/src/orch_pull_requests/broken.py",
         "answers",
     ): "tk = history.shown_ticket(root, raw) first; `raw` only for the proof (history.answer_proven)",
+    (
+        "workspace-addons/pull-requests/src/orch_pull_requests/runner.py",
+        "approved_merges",
+    ): "t = history.shown_ticket(root, raw) first: only a proven person's Merge counts (ORCH-1118)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person
