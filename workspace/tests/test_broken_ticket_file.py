@@ -88,7 +88,9 @@ def test_show_of_an_unknown_key_without_broken_files_is_unchanged(proj, run):
 @pytest.mark.parametrize("text", [TYPO, EMPTY])
 def test_doctor_reports_the_broken_file(broken, run, monkeypatch, text):
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}")
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")

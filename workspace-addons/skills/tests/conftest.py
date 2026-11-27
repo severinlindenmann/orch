@@ -41,7 +41,7 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(home / "orchhome"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters, "detect", lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
     )
     for k in [k for k in os.environ if k.startswith(("CODEX_", "CLAUDECODE", "ORCH_RUN", "ORCH_AGENT"))]:
         monkeypatch.delenv(k)
