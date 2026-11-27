@@ -64,12 +64,59 @@ def test_the_list_says_plain_names_hides_a_broken_switch_and_counts_once():
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     by = {r["name"]: r for r in got["rows"]}
-    assert set(by) == {"Claude api credit", "Pass tool"}
+    assert set(by) == {"Claude API credit", "Pass tool"}
     assert (
-        "codex:" not in by["Claude api credit"]["text"]
-        and "Check the credit left before a run." in by["Claude api credit"]["text"]
+        "codex:" not in by["Claude API credit"]["text"]
+        and "Check the credit left before a run." in by["Claude API credit"]["text"]
     )
-    assert by["Claude api credit"]["switch"] is True
+    assert by["Claude API credit"]["switch"] is True
     assert by["Pass tool"]["switch"] is False  # Needs a look: no switch that looks on
     assert got["tabs"][0] == "Skills 2"  # one number, not "Skills 2 1"
     assert "Needs a look (1)" in got["filters"]
+
+
+def _run(page):
+    js = str(resources.files("orch_skills").joinpath("web", "skills.js"))
+    out = subprocess.run(
+        ["node", "-e", DOM, json.dumps(page), js], check=False, capture_output=True, text=True, timeout=30
+    )
+    assert out.returncode == 0, out.stderr
+    return {r["name"]: r for r in json.loads(out.stdout)["rows"]}
+
+
+def test_names_keep_their_spelling_and_the_line_is_one_plain_sentence():
+    """Report r-1127-0540-ws: 'Github links', 'Openai api credit' and helper instructions as the description."""
+    workspace_copy = (
+        "(Workspace copy of the shipped orch-github skill; orch installs it only with a GitHub remote.) "
+        "Link GitHub issues and pull requests to tickets. Keep their state current."
+    )
+    by = _run(
+        {
+            "skills": [
+                _skill("github-links", workspace_copy),
+                _skill("openai-api-credit", "Use when the owner says use openai (or GPT API) for a task. More text."),
+                _skill("orch-ux-checklist", "Use for ANY orch UI work, a new page or a state."),
+            ]
+        }
+    )
+    assert set(by) == {"GitHub links", "OpenAI API credit", "orch UX checklist"}
+    assert "Link GitHub issues and pull requests to tickets." in by["GitHub links"]["text"]
+    assert "Workspace copy" not in by["GitHub links"]["text"] and "Keep their" not in by["GitHub links"]["text"]
+    assert "When the owner says use openai for a task." in by["OpenAI API credit"]["text"]
+    assert "Use when" not in by["OpenAI API credit"]["text"]
+    assert "For any orch UI work, a new page or a state." in by["orch UX checklist"]["text"]
+
+
+def test_a_second_copy_is_named_on_the_row():
+    mine = _skill("orch-mockup", "How a mockup is built.")
+    ws = dict(_skill("orch-mockup", "How a mockup is built here."), id="skill:workspace:orch-mockup", where="workspace")
+    mine["copy"], ws["copy"] = "A different copy is also in this workspace", "A different copy is also on your computer"
+    js = str(resources.files("orch_skills").joinpath("web", "skills.js"))
+    out = subprocess.run(
+        ["node", "-e", DOM, json.dumps({"skills": [mine, ws]}), js],
+        check=False, capture_output=True, text=True, timeout=30,
+    )  # fmt: skip
+    assert out.returncode == 0, out.stderr
+    texts = [r["text"] for r in json.loads(out.stdout)["rows"]]
+    assert len(texts) == 2
+    assert any("also on your computer" in t for t in texts) and any("also in this workspace" in t for t in texts)

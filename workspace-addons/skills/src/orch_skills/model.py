@@ -55,9 +55,11 @@ def _header(folder: Path) -> dict:
         m = _DESC.search(_text(folder / "SKILL.md").split("\n---", 2)[0])
         return {"description": m.group(1).strip().strip("\"'")} if m else {}
     try:
-        return skillmeta.try_header(folder)
-    except Exception:  # noqa: BLE001  an unreadable header shows as "has no real description"
-        return {}
+        return skillmeta.read_header(folder)
+    except skillmeta.HeaderError as e:  # the page says why orch cannot read it, not "no real description"
+        return {"unreadable": str(e)}
+    except Exception:  # noqa: BLE001
+        return {"unreadable": "The header cannot be read."}
 
 
 def _home(account_home: Path | None) -> Path:
@@ -149,7 +151,9 @@ def _skill_problems(root: Path, head: dict, meta: dict, keys: set[str]) -> list[
     out = []
     if meta.get("status") == "retired":
         out.append("Retired, but helpers still see it")
-    if len((head.get("description") or "").strip()) < DESC_MIN:
+    if head.get("unreadable"):
+        out.append("orch cannot read its header. " + head["unreadable"])
+    elif len((head.get("description") or "").strip()) < DESC_MIN:
         out.append("Has no real description")
     for prog in [p.strip() for p in (meta.get("requires") or "").split(",") if p.strip()]:
         if shutil.which(prog) is None:
@@ -179,6 +183,34 @@ def _kept_copy(root: Path, name: str) -> bool:
     return False
 
 
+_COPY_WHERE = {"orch": "comes with orch", "workspace": "in this workspace", "admin": "shared by your admin",
+               "mine": "on your computer"}  # fmt: skip
+
+
+def _same_text(a: Path, b: Path) -> bool:
+    try:
+        return (a / "SKILL.md").read_bytes() == (b / "SKILL.md").read_bytes()
+    except OSError:
+        return False
+
+
+def _mark_copies(items: list[dict]) -> None:
+    """A skill of this workspace (or orch's, or shared) and one of the same name on this computer: helpers can get
+    both, so each row says so and the list does not look like it repeats itself (report r-1127-0540-ws)."""
+    by_name: dict[str, list[dict]] = {}
+    for it in items:
+        by_name.setdefault(it["name"], []).append(it)
+    for same in by_name.values():
+        if len(same) < 2:
+            continue
+        for it in same:
+            others = [o for o in same if o is not it]
+            o = others[0]
+            twin = _same_text(it["_folder"], o["_folder"])
+            it["copy"] = ("Same skill also " if twin else "A different copy is also ") + _COPY_WHERE[o["where"]]
+            it["copy_hint"] = "Helpers can get both copies. Keep one, so every helper gets the same."
+
+
 def skills(root: Path, account_home: Path | None = None, keys: set[str] | None = None) -> list[dict]:
     from orch import skills as core
 
@@ -201,6 +233,7 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             "description": (head.get("description") or "").strip(),
             "fields": {k: v for k, v in meta.items() if isinstance(v, str)},
             "words": len((head.get("description") or "").split()),
+            "_folder": folder,
         }
         hand = [n for n, st in skill_off.items() if st.get(name) == "hand"]
         if where in ("workspace", "mine") and _is_link(folder):
@@ -246,6 +279,7 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             if waiting:
                 item["newer"] = "Your admin has newer shared settings; they arrive with the next relay update"
         items.append(item)
+    _mark_copies(items)
     for name, had in sorted(gone.items()):
         now_v = offered.get(name)
         item = {
@@ -267,6 +301,8 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
         elif now_v is None and offered:
             item["description"] = "Removed here. Your admin no longer shares it with this workspace."
         items.append(item)
+    for it in items:
+        it.pop("_folder", None)
     return items
 
 
