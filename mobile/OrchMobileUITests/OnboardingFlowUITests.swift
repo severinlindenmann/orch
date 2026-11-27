@@ -171,7 +171,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(cont.waitForExistence(timeout: 10))
         cont.tap()
         XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 10))
-        XCTAssertTrue((app.staticTexts["invite-error"].label).contains("orch on your computer"))
+        XCTAssertTrue((app.staticTexts["invite-error"].label).contains("person who invited you"))
         XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
     }
 
