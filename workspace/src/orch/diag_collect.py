@@ -229,6 +229,46 @@ def addon_on(root: Path, name: str) -> bool:
         return False
 
 
+UNHANDLED_S = 60 * 60  # a saved workspace message nothing handled for this long is stuck
+
+
+def _unhandled_inbox(root: Path, now: float) -> dict:
+    """ORCH-2157: texts and files from other workspaces saved here that nothing handled or passed on (not in
+    inbox-seen.json). Ages from the saved file's time; at most 10 ids."""
+    box = root / ".orch" / "inbox"
+    ages: list[tuple[float, str]] = []
+    if box.is_dir() and not box.is_symlink():
+        try:
+            seen = json.loads((root / ".orch" / "inbox-seen.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            seen = {}
+        seen = seen if isinstance(seen, dict) else {}
+        for p in box.glob("m_*.json"):
+            if p.stem in seen:
+                continue  # handled: not read at all, so a big inbox stays cheap
+            try:
+                m = json.loads(p.read_text(encoding="utf-8"))
+                age = max(0.0, now - p.stat().st_mtime)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(m, dict) or m.get("type") not in ("text", "file"):
+                continue
+            if isinstance(m.get("body"), dict) and isinstance(m["body"].get("group"), dict):
+                continue  # group chat copies have their own rules (chat-groups.md)
+            frm = str(m.get("from") or "")
+            if not frm.startswith("ws_") or p.stem in seen or f"{frm}/{p.stem}" in seen:
+                continue
+            ages.append((age, p.stem))
+    ages.sort(reverse=True)
+    stuck = [i for age, i in ages if age > UNHANDLED_S]
+    return {
+        "count": len(ages),
+        "stuck": len(stuck),
+        "oldest_age_s": ages[0][0] if ages else None,
+        "ids": stuck[:10],
+    }
+
+
 def queues_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
     gaps: list[str] = []
     out: dict = {}
@@ -247,6 +287,7 @@ def queues_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             "oldest_age_s": max(msgs) if msgs else None,
             "problem": problem,
         }
+        out["relay_inbox"] = _unhandled_inbox(root, now)
     pend = runs.run_dir(root) / "pending"
     n_in = {}
     if pend.is_dir() and not pend.is_symlink():

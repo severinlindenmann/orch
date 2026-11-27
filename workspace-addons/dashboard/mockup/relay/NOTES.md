@@ -79,3 +79,11 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   MKT-12" (their ticket), "Passed on to Chat" or "Delivered". Nothing reported yet stays "Sent". A message about an
   open ticket without an answer for 3 days reads "No answer for 3 days" (warn tone, no tick); the person is asked on
   the ticket. No new component: the existing `.handoff` line. Mirrors relay_view.py.
+
+## 28 Nov 2026 (ORCH-2189, Decline tells the sender; ORCH-2312)
+
+- A task you handed over that their person declined says "Declined" in the task card's own badge (the place
+  "Waiting for Marketing" stood until then), and the ticket it came from gets the line "Message to Marketing:
+  Declined". No reason and no name comes back. No new component. Mirrors relay_view.py.
+- The notice for one waiting message reads "1 message waits ...". A waiting message goes out when the page looks
+  again (the page's own view sends it), so "goes out by itself" is true without a terminal.

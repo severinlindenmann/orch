@@ -73,6 +73,13 @@ with `body.update.kind = "ack"` and `reply_to` = the id of the message it is abo
   one that went to Chat carries `body.general: true` and no `ticket`.
 - At most one receipt per message. A receipt is an update: it is never passed on to a ticket and never answered
   with a receipt.
+- `Declined` (ORCH-2189, RP4 A): the one fixed line the receiver's orch sends when its person presses Decline on a
+  1:1 `delegate` or `start`. Same form as above (`ack`, `reply_to` = the task, `body.general: true`, no `ticket`);
+  it follows the `Delivered` the task got while it waited, so a task has at most these two. No reason and no name
+  goes back. The sender shows "Declined" on that message and on the ticket it was about; it replaces Delivered and
+  is never replaced. A sender that does not know the line yet reads it as Delivered (every line it does not know
+  counts as that). Not sent for a task of a group (chat-groups.md has its own note) or one put aside by a helper
+  (`orch relay done`).
 - The sender takes a receipt only from the workspace it sent that message to, and only the fixed lines: any other
   words count as `Delivered` (the text is data, R3.2). An older orch that does not know receipts lists the text as
   any other update; a sender that hears nothing shows `Sent` as before.
