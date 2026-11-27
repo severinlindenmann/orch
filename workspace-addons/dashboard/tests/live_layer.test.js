@@ -336,6 +336,7 @@ test('ORCH-2199 (owner pick G a): full screen, split, pin and close are visible;
   assert.match(more, /liveHistMenuItem\(key\)/, 'History');
   assert.doesNotMatch(more, /'Open ticket'/, 'Open ticket moved to the status popover');
   assert.match(more, /'data-fold-item':''/, 'pin and split come into More only in a narrow pane');
+  assert.match(more, /'data-fold-item':narrow \? null : 'view'/, 'Chat | Terminal folds into More on its own, later');
   assert.match(pane, /'data-key':'live-pin', 'data-fold':''/);
   assert.doesNotMatch(pane, /liveHistButton|liveModelRow|livePermPaneRow/, 'no row above the screen, no History word');
   assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
@@ -670,4 +671,26 @@ test('in the Terminal view the card stays, without Open terminal (ORCH-2197)', a
   assert.equal(findKey(c.box, 'live-ok-title').textContent, 'Helper asks for your OK');
   assert.equal(findKey(c.box, 'live-ok-term'), null);
   assert.equal(findKey(c.box, 'live-ok-here').textContent, 'Answer it in the terminal.');
+});
+
+test('ORCH-2314: Focus beside a ticket at 1280 (a 615 px pane) keeps every header button in the pane', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  // Pin and Split fold into More under 720 px, so Close and More stay in reach in Terminal view with typing off
+  const wide = /@container live-pane \(max-width:719px\)\{([^@]*?)\n\}/.exec(css);
+  assert.ok(wide, 'the 720 px fold is in widgets.css');
+  assert.match(wide[1], /\.live-ctl \[data-fold\]\{display:none\}/);
+  assert.match(wide[1], /\.live-pop \[data-fold-item=""\]\{display:flex\}/);
+  assert.match(wide[1], /\.live-term-tools \.term-say\{display:none\}/, 'the Watch only words give way first');
+  assert.doesNotMatch(wide[1], /live-view/, 'Chat | Terminal stays in the header at 615 px');
+  const narrow = /@container live-pane \(max-width:599px\)\{([^@]*?)\n\}/.exec(css);
+  assert.match(narrow[1], /\.live-ph>\.live-view\{display:none\}/);
+  assert.match(narrow[1], /\.live-pop \[data-fold-item=view\]\{display:flex\}/);
+  assert.match(css, /\.live-term-tools\{[^}]*flex:0 1 auto[^}]*min-width:0/, 'the screen tools shrink before a button leaves the pane');
+});
+
+test('ORCH-2314: a helper that waits for an OK says so in the pane pill; an empty Results strip takes no row', () => {
+  assert.match(source, /liveOkWaits\(\{status:'needs-you', detail:waits\.detail\}\) \? \{\.\.\.waits, word:'Waits for your OK'\}/);
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(css, /\.live-shelf:not\(:has\(\.result-grid>\*,\.result-links>\*,>\.live-ask:not\(\[hidden\]\)\)\)\{display:none\}/);
+  for (const m of ['full', 'bottom']) assert.match(css, new RegExp('\\.live-panel\\[data-mode=' + m + '\\] \\.live-shelf\\{display:flex;'), 'the column beside the chat stays in ' + m);
 });

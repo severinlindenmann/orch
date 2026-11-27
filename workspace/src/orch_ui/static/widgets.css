@@ -1153,7 +1153,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-panel[data-mode=right] .live-pane[data-new]{animation-name:live-up}
 .live-ph{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s2) var(--s1) var(--s3);border-bottom:1px solid var(--border)}
 /* ORCH-2199 (owner picks A a, G a, H a): the header is the pane's one row above the screen. The status pill opens the
-   session's details (.live-stat-pop); a plain terminal starts with >_ and its folder. Under 480 px of pane, Pin and Split
+   session's details (.live-stat-pop); a plain terminal starts with >_ and its folder. Under 720 px of pane, Pin and Split
    fold into More ([data-fold] hides here, [data-fold-item] shows in More). */
 .live-stat{display:inline-flex;flex:none;align-items:center;min-height:28px;padding:0;border:0;border-radius:var(--r1);background:none;color:inherit;font:inherit;cursor:pointer}
 .live-stat:hover .pill,.live-stat[aria-expanded=true] .pill{box-shadow:0 0 0 1px var(--brand)}
@@ -1169,14 +1169,21 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pfolder{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .live-ph:has(>.live-pfolder)>.live-pt{flex:0 1 auto;min-width:0}
 .live-ph>.live-pfolder{margin-left:calc(-1 * var(--s1))}
-.live-term-tools{display:inline-flex;flex:none;align-items:center;margin-left:auto}
+.live-term-tools{display:inline-flex;flex:0 1 auto;align-items:center;min-width:0;margin-left:auto}  /* its words give way before a button leaves the pane */
 .live-term-tools:empty{display:none}
 .live-term-tools .term-say{max-width:18ch}
 .live-pop [data-fold-item]{display:none}
-@container live-pane (max-width:599px){
-  .live-ctl [data-fold],.live-ph>.live-view{display:none}
-  .live-pop [data-fold-item]{display:flex}
+/* ORCH-2314: Focus beside a ticket at 1280 is a 615 px pane. In Terminal view with typing off in Settings ("Watch only",
+   Turn typing on, Copy) Split, Pin, Close and More slid out of it. Pin and Split fold into More under 720 px; Chat |
+   Terminal stays in the header down to 600 px. */
+@container live-pane (max-width:719px){
+  .live-ctl [data-fold]{display:none}
+  .live-pop [data-fold-item=""]{display:flex}
   .live-term-tools .term-say{display:none}
+}
+@container live-pane (max-width:599px){
+  .live-ph>.live-view{display:none}
+  .live-pop [data-fold-item=view]{display:flex}
 }
 @container live-pane (max-width:299px){  /* four panes at 1280: the header keeps Close and More in view, the key and Full screen wait in the popover */
   .live-ph .key,.live-ctl [data-key="live-full"]{display:none}
@@ -1226,6 +1233,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-shelf>.live-ask .btn{height:auto;white-space:normal;text-align:left}
 .live-shelf:has(>.live-ask:not([hidden])) .live-shelf-list>.meta{display:none}  /* the question says what waits; no "Nothing yet" under it */
 .live-shelf-list{flex:1;min-width:0}
+/* ORCH-2314 (owner pick H a, no explaining lines): as a strip above the screen the shelf shows only when it holds a
+   result or a question; "Results · Nothing yet…" took a row from every helper pane. The column beside the chat stays. */
+.live-shelf:not(:has(.result-grid>*,.result-links>*,>.live-ask:not([hidden]))){display:none}
 .live-shelf-list>.meta{margin:0}
 .live-shelf .result-grid{display:flex;gap:var(--s2)}
 .live-shelf .result-grid>*{flex:0 0 176px}
@@ -1237,7 +1247,7 @@ button.live-pt:hover{color:var(--brand)}
 }
 @media(min-width:721px){
   .live-panel[data-mode=full] .live-pbw{flex-direction:row}
-  .live-panel[data-mode=full] .live-shelf{order:0;flex:0 0 320px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=full] .live-shelf{display:flex;order:0;flex:0 0 320px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
   .live-panel[data-mode=full] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=full] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=full] .live-shelf .result-links{display:grid}
@@ -1247,7 +1257,7 @@ button.live-pt:hover{color:var(--brand)}
 }
 @media(min-width:900px){
   .live-panel[data-mode=bottom] .live-pbw{flex-direction:row}
-  .live-panel[data-mode=bottom] .live-shelf{order:0;flex:0 0 360px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=bottom] .live-shelf{display:flex;order:0;flex:0 0 360px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
   .live-panel[data-mode=bottom] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=bottom] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=bottom] .live-shelf .result-links{display:grid}

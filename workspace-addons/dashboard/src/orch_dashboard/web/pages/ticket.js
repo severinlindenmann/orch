@@ -1931,7 +1931,7 @@ function ticketStripModel(t, run, fresh) {
   }
   if (run?.running || run?.state === 'maybe-stale') {
     // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
-    if (s.helper) return m((s.helper.detail || s.word) + '.');
+    if (s.helper) return m(((window.UI?.helperWhy ? window.UI.helperWhy(s.helper.detail) : s.helper.detail) || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
   if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
@@ -2385,7 +2385,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
   const kicker = stripKicker(t, pill, [agent ? name(agent) : null, minutes], 'ticket-kicker');
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
-  const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
+  // a wait for an OK says only that (ORCH-2314): the command is on the OK card in Live, not cut off here
+  const why = helper.state !== 'working' && helper.detail ? clean(window.UI?.helperWhy ? window.UI.helperWhy(helper.detail) : helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
   const idle = ['idle', 'stuck'].includes(helper.state);
   const stop = ticketButton([iconEl('stop'), idle ? 'Stop idle helper' : 'Stop'], 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'});

@@ -150,6 +150,21 @@ test('the short places line: N of M in use, the full sentence when every place i
   assert.match(S.placesShort(p(6, 6)), /^All 6 helper places are in use\..*waits in line/);
 });
 
+test('ORCH-2314: an idle, stuck or waiting helper holds a place but is not counted as working', () => {
+  const S = require('../static/start-choice-state.js');
+  const h = state => ({running: true, helper: {state}});
+  const idle = S.places({a: h('idle'), b: h('stuck'), c: h('you')}, {}, {});
+  assert.equal(idle.used, 3); assert.equal(idle.working, 0);
+  assert.equal(S.placesShort(idle), '', 'three idle helpers never read "3 helpers working"');
+  assert.equal(S.placesText(idle), 'No helper is working now.');
+  const mixed = S.places({a: h('working'), b: h('starting'), c: h('idle'), d: {running: true}, e: {running: false}}, {}, {waiting: ['t_1']});
+  assert.equal(mixed.working, 3, 'working, starting and a run of an older core without the state');
+  assert.equal(S.placesShort(mixed), '3 helpers working · 1 ticket waits');
+  assert.equal(S.placesShort({...idle, waiting: ['t_1']}), '1 ticket waits');
+  const limit = S.places({a: h('idle'), b: h('working')}, {live_max: 2}, {});
+  assert.equal(limit.full, true, 'an idle helper still holds its place');
+});
+
 test('ORCH-1362: a failed start names the steps that did not go through, so Try again sends a message only once', async () => {
   const st = S.starter({clock: fakeClock(), send: async op => ({ok: op !== 'run.start', text: op === 'run.start' ? 'No helper place free.' : ''})});
   const ev = [];
