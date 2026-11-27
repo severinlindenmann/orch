@@ -136,11 +136,8 @@ def test_the_step_hooks_go_only_into_the_runs_own_settings(proj):
     if doc is None:
         pytest.skip("the hook's python cannot import orch here")
     cmds = [g["hooks"][0]["command"] for g in doc["hooks"]["PostToolUse"]]
-    # one command: the record hook runs the step notice itself (`--with claude`, ORCH-634); on Windows there
-    # is no record hook and the work-check step hook is its own command (adapters.reminder_doc)
+    # Without the collector the step notice still runs, without an unusable record hook.
     assert len(cmds) == 1
-    assert cmds[0].endswith(
-        "work-check --hook claude" if adapters._is_windows() else "record hook --with claude"
-    )
+    assert cmds[0].endswith("work-check --hook claude")
     a = adapters.load("claude", proj)
     assert "PostToolUse" not in a["reminder_hooks"]  # never in the workspace's own settings file

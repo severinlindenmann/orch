@@ -1354,8 +1354,9 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .doc-risk{display:inline-block;margin-left:8px;padding:0 6px;border-radius:999px;border:1px solid currentColor;font-family:var(--font-sans,inherit);font-size:11px;white-space:nowrap}
 .doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
 /* ---- Live bar (draft D, ORCH-337): one calm row under every page. Groups with a small label: needs-you chips
-   (orange), pinned chips, then quiet counts that open a list with search. It never wraps: data-fold says how far it
-   folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols and counts, 4 needs you and More).
+   (orange), pinned chips, the sessions open in the panel ("Open"), then quiet counts that open a list with search. It
+   never wraps: data-fold says how far it folded (0 every chip, 1 pinned as a count, 2 the counts as one More, 3 symbols
+   and counts with a short word, 4 needs you and More with words, 5 the numbers alone).
    Fixed under the page beside the side bar; at phone width above the tab bar (--lbar-bottom, set by the page).
    .lbar-sample shows it inline in the gallery. ---- */
 .lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
@@ -1365,7 +1366,7 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
 .lbar-home:hover{background:var(--surface-2)}
 .lbar-sw{display:flex;flex:1 1 0;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-width:0;overflow:hidden}
-.lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw{gap:var(--s1)}
+.lbar[data-fold="3"] .lbar-sw,.lbar[data-fold="4"] .lbar-sw,.lbar[data-fold="5"] .lbar-sw{gap:var(--s1)}
 .lbar-g{display:inline-flex;flex:none;gap:var(--s1);align-items:center}
 .lbar-l{display:inline-flex;align-items:center;margin-right:var(--s1);font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap}
 .lbar-g[data-g=wait] .lbar-l{color:var(--needs-you);font-weight:600}
@@ -1989,6 +1990,26 @@ button.gtree-row:hover{background:var(--surface-2)}
 .thread-line-head .meta{font-size:12px;font-weight:400}
 .thread-line-text{font-size:14px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
 .thread-line>.thread-line-body{min-width:0;max-width:72ch;display:grid;gap:var(--s1)}
+/* Messenger parts (ORCH-2171, lane chat-messenger option A): the day line between days, a file card under a message,
+   the line under your own message that says what happened to it, and the status dot on a picture. */
+.day-line{display:flex;align-items:center;gap:var(--s3);color:var(--text-muted);font-size:12px;line-height:16px}
+.day-line::before,.day-line::after{content:"";flex:1;height:1px;background:var(--border)}
+.day-line>span{padding:2px var(--s3);border:1px solid var(--border-strong);border-radius:999px}
+.day-line-note{margin:0;text-align:center;color:var(--text-muted);font-size:12px;line-height:16px}
+.file-cards{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.file-card{display:inline-flex;align-items:center;gap:var(--s2);min-height:var(--touch);max-width:100%;padding:var(--s2) var(--s3);border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface);color:var(--text);text-decoration:none;overflow-wrap:anywhere}
+.file-card:hover{border-color:var(--brand)}
+.file-card .meta{font-size:12px;white-space:nowrap}
+.msg-state{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2);margin:0;font-size:12px;line-height:16px;color:var(--text-muted)}
+.msg-state::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:currentColor}
+.msg-state.failed{color:var(--danger)}
+.msg-state.saved::before{background:transparent;border:1px solid currentColor}
+.msg-state .btn{min-height:var(--touch)}
+.presence{position:relative;display:inline-grid;flex:none}
+.presence-dot{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg);background:var(--text-faint)}
+.presence-dot.ready{background:var(--success)}
+.presence-dot.working{background:var(--info)}
+.presence-dot.stopped{background:var(--danger)}
 /* Form page (ORCH-1037): one form as its own page (New ticket), a centred column the width of a dialog */
 .form-page{width:100%;max-width:640px;margin:0 auto;padding-top:var(--s5)}
 /* Launch (ORCH-1037, UI.launch): the starting moment after Start, a spinning ring around a breathing dot and the steps */

@@ -6,7 +6,9 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -146,6 +148,28 @@ CI = (WF / "ci.yml").read_text()
 ON_EDGE = "needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both'"
 
 
+@pytest.mark.skipif(not shutil.which("jq"), reason="hosted lookup requires jq")
+@pytest.mark.parametrize("status,label,exit_code,edge", [
+    ("online", "orch-edge", 0, True), ("offline", "orch-edge", 0, False),
+    ("online", "orch-mac", 0, False), ("online", "orch-edge", 1, False),
+])
+def test_check_runner_lookup_requires_a_confirmed_online_linux_runner(tmp_path, status, label, exit_code, edge):
+    lookup = textwrap.dedent((WF / "check-runner.yml").read_text().split("        run: |\n")[1])
+    runner = {"status": status, "labels": [{"name": x} for x in ("self-hosted", "Linux", "ARM64", label)]}
+    out = tmp_path / "output"
+    out.touch()
+    env = {**os.environ, "GITHUB_OUTPUT": str(out), "RUNNERS": json.dumps({"runners": [runner]}), "RC": str(exit_code)}
+    subprocess.run(["bash", "-c", 'gh() { echo "$RUNNERS"; return "$RC"; }\n' + lookup], env=env, check=True)
+    value = out.read_text().removeprefix("machine=").strip() or '"ubuntu-latest"'
+    assert json.loads(value) == (["self-hosted", "Linux", "ARM64", "orch-edge"] if edge else "ubuntu-latest")
+
+
+def test_brand_never_runs_on_the_edge_runner():
+    """brand/tests runs the edge runner's own hooks and setup; on that runner they would act for real (ORCH-1932)."""
+    job = _job(CI, "brand")
+    assert re.search(r"^    runs-on: ubuntu-latest$", job, re.MULTILINE), job
+
+
 def _job(text: str, name: str) -> str:
     m = re.search(rf"^  {re.escape(name)}:\n((?:    .*\n|\s*\n)*)", text, re.MULTILINE)
     assert m, name
@@ -234,8 +258,8 @@ def _hook(tmp_path, event, ref, pr, repo):
     return subprocess.run(["bash", str(RUNNER / "job-started.sh")], env=env, capture_output=True, text=True, timeout=30, check=False)
 
 
-def _pr(base, head):
-    return {"base": {"ref": base}, "head": {"repo": {"full_name": head}}}
+def _pr(base, head, ref="topic"):
+    return {"base": {"ref": base}, "head": {"ref": ref, "repo": {"full_name": head}}}
 
 
 @pytest.mark.skipif(not Path("/usr/bin/python3").exists(), reason="the hook uses the system python3")
@@ -248,6 +272,8 @@ def _pr(base, head):
         ("pull_request", "refs/pull/1/merge", _pr("main", REPO), REPO, True),
         ("pull_request", "refs/pull/1/merge", _pr("main", "someone/orch"), REPO, False),
         ("pull_request", "refs/pull/1/merge", _pr("develop", REPO), REPO, False),
+        ("pull_request", "refs/pull/1/merge", _pr("develop", REPO, "orch-queue/group"), REPO, True),
+        ("pull_request", "refs/pull/1/merge", _pr("develop", "someone/orch", "orch-queue/group"), REPO, False),
         ("push", "refs/heads/feat/x", None, REPO, False),
         ("push", "refs/heads/develop", None, "someone/orch", False),
         ("pull_request_target", "refs/heads/develop", None, REPO, False),
@@ -498,3 +524,31 @@ def test_clock_jobs_get_twice_the_time_on_orch_edge():
     assert "timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}" in wf
     assert wf.count("timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}") == 2
     assert "timeout-minutes: 8\n" not in wf and "timeout-minutes: 12\n" not in wf
+
+
+def test_the_runner_has_a_git_as_current_as_github_s_and_a_job_refuses_an_older_one():
+    # Debian 13's git 2.47 ignores merge.renames=false in `git merge-tree`: the sync add-on's case-clash test got a
+    # rename conflict on orch edge only (ORCH-1932, queue group #3338). setup.sh builds the pinned release.
+    setup = (RUNNER / "setup.sh").read_text()
+    ver = re.search(r"^GIT_VER=(\d+\.\d+\.\d+); GIT_SHA=([0-9a-f]{64})$", setup, re.M)
+    assert ver, "setup.sh pins git with its checksum"
+    assert 'sha256sum -c --quiet -' in setup and "pub/software/scm/git/git-$GIT_VER.tar.xz" in setup
+    assert 'DESTDIR="$GT/root" install' in setup  # a failed build never replaces the working copy
+    assert 'ln -sfn "$f" "/usr/local/bin/${f##*/}"' in setup
+    assert "Environment=PATH=$B/bin:/usr/local/bin:/usr/bin:/bin" in setup  # /usr/local/bin before Debian's git
+    home = (ROOT / ".github" / "actions" / "edge-job-home" / "action.yml").read_text()
+    assert f"want={ver.group(1)}\n" in home and "sort -V" in home and "exit 1" in home
+    assert "rm -rf /opt/orch-edge-git" in (RUNNER / "uninstall.sh").read_text()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize("have, ok", [("2.47.3", False), ("2.56.0", False), ("2.56.1", True), ("2.60.0", True)])
+def test_the_job_home_git_check(tmp_path, have, ok):
+    home = (ROOT / ".github" / "actions" / "edge-job-home" / "action.yml").read_text()
+    check = home[home.index("        want="):home.index("        # The runner user's")]
+    fake = tmp_path / "git"
+    fake.write_text(f"#!/bin/sh\necho 'git version {have}'\n")
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    r = subprocess.run(["bash", "-c", "set -eu\n" + textwrap.dedent(check)], env=env, capture_output=True, text=True)
+    assert (r.returncode == 0) is ok, r.stdout + r.stderr

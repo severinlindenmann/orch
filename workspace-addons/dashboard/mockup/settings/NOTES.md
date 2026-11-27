@@ -293,6 +293,14 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
   `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).
 
+## Plain terminal switch in People, description once (ORCH-1684, 25 Nov)
+
+The plain terminal is a shell with the owner's logins and keys, so its switch "Let me type into the plain terminal"
+moved from the Focus add-on page to the People tab (`settings-people.html`, a "Plain terminal" card under the list,
+"Only the owner can change this."); the server refuses it from a token-login browser. The Focus add-on page
+(`addon-detail-focus.html`) says its description once, in the Add-on row: "About this add-on" shows only when there is
+a connection address to show.
+
 ## 26 Nov 2026 (ORCH-2169, RP1, RP6, RP8 B)
 
 - Tab, section title, menu and add-on rows say "Relay" (was Contacts) and "Publish" (was Shared / Shared links) on
