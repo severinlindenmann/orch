@@ -46,7 +46,9 @@ REFUSED_KEEP = 100
 # Made by the relay itself, never signed: a closed list (relay-api.md). None of them is an allow, a person's
 # answer, a start or a trust change (test_msgtrust.py checks each).
 RELAY_MADE_TYPES = ("refresh-hint", "webhook", "control")
-PERSON_ACTIONS = ("allow", "answer")  # a held one is never run by itself on Accept
+# a held one is never run by itself on Accept: the sender sends it again (start and delegate start work, so
+# they count too; outside review, ORCH-1206)
+PERSON_ACTIONS = ("allow", "answer", "start", "delegate")
 # a refusal that means "forged or changed on the way": counted and shown as Not valid on the contact
 NOT_VALID_CODES = {
     "bad_signature",
@@ -335,12 +337,48 @@ class Verdict:
         return f"Verdict({self.kind!r}, {self.code!r})"
 
 
+def _same_json(a, b) -> bool:
+    """Equal as JSON, type for type: Python's True == 1 and 1.0 == 1 never count as the same value."""
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
 def _outer_matches(m: dict, s: dict) -> bool:
     """relay-api.md: outer id, from, type, ticket, reply_to, body and a string `to` equal the signed ones."""
     for k in ("id", "from", "type", "ticket", "reply_to", "body"):
-        if m.get(k) != s.get(k):
+        if not _same_json(m.get(k), s.get(k)):
             return False
     return not isinstance(s["to"], str) or m.get("to") == s["to"]
+
+
+# Fields the signed bytes speak for: what is delivered is the signed value, never the relay's outer copy, and
+# an outer copy the signed bytes do not have is dropped (outside review, ORCH-1206).
+_SIGNED_SAYS = (
+    "v",
+    "id",
+    "from",
+    "type",
+    "ticket",
+    "reply_to",
+    "body",
+    "question_id",
+    "question_sha256",
+    "expires_ms",
+    "files",
+    "origin",
+    "created_ms",
+)
+
+
+def _from_signed(m: dict, s: dict, me: str) -> dict:
+    out = dict(m)
+    for k in _SIGNED_SAYS:
+        if k in s:
+            out[k] = s[k]
+        else:
+            out.pop(k, None)
+    # a string `to` was compared above; a group's signed `to` names the group, so the copy here is ours
+    out["to"] = s["to"] if isinstance(s.get("to"), str) else me
+    return out
 
 
 def _check(root: Path, st: dict, m: dict, env, keys: dict[str, list[bytes]], now_ms: int, me: str) -> dict:
@@ -534,16 +572,20 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
             return _refuse(st, m, e.code)
         signed = msgsig.read_envelope(env).signed
         digest = hashlib.sha256(signed).hexdigest()
-        out = dict(m)
+        out = _from_signed(m, s, me)
         out["created_at"] = _iso(s["created_ms"])
         out["signed"] = {"origin": s["origin"], "created_ms": s["created_ms"], "key_id": env.get("key_id")}
         if "expires_ms" in s:
             out["signed"]["expires_ms"] = s["expires_ms"]
+        if s["type"] == "answer":  # the question it answers, by id and signed bytes (relay._answer_asked)
+            out["signed"]["question_id"] = s.get("question_id")
+            out["signed"]["question_sha256"] = s.get("question_sha256")
         key = f"{frm}/{s['id']}"
         old = st["seen"].get(key)
         if old is not None:
             if old[1] == digest:
-                return Verdict("duplicate", "seen", out, frm)  # the relay sent it again (a lost ack)
+                # the relay sent it again (a lost ack); "dropped": a held person action that is never run
+                return Verdict("duplicate", "dropped" if old[3:] == ["dropped"] else "seen", out, frm)
             return _refuse(st, m, "replayed")
         ga = _group_author(root, st, m, now_ms)
         if ga is not None:
@@ -637,8 +679,13 @@ def release(root: Path, peer: str) -> list[dict]:
             rec = json.loads(orch_home._read_guarded(f).decode("utf-8"))
         except (OSError, ValueError, Refused):
             continue
-        m = rec.get("message") or {}
-        author = ((m.get("body") or {}).get("origin") or {}).get("from")
+        m = rec.get("message") if isinstance(rec, dict) else None
+        if not isinstance(m, dict):
+            continue
+        # body and body.origin are the sender's JSON: any shape, never a crash of another contact's Accept
+        body = m.get("body") if isinstance(m.get("body"), dict) else {}
+        origin = body.get("origin") if isinstance(body.get("origin"), dict) else {}
+        author = origin.get("from")
         if rec.get("peer") != peer and author != peer:
             continue
         if m.get("type") in PERSON_ACTIONS:
@@ -677,7 +724,7 @@ def _tombstone(root: Path, m: dict) -> None:
     now = _now_ms()
     with _state(root) as st:
         st["seen"].setdefault(
-            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now]
+            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now, "dropped"]
         )
 
 
@@ -804,6 +851,7 @@ def contacts(root: Path) -> list[dict]:
                 "relay_name": relay_name,
                 "kind": "phone" if peer.startswith("ph_") else "workspace",
                 "accepted_at": keys[0].get("accepted_at"),
+                "accepted_by": keys[0].get("by"),  # relay-pairing: taken in on first contact (RP3 A)
                 "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
                 "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else _kept_fp(c),

@@ -23,7 +23,7 @@ publish and relay are built into orch (no separate package) but are also off unt
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
 
-`orch init --recommended` turns on the dashboard, Focus and automation. `orch addon list` shows every add-on and what it does.
+`orch init --recommended` turns on the dashboard, Focus and automation. `orch addon list` shows what each add-on does. The built-in clients appear there only after you turn them on.
 
 ## Turn on and off
 
@@ -286,6 +286,7 @@ $ orch sync needs                  # choices waiting for you
 
 The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml`
 ([contract](../contracts/addon-manifest.md)). Try it with `orch addon add ./my-addon`.
+`orch addon check ./my-addon` first lists anything that does not follow the contract, in plain words.
 
 | Key | Meaning |
 |---|---|

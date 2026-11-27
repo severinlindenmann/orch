@@ -57,7 +57,7 @@ TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
     "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop before_start docs "
-    "api-credits setup run_card".split()
+    "api-credits setup run_card event_formats".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1423,6 +1423,13 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         raise _bad("description is one plain sentence (at most 120 characters, no < or >)")
     if not isinstance(m.get("run"), str) or not MODULE_RE.match(m["run"]):
         raise _bad("run is a top-level module name")
+    if "event_formats" in m:
+        formats = m["event_formats"]
+        if not isinstance(formats, list) or not all(
+            isinstance(f, str) and re.fullmatch(r"[a-z0-9-]{1,40}/[0-9]{1,3}", f) for f in formats
+        ):
+            raise _bad("event_formats must list versioned adapter format IDs")
+        _inside(base, "collector.py", "collector.py", "file")
     skill = _inside(base, m.get("skill"), "skill", "dir")
     if not (skill / "SKILL.md").is_file():
         raise _bad("the skill folder has no SKILL.md")
@@ -2162,8 +2169,8 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
     }
 
 
-def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+def listing(root: Path, *, catalog: bool = False) -> list[dict]:
+    """Only the installation catalog includes inactive core clients. Installed add-ons first (sorted), then
     shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
     Never touches the network: the not-installed ones come from the local source folder, else from the bundle
     in the package; one that is in neither is left out of the list (it can still be added by name)."""
@@ -2173,6 +2180,7 @@ def listing(root: Path) -> list[dict]:
     out = [
         _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
         for name, m in sorted(discover().items())
+        if catalog or name not in CORE_ADDONS or name in act
     ]
     for name, m in sorted(shipped_available(fetch=False).items()):
         out.append(_row(name, m, "built-in", False, False, False))

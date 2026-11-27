@@ -147,8 +147,13 @@ jobs:
   # Mac jobs), whatever files changed: the trial of the Mac runner (MAC_RUNNER=this-mac-manual, ORCH-1125).
   # Dashboard pictures stay pull-request only (they need its number and its changed pages).
   # The phone suite never follows the route: it stays on GitHub's Mac (see the mobile job).
+  check-runner:
+    uses: ./.github/workflows/check-runner.yml
+    secrets:
+      runner_status: ${{ secrets.MAC_RUNNER_STATUS_TOKEN }}
   route:
-    if: github.event.pull_request.draft != true
+    needs: check-runner
+    if: ${{ !cancelled() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
@@ -157,6 +162,7 @@ jobs:
       where: ${{ steps.r.outputs.where || 'github' }}
       edge: ${{ steps.e.outputs.edge || '["ubuntu-latest"]' }}
       edge_where: ${{ steps.e.outputs.edge_where || 'github' }}
+      checks: ${{ needs.check-runner.outputs.machine || '"ubuntu-latest"' }}
     permissions:
       contents: read
     steps:
@@ -215,9 +221,11 @@ jobs:
       - run: pip install pytest
       - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
   contracts:
-    needs: changes
-    if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true') }}
     uses: ./.github/workflows/contracts.yml
+    with:
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
   workspace:
     needs: [changes, route]
     # light pull requests skip it (ORCH-1118 q6); a queue group or a pull request into main that changes file, process
@@ -230,6 +238,8 @@ jobs:
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
+      # No `checks` here: the Linux shards stay on GitHub's machines. On orch edge each proof run had another
+      # timing test go red (runwatch, broken ticket, bgwork, dispatcher; ORCH-1932), later ticket ORCH-2329.
       # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
       # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
       # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
@@ -268,6 +278,7 @@ jobs:
     uses: ./.github/workflows/addons.yml
     with:
       suites: ${{ needs.changes.outputs.proven != 'true' }}
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
       # the Services add-on with its real Linux run (ORCH-1126): with the suites, and always when it goes to orch edge
       services: ${{ needs.changes.outputs.proven != 'true' || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both' }}
       linux_runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
@@ -311,7 +322,9 @@ jobs:
     with:
       runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   brand:
-    # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
+    # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds.
+    # Always on GitHub's machines: brand/tests/test_edge_runner.py runs the edge runner's own hooks and setup, which
+    # act for real on that runner (ORCH-1932).
     needs: changes
     if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
     runs-on: ubuntu-latest

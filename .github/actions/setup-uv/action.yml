@@ -1,0 +1,34 @@
+name: setup-uv
+description: >-
+  astral-sh/setup-uv with up to three tries (ORCH-1932). Our own runners (orch edge, orch mac) share one internet
+  line, and github.com sometimes refuses a connection from it for a few seconds (EHOSTUNREACH / "Could not connect
+  to server" in under 30 ms). actions/checkout retries on its own; setup-uv does not, so one refused download failed
+  the whole check.
+inputs:
+  enable-cache:
+    description: the uv cache, as setup-uv's own input
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - id: try1
+      uses: astral-sh/setup-uv@v5
+      continue-on-error: true
+      with:
+        enable-cache: ${{ inputs.enable-cache }}
+    - if: steps.try1.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - id: try2
+      if: steps.try1.outcome == 'failure'
+      uses: astral-sh/setup-uv@v5
+      continue-on-error: true
+      with:
+        enable-cache: ${{ inputs.enable-cache }}
+    - if: steps.try2.outcome == 'failure'
+      shell: bash
+      run: sleep 40
+    - if: steps.try2.outcome == 'failure'
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: ${{ inputs.enable-cache }}

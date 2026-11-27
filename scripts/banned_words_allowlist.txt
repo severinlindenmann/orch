@@ -25,6 +25,7 @@ mobile/OrchMobileTests/Fixtures/msgsig-v1.json
 mobile/OrchMobile/MessageSignature.swift
 mobile/OrchMobileTests/MessageSignatureTests.swift
 relay/src/msgsig.rs
+relay/src/signgate.rs                # the relay's gate for signed messages (ORCH-1201; merged with the owner's label)
 relay/tests/msgsig_vectors.rs
 scripts/gen_msgsig_vectors.py
 workspace/src/orch/msgsig.py
@@ -40,6 +41,14 @@ relay/src/phonekeys.rs
 relay/src/phonegate.rs
 relay/tests/phone_signed_send.rs
 relay/tests/phone_signing_key.rs
+relay/tests/phone_signed_answer.rs   # the phone's signed answer (ORCH-1204 c9)
+mobile/OrchMobileUITests/SignedTwoWorkspacesE2ETests.swift  # its end-to-end UI test (ORCH-1204)
+relay/src/phone.rs                   # /v1/phone/answer takes the answer's envelope (ORCH-1204 c9)
+mobile/OrchMobile/Outbox.swift       # the outbox keeps the signed answer for a retry (ORCH-1204 c9)
+mobile/OrchMobile/Models.swift       # the question carries the hash of its signed bytes (ORCH-1204 c9)
+workspace/src/orch/relay.py          # keeps the hash of each signed question for its answer (ORCH-1204 c9)
+contracts/relay-api.md               # documents the answer's envelope (ORCH-1204 c9)
+contracts/phone-api.schema.json      # the answer's envelope field (ORCH-1204 c9)
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
 # ORCH-1202 (same owner request): the workspace side that checks every received message and the test of it
 workspace/src/orch/msgtrust.py
@@ -55,3 +64,4 @@ relay/tests/push_signed.rs
 scripts/mac-runner/setup.sh          # reads GitHub's fork setting; its API path and field name contain the word
 companion/mac/*                      # Apple code signing and notarization of the Mac app (Developer ID, ORCH-1497); "gate" = the agreement check
 workspace-addons/personal/tests/test_companion_update.py  # tests the Apple code-signing rule of orch Companion updates (ORCH-1497)
+e2e/scenarios_msgsig.py              # ORCH-1206: the end-to-end test of signed messages (R19)

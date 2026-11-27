@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import runs, runwatch, tickets
+from orch import runs, runwatch, ticketindex, tickets
 
 AGENT = 100
 TABLE = [  # (pid, ppid, seconds, command): a live agent with MCP servers and one tool shell watching CI
@@ -122,7 +122,9 @@ def _transcript(path, command, description=None, answered=False):
             "transcript_path": str(path)}  # fmt: skip
 
 
-def test_permission_prompt_shows_the_command_it_waits_on(proj, new_ticket, run, child, tmp_path, monkeypatch):
+def test_permission_prompt_shows_the_command_it_waits_on(
+    proj, new_ticket, run, child, tmp_path, monkeypatch, collect_claude
+):
     """ORCH-1808 (report r-1123-1145-ws): a helper waited for a Yes on a terminal permission prompt and the
     ticket page only said Needs you / Your OK on the screen. The waiting command now stands next to it."""
     from orch import runs_live
@@ -189,6 +191,10 @@ def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch
     a, b = new_ticket("A"), new_ticket("B")
     _live(proj, a, "idle", child, agent_pid=AGENT)
     monkeypatch.setattr(runwatch, "_table", lambda: TABLE)
+    # The ticket index is a cache `run list` may bring up to date. Whether ticket B's own command already did
+    # depends on the clock: history.sync_enabled keeps its "no" while the .orch folder times stay put, and
+    # where file times move in 4 ms steps (orch edge, Linux 6.12) B can land in A's step. Refresh it first.
+    ticketindex.rows(proj, include_hidden=True)
     before = _files(proj)
     code, out, err = run("run", "list", "--json")
     assert code == 0, err

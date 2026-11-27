@@ -34,6 +34,7 @@ def three(proj, run):
         ["chat", "list", "--json"],
         ["chat", "list", "--reader", "dashboard", "--json"],
         ["addon", "list", "--json"],  # ORCH-1295: every Automation round and dashboard poll
+        ["addon", "list", "--catalog", "--json"],
         ["chat", "id", "--json"],
     ],
 )
@@ -42,6 +43,25 @@ def test_same_answer_as_the_command(three, run, argv):
     code, out, _ = run(*argv)
     assert code == 0
     assert reads.answer(root, argv) == json.loads(out)
+
+
+def test_an_addons_own_tickets_same_answer(three, run):
+    """`ticket list [--all] --ext <add-on>` (Factory's page and watcher) is answered here too (ORCH-2288)."""
+    root, ids = three
+    for i in (ids[0], ids[2]):
+        assert run("ext", "set", i, "relay", json.dumps({"role": "order"}))[0] == 0
+    for argv in (
+        ["ticket", "list", "--all", "--ext", "relay", "--json"],
+        ["ticket", "list", "--ext", "relay", "--json"],
+        ["ticket", "list", "--all", "--ext", "nobody", "--json"],
+    ):
+        code, out, _ = run(*argv)
+        assert code == 0
+        assert reads.answer(root, argv) == json.loads(out), argv
+    assert [r["id"] for r in reads.answer(root, ["ticket", "list", "--all", "--ext", "relay", "--json"])] == [
+        ids[0],
+        ids[2],
+    ]
 
 
 _AGES = {"seconds", "idle_seconds", "age_seconds"}
@@ -97,6 +117,8 @@ def test_a_missing_ticket_does_not_spoil_the_others(three):
         ["run", "status", "--json"],
         ["run", "status", "../etc", "--json"],
         ["chat", "days", "--json"],
+        ["ticket", "list", "--ext", "../x", "--json"],  # not an add-on name: the command answers
+        ["ticket", "list", "--ext", "relay", "--all", "--json"],
     ],
 )
 def test_other_argv_is_not_here(three, argv):

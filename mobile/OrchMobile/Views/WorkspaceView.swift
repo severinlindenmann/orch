@@ -118,7 +118,7 @@ struct WorkspaceView: View {
                         Image(systemName: "bubble.right").themeFont(12).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
                     Text(Self.helperLine(name: name, anyWorking: runningCount > 0, lastLine: summary?.general.lastLine ?? "", unread: summary?.general.unread ?? 0))
-                        .themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                        .themeFont(15).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
                 }
                 Spacer(minLength: 4)
                 ShellBadge(count: summary?.general.unread ?? 0)

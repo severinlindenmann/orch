@@ -18,6 +18,16 @@ sys.path.insert(0, str(CONTRACTS.parent / "workspace" / "src"))
 
 
 @pytest.fixture(autouse=True)
+def _fresh_counts():
+    """Every test reads its own counts: the few seconds one answer is kept (ORCH-2288) never cross tests."""
+    from orch_insights import server
+
+    server.forget_counts()
+    yield
+    server.forget_counts()
+
+
+@pytest.fixture(autouse=True)
 def test_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -146,6 +156,8 @@ if args == ["record", "settings", "--json"]:
     answer("settings")
 if args == ["tokens", "--days", "30", "--json"]:
     answer("usage")
+if args == ["insights", "week", "--json"]:
+    answer("weekly")
 if args == ["ticket", "list", "--all", "--json"]:
     answer("tickets")
 if plain[:2] == ["github", "retries"] and (folder / "retries.json").exists():

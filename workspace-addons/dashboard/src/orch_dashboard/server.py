@@ -81,6 +81,7 @@ SETTINGS_OPS = (
     "prepare.set",
     "auto_reviewer.set",
     "away.set",
+    "reviewer_mode.set",
     "diag.set",
     "typing.set",
     "terminal-typing.set",  # ORCH-1656: the plain terminal's switch showed its old state until the full build
@@ -294,7 +295,7 @@ FILE_STAMP_MAX = 64
 
 TERMINAL_OFF = (
     "Typing into the plain terminal is off. "
-    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+    "The owner turns on 'Let me type into the plain terminal' in Settings \u2192 People."
 )
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
@@ -801,16 +802,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             return hit[1]
         port = None
-        if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
+        pages = {a["name"] for a in load_addons(self.root, self.orch_bin) if a.get("page")}
+        if name in pages:
+            now = time.monotonic()
             for svc in load_services(self.root, self.orch_bin):
                 m = LOCAL.fullmatch(str(svc.get("url") or ""))
                 if (
-                    svc.get("addon") == name
-                    and svc.get("running") is True
+                    svc.get("running") is True
                     and m
                     and 0 < int(m.group(1)) < 65536
+                    and svc.get("addon") in pages
                 ):
-                    port = int(m.group(1))
+                    if svc["addon"] == name:
+                        port = int(m.group(1))
+                    elif stamp is not None:
+                        # the same look found the other pages' ports: the next page opened does not ask orch
+                        # again (ORCH-2288: about a second per add-on on a first open)
+                        _PORTS[(str(self.root), svc["addon"])] = (now, int(m.group(1)), stamp)
         _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 
@@ -2071,8 +2079,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
         elif state is None and body.get("op") in SETTINGS_OPS:
-            state = patch_settings(self.root, self.orch_bin, self.server.state_cache.get()[0], body.get("op"))
-            self.server.state_cache.quick(state)  # before the reply's own keys are added
+            op = body.get("op")  # the quick copy is stored before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_settings(self.root, self.orch_bin, held, op)
+            )
         elif (
             state is None
             and isinstance(tid, str)
@@ -2081,9 +2091,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
             # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
-            state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
-            if state is not None:
-                self.server.state_cache.quick(state)  # before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_ticket(self.root, self.orch_bin, held, tid)
+            )
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added

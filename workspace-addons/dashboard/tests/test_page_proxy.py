@@ -419,6 +419,33 @@ def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_po
     assert _status_calls(tmp_path) == first
 
 
+def test_one_look_finds_every_addon_pages_port(stack, tmp_path, monkeypatch):
+    """ORCH-2288: each add-on page asked orch for its port on its first open (about a second at 10,000 tickets);
+    one look now remembers every page's port, so the next add-on page opens without asking again."""
+    import orch_dashboard.server as srvmod
+
+    base, port = stack
+    monkeypatch.setattr(srvmod, "_services_stamp", lambda: (1, 1))
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    first = _status_calls(tmp_path)
+    here = str(next(k for k in srvmod._PORTS if k[1] == "viewer")[0])
+    assert srvmod._PORTS[(here, "focus")][1] == port
+    assert (here, "nopage") not in srvmod._PORTS  # no page: never shown in a frame
+    assert call(base + "/addon/focus/")[0] == 200
+    assert _status_calls(tmp_path) == first
+
+
+def test_without_a_record_of_what_runs_only_the_asked_port_is_kept(stack, monkeypatch):
+    import orch_dashboard.server as srvmod
+
+    base, _port = stack
+    monkeypatch.setattr(srvmod, "_services_stamp", lambda: None)
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    assert [k[1] for k in srvmod._PORTS] == ["viewer"]
+
+
 def test_fb22_a_moved_addon_port_is_found_again_without_waiting(stack, tmp_path):
     import orch_dashboard.server as srvmod
 

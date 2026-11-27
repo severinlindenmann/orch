@@ -10,6 +10,10 @@ import argparse
 import json
 import re
 import shutil
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from orch import adapters, addons, harness, history, nextstep, reminder_settings, services, skills
@@ -96,11 +100,16 @@ def install_checks(root: Path) -> list[dict]:
             )
         )
     uv = addons._which_uv()
+    uv_err = _uv_fails(uv) if uv else None
     rows.append(
         _row(
             "uv",
-            bool(uv),
-            "uv is found." if uv else "uv was not found (orch update needs it).",
+            bool(uv) and not uv_err,
+            "uv is found."
+            if uv and not uv_err
+            else f"uv at {uv} does not run ({uv_err})."
+            if uv
+            else "uv was not found (orch update needs it).",
             "Run the install line again; it installs uv.",
         )
     )
@@ -118,9 +127,13 @@ def install_checks(root: Path) -> list[dict]:
         )
     )
     agents = skills.detected_agents(root)
-    for fn in _local_files(agents):
+    for fn in skills.local_instruction_files(agents):
         text = _read_quiet(root / fn)
         has = harness.LOCAL_MARK[0] in text
+        left = None if has else harness.local_file_left(root, fn)
+        if left:  # the team's file (or one git would show): left alone on purpose, nothing to fix
+            rows.append(_row(f"{fn}", True, left))
+            continue
         rows.append(
             _row(
                 f"{fn}",
@@ -142,16 +155,6 @@ def install_checks(root: Path) -> list[dict]:
     return rows
 
 
-def _local_files(agents: list[str]) -> list[str]:
-    """The local instruction files of the agents found here (init writes these)."""
-    out = []
-    for n in agents:
-        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
-            if ".local." in fn and fn not in out:
-                out.append(fn)
-    return out
-
-
 def _read_quiet(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8") if p.is_file() else ""
@@ -166,10 +169,154 @@ def _json_quiet(p: Path):
         return None
 
 
+def _uv_fails(uv: str) -> str | None:
+    """Why the uv on the PATH does not run (a broken link, a deleted tool folder), or None when it does."""
+    try:
+        r = subprocess.run(
+            [uv, "--version"], capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return type(e).__name__
+    return None if r.returncode == 0 else f"exit {r.returncode}"
+
+
+LOCK_OLD_S = 60  # a ticket write holds its lock for milliseconds; tickets._locked waits 5 s at most
+
+
+def ticket_file_checks(root: Path, now: float | None = None) -> list[dict]:
+    """Ticket files orch cannot read (a listing silently leaves them out) and ticket locks left behind."""
+    from orch import tickets
+
+    d = tickets.tickets_dir(root)
+    if not d.is_dir():
+        return []
+    now = time.time() if now is None else now
+    bad, old = [], []
+    for p in sorted(d.glob("t_*.json")):
+        try:
+            t = json.loads(p.read_text(encoding="utf-8"))
+            ok = isinstance(t, dict) and t.get("id") == p.stem
+        except (OSError, ValueError):
+            ok = False
+        if not ok:
+            bad.append(p.name)
+    for p in sorted(d.glob(".lock-*")):
+        if p.name.count(".") > 1:  # .lock-<id>.<random>: a waiter breaking a stale lock right now
+            continue
+        try:
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if age > LOCK_OLD_S:
+            old.append((p.name, int(age // 60)))
+    rows = []
+    if bad:
+        names = ", ".join(bad[:3]) + (f" and {len(bad) - 3} more" if len(bad) > 3 else "")
+        rows.append(
+            _row(
+                "ticket files",
+                False,
+                f"orch cannot read {len(bad)} ticket file{'' if len(bad) == 1 else 's'} in .orch/tickets"
+                f" ({names}), so {'it is' if len(bad) == 1 else 'they are'} left out of every list.",
+                "Open the file in a text editor and fix the JSON (or take it back from git or a backup).",
+            )
+        )
+    else:
+        rows.append(_row("ticket files", True, "Every ticket file can be read."))
+    if old:
+        name, mins = old[0]
+        more = f" (and {len(old) - 1} more)" if len(old) > 1 else ""
+        rows.append(
+            _row(
+                "ticket locks",
+                False,
+                f"The lock file .orch/tickets/{name}{more} is {mins} min old: an orch command stopped"
+                " half way, so a ticket may stay busy.",
+                f"If no orch command is running, delete .orch/tickets/{name}{more and ' and the others'}.",
+            )
+        )
+    return rows
+
+
+def addon_checks(root: Path) -> list[dict]:
+    """Add-ons turned on here whose package cannot be found or imported, and a background add-on whose last
+    port another program now holds (it then starts on another port and old links stop working)."""
+    try:
+        on = [n for n in addons.active(root) if n not in addons.CORE_ADDONS]
+    except (Refused, OSError, ValueError):
+        return []
+    if not on:
+        return []
+    found = addons.discover()
+    rows = []
+    for name in on:
+        m = found.get(name)
+        err = "its package is not installed" if m is None else _import_fails(root, m["run"])
+        if err:
+            rows.append(
+                _row(
+                    f"add-on {name}",
+                    False,
+                    f"The add-on {name} is on here but cannot be loaded ({err}).",
+                    f"Run: orch addon add {name} (it installs it again).",
+                )
+            )
+            continue
+        port = services.last_port(root, name) if m["background"] else None
+        if port and not _runs_here(root, name) and _port_taken(port):
+            rows.append(
+                _row(
+                    f"port of {name}",
+                    False,
+                    f"Port {port} of the add-on {name} is used by another program,"
+                    " so it starts on another port and old links to it stop working.",
+                    f"Close the program that uses port {port}, then run: orch start",
+                )
+            )
+    return rows
+
+
+def _import_fails(root: Path, module: str) -> str | None:
+    """Import the add-on's package the way orch starts it (own process, -P), or None when it loads."""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-P", "-c", f"import {module}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return type(e).__name__
+    if r.returncode == 0:
+        return None
+    last = (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[-1]
+    return last[:200]
+
+
+def _runs_here(root: Path, name: str) -> bool:
+    ws = str(root.resolve())
+    return any(
+        e["workspace"] == ws and e["addon"] == name and services.pid_alive(e["pid"]) for e in services._load()
+    )
+
+
+def _port_taken(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
 def doctor(root: Path) -> dict:
     if not root.is_dir():
         raise Refused(f"{root} cannot be read. Open a terminal in your project folder and try again.")
     rows = install_checks(root)
+    if (root / ".orch").is_dir():
+        rows += ticket_file_checks(root)
+        rows += addon_checks(root)
     run_checks = []
     if (root / ".orch").is_dir():
         from orch import cli_diag
@@ -182,16 +329,14 @@ def doctor(root: Path) -> dict:
                     "run health", False, f"The run checks could not be read ({e}).", "Run: orch diag inspect"
                 )
             )
+    fixes = _diag_fixes() if any(c["verdict"] == "problem" for c in run_checks) else {}
     for c in run_checks:
         if c["verdict"] == "problem":
-            rows.append(
-                _row(
-                    c["name"],
-                    False,
-                    c["fact"][:1].upper() + c["fact"][1:] + ".",
-                    "Run: orch diag inspect",
-                )
-            )
+            fix = fixes.get(c["name"])
+            fact = c["fact"][:1].upper() + c["fact"][1:]
+            if fix and c["evidence"]:  # with a fix of its own: say exactly what was found
+                fact += f": {c['evidence'][0]}"
+            rows.append(_row(c["name"], False, fact + ".", fix or "Run: orch diag inspect"))
     from orch import doctorpass
 
     late = doctorpass.overdue_row(root)  # once, after the run checks (it sat inside their loop: ORCH-104)
@@ -221,6 +366,13 @@ def doctor(root: Path) -> dict:
                 )
     problems = [r for r in rows if not r["ok"]]
     return {"ok": not problems, "problems": len(problems), "checks": rows}
+
+
+def _diag_fixes() -> dict[str, str]:
+    """The one-sentence fix a diag check names (its FIX), by check name."""
+    from orch import diag_checks
+
+    return {m.NAME: m.FIX for m in diag_checks.modules() if isinstance(getattr(m, "FIX", None), str)}
 
 
 def _doctor_text(res: dict) -> str:

@@ -19,17 +19,25 @@ test('not connected: the next step is written inline; pairing is not offered in 
   // ORCH-1693: the line is pasted here and Connect runs it; no terminal step
   const paste = src.slice(src.indexOf('function relayPaste('), src.indexOf('async function relayReconnect'));
   assert.doesNotMatch(panel + paste, /terminal/i);
-  assert.match(panel, /Paste that line below and press Connect/);
+  assert.match(panel, /Paste the whole text here/);
   assert.match(paste, /'data-key':'phone-relay-line'/);
   assert.match(paste, /act\('relay\.connect', \{line\}\)/);
   assert.match(app, /action === 'relay-connect'\) \{ await relayConnect\(\)/);
   assert.ok(!/disabled:true/.test(panel), 'no disabled pair button');
   assert.ok(!/Pair a phone/.test(src + app), 'no pairing entry point in the workspace');
   assert.ok(!/phonePairDialog|'phone-pair'/.test(src + app));
-  assert.match(panel, /Phones are paired on your phone link/);
+  assert.match(panel, /Ask your admin for a phone code/);
   assert.match(panel, /phone-relay-admin/);
 });
 
 test('connected: no setup steps are shown', () => {
-  assert.match(panel, /connected \? null : h\('div', \{className:'card-row', 'data-key':'phone-relay-steps'/);
+  assert.match(panel, /connected \? null : relayPaste\(\)/);
+});
+
+test('RP1: a multi-line paste box, a note for the admin, the error shown inline, no Phone link name', () => {
+  assert.match(src, /h\('textarea', \{rows:4/);
+  assert.match(panel, /Copy a note for my admin/);
+  assert.match(panel, /Your admin chooses who you can write to/);
+  assert.match(src, /relayUi\.error = /);
+  assert.ok(!/Phone link/.test(panel));
 });
