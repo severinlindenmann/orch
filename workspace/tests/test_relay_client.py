@@ -1149,7 +1149,7 @@ def test_one_waiting_message_with_a_problem_reads_as_one(proj, run, rel, monkeyp
     connect(run, rel)
 
     def blocked(root, raw):
-        err = Refused("The server's security certificate is not valid.")
+        err = Refused("The server's address is not safe to use.")
         err.status, err.blocked = None, True
         raise err
 
