@@ -363,6 +363,52 @@ def _check_format(data: dict, tid: str) -> None:
         )
 
 
+_LISTS = ("checklist", "refs", "questions", "history")
+
+
+def shape_problem(data: dict) -> str | None:
+    """What makes a ticket file a shape this orch can't work on (a title or status that is not text, a core
+    list of another type, a step, question or history line that is no object), or None. A missing title,
+    status or list reads as a default (fill_missing); unknown fields and add-on data under `ext` are never a
+    problem (R8.2)."""
+    for key in ("title", "status"):
+        if key in data and not isinstance(data[key], str):
+            return f"`{key}` is not text"
+    for key in _LISTS:
+        if key in data and not isinstance(data[key], list):
+            return f"`{key}` is not a list"
+    if "ext" in data and not isinstance(data["ext"], dict):
+        return "`ext` is not an object"
+    for key in ("checklist", "questions", "history"):
+        if not all(isinstance(x, dict) for x in data.get(key, ())):
+            return f"`{key}` holds an entry that is not an object"
+    return None
+
+
+def fill_missing(data: dict) -> dict:
+    """A title, status or core list an older or hand-written file left out reads as empty text, open or an
+    empty list; a save then writes it (additive)."""
+    data.setdefault("title", "")
+    data.setdefault("status", "open")
+    for key in _LISTS:
+        data.setdefault(key, [])
+    return data
+
+
+def read_text(p: Path) -> str:
+    """A ticket file's text. A byte order mark (Notepad on Windows writes one) is dropped."""
+    return p.read_text(encoding="utf-8-sig")
+
+
+def _check_shape(data: dict, tid: str) -> None:
+    why = shape_problem(data)
+    if why:
+        raise Refused(
+            f"Ticket {tid} has a format this orch can't read ({why}): fix that field in"
+            f" .orch/tickets/{tid}.json or restore the file from git; the file is left as it is."
+        )
+
+
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
     may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
@@ -370,14 +416,15 @@ def _read_ticket(p: Path, tid: str) -> dict:
     file."""
     for attempt in range(4):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(read_text(p))
             if not isinstance(data, dict) or data.get("id") != tid:
                 raise Refused(
                     f"Ticket {tid} is damaged: its id does not match its filename. "
                     f"Put {tid} back as its id, then try again."
                 )
             _check_format(data, tid)
-            return data
+            _check_shape(data, tid)
+            return fill_missing(data)
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
@@ -395,9 +442,14 @@ def _root_of(p: Path) -> Path:
     return p.parent.parent.parent  # <root>/.orch/tickets/<file>
 
 
+# A writer names itself (pid + start time) right after it makes its lock, so a nameless lock this old was
+# left by a writer killed in between. A named lock is stale only when its holder is verifiably gone.
+_NAMELESS_STALE = 3.0
+
+
 def _break_stale(lock: Path) -> bool:
     """Claim a stale lock by renaming it to a name only we know (atomic: just one waiter wins), then check
-    that what we took is really old. If it was a fresh lock a faster waiter had just made, put it back."""
+    that what we took is really stale. If it was a fresh lock a faster waiter had just made, put it back."""
     mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
     try:
         os.replace(lock, mine)
@@ -408,8 +460,10 @@ def _break_stale(lock: Path) -> bool:
             holder = mine.read_text(encoding="utf-8")
         except OSError:
             holder = ""
-        # old enough, and its holder (if it named itself) is gone: a live or unverifiable holder keeps it
-        if time.time() - mine.stat().st_mtime > 30 and (not holder.strip() or procs.owner_dead(holder)):
+        named = bool(holder.strip())
+        if named and procs.owner_dead(holder):  # a live or unverifiable holder keeps it
+            return True
+        if not named and time.time() - mine.stat().st_mtime > _NAMELESS_STALE:
             return True
         with contextlib.suppress(OSError):
             os.link(mine, lock)  # no-clobber put-back
@@ -438,7 +492,9 @@ def sync_apply(root: Path, tid: str):
 
 @contextlib.contextmanager
 def _locked(root: Path, tid: str, wait: float = 5.0):
-    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
+    """One writer at a time per ticket: an exclusive lock file next to it that names its holder. A writer
+    killed mid-write leaves it behind; the next writer takes it over at once (holder gone) and removes the
+    dead writer's temp file, so a killed write never blocks the ticket or leaves half a file.
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
     the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
     for every file it writes) never has a writer inside a file it replaces. Never waits for the gate while
@@ -450,11 +506,19 @@ def _locked(root: Path, tid: str, wait: float = 5.0):
     if gated:
         syncgate.wait_clear(root, what)
     end = time.monotonic() + wait
+    token = procs.own_token().encode()  # made before the lock exists, so the lock is nameless for no time
+    looked: dict[str, float] = {}  # holder -> when it was last found alive (asked again every 0.5 s)
+    broke = False
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w") as f:
-                f.write(procs.own_token())
+            try:
+                os.write(fd, token)
+            except OSError:
+                os.close(fd)
+                procs.unlink(lock)
+                raise
+            os.close(fd)
             break
         except (
             FileExistsError,
@@ -463,16 +527,30 @@ def _locked(root: Path, tid: str, wait: float = 5.0):
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             try:
-                stale = time.time() - lock.stat().st_mtime > 30
+                age = time.time() - lock.stat().st_mtime
+                holder = lock.read_text(encoding="utf-8").strip()
             except OSError:
                 time.sleep(0.02)
                 continue
+            if not holder:
+                stale = age > _NAMELESS_STALE
+            elif time.monotonic() - looked.get(holder, -1.0) < 0.5:
+                stale = False
+            else:
+                stale = procs.owner_dead(holder)  # a writer killed mid-write: its ticket is free at once
+                looked[holder] = time.monotonic()
             if stale and _break_stale(lock):
+                broke = True
                 continue
             if time.monotonic() > end:
                 raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             time.sleep(0.02)
     try:
+        if broke and gated:
+            # we hold the lock now: a temp file of this ticket is the dead writer's, never a live one's
+            for tmp in tickets_dir(root).glob(f".tmp-{tid}-*.json"):
+                with contextlib.suppress(OSError):
+                    procs.unlink(tmp)
         if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
             raise syncgate.busy(what)
         yield
@@ -539,17 +617,20 @@ def drop_link_keys(obj):
 
 
 def _write(root: Path, ticket: dict) -> None:
-    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    """Lock-free atomic write (tmp + fsync + os.replace). Callers hold the lock. The temp file names the
+    ticket, so the next writer cleans up after a writer that was killed before the replace."""
     drop_link_keys(ticket)
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".tmp-{ticket['id']}-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(ticket, f, indent=2, ensure_ascii=False)
             f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())  # a crash right after the replace never leaves an empty ticket file
         procs.replace(tmp, p)
     except BaseException:
         if os.path.exists(tmp):
@@ -758,7 +839,7 @@ def save(root: Path, ticket: dict) -> None:
         p = ticket_path(root, ticket["id"])
         if p.exists():
             try:
-                on_disk = revision(json.loads(p.read_text(encoding="utf-8")))
+                on_disk = revision(json.loads(read_text(p)))
             except (OSError, ValueError):
                 on_disk = revision(ticket)
             if on_disk != revision(ticket):
@@ -786,7 +867,7 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                text = p.read_text(encoding="utf-8")
+                text = read_text(p)
                 if mark is not None and mark not in text:
                     continue
                 t = json.loads(text)  # no retry: a listing never stalls on a bad file
@@ -796,10 +877,10 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
                 continue
             if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
                 continue
-            if _newer_format(t):
-                continue  # a newer orch's file: not shown here, never rewritten
+            if _newer_format(t) or shape_problem(t):
+                continue  # a newer orch's file or a shape it can't read: not shown here, never rewritten
             if include_general or not is_hidden(t):
-                out.append(t)
+                out.append(fill_missing(t))
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
 
@@ -829,7 +910,7 @@ def _with_ext(root: Path, ext: str, include_general: bool) -> list[dict] | None:
 def is_general(root: Path, tid: str) -> bool:
     """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+        return json.loads(read_text(ticket_path(root, tid))).get("general") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -854,7 +935,7 @@ def _hidden_tickets(root: Path) -> list[dict]:
 def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+        return json.loads(read_text(ticket_path(root, tid))).get("manager") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -862,7 +943,7 @@ def is_manager(root: Path, tid: str) -> bool:
 def is_session(root: Path, tid: str) -> bool:
     """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
+        return json.loads(read_text(ticket_path(root, tid))).get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -3675,7 +3756,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
     """R5.2 (#942): evidence can leave this computer later (sync, the relay, a phone, a share), so every
     evidence write runs the one scanner first. `evidence`: evidence objects or their JSON text (anything else
     is left to parse_evidence). A hit refuses with the kind and the field, never the value; nothing is
-    written."""
+    written. Strict: saved keys that cannot be compared refuse too (the send-only skip is not for writes)."""
     from orch import secretscan
 
     for raw in evidence:
@@ -3686,7 +3767,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
             except ValueError:
                 ev = raw  # not JSON: still scanned as text, parse_evidence refuses it afterwards
         if not isinstance(ev, dict):
-            secretscan.refuse_if_secret_in(root, {"evidence": str(ev)}, "evidence", verb="saved")
+            secretscan.refuse_if_secret_in(root, {"evidence": str(ev)}, "evidence", verb="saved", strict=True)
             continue
         body = {}
         for k, v in ev.items():
@@ -3701,7 +3782,7 @@ def refuse_secret_in_evidence(root: Path, evidence: list) -> None:
             while key in body:  # never overwrite a field already in the body: every value is scanned
                 key += " "
             body[key] = v
-        secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved")
+        secretscan.refuse_if_secret_in(root, body, "evidence", verb="saved", strict=True)
 
 
 def check_done(
@@ -5715,7 +5796,7 @@ def _attach_file(
                 raise Refused(_too_big(cur_src.name))
             from orch import secretscan
 
-            secretscan.refuse_if_secret(data, "evidence file", root, verb="saved")  # R5.2 (#942)
+            secretscan.refuse_if_secret(data, "evidence file", root, verb="saved", strict=True)  # R5.2 (#942)
             out.write(data)
     except BaseException:
         with contextlib.suppress(OSError):

@@ -19,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 HARNESS = Path(".orch") / "harness"
@@ -100,7 +101,7 @@ def write_text(path: Path, text: str, mode: int = 0o644, replace_link: bool = Fa
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        procs.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
