@@ -96,7 +96,8 @@ The sender hears what happened (ORCH-2348): the receiving orch answers each mess
 ticket gets one history line ("Message to Reports: Passed on to ORCH-12") and the Relay page shows it on the message
 instead of "Sent". A text or file about an open ticket that has had no answer for 3 days becomes one question for the
 person on that ticket (Ask again / Keep waiting / Go on without an answer), so no helper has to look again and again;
-an answer that still comes takes the question back.
+when the answer still comes, the helper that gets it is told the line that takes the question back (a received
+message never settles a question by itself).
 First contact (RP3 A) pins the key `orch relay refresh` took from the relay's own answer and kept in the guarded orch
 home (`listed.json`), never the copy in the workspace folder (ORCH-2349): when `workspaces.json` says another key, the
 message is held and orch asks the relay again.

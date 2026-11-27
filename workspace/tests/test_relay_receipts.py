@@ -283,7 +283,11 @@ def test_an_answer_or_a_closed_ticket_asks_nothing(proj, run, rel, new_ticket):
     assert _no_answer_questions(proj, answered) == [] and _no_answer_questions(proj, closed) == []
 
 
-def test_a_late_answer_takes_the_question_back(proj, run, rel, new_ticket):
+def test_a_late_answer_tells_the_helper_to_take_the_question_back(proj, run, rel, new_ticket):
+    """A received message never settles a question by itself (test_take_back.py); the helper that gets the
+    answer is told the one line, and that line works."""
+    from orch import runs
+
     _listed(rel)
     connect(run, rel)
     tid = new_ticket("Ask them")
@@ -291,12 +295,16 @@ def test_a_late_answer_takes_the_question_back(proj, run, rel, new_ticket):
     _age_sent(proj, mid, 3.5)
     run("relay", "inbox")
     (q,) = _no_answer_questions(proj, tid)
-    assert q.get("answer") is None
     rel.inbox.append(msg("m_text000000000170", "text", {"text": "Sorry, here it is"}, ticket=tid))
     run("relay", "inbox")
     (q,) = _no_answer_questions(proj, tid)
-    assert q["taken_back"]["reason"] == "Reports answered"
-    assert relay.no_answer(proj) == []
+    assert q.get("answer") is None  # still the person's or the helper's to settle
+    queued = runs._pending_read(proj, tid)[-1]["text"]
+    line = f'orch ask {tid} --take-back {q["id"]} "Reports answered"'
+    assert line in queued
+    assert run("ask", tid, "--take-back", q["id"], "Reports answered", "--by", "agent:claude")[0] == 0
+    (q,) = _no_answer_questions(proj, tid)
+    assert q["taken_back"]["reason"] == "Reports answered" and relay.no_answer(proj) == []
 
 
 def test_a_message_still_in_the_outbox_is_not_a_missing_answer(proj, run, rel, new_ticket, monkeypatch):

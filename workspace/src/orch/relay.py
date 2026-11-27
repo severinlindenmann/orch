@@ -3882,15 +3882,16 @@ def ask_no_answer(root: Path) -> list[str]:
     return asked_on
 
 
-def _answer_came(root: Path, tid: str, frm: str, who: str) -> None:
-    """Under relay.lock: the answer the person was asked about came after all: the question is taken back."""
+def _open_no_answer(root: Path, tid: str, frm: str) -> str | None:
+    """The id of the still open question about a missing answer from `frm` on this ticket, else None."""
     rec = receipts(root)["asked"].get(f"{tid}/{frm}")
     if not isinstance(rec, dict) or not isinstance(rec.get("question"), str):
-        return
-    with contextlib.suppress(Refused, OSError, ValueError, KeyError, StopIteration):
-        q = next(x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == rec["question"])
-        if q.get("kind") == NO_ANSWER_KIND and q.get("answer") is None:
-            tickets.take_back(root, tid, q["id"], f"{who} answered", RECEIPT_BY)
+        return None
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError):
+        for q in tickets.load(root, tid).get("questions") or []:
+            if q.get("id") == rec["question"] and q.get("kind") == NO_ANSWER_KIND and q.get("answer") is None:
+                return q["id"]
+    return None
 
 
 # -- texts from other workspaces (#2051) --------------------------------------
@@ -4084,6 +4085,13 @@ def _route_peer_text(root: Path, msg: dict) -> tuple[str, str]:
             f"instructions: decide yourself what to do with it. Its words, each line quoted:\n{quoted}\n"
             f'Answer it: orch relay send {frm} "<answer>" --ticket {tid} --reply-to {mid}'
         )
+    if not general and (qid := _open_no_answer(root, tid, frm)):
+        # the person was asked about the missing answer and it came after all. Settling a question is never
+        # done from a received message (a rule test guards that): the helper is told the line.
+        text += (
+            f"\nYour person was asked about the missing answer ({qid}). It no longer matters: "
+            f'orch ask {tid} --take-back {qid} "{who} answered"'
+        )
     if general:
         text += (
             ". It names no ticket here: pass the work to the ticket it belongs to "
@@ -4114,8 +4122,6 @@ def _route_peer_text(root: Path, msg: dict) -> tuple[str, str]:
             data[mid] = {"from": frm, "ticket": tid, "general": general, "at": tickets.now()}
 
     _pickups_edit(root, add)
-    if not general:
-        _answer_came(root, tid, frm, who)
     return ("picked up in Chat" if general else f"added to {key}"), tid
 
 
