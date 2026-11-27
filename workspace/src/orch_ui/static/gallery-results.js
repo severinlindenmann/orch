@@ -55,6 +55,10 @@
       STATES.forEach(st => row.append(UI.result(shape(it, st), {size: 'sm'})));
       host.append(row);
     });
+    // ORCH-2347: a pull request card says the reference's live state word; a conflict says when its checks start
+    const pr = ITEMS.find(x => x.type === 'pr'), live = document.createElement('div'); live.className = 'result-grid';
+    ['conflict', 'checks failed', 'ready to merge'].forEach(status => live.append(UI.result(Object.assign({}, pr, {status, checks: [], meta: 'Pull request · ' + status}), {size: 'sm'})));
+    host.append(live);
   }
   function start() {
     if (!q('#rw-grid')) return;

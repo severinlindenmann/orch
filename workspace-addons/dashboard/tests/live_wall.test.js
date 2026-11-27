@@ -49,6 +49,15 @@ test('the summary line reads right: "1 needs you", "3 need you", "Nobody needs y
   // ORCH-674: the wall reads the same one number as the live bar (results to check count too)
   assert.deepEqual(wall.liveWallSummary([sess('b', 'B', 'working')], 2).map(p => [p.s, p.text]), [['needs-you', '2 need you'], ['working', '1 working']]);
   assert.equal(wall.liveWallSummary(many, 1)[0].text, '3 need you');
+  // the needs list behind it is read once per page state (summary and bands share it): at 10,000 tickets a second read per paint cost a third of the page time
+  assert.match(require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8'),
+    /m\.state === st && m\.tickets === st\.tickets && m\.needs === st\.needs && m\.counts === st\.counts && m\.runs === st\.runs\) return m\.list;/);
+  // ORCH-2149: the one number over fewer tiles (two things on one ticket) names both; equal numbers stay as they are
+  assert.equal(wall.liveWallSummary(many, 5, 4)[0].text, '5 need you on 4 tickets');
+  assert.equal(wall.liveWallSummary(many, 2, 1)[0].text, '3 need you on 1 ticket');
+  assert.equal(wall.liveWallSummary(many, 3, 3)[0].text, '3 need you');
+  assert.equal(wall.liveWallSummary(many, 3, 0)[0].text, '3 need you', 'no tile to name');
+  assert.equal(wall.liveWallSummary([sess('b', 'B', 'working')], 0, 0)[0].text, 'Nobody needs you');
   assert.equal(wall.liveWallSessions(1), '1 session');
   assert.equal(wall.liveWallSessions(24), '24 sessions');
   assert.equal(wall.liveWallSessions(0), '0 sessions');

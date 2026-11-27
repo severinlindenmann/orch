@@ -62,6 +62,9 @@ def _line(r: dict, keys: dict[str, str]) -> str:
         extra = "  [" + " | ".join(ans.get("labels") or ans["options"]) + "]"
     elif r.get("cli"):
         extra = f"  ({r['cli']})"
+    if r.get("kind") == "addon:not-running":
+        # ORCH-2149: "core  factory: factory is not running" named the core for an add-on and the add-on twice
+        return f"  {'add-on':<10}  {r['text']}{extra}{stale}"
     return f"  {who:<10}  {r['title']}: {r['text']}{extra}{stale}"
 
 

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-density="desktop"><head>
+<!-- The Chat page as the product draws it (messenger, ORCH-2171 option A): the page's own markup with the master and the
+     dashboard sheets, no scripts. Made from the running dashboard on sample data (ORCH-2176). -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Chat · no helper set up · orch</title>
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/fileviewer.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/composer.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/docs.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/results.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/term.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/browser.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/style.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/home.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/tickets.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/ticket.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/newticket.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/settings.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/chat.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/look-colors.css">
+<link rel="stylesheet" href="../../src/orch_dashboard/web/pages/desktop.css">
+</head>
+<body class="has-shell">
+<a class="skip-link btn primary" href="#content" data-skip="">Skip to content</a>
+<div class="shell">
+<aside class="sidebar" id="side-menu" aria-label="Workspace navigation">
+<div class="side-head"><a class="brand" href="../home/home.html" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"></path><circle cx="11" cy="12" r="3" fill="currentColor"></circle><circle cx="19" cy="5" r="2" fill="var(--brand)"></circle></svg><span class="brand-word">orch</span></a><button type="button" class="btn ghost icon sm side-toggle" id="side-toggle" aria-controls="side-menu" aria-expanded="true" aria-label="Close menu" title="Close menu"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16m7-11-3 3 3 3"></path></svg></span></button></div>
+<div class="workspace ws-switch" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" data-testid="ws-switch"><span class="ws-badge-slot"><span class="wsb s32" data-c="slate" role="img" aria-label="Pilatus"><b>P</b></span></span><span class="ws-text"><strong id="workspace-name">Pilatus</strong><span class="meta">Workspace</span></span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="ws-chev"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"></path></svg></div>
+<div class="sidebar-scroll">
+<nav id="side-nav" aria-label="Main"><a class="nav-item" href="../home/home.html" aria-label="Home"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"></path><path d="M9 20v-7h6v7"></path></svg></span><span class="nav-label">Home</span></a><a class="nav-item" href="../board/board.html" aria-label="Tickets"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16m6-16v16"></path></svg></span><span class="nav-label">Tickets</span></a><a class="nav-item" href="../review/review.html" aria-label="Review, 2 need you"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="m8 12 3 3 5-6"></path></svg></span><span class="nav-label">Review</span><span class="count" title="2 need you" aria-label="2 need you">2</span></a><a class="nav-item" href="chat.html" aria-label="Chat, 1 unread" aria-current="page"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"></path><path d="M8 8h8m-8 4h5"></path></svg></span><span class="nav-label">Chat</span><span class="count" aria-label="1 unread">1</span></a></nav>
+<div id="side-addons"><div class="nav-addons" data-key="nav-addons"><p class="eyebrow">Add-ons</p><nav aria-label="Add-ons" data-key="nav-pinned"><div class="nav-row" data-key="nav-row-insights"><a class="nav-item" href="../insights/insights.html" aria-label="Insights"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg></span><span class="nav-label">Insights</span></a></div><div class="nav-row" data-key="nav-row-skills"><a class="nav-item" href="../skills/skills.html" aria-label="Skills"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 8h18"></path></svg></span><span class="nav-label">Skills</span></a></div></nav><button type="button" class="nav-item nav-more" data-key="nav-more" aria-expanded="false" aria-label="More (1)"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></span><span class="nav-label">More (1)</span></button></div></div>
+<p class="meta side-mode" id="workspace-mode"></p>
+</div>
+<div class="side-foot person-row">
+<div id="side-person" class="person-switch"><details class="menu person-menu" data-menu-ready="true"><summary class="nav-item" aria-label="Pick your name, signed in. Switch person" title="Signed in" data-testid="person-switch" aria-haspopup="menu"><span class="avatar sm" aria-hidden="true">Y<span class="dot ok" aria-hidden="true"></span></span><span class="nav-label pick" data-testid="person-pick"><strong>Pick your name</strong></span><span class="grow"></span><span class="chev" aria-hidden="true"></span></summary><div class="menu-pop" role="menu"><p class="eyebrow">You are</p><button type="button" class="menu-item" data-person-add="" data-testid="person-add" role="menuitem">Add person</button></div></details><span class="sr-only session-state" role="status" data-testid="session-state" data-state="signed-in">Signed in</span></div>
+<button type="button" class="mm-toggle phone-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" aria-label="Send questions to my phone" title="Phone: off" hidden=""><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"></rect><path d="M11 18h2"></path></svg></button>
+<nav id="side-settings" class="side-settings" aria-label="Settings"><a class="nav-item nav-icon-only" href="../settings/settings.html" aria-label="Settings" title="Settings"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"></path></svg></span></a><a class="nav-item nav-icon-only" href="../docs/docs.html" aria-label="Documentation" title="Documentation"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"></path></svg></span></a></nav>
+</div>
+</aside>
+<div class="shell-body">
+<div id="mm-bar" class="mm-bar" hidden=""></div>
+<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="../home/home.html" aria-label="Home" data-look="[null,null,&quot;Pilatus&quot;]"><span class="wsb s26" data-c="slate" role="img" aria-label="Pilatus"><b>P</b></span></a><span class="meta breadcrumb"><span id="crumb">Chat</span><span id="updated"> · Updated just now</span></span><a class="badge needs" id="topbar-build" href="../settings/settings.html">Test version</a><details class="menu topbar-chip" id="mm-chip" hidden="" data-menu-ready="true"></details><span class="topbar-actions"><button type="button" class="btn ghost sm" id="report-problem" data-action="report-problem" aria-label="Report a problem"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4m8-4v4M5 10h14M6 6h12a1 1 0 0 1 1 1v4a7 7 0 0 1-14 0V7a1 1 0 0 1 1-1z"></path><path d="M12 18v4"></path></svg><span class="btn-word-wide">Report a problem</span></button><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" aria-label="Chat" hidden=""><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"></path></svg><span class="btn-word-wide">Chat</span></button><button type="button" class="btn outline sm" id="new-ticket"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
+<div id="connection" class="banner attn" role="status" hidden=""></div>
+<p id="page-said" class="sr-only" role="status" aria-live="polite">Chat</p>
+<main id="content" class="page" tabindex="-1" aria-label="Dashboard"><section class="chat-page chat-frame chat-thread-open" data-key="chat-page"><aside class="chat-list" aria-label="Chats" data-key="chat-list"><div class="chat-list-head"><h1 class="chat-list-title" data-key="chat-list-title">Chats</h1><button type="button" class="btn outline sm" data-chat-action="contacts" data-key="new-chat"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>New chat</button></div><input type="search" class="chat-search" data-key="chat-search" data-chat-input="search" aria-label="Search chats" placeholder="Search chats" value=""><button type="button" class="chat-list-row chat-pinned" data-key="row-chat" data-chat-action="select" data-id="chat" aria-current="true"><span class="presence" data-key="helper-pic"><span class="avatar chat-avatar chat-helper-pic" aria-hidden="true"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"></path></svg></span></span><span class="presence-dot" aria-hidden="true"></span></span><span class="chat-row-text"><strong class="">Your helper</strong><small class="chat-row-preview">No messages yet.</small></span><span class="chat-row-time"></span></button><hr class="chat-list-rule"><h2 data-key="ticket-chats-heading">Tickets</h2><button type="button" class="chat-list-row" data-chat-action="select-ticket" data-id="t_6ebowa" data-key="row-t_6ebowa"><span class="avatar chat-avatar chat-ticket-pic" aria-hidden="true"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a3 3 0 0 0 0 6v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a3 3 0 0 0 0-6z"></path><path d="M10 9h4m-4 3h4m-4 3h2"></path></svg></span></span><span class="chat-row-text"><strong class="">Answer the supplier about the delivery date</strong><small class="chat-row-preview chat-needs-you">Needs you · The supplier can deliver on Tuesday or Thursday. Which day?</small></span><span class="chat-row-time">21:58<span class="count" aria-label="1 unread">1</span></span></button></aside><div class="chat-main" data-key="chat-main"><header class="chat-thread-head" data-key="thread-head"><div class="chat-head-top"><button type="button" class="chat-button chat-back" data-chat-action="back" data-key="back">‹ Chats</button><span class="presence" data-key="helper-pic"><span class="avatar chat-avatar chat-helper-pic" aria-hidden="true"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"></path></svg></span></span><span class="presence-dot" aria-hidden="true"></span></span><div class="chat-head-text"><h2 data-key="chat-title" tabindex="-1">Your helper</h2><p class="chat-head-meta" data-key="helper-status">Not set up yet</p></div></div></header><div class="chat-log" data-key="log-chat" role="log" aria-live="polite" aria-label="Chat messages"><div class="day-line" data-key="day-today"><span>Today</span></div><article class="thread-line chat-welcome" data-key="welcome-no-helper"><span class="avatar chat-avatar chat-helper-pic" aria-hidden="true"><span class="ic-wrap"><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"></path></svg></span></span><div class="thread-line-body"><div class="thread-line-head">No helper is set up yet</div><p class="chat-muted">Set it up once. After that you can talk things through here.</p><div class="row"><a class="btn primary sm" href="../settings/settings.html" data-key="chat-setup-helper">Set up a helper</a></div></div></article></div><div class="chat-composer-area" data-key="composer-chat"><div class="chat-box-host attachment-composer composer-box" data-chat-box="chat" data-key="chat-box-chat" data-label="Message your helper" data-attach="yes" data-max="20000" data-blocked="no" id="chat-box-chat"><form><label class="sr-only" for="chat-box-chat-message">Message your helper</label><textarea class="composer-field" id="chat-box-chat-message" rows="2" maxlength="20000" placeholder="Message your helper" data-thread="chat" style="height: 56px;"></textarea><div class="staged-files" role="group" aria-label="Added, not sent yet"></div><p class="attachment-error" role="alert"></p><div class="composer-foot"><button class="btn ghost sm" type="button" data-attach=""><svg class="ic " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 11-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"></path></svg>Attach</button><input type="file" multiple="" hidden="" accept=".txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp,.webm,.ogg,.m4a,.mp3,.wav"><span data-voice-slot="" hidden=""></span><span class="grow"></span><span class="meta composer-keys">Enter to send</span><button class="btn primary sm" type="submit" data-key="send" data-state="empty">Send</button></div><p class="meta" data-delivery="" role="status"></p></form><div class="attachment-drop" hidden="">Drop to add to your message</div></div></div></div></section></main>
+<div id="keep" data-keep=""></div>
+</div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<nav class="tabbar" aria-label="Main" id="tabbar" data-testid="tabbar"><a href="../home/home.html" data-tab="home" aria-label="Home"><span class="tab-label">Home</span></a><a href="../board/board.html" data-tab="tickets" aria-label="Tickets"><span class="tab-label">Tickets</span></a><a href="../review/review.html" data-tab="review" aria-label="Review, 2 need you"><span class="tab-label">Review</span><span class="count">2</span></a><button type="button" aria-controls="side-menu" data-tab="more" data-testid="tabbar-more" aria-label="More" aria-expanded="false" data-current="page"><span class="tab-label">More</span></button></nav></body></html>

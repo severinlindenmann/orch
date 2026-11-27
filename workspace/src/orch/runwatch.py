@@ -358,7 +358,9 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
         else:
             key = "waiting"
             # plain words for what it does (ORCH-407), never the program's name
-            cmds = [f"{_doing(w)} · {span(w.get('seconds'))}" for w in waits if _is_cmd(w)]
+            # ORCH-2347: "On hold" beside "Running a command" read as two states; the line says what it is
+            # on hold for
+            cmds = [f"{_hold_for(_doing(w))} · {span(w.get('seconds'))}" for w in waits if _is_cmd(w)]
             other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what") and not _time_passed(w)]
             # a time wait already says "until 07:50": "Waiting until 07:50", never "Waiting for until 07:50";
             # a time that has passed is no reason to be on hold (ORCH-1465 follow-up)
@@ -419,6 +421,16 @@ def _is_cmd(w: dict) -> bool:
 
 def _doing(w: dict) -> str:
     return str(w.get("doing") or doing(str(w.get("label") or "")))
+
+
+def _hold_for(did: str) -> str:
+    """What a helper on hold waits for, from what its own command does: 'Running tests' -> 'Waiting for its
+    own command: running tests'. Words that already say Waiting stay as they are."""
+    if did.startswith("Waiting"):
+        return did
+    if did == "Running a command":
+        return "Waiting for its own command"
+    return f"Waiting for its own command: {did[:1].lower()}{did[1:]}"
 
 
 _SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
