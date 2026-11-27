@@ -468,8 +468,8 @@ const OrchBlocks = (() => {
 
   // ---- Conversations (RP5): one thread per workspace. The workspaces are the master's list-and-panel (.split-view, the
   // same choosing and phone-width back as the split block); a message is the master's .thread-line, a handed-over task a
-  // small .banner card, a file a .file-chip. What a message says about itself (Sent, Not sent yet, Waiting for <Name>)
-  // is the add-on's answer, drawn as it is. Only the checked workspace id goes into a data attribute.
+  // small .banner card, a file a .file-chip. What a message says about itself (Sent, Passed on to <ticket>, Delivered,
+  // No answer for N days, Not sent yet, Waiting for <Name>) is the add-on's answer, drawn as it is. Only the checked workspace id goes into a data attribute.
   const WS_ID = /^ws_[a-z0-9]{10}$/;
   const convDrafts = new Map();   // what was typed in a thread's box, kept over repaints (workspace id -> text)
   const initial = name => (String(name || '?').trim()[0] || '?').toUpperCase();

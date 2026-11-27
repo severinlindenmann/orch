@@ -72,3 +72,10 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   Own messages say "Sent" or "Not sent yet"; a handed-over task is a small card "Waiting for Marketing".
 - RP4 A: an incoming task is one card "Task from Marketing": their words in quotes, what allowing does, then
   "Allow this task", "Always allow tasks from Marketing", "Decline". No "Allow once". Mirrors blocks.js and relay_view.py.
+
+## 27 Nov 2026 (ORCH-2348, receipts)
+
+- An own message says what the other workspace's orch reported, in the same quiet line as "Sent": "Passed on to
+  MKT-12" (their ticket), "Passed on to Chat" or "Delivered". Nothing reported yet stays "Sent". A message about an
+  open ticket without an answer for 3 days reads "No answer for 3 days" (warn tone, no tick); the person is asked on
+  the ticket. No new component: the existing `.handoff` line. Mirrors relay_view.py.
