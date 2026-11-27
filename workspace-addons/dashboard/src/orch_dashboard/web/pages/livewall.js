@@ -181,15 +181,14 @@ function liveWallSteps(s) {
     h('span', {className:'progress', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, bar),
     h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length)));
 }
-// A tile's buttons say their word beside the icon (ORCH-1695: icons alone were not readable); a line keeps the icon.
 function liveWallBeside(s) {
-  return h('button', {type:'button', className:'btn sm ghost wall-beside', 'data-wall-beside':s.opens || s.id, 'data-key':'wall-beside-' + s.id,
-    'aria-label':'Open ' + liveWallLabel(s) + ' beside what is open', title:'Open beside'}, iconEl('plus'), h('span', {}, 'Add beside'));
+  return h('button', {type:'button', className:'btn icon sm ghost wall-beside', 'data-wall-beside':s.opens || s.id, 'data-key':'wall-beside-' + s.id,
+    'aria-label':'Open ' + liveWallLabel(s) + ' beside what is open', title:'Open beside'}, iconEl('plus'));
 }
 // Pin or unpin from the wall (draft D: on every tile and line); kept by orch for the workspace (ORCH-361).
-function liveWallPin(s, pinned, word) {
-  return h('button', {type:'button', className:word ? 'btn sm ghost' : 'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
-    'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'), word ? h('span', {}, pinned ? 'Unpin' : 'Pin') : null);
+function liveWallPin(s, pinned) {
+  return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
+    'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
 }
 // Stop and End session from the wall (ORCH-817, pages/live-end.js): a More button with its menu on tiles and lines.
 function liveWallEnd(s) {
@@ -205,7 +204,7 @@ function liveWallGroupTile(s, pinned) {
       h('span', {className:'wall-tt'}, s.title || ''),
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveGroupLine(g)),
       liveGroupPreview(g)),
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned, true), liveWallBeside(s)));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
 }
 function liveWallTile(s, pinned) {
   if (s.group && typeof liveGroupPreview === 'function') return liveWallGroupTile(s, pinned);
@@ -219,7 +218,7 @@ function liveWallTile(s, pinned) {
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
     liveWallResults(s),
     // the buttons stay together: a tile with a task bar never leaves ⋯ alone on a row of its own (ORCH-1663)
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned, true), liveWallBeside(s), ...liveWallEnd(s))));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s))));
 }
 // The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
 function liveWallResults(s) {
