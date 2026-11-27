@@ -2,7 +2,7 @@
 // (written with orch as the stand-in helper). The person opens Chats, sees the ticket under Ticket chats with its
 // unread count, opens the chat (it is marked read), writes to the helper, answers the question in the chat and sees
 // the answer under Decided in the ticket beside the chat. At phone width the list comes first, then the chat with a
-// back button. The ticket page's Open chat leads to the same chat. Everything survives a reload.
+// back button. The ticket page's Ticket chat leads to the same chat. Everything survives a reload.
 module.exports = {
   name: 'Chats page: ticket chats, answer a question, Decided',
   covers: ['page:chat', 'chat.read', 'chat.say', 'answer'],
@@ -57,11 +57,11 @@ module.exports = {
     must(await page.locator('[data-key="ticket-chat-' + tid + '"]').isVisible(), 'at 390 the chat does not open from the list');
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    // the ticket page's Open chat leads to the same chat
+    // the ticket page's Ticket chat leads to the same chat
     await open('#ticket/' + tid);
-    await page.getByRole('link', { name: 'Open chat' }).first().click();
+    await page.getByRole('link', { name: 'Ticket chat' }).first().click();
     await page.waitForFunction(id => location.hash === '#chat/' + id, tid);
     await page.locator('[data-key="ticket-chat-' + tid + '"]').waitFor();
-    must((await text()).includes('Please keep the logo small'), 'Open chat on the ticket page does not open its chat');
+    must((await text()).includes('Please keep the logo small'), 'Ticket chat on the ticket page does not open its chat');
   },
 };
