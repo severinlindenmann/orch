@@ -979,6 +979,16 @@ document.addEventListener('keydown', e => {
   const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
   if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
 });
+// ORCH-2149 (7): the room a dashboard-drawn page keeps for its scrollbar (0 where scrollbars lie over the page), for
+// the top bar of a framed add-on page. Read from the page itself with the gutter on: a scrolling box does not tell
+// (a browser may draw its own bars over the content and still keep the page's gutter).
+try {
+  const html = document.documentElement, was = html.style.scrollbarGutter;
+  html.style.scrollbarGutter = 'stable';
+  const room = Math.max(0, Math.round(window.innerWidth - html.getBoundingClientRect().width));
+  html.style.scrollbarGutter = was;
+  html.style.setProperty('--scrollbar-w', room + 'px');
+} catch (_) { /* no layout (a test page): the top bar keeps its own padding */ }
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;

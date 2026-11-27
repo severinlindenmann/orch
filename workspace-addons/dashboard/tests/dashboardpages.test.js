@@ -608,6 +608,10 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.doesNotMatch(style, /#open-agent\{display:none\}/);
   assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
   assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Chat"/);
+  // ORCH-2149: on a framed add-on page the top bar keeps the room of the scrollbar the frame shows, so New ticket
+  // ends at the same right edge as on Home
+  assert.match(style, /html:has\(iframe\.embed:not\(\.embed-loading\)\) \.topbar\{padding-right:calc\(var\(--page-gutter\) \+ var\(--scrollbar-w,0px\)\)\}/);
+  assert.match(source, /html\.style\.scrollbarGutter = 'stable';\s+const room = Math\.max\(0, Math\.round\(window\.innerWidth - html\.getBoundingClientRect\(\)\.width\)\);[^]*?setProperty\('--scrollbar-w', room \+ 'px'\)/);
   // ORCH-2176: on the Chat page itself the top bar has no Chat button
   assert.match(source, /getElementById\('open-agent'\)\.hidden = snapshot \|\| r\.kind === 'chat';/);
   // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
