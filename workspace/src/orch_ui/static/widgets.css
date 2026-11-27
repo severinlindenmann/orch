@@ -1812,7 +1812,7 @@ button.gtree-row:hover{background:var(--surface-2)}
  .switch-table,.switch-table tbody,.table-wrap .switch-table{display:block;min-width:0}
  .switch-table thead,.switch-table td:nth-child(3){display:none}
  .switch-table tr{display:grid;grid-template-columns:var(--s9) minmax(0,1fr);align-items:center;border-top:1px solid var(--border)}
- .switch-table td{border:0;min-width:0;overflow:hidden}
+ .switch-table td{border:0;min-width:0;overflow:hidden;height:auto}
  .switch-table td:nth-child(4){grid-column:2;padding-top:0}
  .switch-table td .truncate{max-width:none}
 }
