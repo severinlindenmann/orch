@@ -2,6 +2,7 @@
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import threading
@@ -30,6 +31,7 @@ class Revisions:
         self.ticket_files = {}
         self.closed = False
         self._health = None  # the login check results file in the guarded home, once found
+        self._running = None  # (the running file's time and size, its mark): read again only when it changed
         # set by the state cache: a file change starts its background build, and the pages are told by publish()
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
         self.on_change = None
@@ -79,7 +81,36 @@ class Revisions:
                 rows.append((str(path), st.st_mtime_ns, st.st_size))
             except OSError:
                 pass
+        rows.append(("running", repr(self.running_mark()), 0))
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
+
+    def running_mark(self):
+        """Which add-ons of this workspace run now, as (add-on, pid) pairs (ORCH-2149): one started again or
+        stopped changes it, so Home's "... is not running" row leaves at once and not with the 120 s safety
+        rebuild. By what the file says, never by its time: `orch start` with nothing to start writes the same
+        list again, and a rebuild for that cost seconds at 10,000 tickets (perf check: Review a third slower).
+        The file is read again only when it changed."""
+        try:
+            from orch import services
+
+            path = services.running_path()
+            st = os.stat(path)
+            key = (st.st_mtime_ns, st.st_size)
+            if self._running is not None and self._running[0] == key:
+                return self._running[1]
+            here = str(Path(self.root).resolve())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            mark = tuple(
+                sorted(
+                    (str(e.get("addon")), e.get("pid") if isinstance(e.get("pid"), int) else 0)
+                    for e in (data if isinstance(data, list) else [])
+                    if isinstance(e, dict) and e.get("workspace") == here
+                )
+            )
+            self._running = (key, mark)
+            return mark
+        except Exception:  # noqa: BLE001 - no orch, no file yet or one being written: nothing runs, as far as we know
+            return ()
 
     def current(self):
         """The files' state: what the running watcher saw last (it looks again within a moment), else a new look.
@@ -106,11 +137,6 @@ class Revisions:
             # the add-ons on in this workspace (`orch addon add|remove` rewrites it): a removed add-on's tab and
             # ticket rows leave the open page at once, not after the 120 s safety rebuild
             files.append(addons.activation_path(self.root))
-            # what runs now (`orch start` / `orch stop` rewrite it): Home's "… is not running" row left only with
-            # the 120 s safety rebuild after the add-on was started again (ORCH-2149)
-            from orch import services
-
-            files.append(services.running_path())
         # Changes made in the terminal that the page shows (ORCH-308 / #1402): the last login check result
         # (`orch logins`), git (`git add` of the orch files: the private-files card; a remote) and the saved
         # problem reports folder (its own mtime moves when a report is added or deleted; the busy notes beside

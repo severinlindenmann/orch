@@ -223,9 +223,25 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     assert tmp_path / "orchhome" / "addons.json" in r.settings_files()
     # ORCH-2149: an add-on started again (`orch start` rewrites running.json) moves the revision too, so Home drops
     # its "… is not running" row at once
+    import json as _json
+    import os as _os
+
+    running = tmp_path / "orchhome" / "running.json"
+    entry = {"workspace": str(ws.resolve()), "addon": "sync", "pid": 4242}
     before = r.fingerprint()
-    (tmp_path / "orchhome" / "running.json").write_text('[{"addon": "sync", "pid": 4242}]')
-    assert r.fingerprint() != before
+    running.write_text(_json.dumps([entry]))
+    started = r.fingerprint()
+    assert started != before
+    # `orch start` with nothing to start writes the same list again (a new file time): no rebuild for that
+    running.write_text(_json.dumps([entry]))
+    _os.utime(running, ns=(1, 1))
+    assert r.fingerprint() == started
+    # another workspace's add-on is not this page's business; this one's new pid (a restart) is
+    running.write_text(_json.dumps([entry, {"workspace": "/somewhere/else", "addon": "sync", "pid": 7}]))
+    assert r.fingerprint() == started
+    running.write_text(_json.dumps([{**entry, "pid": 4343}]))
+    assert r.fingerprint() != started
+    assert running not in r.settings_files()
     # `orch addon remove` in this workspace rewrites .orch/addons.json only (the add-on stays on the computer)
     before = r.fingerprint()
     (ws / ".orch" / "addons.json").write_text('{"active": {}}')
