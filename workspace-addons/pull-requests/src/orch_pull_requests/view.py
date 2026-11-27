@@ -130,16 +130,27 @@ def _runs(root) -> dict[str, str] | None:
     }
 
 
+def _failed_what(checks: dict) -> str:
+    """The failed checks as one sentence: 'lint failed.', '2 checks failed: lint and light.' (a bare 'lint, light
+    failed.' read like one name, report r-1127-0539-ws-3)."""
+    names = [_clean(n) for n in (checks.get("failed_names") or []) if _clean(n)]
+    if not names:
+        return "A check failed."
+    failed = checks.get("failed") if isinstance(checks.get("failed"), int) else 0
+    count = max(len(names), failed) if len(names) >= 5 else len(names)  # failed_names keeps at most 5
+    if count == 1:
+        return f"{names[0]} failed."
+    shown = " and ".join(names) if count == 2 else ", ".join(names[:2]) + f" and {count - 2} more"
+    return f"{count} checks failed: {shown}."
+
+
 def _pr_state(r: dict, repair: str = "", has_ticket: bool = True) -> tuple[int, str, str]:
     """(order, state, note) of an open pull request that is not in the merge queue."""
     status, merge, checks = r.get("status"), r.get("merge"), r.get("checks") or {}
     if status == "draft" or merge == "draft":
         return DRAFT, "Draft", "Not checked while it is a draft."
     if status == "checks failed":
-        names = ", ".join((checks.get("failed_names") or [])[:2])
-        what = (
-            f"{names} failed." if names else "A check failed."
-        )  # the check first: the State column says the rest
+        what = _failed_what(checks)  # the check first: the State column says the rest
         return NEEDS, "Checks failed", f"{what} {repair or 'Open the ticket to fix it.'}"
     if status == "conflict" or merge == "conflict":
         if not has_ticket:
@@ -376,7 +387,7 @@ def queue_blocks(root, data: dict, alive: bool, now: float, tz: tzinfo | None = 
         if recent:
             whole = sum(1 for g in recent if g["merged"] == g["size"])
             part = sum(1 for g in recent if 0 < g["merged"] < g["size"])
-            done["value"] = f"{whole + part} of {len(recent)} groups"
+            done["value"] = f"{whole + part} of {len(recent)} group" + ("" if len(recent) == 1 else "s")
             waits = [g["wait"] for g in recent if g["wait"]]
             bits = [f"{part} merged in part" if part else "", f"{len(recent) - whole - part} sent back"]
             if waits:

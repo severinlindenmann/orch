@@ -1510,7 +1510,7 @@ function paintAddon(id) {
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     // Block text is supplied by add-ons; keep internal keys out of visible copy.
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
+    while (walker.nextNode()) walker.currentNode.data = cleanTextNode(walker.currentNode.data);
   }
   // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
   // in place of the ticket's own row when it has one, else as a new row on top.
