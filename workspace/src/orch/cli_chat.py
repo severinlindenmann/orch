@@ -158,12 +158,12 @@ def _dispatch_dm(args, root):
         if tickets.agent_tool() or not tickets.current_actor(getattr(args, "by", None)).startswith("human:"):
             raise Refused("Only a person reads workspace messages in Chat.")
     if args.sub == "contacts":
-        data = chat.contacts(root)
+        data = chat.contacts(root, getattr(args, "by", None))
         text = "\n".join(f"{c['ws']}  {c['name']}" for c in data) or "No contacts."
     elif args.sub == "thread":
         if args.sync:
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))
-        data = chat.dm_read(root, args.workspace)
+        data = chat.dm_read(root, args.workspace, getattr(args, "by", None))
         text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
     elif args.sub == "sync":
         data = (

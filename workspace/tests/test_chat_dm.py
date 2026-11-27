@@ -806,3 +806,22 @@ def test_contact_carries_description_and_tags_cleaned(dm):
     assert len(c["tags"]) <= 8 and all(isinstance(t, str) and 0 < len(t) <= 24 for t in c["tags"])
     del row["description"], row["tags"]
     assert "description" not in chat.contacts(root)[0] and "tags" not in chat.contacts(root)[0]
+
+
+def test_unattended_reads_with_the_dashboards_by(dm, monkeypatch, capsys):
+    """The dashboard's server has no terminal and passes the signed-in person as --by: contacts, a thread and a
+    sync read work with it, and stay refused without it (an unattended call is a helper, ORCH-2108)."""
+    from orch import cli_chat
+
+    monkeypatch.undo()  # the real actor default, not the fixture's stand-in
+    monkeypatch.setattr(relay, "_read_dir", lambda root: dm[1])
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    for key in ("ORCH_RUN", "ORCH_AGENT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(tickets, "attended", lambda: False)
+    parse = cli.build_parser(show_all=True).parse_args
+    for command in (["contacts"], ["thread", WS], ["thread", WS, "--sync"], ["sync"], ["sync", WS]):
+        assert cli_chat.dispatch(parse(["chat", *command, "--by", "human:anna", "--json"]), dm[0])
+        assert WS in capsys.readouterr().out
+        with pytest.raises(Refused, match="Only a person"):
+            cli_chat.dispatch(parse(["chat", *command, "--json"]), dm[0])
