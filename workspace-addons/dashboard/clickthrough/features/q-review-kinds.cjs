@@ -18,7 +18,7 @@ const POSTER = (name, colour) => `<!doctype html><html><body style="background:$
 module.exports = {
   name: 'Review page: every card kind and the draft guard',
   covers: ['page:review', 'review.answer', 'run.send'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, until, workspace, home, standins }) {
+  async run({ page, open, reload, act, must, shot, text, orch, orchAsPerson, python, until, workspace, home, standins }) {
     await open('#home');  // the state polls below run in the page
     fs.writeFileSync(path.join(workspace, 'kinds-letter.txt'), 'Dear customer,\nthank you for a great year.\n');
     fs.writeFileSync(path.join(workspace, 'kinds-plan.txt'), 'Summer party: 20 people, Friday 18:00.\n');
@@ -69,7 +69,8 @@ module.exports = {
     must(/Exact version/.test(await host().innerText()), 'the merge card does not name the exact version it merges');
     const log = path.join(home, 'standin-merged');  // shared by every click-through of the run: only what this click adds counts
     const before = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').length : 0;
-    await act('review.answer', () => button(/^\s*Merge/).click());
+    must(/See the changes/.test(await host().innerText()), 'the release card has no See the changes link (R3, ORCH-2316)');
+    await act('review.answer', () => button(/^\s*Put it live/).click());  // R3 (draft r3-b): the merge button says Put it live
     const added = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(before) : '';
     must(added.includes('https://github.com/standin/lunch/pull/7') && added.includes('--match-head-commit ' + standins.head),
       'Merge did not merge pull request 7 at the shown commit: ' + added.slice(-200));
@@ -82,15 +83,18 @@ module.exports = {
     // 6. the plan: Add note keeps the card, Send back answers it with the words
     await show(plan);
     // the Comment sheet (widgets.js): its words box is named "What should change"
+    // R4 A (ORCH-2316): Comment turns on pointing first; "Whole card" opens the words box
+    const comment = async () => { await button(/^\s*Comment/).click(); const whole = host().getByRole('button', { name: 'Whole card' });
+      if (await whole.count()) { must(/Comment is on\./.test(await host().locator('.swipe-commenting').innerText()), 'Comment did not turn on pointing'); if (shot) await shot('comment-on'); await whole.first().click(); } };
     const words = () => page.getByRole('textbox', { name: 'What should change' }).last();
-    await button(/^\s*Comment/).click();
+    await comment();
     await words().fill('Ask the bakery for the cake too.');
     await act('run.send', () => page.getByRole('button', { name: 'Add note' }).last().click());
     must(answer(plan) === '[null]', 'Add note answered the plan card; it should stay open');
     const queued = path.join(workspace, '.orch', 'run', 'pending', plan + '.jsonl');  // the words wait for the plan's helper
     must(fs.existsSync(queued) && fs.readFileSync(queued, 'utf8').includes('Ask the bakery for the cake too.'), 'the note did not reach the plan ticket\'s helper');
     await show(plan);
-    await button(/^\s*Comment/).click();
+    await comment();
     await words().fill('Book a room for 40 people, not 20.');
     await act('review.answer', () => page.getByRole('button', { name: 'Send back for changes' }).last().click());
     must(answer(plan) !== '[null]', 'the plan has no answer after Send back');

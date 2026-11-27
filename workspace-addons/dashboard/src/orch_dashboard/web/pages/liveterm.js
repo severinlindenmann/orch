@@ -70,6 +70,7 @@ if (typeof window === 'object') window.LiveTerm = {
   has: id => liveTerms.has(id),
   typing: id => !!liveTerms.get(id)?.ui.typing(),
   send: liveTermSend,
+  mount: (host, id, label, plain) => liveTermMount(host, id, label, plain),
   // typing for this session as soon as its stream allows it: now, or after a new hello (the setting was just turned on)
   want(id) {
     const t = liveTerms.get(id);
@@ -93,6 +94,18 @@ async function liveTermSend(id, text, {wait = 6000, plain = false} = {}) {
   const r = await liveTermPost('/api/term/input', {ticket:id, data:text, page:t.page});
   if (!r.ok) liveTermSay(r);
   return r;
+}
+// Review's side panel (ORCH-2185, Focused review D): the session's terminal in a host of its own, watching until the
+// person turns on "Let me type". It is the same one terminal and stream per session as a live pane's: a terminal a
+// pane shows now stays there (false: the panel says where it is). liveTermTick closes it once no page shows it.
+function liveTermMount(host, id, label, plain = false) {
+  if (!host || typeof window !== 'object' || !window.UI?.term || !/^t_[a-z0-9]{6,16}$/.test(String(id || ''))) return false;
+  const t = liveTermFor(id, label || 'the helper', plain);
+  if (t.ui.el.parentNode !== host && document.contains(t.ui.el)) return false;
+  t.seen = Date.now();
+  if (t.ui.el.parentNode !== host) { host.append(t.ui.el); t.ui.back(); }
+  liveTermOpen(id, t);
+  return true;
 }
 // Opens the session's stream (once; again after it closed and LIVE_TERM_RETRY passed).
 function liveTermOpen(id, t) {
@@ -175,4 +188,4 @@ function liveTermTick() {
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   setInterval(liveTermTick, LIVE_TERM_EVERY);
 }
-if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};
+if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermMount, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};
