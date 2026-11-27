@@ -1351,6 +1351,14 @@ def _set_state(root: Path, tid: str, run: str, state: str, asks: str | None = No
 ATTENTION_CLEAR_SECONDS = 3.0  # the dialog must stay gone this long before a person's OK no longer counts
 
 
+def attention_clear_seconds() -> float:
+    """ATTENTION_CLEAR_SECONDS; ORCH_RUN_ATTENTION_CLEAR_SECONDS changes it (tests, ORCH-2305)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_ATTENTION_CLEAR_SECONDS", ATTENTION_CLEAR_SECONDS))
+    except ValueError:
+        return ATTENTION_CLEAR_SECONDS
+
+
 def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
     """The tool asked for a person's OK on the screen after it was up (attention, no first-run screen) and the
     dialog went away without a Stop or a new prompt: the tool took a decision by itself (it blocked the call
@@ -1380,7 +1388,7 @@ def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | Non
     if since != live.get("since"):
         memo["attention_gone"] = (live.get("since"), t)
         return False
-    if t - first < ATTENTION_CLEAR_SECONDS:
+    if t - first < attention_clear_seconds():
         return False
     memo.pop("attention_gone", None)
     with runs.locked(root, tid):

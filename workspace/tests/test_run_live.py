@@ -712,6 +712,10 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
 ):
     """Claude's Notification hook fires for "waiting for your input" (idle, ~60 s after a turn) and for a
     permission prompt. Only the first lets input in: a paste into a permission prompt could allow a tool."""
+    # ORCH-2305: the fake tool never draws the dialog, so the run's own watcher would read "the dialog is
+    # gone" and set working again after ATTENTION_CLEAR_SECONDS; on a slow machine that fell between two
+    # asserts here. This test is about the hooks alone: the watcher's clearing is switched off for it.
+    monkeypatch.setenv("ORCH_RUN_ATTENTION_CLEAR_SECONDS", "3600")
     calls, typed = _fake_claude(tmp_path, monkeypatch)
     _claude_live(proj)
     tid = _ticket(run)
