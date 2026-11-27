@@ -531,7 +531,7 @@ def needs(root: Path) -> list[dict]:
             # late last time: its saved answer now, never a wait for (and a stop of) a child that comes late
             saved = _read_cache(root, name) if _late_mark(root, name).is_file() else None
             if saved is not None:
-                pulls[name] = _saved(root, name, saved)
+                pulls[name] = saved  # its refresh starts after the core rows, not beside them
                 continue
             pulls[name] = _Pull(root, name, m)
             pulls[name].start()  # side by side, while the core rows are made
@@ -547,7 +547,7 @@ def needs(root: Path) -> list[dict]:
     rows = list(core)
     for name, p in pulls.items():
         budget = FAST_BUDGET if _cache_path(root, name).is_file() else PULL_TIMEOUT + 1
-        for r in p if isinstance(p, list) else _settle(root, name, p, start + budget):
+        for r in _saved(root, name, p) if isinstance(p, list) else _settle(root, name, p, start + budget):
             ans = r.get("answer")
             same_q = isinstance(ans, dict) and (r["ticket"], ans.get("question")) in answered
             if r["id"] in seen or same_q:
