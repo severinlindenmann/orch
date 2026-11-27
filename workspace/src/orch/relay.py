@@ -3699,6 +3699,8 @@ def _give_receipt(root: Path, msg: dict, tid: str | None, general: bool, passed:
             first.append(mid)
 
     try:
+        if mid in receipts(root)["given"]:
+            return  # the usual case for a task that still waits: no lock, no write
         with locked(root):
             _receipts_edit(root, mark)
         if not first:
