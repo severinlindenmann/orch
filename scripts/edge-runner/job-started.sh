@@ -1,7 +1,7 @@
 #!/bin/bash -p
 # Runner hook before every job on the orch edge test server's CI runner (ACTIONS_RUNNER_HOOK_JOB_STARTED, set by
 # setup.sh; ORCH-1126). Refuses a job that must never run here: anything but a push to develop, the nightly run, a
-# manual run or a release pull request (into main, from a branch of this repository). ci.yml's route job already
+# manual run, release PR or orch-queue/ PR into develop (from this repository). ci.yml's route job already
 # sends nothing else here; this is the second lock on the door (the repository is public: never a fork's pull request).
 # A refused job is STOPPED, not only failed: the runner treats a failed hook as a failed step and would still run
 # later steps marked `if: always()`, so the hook ends the job's Runner.Worker before any step of the job runs.
@@ -11,11 +11,10 @@
 # Limit: bash reads BASH_ENV before any line of this file, so a job whose settings reach the hook can still run code
 # first. The hook is the second lock; the first is the route job and GitHub holding outside contributors' runs (docs/ci-checks.md).
 if [[ ${1-} != --orch-clean ]]; then   # the runner starts hooks without arguments; a job cannot add one
-  pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
-  for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_EVENT_PATH GITHUB_JOB GITHUB_RUN_ID ORCH_RUNNER_REPO; do
-    if [[ -n ${!v+x} ]]; then pass+=("$v=${!v}"); fi
-  done
-  /usr/bin/env -i "${pass[@]}" /bin/bash -p "$0" --orch-clean
+  /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin GITHUB_REPOSITORY="${GITHUB_REPOSITORY-}" \
+    GITHUB_EVENT_NAME="${GITHUB_EVENT_NAME-}" GITHUB_REF="${GITHUB_REF-}" GITHUB_EVENT_PATH="${GITHUB_EVENT_PATH-}" \
+    GITHUB_JOB="${GITHUB_JOB-}" GITHUB_RUN_ID="${GITHUB_RUN_ID-}" ORCH_RUNNER_REPO="${ORCH_RUNNER_REPO-}" \
+    /bin/bash -p "$0" --orch-clean
 else
 set -u
 # a job can set its own environment variables: the hook uses a fixed PATH and nothing a job could have set
@@ -29,7 +28,7 @@ for _ in 1 2 3 4 5 6 7 8; do
   p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' '); [ -n "$p" ] && [ "$p" -gt 1 ] || break
 done
 refuse() {
-  echo "edge runner: refused this job ($1).${2- Only pushes to develop, the nightly run, manual runs and release pull requests run on orch edge.}" >&2
+  echo "edge runner: refused this job ($1).${2- Use a hosted runner for this event.}" >&2
   # Only the copy setup.sh installed stops the job: its repo file is owned by root, which no job can fake. Run from
   # the repository (the tests on GitHub's machines run inside a real Runner.Worker) it only fails.
   if [ -n "$worker" ] && [ -n "$(find "$HERE/repo" -maxdepth 0 -user 0 2>/dev/null)" ]; then kill -9 "$worker" 2>/dev/null; fi
@@ -59,7 +58,8 @@ if event == "pull_request":
     base = (pr.get("base") or {}).get("ref")
     if head != repo:
         print("no: pull request from a fork"); sys.exit()
-    print("ok" if base == "main" else "no: pull request into " + str(base)); sys.exit()
+    queue = base == "develop" and (pr["head"].get("ref") or "").startswith("orch-queue/")
+    print("ok" if base == "main" or queue else "no: pull request into " + str(base)); sys.exit()
 print("no: event " + event)
 PY
 )
