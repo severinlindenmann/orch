@@ -80,13 +80,13 @@ def add_parsers(sub, common) -> None:
     shown = "the helpers found here and the one this folder uses"
     ag = sub.add_parser("agents", parents=[common], help=shown)
     ag = ag.add_subparsers(dest="sub", metavar="<command>")
-    t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
+    t = ag.add_parser("test", parents=[common], help="run an AI tool once with a trivial prompt")
     t.add_argument("name")
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
     pv.add_argument("state", nargs="?", choices=("status", "move", "allow"), default="status")
-    pv.add_argument("name", nargs="?", help="allow: the agent name shown by orch private")
+    pv.add_argument("name", nargs="?", help="allow: the AI tool name shown by orch private")
     pv.add_argument("--key", help="allow: the key shown by orch private (binds the yes to what you saw)")
     c = sub.add_parser("config", help="settings of this workspace and its helpers").add_subparsers(
         dest="sub", required=True, metavar="<command>"

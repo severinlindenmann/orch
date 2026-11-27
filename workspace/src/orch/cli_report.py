@@ -36,7 +36,7 @@ def add_parsers(sub, common) -> None:
             default=about == "problem",
             help="include ticket text and helper excerpts (default: on for a problem, off for a wish)",
         )
-        x.add_argument("--no-send", action="store_true", help="keep it on this computer, even with a relay")
+        x.add_argument("--no-send", action="store_true", help="do not send it, keep it here")
 
 
 def _relay_ready(root: Path) -> bool:

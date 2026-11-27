@@ -780,7 +780,20 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
     run("run", "start", tid)
     _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
     qid = json.loads(
-        run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", "--json", "--by", "agent:fake")[1]
+        run(
+            "ask",
+            tid,
+            "Use CHF?",
+            "--option",
+            "Yes",
+            "--option",
+            "No",
+            "--recommend",
+            "Yes",
+            "--json",
+            "--by",
+            "agent:fake",
+        )[1]
     )["id"]
     code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
     assert code == 0 and out.splitlines()[0] == "Answered: Yes"
@@ -792,7 +805,22 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
 
 def test_an_answer_without_a_run_sends_nothing(proj, run):
     tid = _ticket(run)
-    qid = json.loads(run("ask", tid, "Use CHF?", "--json", "--by", "agent:fake")[1])["id"]
+    qid = json.loads(
+        run(
+            "ask",
+            tid,
+            "Use CHF?",
+            "--option",
+            "Yes",
+            "--option",
+            "No",
+            "--recommend",
+            "Yes",
+            "--json",
+            "--by",
+            "agent:fake",
+        )[1]
+    )["id"]
     assert run("answer", tid, qid, "Yes", "--by", "human:anna")[0] == 0
     assert runs.undelivered(proj, tid) == []
 

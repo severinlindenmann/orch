@@ -189,7 +189,7 @@ test('offline answers do not send; network failures show the plain message; snap
   const row = ctx.needRow(data), control = row.querySelectorAll('button')[0], event = {currentTarget:{closest:() => row}};
   connection.hidden = false; await control.onclick(event); assert.equal(sent, 0);
   connection.hidden = true; await control.onclick(event); await new Promise(r => setTimeout(r, 40)); assert.equal(sent, 1);
-  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent.") && toasts.at(-1) === "Can't reach orch. Your change was not sent.");
+  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent; try again in a moment.") && toasts.at(-1) === "Can't reach orch. Your change was not sent; try again in a moment.");
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
 test('connection notice keeps the saved view and offers Try again', () => {
