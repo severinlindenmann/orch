@@ -370,11 +370,11 @@ def test_a_conflict_without_a_ticket_says_to_make_one():
 
 
 def test_failed_checks_read_as_one_sentence():
-    # report r-1127-0539-ws-3: 'gate, light failed.' read like one check called 'gate, light'
+    # report r-1127-0539-ws-3: 'lint, light failed.' read like one check called 'lint, light'
     w = view._failed_what
     assert w({}) == "A check failed."
     assert w({"failed_names": ["lint"], "failed": 1}) == "lint failed."
-    assert w({"failed_names": ["gate", "light"], "failed": 2}) == "2 checks failed: gate and light."
+    assert w({"failed_names": ["lint", "light"], "failed": 2}) == "2 checks failed: lint and light."
     names = ["a", "b", "c", "d", "e"]
     assert w({"failed_names": names, "failed": 7}) == "7 checks failed: a, b and 5 more."
     assert w({"failed_names": ["a", "b", "c"], "failed": 3}) == "3 checks failed: a, b and 1 more."

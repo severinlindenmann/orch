@@ -131,7 +131,7 @@ def _runs(root) -> dict[str, str] | None:
 
 
 def _failed_what(checks: dict) -> str:
-    """The failed checks as one sentence: 'lint failed.', '2 checks failed: gate and light.' (a bare 'gate, light
+    """The failed checks as one sentence: 'lint failed.', '2 checks failed: lint and light.' (a bare 'lint, light
     failed.' read like one name, report r-1127-0539-ws-3)."""
     names = [_clean(n) for n in (checks.get("failed_names") or []) if _clean(n)]
     if not names:
