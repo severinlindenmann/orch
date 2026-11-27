@@ -24,6 +24,7 @@ from test_chat_groups import (  # noqa: F401  (fixtures are used by name)
     from_host,
     gout,
     group_msg,
+    group_run,
     grp,
     host,
     inbox,
