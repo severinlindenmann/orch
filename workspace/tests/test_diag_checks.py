@@ -39,7 +39,7 @@ def test_all_checks_are_registered_and_one_file_each():
     assert names == {
         "run_gone_ticket_working", "dead_lock_holder", "no_heartbeat", "waiting_for_permission",
         "ticket_op_refused", "hook_lines_missing", "relay_unreachable", "clock_skew", "disk_low",
-        "diag_dropped", "workspace_folder_moved", "idle_working_no_question",
+        "diag_dropped", "workspace_folder_moved", "idle_working_no_question", "relay_unhandled",
     }  # fmt: skip
 
 
@@ -195,6 +195,33 @@ def test_relay_unreachable(proj, monkeypatch):
     os.utime(m, (time.time() - 3600, time.time() - 3600))
     c = one(proj, "relay_unreachable")
     assert c["verdict"] == "problem" and "oldest for 60 min" in c["evidence"][0]
+
+
+def test_relay_unhandled(proj, monkeypatch):
+    """ORCH-2157: a text from another workspace saved over an hour ago that nothing handled is a problem;
+    a phone's, a group copy, a fresh one and a handled one are not."""
+    # relay off: the check has nothing to say
+    assert "relay_unhandled" not in {c["name"] for c in diag_checks.run_all(snap(proj))}
+    monkeypatch.setattr(diag_collect, "addon_on", lambda root, name: name == "relay")
+    assert one(proj, "relay_unhandled")["verdict"] == "ok"
+    box = proj / ".orch" / "inbox"
+    box.mkdir()
+    old = time.time() - 4 * 86400
+
+    def put(mid, frm, body, age=old):
+        p = box / f"{mid}.json"
+        p.write_text(json.dumps({"id": mid, "from": frm, "type": "text", "body": body}))
+        os.utime(p, (age, age))
+
+    put("m_phone", "ph_iphone0001", {"text": "hi"})
+    put("m_group", "ws_peer000001", {"text": "hi", "group": {"id": "g_1"}})
+    put("m_fresh", "ws_peer000001", {"text": "hi"}, age=time.time())
+    assert one(proj, "relay_unhandled")["verdict"] == "ok"
+    put("m_stuck", "ws_peer000001", {"text": "Done", "update": {"kind": "result"}})
+    c = one(proj, "relay_unhandled")
+    assert c["verdict"] == "problem" and "oldest for 96 h" in c["fact"] and c["evidence"] == ["m_stuck"]
+    (proj / ".orch" / "inbox-seen.json").write_text(json.dumps({"m_stuck": "2026-11-27T00:00:00Z"}))
+    assert one(proj, "relay_unhandled")["verdict"] == "ok"
 
 
 def test_relay_send_failures_in_the_log(proj, monkeypatch):
