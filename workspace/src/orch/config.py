@@ -384,7 +384,8 @@ def live_max(root: Path | None) -> int | None:
 
 
 DEFAULT_FOCUS_LIVE_SESSION = True
-DEFAULT_FOCUS_SESSION_TYPING = False
+# owner pick B a of ORCH-2188 (26 Nov): typing into a helper's screen is on by default; watch only is a setting
+DEFAULT_FOCUS_SESSION_TYPING = True
 DEFAULT_FOCUS_TERMINAL_TYPING = (
     False  # the plain terminal is a shell: its own switch, off (owner, ORCH-261 q7)
 )
@@ -467,14 +468,18 @@ def focus_live_session(root: Path | None) -> bool:
 
 
 def focus_session_typing(root: Path | None) -> bool:
-    return _reserved(root, "focus", "session_typing", DEFAULT_FOCUS_SESSION_TYPING)
+    """On unless the workspace turned it off. A config file that cannot be read, or a value that is not
+    true / false, counts as off: a person who chose watch only never gets typing back through a broken file."""
+    if root is None:
+        return DEFAULT_FOCUS_SESSION_TYPING
+    return file_switch(root, "focus", "session_typing", DEFAULT_FOCUS_SESSION_TYPING) is True
 
 
 SESSION_TYPING_KEY = "focus.session_typing"  # the `orch config` key of the setting below
 
 
 def set_focus_session_typing(root: Path, value: bool) -> bool:
-    """[focus] session_typing (default off): may the person type into the helper's screen."""
+    """[focus] session_typing (default on, ORCH-2314): may the person type into the helper's screen."""
     set_key(root, "focus", "session_typing", bool(value))
     return bool(value)
 

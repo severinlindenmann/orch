@@ -436,7 +436,7 @@ def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
         actions.build_argv("typing.set", {"on": "yes"})
     assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
-    assert data.load_settings(ws, "orch")["typing_on"] is False
+    assert data.load_settings(ws, "orch")["typing_on"] is True  # on by default (ORCH-2314); the switch turns it off
 
 
 def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
