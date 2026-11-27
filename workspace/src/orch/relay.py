@@ -569,10 +569,13 @@ def _unreachable(e: Refused) -> bool:
 POST_TIMEOUT = 15  # seconds; a message is small (files go as blobs) and stays in the outbox when cut
 
 
+_post_timeout: contextvars.ContextVar[float] = contextvars.ContextVar("orch_relay_post_timeout", default=0)
+
+
 def _post_message(root: Path, raw: bytes) -> None:
     cfg = _cfg(root)
     headers = {**net.auth_headers(cfg), "Content-Type": "application/json"}
-    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, POST_TIMEOUT)
+    net.call_json("POST", cfg["url"] + "/v1/messages", headers, raw, _post_timeout.get() or POST_TIMEOUT)
 
 
 def _outbox(root: Path) -> Path:
@@ -850,14 +853,48 @@ def _record_not_sent(root: Path, mid: str, reason: str) -> None:
             net.write_json(p, dict(list(data.items())[-500:]), True)
 
 
-def resend_outbox(root: Path) -> dict:
+def resend_outbox(root: Path, timeout: float | None = None) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
     Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}], "failed": [{id, reason}]}.
     Stops at the first unreachable. R5.2: an entry written before the send-time scan is scanned here too;
-    a hit is not sent, is removed from disk and reported as failed (one sentence, never the value)."""
+    a hit is not sent, is removed from disk and reported as failed (one sentence, never the value).
+    `timeout`: seconds one post may take (the page's own try keeps it short); None = POST_TIMEOUT."""
     with contextlib.suppress(Refused):
         apply_allow_answers(root)  # the next orch relay command applies an answered allow question
-    return _flush_outbox(root)[0]
+    token = _post_timeout.set(timeout or 0)
+    try:
+        return _flush_outbox(root)[0]
+    finally:
+        _post_timeout.reset(token)
+
+
+OUTBOX_TRIED = (
+    "run",
+    "relay",
+    "outbox-tried",
+)  # under .orch/: when a try from the page left messages waiting
+OUTBOX_TRY_EVERY = 15.0  # seconds between two tries from the page while the relay stays away
+OUTBOX_TRY_TIMEOUT = 4.0  # the page's `view` has 10 s in all: a relay that never answers must not cost them
+
+
+def send_waiting(root: Path) -> None:
+    """ORCH-2312: what the Contacts page promises ("goes out by itself"). The page asks for its view while it
+    is open, and that look sends what waits in .orch/outbox/. Before, only the next `orch relay` command did,
+    so a person who uses the page alone waited for ever. While the relay stays away there is one short try
+    every OUTBOX_TRY_EVERY seconds. Never raises: the view is shown whatever happens here."""
+    with contextlib.suppress(Exception):
+        if not outbox_list(root):
+            return
+        stamp = root.joinpath(".orch", *OUTBOX_TRIED)
+        with contextlib.suppress(OSError):
+            if 0 <= time.time() - stamp.stat().st_mtime < OUTBOX_TRY_EVERY:
+                return
+        net.load_service(root, "relay")
+        res = resend_outbox(root, OUTBOX_TRY_TIMEOUT)
+        if res["waiting"]:
+            net.write_atomic(stamp, b"", True)
+        else:
+            stamp.unlink(missing_ok=True)
 
 
 def _flush_outbox(root: Path) -> tuple[dict, dict[str, Refused]]:

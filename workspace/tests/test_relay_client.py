@@ -1108,6 +1108,58 @@ def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
     assert tries == []
 
 
+def test_a_waiting_message_goes_out_when_the_page_looks_and_no_command_runs(proj, run, rel, monkeypatch):
+    """ORCH-2312: the Contacts page says a waiting message "goes out by itself". The page's own look
+    (`orch relay view`, asked for while the dashboard is open) sends it once the relay answers again; a
+    relay that stays away is tried once in a while, not on every look, and the view never fails."""
+    from orch import relay, relay_view
+    from orch.errors import Refused
+
+    connect(run, rel)
+    tries = []
+
+    def down(root, raw):
+        tries.append(relay._post_timeout.get())
+        raise Refused("Can't reach relay.example right now. Check your internet and try again.")
+
+    real = relay._post_message
+    monkeypatch.setattr(relay, "_post_message", down)
+    m = json.loads(run("relay", "send", PEER, "hello", "--json")[1])
+    assert m["sent"] is False and tries == [0]  # the command's own try: the usual time limit
+    v = relay_view.view(proj)
+    assert tries == [0, relay.OUTBOX_TRY_TIMEOUT], "the page's try is a short one"
+    assert "1 message waits here and goes out by itself." in v["notice"]
+    relay_view.view(proj)
+    assert len(tries) == 2, "the relay is still away: not tried on every look"
+    monkeypatch.setattr(relay, "_post_message", real)  # the relay is back
+    monkeypatch.setattr(relay, "OUTBOX_TRY_EVERY", 0.0)  # ... and the wait between two tries is over
+    code, out, _ = run("relay", "view", "--json")  # what the dashboard runs: no other relay command
+    assert code == 0 and [x["id"] for x in rel.sent] == [m["id"]]
+    assert json.loads(out)["notice"].startswith("Connected.") and relay.outbox_list(proj) == []
+    assert not (proj / ".orch/run/relay/outbox-tried").exists()
+    relay_view.view(proj)
+    assert len(rel.sent) == 1, "sent once"
+
+
+def test_one_waiting_message_with_a_problem_reads_as_one(proj, run, rel, monkeypatch):
+    """ORCH-2312: "1 message wait to be sent" was wrong for one message."""
+    from orch import relay, relay_view
+    from orch.errors import Refused
+
+    connect(run, rel)
+
+    def blocked(root, raw):
+        err = Refused("The server's security certificate is not valid.")
+        err.status, err.blocked = None, True
+        raise err
+
+    monkeypatch.setattr(relay, "_post_message", blocked)
+    run("relay", "send", PEER, "one")
+    assert relay_view.view(proj)["notice"].startswith("1 message waits to be sent: The server's")
+    run("relay", "send", PEER, "two")
+    assert relay_view.view(proj)["notice"].startswith("2 messages wait to be sent: The server's")
+
+
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     proj, run, rel, monkeypatch, new_ticket
 ):

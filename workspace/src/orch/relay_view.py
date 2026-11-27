@@ -521,13 +521,14 @@ def view(root: Path) -> dict:
         return out
     with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
         relay.auto_refresh(root)
+    relay.send_waiting(root)  # ORCH-2312: the open page sends what waits; no `orch relay` command needed
     peers = _peers(root)
     waiting = len(relay.outbox_list(root))
     if waiting:
         s = "s" if waiting != 1 else ""
         problem = relay.outbox_problem(root)
         out["notice"] = (
-            f"{waiting} message{s} wait to be sent: {problem}"
+            f"{waiting} message{s} {'waits' if waiting == 1 else 'wait'} to be sent: {problem}"
             if problem
             else f"The relay can't be reached. You can keep writing. {waiting} message{s} "
             + (
