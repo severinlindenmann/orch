@@ -417,6 +417,7 @@ def _doctor_sub(args, root: Path) -> None:
             tickets.require_human(
                 "Change what the scheduled health checks watch and clean on this computer?",
                 "changing the scheduled health checks",
+                getattr(args, "by", None),
             )
         if args.off:
             was = doctorpass.remove_setup(root)

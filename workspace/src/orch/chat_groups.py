@@ -1590,7 +1590,7 @@ def add_member(
         if cur and cur.get("left_at") and cur.get("reason") == "removed":
             # a person's removal is not undone by an agent
             tickets.require_human(
-                f"Add {cur.get('name') or ws} back to the group?", "adding a removed workspace again"
+                f"Add {cur.get('name') or ws} back to the group?", "adding a removed workspace again", by
             )
         if len(_active(g, True)) >= MAX_MEMBERS:
             raise Refused("A group has at most 8 members.")
@@ -2365,7 +2365,7 @@ def say(
     if (
         via == tickets.PERSON_VIA
     ):  # "by you" is the person at this dashboard: an agent can't write as the person
-        tickets.require_human("Write into the group as yourself?", "writing as the person")
+        tickets.require_human("Write into the group as yourself?", "writing as the person", by)
     gid = ensure_group(root, tid, by)
     me = _me(root)
     origin = tickets.PERSON_VIA if via == tickets.PERSON_VIA else me
@@ -2557,7 +2557,7 @@ def share_file(
         raise Refused("A person has to click to share a picture.")
     mime = _checked(data, path.name, by_click, confirm)
     if by_click:
-        tickets.require_human("Share this file with the group?", "sharing a file")
+        tickets.require_human("Share this file with the group?", "sharing a file", by)
     gid = ensure_group(root, tid, by)
     name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
     ttl = _line(title or name, 120) or name
@@ -3993,13 +3993,14 @@ def share_member(
     by_click: bool = False,
     confirm=None,
     expect_sha: str | None = None,
+    by: str | None = None,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay
 
     if not by_click:
         raise Refused("A person has to click to share a file from this workspace.")
-    tickets.require_human("Share this file with the group?", "sharing a file")
+    tickets.require_human("Share this file with the group?", "sharing a file", by)
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
     if expect_sha is not None and hashlib.sha256(data).hexdigest() != expect_sha:
