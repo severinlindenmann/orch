@@ -292,6 +292,7 @@ NEXT = {
     "uninstall": "orch init  (to set this folder up again later)",
     "ticket artifacts-dir": "save the files there, then: orch check done <ticket> <task> --file <file>",
     "publish new": "orch publish app <folder>",
+    "relay topic": "orch ticket show <ticket>  (the ticket it made)",
     "publish invite": "open the folder in your helper; it is connected to publish.",
     "relay invite": "open the folder in your helper; it is connected to the relay.",
     "addon check": "fix what it lists, then: orch addon add <name>",
