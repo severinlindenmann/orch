@@ -303,6 +303,9 @@ ORCH_IGNORE = [
     # the reference template `orch init` writes (#1867): orch's own file, rewritten when missing; the checks a
     # workspace adds next to it stay visible to git
     "checks/_template.json",
+    # which messages the relay took (ORCH-2313): it was missing here, so in a git repository every write of
+    # it was refused without a word and a message another command had sent kept showing as not sent
+    "relay-posted.json",
 ]
 
 
@@ -548,6 +551,57 @@ def _ignored_all(root: Path, rels: list[str]) -> bool:
 
 
 PROBES = (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe")
+
+# ORCH-2313: one `orch relay send` or `inbox` writes the same few private files several times, and every write
+# asked git twice (one relay send: 10 git processes, 4-12 s on a busy computer). Git's "not tracked and ignored"
+# for one file is kept for a moment while every file that decides it is unchanged. Only that full yes is kept;
+# anything else asks git again and refuses as before.
+_PRIVATE_SEEN: dict[tuple[str, str], tuple[tuple, float]] = {}  # (folder, file) -> (stat key, looked at)
+PRIVATE_KEEP = 10.0  # seconds
+_PRIVATE_MAX = 512
+
+
+def _private_key(root: Path, rel: str):
+    """Plain stats (no process) of what decides whether git tracks and ignores root/rel: the repository itself
+    (_git_state_key: .git, its config and HEAD, GIT_ variables), its index, its info/exclude, and the .gitignore
+    of every folder from the file up to the top of the repository. None = cannot tell cheaply (no repository
+    folder found, a .git file or link, an unreadable entry): then git is asked every time."""
+    base = _git_state_key(root)
+    if base is None:
+        return None
+    try:
+        real = Path(os.path.realpath(root))
+        top = next((d for d in (real, *real.parents) if os.path.isdir(d / ".git")), None)
+        if top is None:
+            return None
+        files = [top / ".git" / "index", top / ".git" / "info" / "exclude"]
+        d = (real / rel).parent
+        while True:
+            files.append(d / ".gitignore")
+            if d == top or d.parent == d:
+                break
+            d = d.parent
+        stamps: list = []
+        for f in files:
+            try:
+                st = os.lstat(f)
+                stamps.append((st.st_ino, st.st_mode, st.st_mtime_ns, st.st_size))
+            except FileNotFoundError:
+                stamps.append(None)
+    except OSError:
+        return None
+    return (base, tuple(stamps))
+
+
+def _private_kept(root: Path, rel: str, key) -> bool:
+    seen = _PRIVATE_SEEN.get((os.path.realpath(root), rel))
+    return bool(seen and seen[0] == key and 0 <= time.monotonic() - seen[1] < PRIVATE_KEEP)
+
+
+def _private_keep(root: Path, rel: str, key) -> None:
+    if len(_PRIVATE_SEEN) >= _PRIVATE_MAX:
+        _PRIVATE_SEEN.clear()
+    _PRIVATE_SEEN[(os.path.realpath(root), rel)] = (key, time.monotonic())
 
 
 def _probes_ignored(root: Path) -> bool:
@@ -864,8 +918,10 @@ def protect_local(
         except (Refused, OSError, ValueError, KeyError):
             lines = None
     known: set[tuple[str, str | None]] = set()
+    key = _private_key(root, also) if also else None
+    kept = key is not None and _private_kept(root, also, key)
     try:
-        if also and _in_git_repo(root) and _untracked_all(root, [".orch/.gitignore", also]):
+        if kept or (also and _in_git_repo(root) and _untracked_all(root, [".orch/.gitignore", also])):
             known.add(("untracked", also))
     except Refused:
         pass  # each question below asks again and refuses as before
@@ -890,10 +946,14 @@ def protect_local(
             ok = True
     except (Refused, OSError, UnicodeDecodeError):
         pass
-    if ok and also and _in_git_repo(root) and _ignored_all(root, [*PROBES, also]):
+    if ok and kept and _private_key(root, also) == key:
+        known.add(("ignored", also))  # git said so moments ago and nothing it reads has changed since
+    elif ok and also and _in_git_repo(root) and _ignored_all(root, [*PROBES, also]):
         known.add(
             ("ignored", also)
         )  # the probes and the file in one process (after the rules above are written)
+        if key is not None and ("untracked", also) in known and _private_key(root, also) == key:
+            _private_keep(root, also, key)  # only a full yes, and only when this call changed no rule file
     elif ok and not _probes_ignored(root):
         ok = False
     if not ok:
