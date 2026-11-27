@@ -106,6 +106,11 @@ class Revisions:
             # the add-ons on in this workspace (`orch addon add|remove` rewrites it): a removed add-on's tab and
             # ticket rows leave the open page at once, not after the 120 s safety rebuild
             files.append(addons.activation_path(self.root))
+            # what runs now (`orch start` / `orch stop` rewrite it): Home's "… is not running" row left only with
+            # the 120 s safety rebuild after the add-on was started again (ORCH-2149)
+            from orch import services
+
+            files.append(services.running_path())
         # Changes made in the terminal that the page shows (ORCH-308 / #1402): the last login check result
         # (`orch logins`), git (`git add` of the orch files: the private-files card; a remote) and the saved
         # problem reports folder (its own mtime moves when a report is added or deleted; the busy notes beside

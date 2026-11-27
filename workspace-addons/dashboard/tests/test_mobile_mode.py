@@ -221,6 +221,11 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     # an uninstall rewrites the add-on list: it is one of the watched files, so the cached Settings list is rebuilt
     # at once instead of keeping a removed add-on until the 120 s safety rebuild (ORCH-1034)
     assert tmp_path / "orchhome" / "addons.json" in r.settings_files()
+    # ORCH-2149: an add-on started again (`orch start` rewrites running.json) moves the revision too, so Home drops
+    # its "… is not running" row at once
+    before = r.fingerprint()
+    (tmp_path / "orchhome" / "running.json").write_text('[{"addon": "sync", "pid": 4242}]')
+    assert r.fingerprint() != before
     # `orch addon remove` in this workspace rewrites .orch/addons.json only (the add-on stays on the computer)
     before = r.fingerprint()
     (ws / ".orch" / "addons.json").write_text('{"active": {}}')

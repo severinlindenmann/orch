@@ -1935,6 +1935,9 @@ function ticketStripModel(t, run, fresh) {
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
   if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
+  // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
+  // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
+  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m('Your helper begins when you press Start.'), word:'Not started'};
   if (fresh) return m('Not started. Your helper begins when you press Start.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does

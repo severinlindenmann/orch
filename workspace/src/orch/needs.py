@@ -194,14 +194,16 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     doctorpass.soon(root)  # the machine's health checks, when set up here and due (ORCH-104)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
+            # ORCH-2149: the add-on by the name a person reads (its dashboard label), never its package name
+            shown = addons.display_title(r["name"])
             rows.append(
                 {
                     "id": f"core:down:{r['name']}",
                     "source": "core",
                     "kind": "addon:not-running",
                     "ticket": None,
-                    "title": r["name"],
-                    "text": f"{r['name']} is not running (last seen {services.ago(r['last_seen'])})",
+                    "title": shown,
+                    "text": f"{shown} is not running (last seen {services.ago(r['last_seen'])})",
                     "tone": "bad",
                     "since": r["last_seen"] or now,
                     "cli": "orch start",

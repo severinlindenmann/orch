@@ -291,7 +291,7 @@ test('Prepare: Prepared mark, Not prepared yet, In line; none of it once the tic
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'not_prepared', at:'x'}}))), 'Not prepared yet. Start still works.');
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'waiting', at:'x'}}))), 'In line to be prepared. Start still works.');
   assert.doesNotMatch(text(sentenceOf(c.detail({...base, status:'review', prepare:{state:'prepared', at:'x'}}))), /Prepared/);
-  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /Not started/);
+  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /^Your helper begins when you press Start\.$/);  // 'Not started' is the word above the title (ORCH-2149)
 });
 test('What I found: folded line with counts, sources with web links only, Could not open in sight with one action', () => {
   const c = ctx();
@@ -344,6 +344,16 @@ test('helper bar without a run appears on active tickets, never Review or Done',
     const all = nodes(handoverCtx({}).detail({...lunch, status}));
     assert.equal(Boolean(keyed(all, 'agent-bar')), status === 'active', status);
   }
+});
+
+test('ORCH-2149: a just-saved ticket says Not started above the title, not the lane name Backlog; the words are not said twice', () => {
+  const saved = nodes(handoverCtx({}).detail({...lunch, status:'open', sessions:[], checklist:[]}));
+  const pill = saved.find(n => /^status-open-/.test(n.attrs?.['data-key'] || ''));
+  assert.match(text(pill), /Not started/); assert.doesNotMatch(text(pill), /Backlog/);
+  assert.equal(text(keyed(saved, 'ticket-sentence')), 'Your helper begins when you press Start.');
+  const todo = nodes(handoverCtx({}).detail({...lunch, status:'ready', sessions:[], checklist:[]}));
+  assert.match(text(todo.find(n => /^status-ready-/.test(n.attrs?.['data-key'] || ''))), /To do/, 'a ticket in To do keeps its word');
+  assert.equal(text(keyed(todo, 'ticket-sentence')), 'Not started. Your helper begins when you press Start.');
 });
 
 test('ORCH-1850: active task and no run: the bar names the last marked step and who marked it, never a helper that is not running', () => {
