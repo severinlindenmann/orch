@@ -685,7 +685,11 @@ def needs(root: Path, now: dt.datetime | None = None) -> list[dict]:
 
     now = now or dt.datetime.now(dt.UTC)
     rows = []
-    for c in msgtrust.contacts(root):
+    try:
+        known = msgtrust.contacts(root)
+    except Refused:  # turned on but not connected to a relay yet: nobody new, and nothing wrong to say
+        return []
+    for c in known:
         if (
             c.get("kind") != "workspace"
             or c.get("accepted_by") != "relay-pairing"
