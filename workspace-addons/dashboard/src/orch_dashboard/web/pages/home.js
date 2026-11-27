@@ -888,8 +888,9 @@ function connectionNotice(connectionEl, hadState, kind = 'offline') {
     : kind === 'error' ? ['orch had a problem', hadState ? saved + 'it works again.' : 'orch answered with an error. Your data has not been changed.']
     : ['Can’t reach the workspace', hadState ? saved + 'you’re back online.' : 'Reconnect to load your workspace. Your data has not been changed.'];
   connectionEl.dataset.kind = kind;
-  connectionEl.replaceChildren(h('div', {className:'grow'}, h('h3', {}, words[0]), h('p', {}, words[1])),
-    kind === 'slow' ? null : button('Try again', 'outline sm', () => refresh()));
+  // No null child: replaceChildren writes null as the text "null" (seen in the corner of Still loading at phone width)
+  connectionEl.replaceChildren(...[h('div', {className:'grow'}, h('h3', {}, words[0]), h('p', {}, words[1])),
+    kind === 'slow' ? null : button('Try again', 'outline sm', () => refresh())].filter(Boolean));
   connectionEl.hidden = false;
   holdChanges();
   if (typeof paintUpdated === 'function') paintUpdated();
