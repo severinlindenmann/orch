@@ -406,7 +406,8 @@ def kind_block(root: Path, ticket: dict) -> str | None:
     second look."""
     kind = tickets.kind(ticket)
     if kind == "draft":
-        return "drafts, mockups and designs are only accepted by you."
+        # one wording for the one reason, also when the ticket carries a draft card (report r-1127-0540-ws-2)
+        return ownerpick.LEFT_WHY
     allowed = config.reviewer_kinds(root)
     if not allowed:
         return "this workspace lets the Reviewer accept no kind of work by itself."

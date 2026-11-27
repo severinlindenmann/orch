@@ -61,6 +61,8 @@ test('the peek: the last three lines that say something; none while a question w
   assert.equal(wall.liveWallPeek(sess('b', 'B', 'in-line', {lines:[]})), '');
   assert.equal(wall.liveWallPeek(sess('c', 'C', 'working', {lines:null})), '');
   assert.equal(wall.liveWallPeek(null), '');
+  // report r-1127-0540-ws-2: a right-aligned terminal line keeps no long run of spaces; the indent stays
+  assert.equal(wall.liveWallPeek(sess('d', 'D', 'working', {lines:['  done' + ' '.repeat(60) + 'Update installed']})), '  done  Update installed');
 });
 
 test('folded bands are kept per workspace in this browser; broken or foreign data reads as nothing folded', () => {

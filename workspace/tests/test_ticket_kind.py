@@ -4,7 +4,7 @@ A draft, mockup or design is never accepted by an automation (ORCH-582)."""
 
 import pytest
 
-from orch import config, lookreview, reviewer, runs, tickets
+from orch import config, lookreview, ownerpick, reviewer, runs, tickets
 from orch.errors import Refused
 
 PR = "https://github.com/acme/app/pull/12"
@@ -153,7 +153,7 @@ def test_a_listed_feature_is_accepted_when_small_but_a_new_setting_still_waits(
 
 def test_a_draft_is_never_accepted_even_when_everything_else_is_fine(proj, run, new_ticket, facts, on):
     _finished(proj, run, new_ticket, "draft")
-    assert _verdict(proj) == [("leave", "drafts, mockups and designs are only accepted by you.")]
+    assert _verdict(proj) == [("leave", ownerpick.LEFT_WHY)]
 
 
 def test_an_empty_list_accepts_nothing_also_without_a_kind(proj, run, new_ticket, facts, on):
@@ -241,3 +241,8 @@ def test_an_unknown_kind_a_person_wrote_does_not_crash_a_helper():
     t = {"id": "t_x", "history": [], "kind": {"name": "future_kind", "by": "human:x"}}
     assert not tickets.kind_by_person(t)
     assert tickets._put_kind(t, "bug", "agent:claude") and tickets.kind(t) == "bug"
+
+
+def test_a_draft_kind_and_a_draft_card_give_the_same_reason():
+    # report r-1127-0540-ws-2: Home showed the one reason in two wordings side by side
+    assert reviewer.kind_block(None, {"kind": {"name": "draft"}}) == ownerpick.LEFT_WHY

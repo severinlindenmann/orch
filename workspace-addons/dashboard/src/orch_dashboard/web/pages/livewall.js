@@ -109,7 +109,8 @@ function liveWallPlaces(p) {
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
-  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '')).filter(x => x.trim()).slice(-n).join('\n');
+  // a terminal pads right-aligned text with a long run of spaces: two spaces in a peek (report r-1127-0540-ws-2)
+  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '').replace(/(\S)[ \t\u00a0]{3,}(?=\S)/g, '$1  ')).filter(x => x.trim()).slice(-n).join('\n');
 }
 // ORCH-2063: is a band shown folded? While a search runs, a band the person folded opens by itself when it holds a
 // match (their saved choice stays as it is). A fold click during the search counts for that search only (ui.sf, never
