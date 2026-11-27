@@ -1,5 +1,8 @@
 schema = "orch.skill-description/1"
 
+[service_facts]
+publish = "publish"
+
 [online]
 lead = "Show the tickets in a web page on this computer with the orch dashboard."
 not_for = "Not for changing tickets (use the orch commands)."
