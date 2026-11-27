@@ -181,12 +181,9 @@ def test_merge_off_only_reports_once(proj, role, linked):
     assert history(proj, linked) == before  # the same report is not said again
 
 
-def test_never_merges_past_a_merge_queue_on_its_base_branch(proj, role, linked, monkeypatch):
+def test_never_merges_past_a_merge_queue_on_its_base_branch(proj, role, linked, queue_on):
     """#1809: green pull requests into develop were merged by the unblocker, past the merge queue."""
-    from orch import cli
-
     ub.set_merge(proj, "on")
-    monkeypatch.setattr(cli, "_queue_bases", lambda root: ["develop"])
     gh = FakeGH({PR: view()})
     _, res = two_passes(proj, gh)
     assert gh.merged == [] and res["reported"]
@@ -240,7 +237,7 @@ def test_held_merge_is_said_once(proj, role, linked):
     assert sum("keeps changing" in h for h in history(proj, linked)) == 1
 
 
-def test_merge_card_and_queue_are_left_alone(proj, role, new_ticket, run):
+def test_merge_card_and_queue_are_left_alone(proj, role, new_ticket, run, queue_on):
     ub.set_merge(proj, "on")
     a = new_ticket("Merged by a person")
     run("ref", "add", a, PR)
@@ -254,7 +251,7 @@ def test_merge_card_and_queue_are_left_alone(proj, role, new_ticket, run):
     )  # fmt: skip
     b = new_ticket("In the queue")
     run("ref", "add", b, PR2)
-    qdir = proj / ".orch" / "addons" / "some-queue"
+    qdir = proj / ".orch" / "addons" / "pull-requests"
     qdir.mkdir(parents=True)
     (qdir / "queue.json").write_text(json.dumps({"entries": [{"url": PR2, "state": "waiting"}]}))
     gh = FakeGH({PR: view(), PR2: view()})

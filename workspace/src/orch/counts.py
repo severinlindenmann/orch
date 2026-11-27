@@ -88,12 +88,13 @@ def quiet(root, tickets: list[dict]) -> dict:
     (the queue woke it to repair the pull request); it comes back once the queue gives up on it. folded = the
     ticket has another card already: an open question (the Check card follows once it is answered) or the
     "passed its checks but was not merged" row. Never raises: what cannot be read shows its card."""
-    from orch import stuck
+    from orch import mergequeue, stuck
     from orch import tickets as core
 
     out: dict = {"queue": [], "folded": []}
+    queue = mergequeue.Queue(root)
     try:
-        ready = stuck.unmerged_ids(root, tickets)
+        ready = stuck.unmerged_ids(root, tickets, queue)
     except Exception:  # noqa: BLE001 - no cache, no row: the Check card shows
         ready = set()
     for t in tickets:
@@ -102,7 +103,7 @@ def quiet(root, tickets: list[dict]) -> dict:
         try:
             pulls = stuck.open_pulls(t)  # every open one in the queue: one left out still needs the person
             held = bool(pulls) and (
-                all(core.in_merge_queue(root, [u]) for u in pulls) or stuck.helper_busy(root, t)
+                all(u.lower() in queue.waiting for u in pulls) or stuck.helper_busy(root, t)
             )
         except Exception:  # noqa: BLE001 - a broken run record or ref: the Check card shows
             held = False

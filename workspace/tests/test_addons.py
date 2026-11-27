@@ -188,6 +188,8 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["test/1"]'),
         lambda t: t.replace("background = false", 'background = false\nsetup = "setup"'),
         lambda t: t.replace("background = false", 'background = false\nsetup = ["../x"]'),
+        lambda t: t + '\n[merge_queue]\nread = ["status"]\n',
+        lambda t: t + '\n[merge_queue]\nread = ["../x"]\nadd = ["add"]\n',
     ],
 )
 def test_invalid_manifests_refused(tmp_path, mutate):

@@ -36,7 +36,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
+from orch import brake, config, ghmerge, history, mergequeue, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -445,16 +445,24 @@ def walk_of(root: Path, ticket: dict) -> dict | None:
         return None
 
 
-def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+def decide(
+    root: Path,
+    ticket: dict,
+    facts: list[dict | None],
+    sent_back: int = 0,
+    queue: mergequeue.Queue | None = None,
+) -> dict:
     """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
     look then leaves it too, whatever the verdict's reason)."""
-    res = _decide(root, ticket, facts, sent_back)
+    res = _decide(root, ticket, facts, sent_back, queue or mergequeue.Queue(root))
     if res.get("verdict") == "leave" and kind_block(root, ticket):
         res["kind_block"] = True
     return res
 
 
-def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+def _decide(
+    root: Path, ticket: dict, facts: list[dict | None], sent_back: int, queue: mergequeue.Queue
+) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
@@ -549,7 +557,7 @@ def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int =
             return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
-        if f["state"] != "MERGED" and tickets.in_merge_queue(root, [f.get("url")]):
+        if f["state"] != "MERGED" and str(f.get("url") or "").lower() in queue.waiting:
             # ORCH-815: sending it back only starts a helper that can do nothing but wait; the queue merges it
             # or wakes the helper with its reason
             return {
@@ -704,6 +712,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
+    queue = mergequeue.Queue(root)
     in_review = set()
     kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
@@ -732,7 +741,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         res = (
             {"verdict": "accept", "why": itself}
             if itself
-            else decide(root, t, facts, back)
+            else decide(root, t, facts, back, queue)
             if plain
             else None
         )

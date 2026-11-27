@@ -38,6 +38,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
 | `before_start` | `true` = implements `orch <name> before-start --json`: the core asks it before every helper start which tool, model and account to use, or to wait (Before a helper starts, below) |
+| `[merge_queue]` | Optional workspace merge queue. `read` and `add` are command argument lists after `orch <name>`, e.g. `read = ["queue", "snapshot"]`, `add = ["queue", "add"]`. Only an active, installed provider counts. |
 | `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`, unless `live_session = true` (then the dashboard draws the page and there is no server). Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
@@ -201,6 +202,15 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   `orch` on PATH). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract
   vectors (`vectors/activity-v1.json`, `examples/screen/`, `vectors/jobs-v1.json`, `examples/counts/`) for `record tail`,
   `record counts`, `job`, `run screen`, so add-on code does not change when the real commands arrive.
+
+## Merge queue (`[merge_queue]`)
+
+`merge_queue.read` is local and read-only. It prints, for example,
+`{"bases":["develop"],"entries":[{"url":"https://github.com/o/r/pull/1","state":"waiting","ticket":"t_abc123"}]}`.
+Entries have a URL and state (`waiting`, `running`, `merged`, `out`), optionally a ticket and ISO `ended` time.
+`entries: null` means the queue file is absent or unreadable: do not open a revert. An empty array means a
+readable, empty queue. The base-branch guard applies even before the first entry. `merge_queue.add` accepts
+`<url> --ticket <ticket>` and optionally `--first` for a priority fix. A workspace uses one queue provider.
 
 ## Before a helper starts (`before_start = true`)
 

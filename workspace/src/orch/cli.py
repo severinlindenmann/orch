@@ -2115,29 +2115,13 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
-def _queue_bases(root: Path) -> list[str]:
-    """The base branches the pull-requests add-on's merge queue merges into (`[pull_requests] bases`, default
-    develop, never main or master); empty when the add-on is not turned on here."""
-    from orch import config
-
-    try:
-        if "pull-requests" not in addons.active(root):
-            return []
-        t = config.read(root).get("pull_requests")
-    except Exception:  # noqa: BLE001 - unreadable: the queue is not known to be on
-        return []
-    got = t.get("bases") if isinstance(t, dict) else None
-    if not isinstance(got, list) or not got or not all(isinstance(b, str) and b.strip() for b in got):
-        got = ["develop"]
-    return [b.strip() for b in got if b.strip().lower() not in ("main", "master")]
-
-
 def _past_the_queue(root: Path, urls: list[str], key: str) -> None:
     """ORCH-450: with the merge queue on, every merge into its base branches goes through the queue, where it
     is checked in a queue group on top of the base. `orch ref wait --merge` refuses those, before any wait."""
-    from orch import prwait
+    from orch import mergequeue, prwait
 
-    bases = _queue_bases(root)
+    queue = mergequeue.Queue(root)
+    bases = queue.snapshot["bases"]
     if not bases:
         return
     for url in urls:
@@ -2147,7 +2131,7 @@ def _past_the_queue(root: Path, urls: list[str], key: str) -> None:
             into = base or " / ".join(bases)
             raise Refused(
                 f"Merges into {into} go through the merge queue, never past it. Mark {url} ready, then run: "
-                f"orch pull-requests queue add {url} --ticket {key}"
+                f"orch {' '.join(queue.add_args(url, key))}"
             )
 
 

@@ -1157,6 +1157,16 @@
   "gitignore": [
    ".orch/addons/pull-requests/"
   ],
+  "merge_queue": {
+   "add": [
+    "queue",
+    "add"
+   ],
+   "read": [
+    "queue",
+    "snapshot"
+   ]
+  },
   "name": "pull-requests",
   "needs": false,
   "orch_api": 1,

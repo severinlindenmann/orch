@@ -57,7 +57,7 @@ TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
     "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop before_start docs "
-    "api-credits setup run_card event_formats".split()
+    "api-credits setup run_card event_formats merge_queue".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1481,6 +1481,10 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("dashboard order is 0 to 99")
         d["order"] = order
     _check_selfcheck(m)
+    if "merge_queue" in m:
+        q = m["merge_queue"]
+        if not isinstance(q, dict) or set(q) != {"read", "add"} or not all(map(_args_ok, q.values())):
+            raise _bad("[merge_queue] needs read and add command arguments")
     _check_setup(m)
     _check_run_card(m)
     tv = m.get("ticket_view", [])
@@ -1996,8 +2000,9 @@ def _save_active(root: Path, a: dict[str, dict]) -> None:
 
 def active_manifests(root: Path) -> dict[str, dict]:
     """Active add-ons that are also installed here (a switch without a package does nothing)."""
-    found = discover()
-    return {n: found[n] for n in active(root) if n in found}
+    names = active(root)
+    found = discover() if names else {}
+    return {n: found[n] for n in names if n in found}
 
 
 def not_on_message(root: Path, name: str) -> str:
