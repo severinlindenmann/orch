@@ -54,6 +54,7 @@ jobs:
       dashshots: ${{ steps.f.outputs.dashshots }}
       pagesmoke: ${{ steps.f.outputs.pagesmoke }}
       clock: ${{ steps.f.outputs.clock }}
+      perf: ${{ steps.f.outputs.perf }}
       oscode: ${{ steps.os.outputs.oscode }}
       # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
       # group (orch-queue/...: the full suite once, whatever files it touches); proven = a push to develop with the
@@ -109,6 +110,8 @@ jobs:
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
+            # orch at 10,000 tickets against develop (ORCH-1609): the CLI, the add-on pages it measures, its scripts
+            perf: ['workspace/**', 'workspace-addons/**', 'install.sh', 'e2e/perf/**', '.github/workflows/perf.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
       # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
@@ -378,9 +381,20 @@ jobs:
     uses: ./.github/workflows/dash-shots.yml
     with:
       runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
+  # orch at 10,000 seeded tickets in queue groups that touch orch (ORCH-1609): fails only on more than 30% slower
+  # than develop's newest nightly numbers, never on the owner's absolute limits (R8.3). About 5 minutes.
+  perf:
+    needs: changes
+    if: needs.changes.outputs.queue == 'true' && needs.changes.outputs.perf == 'true'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/perf.yml
+    with:
+      against_develop: true
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots]
+    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots, perf]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
