@@ -319,9 +319,10 @@ def test_a_refused_review_is_said_not_only_the_branch_policy(tk, run, gh):
 def test_own_pull_request_needing_a_review_goes_to_the_merge_queue(tk, run, gh, monkeypatch):
     """ORCH-1118 (#2829 q9): GitHub refuses an author's own review (HTTP 422), so the click never tries it;
     with the merge queue on for its base branch the Merge stands and the queue approves and merges it."""
-    from orch import cli
+    from orch import mergequeue
 
-    monkeypatch.setattr(cli, "_queue_bases", lambda root: ["develop"])
+    # the queue's own reader is a child process (ORCH-2122); here only its answer matters
+    monkeypatch.setattr(mergequeue.Queue, "snapshot", {"bases": ["develop"], "entries": []})
     root, tid = tk
     assert _ask(run, tid)[0] == 0
     gh.review, gh.author = "REVIEW_REQUIRED", "PAT-GH"  # GitHub logins ignore case
@@ -336,9 +337,9 @@ def test_own_pull_request_needing_a_review_goes_to_the_merge_queue(tk, run, gh, 
 
 
 def test_own_pull_request_without_the_merge_queue_is_sent_back_with_what_to_do(tk, run, gh, monkeypatch):
-    from orch import cli
+    from orch import mergequeue
 
-    monkeypatch.setattr(cli, "_queue_bases", lambda root: [])
+    monkeypatch.setattr(mergequeue.Queue, "snapshot", {"bases": [], "entries": None})
     root, tid = tk
     gh.files = [_wf_file("    timeout-minutes: 10")]
     assert _ask(run, tid)[0] == 0

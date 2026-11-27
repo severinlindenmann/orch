@@ -1482,10 +1482,13 @@ def _own_pull_request(root: Path, tid: str, url: str, e, by: str, via: str) -> N
     queue (another login) approves and merges that commit once its checks are green. Else it is sent back."""
     import contextlib
 
-    from orch import ghmerge
-    from orch.cli import _queue_bases
+    from orch import ghmerge, mergequeue
 
-    if not e.base or e.base not in _queue_bases(root):
+    try:  # the queue's base branches, as its provider reads them (ORCH-2122); unreadable counts as not on
+        bases = mergequeue.Queue(root).snapshot["bases"]
+    except Refused:
+        bases = []
+    if not e.base or e.base not in bases:
         raise ghmerge.MergeFailed(
             "GitHub does not let you approve your own pull request, so nothing was merged: "
             "someone else who may approve it approves it on GitHub."

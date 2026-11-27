@@ -29,7 +29,9 @@ def test_readme_says_the_app_is_optional():
 def test_doctor_does_not_mind_a_missing_companion(proj, run, monkeypatch):
     diag._dropped.clear()
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **kw: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     monkeypatch.setattr(
         shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}" if n in ("orch", "uv", "git") else None
