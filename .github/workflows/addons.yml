@@ -37,7 +37,9 @@ jobs:
   dashboard:
     if: inputs.suites
     runs-on: ${{ fromJSON(inputs.checks) }}
-    timeout-minutes: 5
+    # 10, not 5: on orch edge its pytest takes about 4 of them, and the job was cancelled with every step green
+    # (ORCH-1932, run 45906897076).
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: workspace-addons/dashboard
