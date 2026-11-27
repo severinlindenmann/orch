@@ -1550,11 +1550,11 @@ def person_names(root: Path) -> dict:
 
 
 def load_settings(root: Path, orch_bin: str | None) -> dict:
-    """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
+    """What the Settings page shows: agents and the full add-on installation catalog."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_agents = pool.submit(run_orch, orch_bin, ["agents", "--json"], root)
-        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_rows = pool.submit(run_orch, orch_bin, ["addon", "list", "--catalog", "--json"], root)
         f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
         f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
@@ -1596,6 +1596,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_max,
         copies_mode,
         copy_setup,
+        decision_first_on,
         diag_enabled,
         focus_session_typing,
         focus_terminal_typing,
@@ -1604,6 +1605,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         prepare_on_save_on,
         release_merge_on,
         reviewer_kinds,
+        reviewer_mode,
         reviewer_on,
         workspace_description,
         workspace_name,
@@ -1627,6 +1629,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
         "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
+        "reviewer_propose_on": reviewer_mode(root) == "propose",  # owner 25 Nov: nothing closes by itself
+        "decision_first_on": decision_first_on(root),  # ORCH-2182: Review cards lead with the decision
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
         "pull_requests": _has_pull_requests(root, rows),

@@ -34,6 +34,7 @@ def three(proj, run):
         ["chat", "list", "--json"],
         ["chat", "list", "--reader", "dashboard", "--json"],
         ["addon", "list", "--json"],  # ORCH-1295: every Automation round and dashboard poll
+        ["addon", "list", "--catalog", "--json"],
         ["chat", "id", "--json"],
     ],
 )

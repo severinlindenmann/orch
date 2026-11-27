@@ -277,6 +277,37 @@ def _waiting(ticket, d, held=None, watcher=True, stuck=False):
     return {"kind": "idle"}
 
 
+FINISHED = (
+    "review",
+    "done",
+    "dropped",
+)  # a crew ticket whose work is over (its result may still wait for Looks good)
+
+
+def _next_stop_at(d, waiting):
+    """About when the next pause needs you (#956), or None. No AI call: the proposal's planned helper time per task,
+    times the tasks still open up to and including the next pause stage, at the pace measured so far (active minutes
+    used per finished task against the plan, kept between half and three times). Rounded up to 5 minutes. None while
+    the run waits on something (a question, a time, the person) and when no pause is ahead."""
+    p = d.get("proposal")
+    if not p or not d.get("tasks") or d.get("open") or d.get("shipped"):
+        return None
+    if waiting and waiting.get("kind") != "starting":
+        return None
+    names = [x["stage"] for x in d["line"]]
+    stop = next((x for x in d["line"] if x["stop"] and x["state"] != "done"), None)
+    if stop is None:
+        return None
+    upto = set(names[: names.index(stop["stage"]) + 1])
+    plan = p["time"]["active_min"] + max(0, d["cap"] - p["budget"]["active_min_cap"])  # plus accepted changes
+    each = plan / len(d["tasks"])
+    over = {slug for slug in d["tasks"] if (d["crew"].get(slug) or {}).get("status") in FINISHED}
+    left = sum(1 for slug, t in d["tasks"].items() if t["stage"] in upto and slug not in over)
+    pace = min(3.0, max(0.5, (d.get("used") or 0) / (len(over) * each))) if over and each else 1.0
+    at = clock().timestamp() + max(5.0, left * each * pace) * 60
+    return _iso(datetime.fromtimestamp(-(-at // 300) * 300, UTC))
+
+
 def _labelled(line, proposal):
     """Stage items with the proposal's own `label` when it gave one (a short, plain name for the owner)."""
     labels = {x["stage"]: x["label"] for x in (proposal or {}).get("line", []) if x.get("label")}
@@ -357,6 +388,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False, workspa
     if out["waiting"] and out["waiting"]["kind"] == "watcher":
         # where `orch factory start` is run again (ORCH-1857): the page never sends the viewer to "this computer"
         out["waiting"]["workspace"] = workspace or _workspace_name(root)
+    out["next_stop_at"] = _next_stop_at(d, out["waiting"]) if started_run else None
     return out
 
 
@@ -430,6 +462,7 @@ def _broken(ticket, error):
         "reviews": [],
         "starting": None,
         "waiting": None,
+        "next_stop_at": None,
         "problem": _text(str(error), 200),
     }
 

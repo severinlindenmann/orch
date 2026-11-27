@@ -140,6 +140,7 @@ function reviewWord(answer) {
   const it = answer.item || {}, note = answer.note || {};
   const own = Array.isArray(it.answers) && it.answers.find(x => x.picked === note.picked);
   if (answer.verdict === 'ok' && own) return own.label;
+  if (answer.verdict === 'ok' && note.ideas && window.UI?.ideasWord) return window.UI.ideasWord(note.ideas, (it.ideas || []).length);  // ORCH-2186
   if (answer.verdict === 'ok') return note.picked ? 'Use ' + note.picked : it.okLabel || 'Looks good';
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';
@@ -428,9 +429,12 @@ function reviewAcceptedCard() {
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with “I review the result” on wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
-    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
+    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'},
+  // Reviewer mode (owner, 25 Nov 2026): off = the Reviewer accepts complete work and sends open work back (each with Undo)
+  propose:{op:'reviewer_mode.set', field:'reviewer_propose_on', action:'reviewer-mode-set', title:'Nothing closes by itself',
+    meta:'The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.'}
 };
 const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
 function reviewSwitchRow(key, where = 'review') {
@@ -442,12 +446,12 @@ function reviewSwitchRow(key, where = 'review') {
 }
 // One set of rows for both places (R4.3): the Review card and Settings > General.
 function reviewAutoRows(where = 'review') {
-  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where),
+  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where), reviewSwitchRow('propose', where),
     h('div', {className:'card-row', 'data-key':where + '-auto-note'}, h('p', {className:'meta'}, REVIEW_AUTO_NOTE))];
 }
 function reviewAutoOn() {
   const s = state?.settings;
-  return !!s && (s.auto_reviewer_on === true || s.away_on === true);
+  return !!s && (s.auto_reviewer_on === true || s.away_on === true || s.reviewer_propose_on === true);
 }
 function reviewAutoCard() {
   if (!reviewAutoOn()) return null;
@@ -591,7 +595,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id)});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }

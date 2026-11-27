@@ -50,8 +50,13 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Time zone beside the time (ORCH-1861, 24 Nov)
 
 - automation-edit.html: the Time field names the zone it is read in beside it ("Europe/Zurich"), on one line at phone width too. In the product the name comes from the automation add-on, never from the browser: a new repeat shows the zone `orch automation repeat` saves without `--tz`; a saved one its own, an old one saved without a zone "UTC" (as the scheduler reads it).
-- `?mode=edit&zone=utc`: an old repeat read in UTC; below the field "Saving changes the time zone to Europe/Zurich.", because saving sends no zone.
+- `?mode=edit&zone=utc`: an old repeat read in UTC. Saving keeps a repeat's own zone (ORCH-1969), so the window no longer warns that saving moves it.
 - automation.html list: the product's Next time now ends with the zone of this computer ("Mon 30 Nov, 08:00 CET").
+
+## Save keeps the zone; calendar and notice name it (ORCH-1969, 25 Nov)
+
+- Save in the repeat window keeps the repeat's own saved zone (the automation add-on reads it when the dashboard saves a plan); a new repeat takes the default. With "New repeat" on a ticket that already repeats, the zone beside the time is that repeat's own.
+- automation.html: the Coming up heading names the zone of its times ("13–19 November · CET"; both names in a week that crosses summer time, "CEST / CET"), the status line says "Next: Monday at 08:00 CET", and Once "Starts" ends with the zone like Next time. The zone is always named: the add-on cannot know where the viewer sits.
 
 ## Polish (ORCH-2097, 25 Nov)
 

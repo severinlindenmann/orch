@@ -116,6 +116,18 @@ def test_record_before_send_plain_call_and_offline_recheck(dm, monkeypatch):
     assert chat.dm_send(root, WS, "accepted")["state"] == "delivered"
 
 
+def test_a_queued_message_the_relay_refuses_later_shows_as_failed(dm, monkeypatch):
+    """R3.1: queued while the relay was away, then refused when the outbox went out: Chat says "Not sent."
+    with the relay's reason instead of "Sending…" for ever."""
+    root, _ = dm
+    monkeypatch.setattr(relay, "send_text", lambda *a: {"id": MID, "sent": False})
+    chat.dm_send(root, WS, "hello")
+    assert chat.dm_sync(root, WS)["messages"][0]["state"] == "sending"
+    relay._record_not_sent(root, MID, "Pilatus may not send text to Home.")
+    entry = chat.dm_sync(root, WS)["messages"][0]
+    assert entry["state"] == "failed" and entry["error"] == "Pilatus may not send text to Home."
+
+
 def test_refusal_is_saved_and_cleaned(dm, monkeypatch):
     root, _ = dm
     reason = "No\x1b<!--secret-->" + "x" * 300

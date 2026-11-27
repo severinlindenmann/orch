@@ -200,3 +200,41 @@ test('ORCH-1836: owner shows the person\'s name for the computer login; time rea
   assert.equal(H.ageWords(3 * 86400), '3 days');
   assert.equal(H.ageWords(undefined), '');
 });
+
+test('ORCH-2271: a wall tile reads only the result it shows; the ticket page reads them all', async () => {
+  const asked = [];
+  const answer = url => url.startsWith('/api/artifacts/') ? {ok: true, status: 200, json: async () => listing}
+    : {ok: true, status: 200, text: async () => 'some text', json: async () => ({pages: 1, entries: [], count: 0})};
+  const before = global.fetch;
+  global.fetch = async url => { asked.push(url); return answer(url); };
+  try {
+    const t = {...DEMO.ticket, id: 't_tile' + Date.now().toString(36).slice(-6)};
+    // the last list resultsLoad hands over once every read it started has answered
+    const run = max => new Promise(done => { let last = null; F.resultsLoad(t, list => { last = list; }, false, max); setTimeout(() => done(last), 200); });
+    const files = () => asked.filter(u => !u.startsWith('/api/artifacts/'));
+    const tile = await run(1);
+    assert.ok(files().length <= 1, 'at most the one shown result is read: ' + files().join(', '));
+    assert.notEqual(F.resultsNewest(tile, 1)[0].state, 'loading', 'the shown result is ready');
+    assert.ok(tile.filter(it => it.state === 'loading').length > 3, 'the others wait until the overlay opens');
+    asked.length = 0;
+    const page = await run(0);
+    assert.ok(files().length > 3, 'the ticket page reads every text result');
+    assert.equal(page.filter(it => it.state === 'loading').length, 0, 'the ticket page reads every result');
+  } finally { global.fetch = before; }
+});
+
+test('ORCH-2271: the overlay of a tile opens once per click, also while a hidden file is still on its way', async () => {
+  const opened = [], before = global.fetch, beforeOverlay = win.UI.resultOverlay;
+  win.UI.resultOverlay = (list, i) => { opened.push(list.map(it => it.state || 'ready')); return null; };
+  global.fetch = () => new Promise(() => {});  // a file that never answers
+  try {
+    const ready = {key: 'a', type: 'text', text: 'ready'};
+    const slow = {key: 'b', type: 'text', state: 'loading', src0: {tid: 't_slow01', kind: 'artifacts', name: 'slow' + Date.now() + '.txt'}};
+    const one = F.resultsOpenAll([ready, slow], 0), two = F.resultsOpenAll([ready, slow], 0);
+    assert.equal(one, two, 'a second click waits for the first');
+    await one;
+    assert.deepEqual(opened, [['ready', 'loading']], 'opened once, after the wait, the slow file still loading');
+    await F.resultsOpenAll([ready], 0);
+    assert.equal(opened.length, 2, 'everything read: it opens at once');
+  } finally { global.fetch = before; win.UI.resultOverlay = beforeOverlay; }
+});

@@ -22,7 +22,7 @@
     { k: 'ORCH-238', t: 'Add files and notes to a ticket', kind: 'ticket', s: 'wait', tool: 't1', up: 64, step: [3, 5], now: 'Waits for your answer.', qn: 4,
       q: { t: 'Keep the old file name when the same file is added twice?', why: 'The helper suggests keeping it: links people already shared keep working.', a: ['Keep the old name', 'Use the new name'] },
       lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)', '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ The upload works. One thing only you can decide:', '  Keep the old file name when the same file is added twice?', '  1. Keep the old name (suggested)', '  2. Use the new name', '  Waiting for your answer…'],
-      chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
+      chat: [['e', 'Step 2 done: files can be dropped on a ticket', '14:21'], ['h', 'Uploading works for pictures, pages and tables. Notes sit below the files.', '14:38', 0, 0], ['h', 'To run the upload checks yourself:', '14:40', 0, 0, [], 'node --test tests/attach.test.js'], ['h', 'One thing I need from you before I go on: when the same file is added twice, should the old name stay?', '14:52', 1]],
       files: [['img', 'ticket-files.png', 'Picture · 14:36'], ['table', 'upload-sizes.csv', 'Table · 3 rows', [['Picture', '2.1 MB'], ['Page', '48 KB'], ['Table', '12 KB']]]] },
     { k: 'ORCH-228', t: 'Phone width and zoom', kind: 'ticket', s: 'run', tool: 't1', model: 'Opus', up: 38, step: [4, 5], now: 'Opening the pull request.',
       lines: ['⏺ All 3 widths pass: 1280, 1920 and 390.', '⏺ Bash(git push -u origin fix/phone-width)', '  ⎿ branch fix/phone-width set up to track origin', '⏺ Writing the pull request text.', '⏺ Bash(gh pr create --base develop --draft)', '  ⎿ Creating pull request…'],
@@ -57,7 +57,7 @@
   var PAGES = { focus: 'Focus', home: 'Home', tickets: 'Tickets', ticket: 'Tickets', review: 'Review', widgets: 'Widgets' };
   var AG = window.MW_TOOLS, TOOL = { t1: AG.t1.label, t2: AG.t2.label, shell: 'Plain terminal' };
   var NEW = [['Empty helper', 'A helper with no ticket and no task yet'], ['Chat helper', 'Ask anything, no ticket'], ['Plain terminal', 'An empty terminal in this workspace'], ['Manager', 'Looks after all helpers']];
-  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, sf: {}, panes: ['ORCH-238'], act: 0, pm: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
+  var st = { page: 'focus', view: 'wall', cur: 'ORCH-238', term: false, mode: 'bar', last: 'bottom', full: false, ask: false, ren: '', menu: '', list: '', lq: '', f: '', col: {}, sf: {}, panes: ['ORCH-238'], act: 0, pm: '', run: '', endask: '', ov: null, nt: 't1', nm: 'Sonnet', np: '', voice: '', vk: '', many: false, sheet: false, feat: 0, marks: false, tk: 'ORCH-238', foldR: false };
   var drafts = {}, picks = {}, uid = 0, feedAt = 0;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   try { picks = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { picks = {}; }
@@ -81,9 +81,9 @@
   function warm(s) {
     if (s.kind === 'shell') return 'stays open until you close it';
     if (s.s === 'idle') return 'closes in ' + (s.close || 40) + ' min if left idle';
-    if (s.s === 'none') return 'closed, the conversation is kept';
+    if (s.s === 'none') return 'closed, you can continue it later';
     if (s.s === 'queue') return 'starts when a place is free';
-    return s.s === 'wait' ? 'stays warm while it waits for you' : 'stays warm while it works';
+    return s.s === 'wait' ? 'stays open while it waits for you' : 'stays open while it works';
   }
   function grp(o) { return o.s === 'run' || o.s === 'open' ? 'run' : (o.s === 'queue' ? 'queue' : 'idle'); }
   function isOpen() { var m = eff(); return (m !== 'bar' && m !== 'side') || zoomed(); }
@@ -123,7 +123,7 @@
     html: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMin slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><rect class="mw-f5" width="120" height="22" rx="4"/><rect class="mw-f2" x="10" y="8" width="46" height="6" rx="2"/><rect class="mw-f1" x="10" y="30" width="100" height="5" rx="2"/><rect class="mw-f1" x="10" y="40" width="84" height="5" rx="2"/><rect class="mw-f1" x="10" y="50" width="92" height="5" rx="2"/><rect class="mw-f3" x="10" y="60" width="30" height="6" rx="2"/></svg>',
     chart: '<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><rect class="mw-f0" width="120" height="72" rx="4"/><path class="mw-l1" d="M10 62h100"/><rect class="mw-f3" x="14" y="40" width="12" height="22" rx="2"/><rect class="mw-f3" x="32" y="30" width="12" height="32" rx="2"/><rect class="mw-f3" x="50" y="36" width="12" height="26" rx="2"/><rect class="mw-f3" x="68" y="18" width="12" height="44" rx="2"/><rect class="mw-f2" x="86" y="10" width="12" height="52" rx="2"/></svg>'
   };
-  var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols and counts only */
+  var BL = 0; /* how far the bar is folded: 0 all chips, 1 pinned as a count, 2 counts as More, 3 symbols with short words (ORCH-1684), 4 the numbers alone */
   var GRP = { run: ['●', 'working', 'Working'], queue: ['◷', 'in line', 'In line'], idle: ['◐', 'idle', 'Idle'] };
   var MODELS = { t1: AG.t1.models, t2: AG.t2.models };
   var KIND = { file: 'file', img: 'picture', html: 'page', table: 'table', chart: 'chart', pr: 'pull request', link: 'link' };
@@ -278,12 +278,18 @@
   function qHTML(s, quiet) {
     return '<div class="mw-q" role="group" aria-label="Question from the helper"><p class="mw-qt">' + esc(s.q.t) + '</p><p class="meta">' + esc(s.q.why) + '</p><div class="mw-ans">' + btn('btn ' + (quiet ? 'outline' : 'primary'), 'answer', esc(s.q.a[0]), { 'data-k': s.k, 'data-a': 0 }) + btn('btn outline', 'answer', esc(s.q.a[1]), { 'data-k': s.k, 'data-a': 1 }) + '</div></div>';
   }
+  /* a command the helper suggests: Run in terminal types it (never Enter) into the helper or a plain terminal (ORCH-2203) */
+  function cmdHTML(s, i, cmd) {
+    var id = s.k + '|' + i, open = st.run === id;
+    return '<div class="mw-cmd"><code>' + esc(cmd) + '</code><span class="mw-run">' + btn('btn primary sm', 'run', 'Run in terminal ▾', { 'data-id': id, 'aria-expanded': String(open), 'aria-haspopup': 'menu' }) +
+      (open ? '<div class="mw-runmenu" role="menu" aria-label="Where to type it">' + [['helper', 'This helper'], ['plain', 'Plain terminal'], ['new', 'New plain terminal']].map(function (o) { return btn('btn ghost sm', 'runto', o[1], { 'data-to': o[0], 'data-k': s.k, 'data-cmd': cmd, role: 'menuitem' }); }).join('') + '</div>' : '') + '</span></div>';
+  }
   function chatMsgs(s) {
     return s.chat.filter(function (m) { return !(s.q && m[3]); }).map(function (m, i) {
       if (m[0] === 'e') return '<p class="mw-ev meta"><span aria-hidden="true">✓</span> ' + esc(m[1]) + ' · ' + esc(m[2]) + '</p>';
       var f = m[4] !== undefined && s.files && s.files[m[4]] && m[1].indexOf('picture') + m[1].indexOf('pull request') > -2 ? s.files[m[4]] : null;
       var sent = (m[5] || []).map(function (x) { return '<div class="mw-inmsg">' + widget(s.sent[x], 'sent:' + s.k, x, true) + '</div>'; }).join('');
-      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span>' + (m[1] ? '<p>' + esc(m[1]) + '</p>' : '') + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + (sent ? '<div class="mw-sent">' + sent + '</div>' : '') + '</div>';
+      return '<div class="mw-msg" data-w="' + m[0] + '"><span class="meta">' + (m[0] === 'y' ? 'You' : 'Helper') + ' · ' + esc(m[2]) + '</span>' + (m[1] ? '<p>' + esc(m[1]) + '</p>' : '') + (f ? '<div class="mw-inmsg">' + widget(f, s.k, m[4], true) + '</div>' : '') + (sent ? '<div class="mw-sent">' + sent + '</div>' : '') + (m[6] ? cmdHTML(s, i, m[6]) : '') + '</div>';
     }).join('');
   }
   function attHTML(s) {
@@ -526,8 +532,9 @@
   function cnt(l, compact) {
     var n = sorted().filter(function (o) { return inList(o, l); }).length; if (!n) return '';
     var sym = l === 'pin' ? I.pin : (l === 'more' ? I.more : '<span class="mw-st" data-s="' + l + '"><span class="mw-sym" aria-hidden="true">' + LIST[l][0] + '</span></span>');
-    var text = compact ? sym + n : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
-    return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': compact ? n + ' ' + LIST[l][1] : null });
+    var word = n + ' ' + (l === 'wait' && n === 1 ? 'needs you' : LIST[l][1]), bare = compact && BL >= 4; /* only the narrowest fold drops the words */
+    var text = compact ? sym + (bare ? n : word) : (l === 'pin' ? sym + 'Pinned (' + n + ')' : (l === 'more' ? 'More (' + n + ')' : n + ' ' + LIST[l][1])) + I.up;
+    return btn('mw-swb mw-grp', 'list', text, { 'data-l': l, 'aria-expanded': String(st.list === l), 'aria-label': bare ? word : null, title: compact ? LIST[l][2] + ': ' + word : null });
   }
   function chipsHTML() {
     var all = sorted(), need = all.filter(function (o) { return o.s === 'wait'; }), pin = all.filter(function (o) { return inList(o, 'pin'); }), open = all.filter(function (o) { return shownIn(o) && o.s !== 'wait' && !o.pin; });
@@ -607,9 +614,9 @@
     b.dataset.mwSheet = st.sheet ? '1' : ''; b.dataset.mwLayer = mode; b.dataset.mwSplit = mode === 'bar' || mode === 'side' ? '' : st.panes.length;
     $('mw-page').innerHTML = st.page === 'focus' ? (st.view === 'zoom' ? zoomHTML() : wallHTML()) : PG[st.page]();
     var L = $('mw-layer'), nav; L.dataset.mode = mode;
-    /* the bar never wraps: beside the right dock and on phones it is symbols and counts; elsewhere it folds only as far as needed */
+    /* the bar never wraps: beside the right dock and on phones it is symbols with short words; elsewhere it folds only as far as needed */
     BL = phone() || (mode === 'right' && window.innerWidth < 1700) ? 3 : 0; L.innerHTML = layerHTML();
-    while (BL < 3 && (nav = q1('.mw-bar .mw-sw')) && nav.scrollWidth > nav.clientWidth + 1) { BL++; L.innerHTML = layerHTML(); }
+    while (BL < 4 && (nav = q1('.mw-bar .mw-sw')) && nav.scrollWidth > nav.clientWidth + 1) { BL++; L.innerHTML = layerHTML(); }
     var sh = $('mw-sheet'); sh.innerHTML = sheetHTML(); sh.inert = !st.sheet; sh.setAttribute('aria-hidden', String(!st.sheet));
     var ov = $('mw-ov'), oh = ovHTML(); ov.innerHTML = oh; ov.hidden = !oh; if (!oh) st.ov = null;
     Array.prototype.forEach.call(b.children, function (c) { if (c !== ov && c !== sh && c.tagName !== 'SCRIPT') c.inert = !!oh; }); if (oh) sh.inert = true; /* the page behind a preview cannot be reached */
@@ -779,7 +786,7 @@
         if (m[2] === 'idle') { s.sl = 'Idle ' + (9 + i * 3) + ' min'; s.close = 51 - i * 3; s.now = 'Finished its step. Nothing to do right now.'; }
         // a result to check without a session (ORCH-1687): no session, so not counted as one; sits with needs you
         if (m[2] === 'check') { s.s = 'none'; s.sl = 'Check'; s.ask = true; s.last = 'today 14:10'; s.now = 'A result to check.'; s.lines = []; s.chat = []; }
-        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. The conversation is kept.'; }
+        if (m[2] === 'none') { s.sl = 'No session'; s.last = 'last week'; s.now = 'Closed after an hour idle. You can continue it later.'; }
         if (m[2] === 'queue') { s.now = 'Waits in line for a free helper place.'; s.lines = []; s.chat = []; s.step = [0, 4 + i % 3]; }
         if (m[2] === 'run' && i % 3 === 0) s.feed = ['⏺ ' + NOWS[(i + 1) % NOWS.length], '⏺ ' + NOWS[(i + 2) % NOWS.length]];
         return s;
@@ -836,7 +843,7 @@
     var nav = e.target.closest('.sidebar .nav-item[aria-label], .sidebar .brand');
     if (nav) { var p = nav.classList.contains('brand') ? 'home' : nav.getAttribute('aria-label').toLowerCase(); if (PAGES[p]) { e.preventDefault(); setPage(p); return; } }
     var b = e.target.closest('[data-act]');
-    if (!b) { if ((st.menu || st.list || st.pm) && !e.target.closest('.mw-pop, .mw-pmenu')) { st.menu = ''; st.list = ''; st.pm = ''; st.endask = ''; render(); } return; }
+    if (!b) { if ((st.menu || st.list || st.pm || st.run) && !e.target.closest('.mw-pop, .mw-pmenu, .mw-run')) { st.menu = ''; st.list = ''; st.pm = ''; st.run = ''; st.endask = ''; render(); } return; }
     var a = b.dataset.act, k = b.dataset.k, s;
     if (a === 'pm') { var pk = k + '|' + b.dataset.kind; st.pm = st.pm === pk ? '' : pk; st.endask = ''; st.menu = ''; if (b.dataset.kind !== 'bar') st.list = ''; render(st.pm ? '.mw-pmenu .mw-opt:not([disabled]), .mw-pmenu .btn, .mw-pop-sess .mw-opt:not([disabled])' : '[data-act=pm][data-k="' + k + '"][data-kind=' + b.dataset.kind + ']'); return; }
     if (a === 'stopstep') { stopStep(k); return; }
@@ -877,6 +884,8 @@
     else if (a === 'wallclear') { st.f = ''; st.sf = {}; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
     else if (a === 'col') { if (st.f.trim()) st.sf[b.dataset.id] = b.getAttribute('aria-expanded') === 'true'; else st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
     else if (a === 'fold') { st.foldR = !st.foldR; render('[data-act=fold]'); }
+    else if (a === 'run') { st.run = st.run === b.dataset.id ? '' : b.dataset.id; render('[data-act=run]'); }
+    else if (a === 'runto') { var rs = by(k), plainT = b.dataset.to !== 'helper'; st.run = ''; rs.lines = rs.lines.concat([(plainT ? '$ ' : '❯ ') + b.dataset.cmd.replace(/^!\s*/, plainT ? '' : '!')]); render(); say('Typed into ' + (plainT ? 'the plain terminal' : 'the helper') + '. Press Enter to run it.'); }
     else if (a === 'pin') pin(k);
     else if (a === 'ren') { st.ren = k; render('.mw-ren input'); var ri = q1('.mw-ren input'); if (ri) ri.select(); }
     else if (a === 'answer') answer(k, +b.dataset.a);
