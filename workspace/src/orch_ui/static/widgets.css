@@ -2318,6 +2318,18 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket .ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}
 .review-ticket .btn.primary{background:transparent;border-color:var(--border-strong);color:var(--text)}
 .review-ticket .btn.primary:hover{background:var(--surface-2);border-color:var(--border-strong)}
+/* ORCH-2185 (Focused review D, with decisionFirst): the panel's tabs Ticket / Chat / What the helper does (a .segmented
+   row of links in the panel's header, in place of its "Ticket" heading). Chat: the ticket's chat lines over the Chat
+   message box (UI.composer layout box), the box stays at the bottom of the panel. The helper's screen (UI.term) fills
+   the panel's height, watching until "Let me type". */
+.review-ticket-h:has(.review-ticket-tabs){flex-wrap:wrap}
+.review-ticket-tabs{flex:0 1 auto;flex-wrap:nowrap;margin-right:auto}
+.review-ticket-tabs .btn,.review-ticket-h>.btn{white-space:nowrap;text-decoration:none}
+.review-ticket[data-tab=chat] .review-ticket-b,.review-ticket[data-tab=helper] .review-ticket-b{display:flex;flex-direction:column;min-height:0}
+.review-panel-chat{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-log{display:flex;flex-direction:column;gap:var(--s3);flex:1 1 auto;min-height:0}
+.review-panel-box{position:sticky;bottom:0;padding-top:var(--s2);background:var(--surface)}
+.review-panel-term{display:flex;flex-direction:column;flex:1 1 auto;min-height:calc(var(--s9) * 5)}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
 @media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
 
@@ -3001,3 +3013,27 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
 .bulk-bar .menu-pop .meta{padding:4px 8px}
 .bulk-bar[aria-busy=true] .bulk-actions{opacity:.5;pointer-events:none}
 .bulk-bar .bulk-clear{margin-left:auto}
+
+/* Review gaps against the approved drafts (ORCH-2316). R4 A: Comment turns on pointing: what you can point at shows a
+   dashed outline (a paragraph takes a comment, a picture a numbered spot); words never zoom (.no-zoom). R6 A: a result's
+   steps fold under "What the helper did". */
+.swipe-preview.no-zoom{cursor:default}
+.swipe-commenting{margin:0 var(--s4) var(--s3);flex-shrink:0}
+.swipe-commenting .grow{min-width:0}
+.swipe-card.commenting .swipe-preview:not(.plain):not(.no-zoom){outline:1px dashed var(--border-strong);outline-offset:2px;cursor:crosshair}
+.swipe-card.commenting .swipe-point{outline:1px dashed var(--border-strong);outline-offset:var(--s1);border-radius:var(--radius);cursor:pointer}
+.swipe-card.commenting .swipe-point:hover,.swipe-card.commenting .swipe-point:focus-visible{outline:1px solid var(--warning)}
+.doc details.doc-steps{margin-top:var(--s2)}
+.doc details.doc-steps>summary{min-height:32px;display:flex;align-items:center}
+.doc details.doc-steps ol{margin:var(--s1) 0 0}
+@media (max-width:720px){.swipe-commenting{order:-1;flex-wrap:wrap;align-items:flex-start;margin:0 var(--s4) var(--s3);padding:var(--s2) var(--s3)}.swipe-commenting>.grow{flex:1 1 calc(100% - 32px)}.swipe-commenting>.btn{margin-left:auto}.swipe-commenting>.btn+.btn{margin-left:0}}
+/* ORCH-2316: on a phone the answers are pinned over the card's lower part, so the card's links (Open ticket, Open,
+   See the changes) sit right under its title, where the pinned bar never covers them */
+@media (max-width:720px){
+ .swipe-card>.swipe-head{order:-2}
+ .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
+ .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
+}
+/* ORCH-2185 / ORCH-2316: narrow phones need the links above the title: Linux font wrapping at 390 px
+   leaves only 21 px before the pinned answer bar. Keep the same safe placement through 480 px. */
+@media (max-width:480px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}
