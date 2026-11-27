@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CLI smoke for CI (R1.6, R3.4): orch is already installed (install.sh / install.ps1) and on PATH.
-# Runs in a temp folder whose name has a space and an umlaut. bash on all three OSes (Git Bash on Windows).
+# Runs in a test folder (under .orch-test in the home) whose name has a space and an umlaut. bash on all three OSes (Git Bash on Windows).
 #   cli-smoke.sh <addon-name>      # the add-on to add and remove again (default: focus)
 set -eu
 ADDON="${1:-focus}"
@@ -9,7 +9,10 @@ ADDON="${1:-focus}"
 if [ -z "${ORCH_HOME:-}" ]; then ORCH_HOME="$HOME/.orch-test/smoke-home-$$"; mkdir -p "$ORCH_HOME"; fi
 export ORCH_HOME ORCH_HOME_STRICT=1
 AGENT_PY="$(cd "$(dirname "$0")/../fixtures/generic-agent" && pwd)/agent.py"  # the generic fake agent (R3.4)
-BASE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+# The workspace sits beside that folder, under .orch-test: a test install works only in test folders there, and
+# an evidence write is refused where orch cannot read the saved keys (ORCH-2077).
+BASE="$(dirname "$ORCH_HOME")"
+if command -v cygpath >/dev/null 2>&1; then BASE="$(cygpath -u "$BASE")"; fi
 D="$BASE/orch smoke Büro $$"
 mkdir -p "$D"; cd "$D"
 step() { printf '\n=== %s\n' "$*"; }
