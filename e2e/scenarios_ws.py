@@ -167,7 +167,7 @@ def w5t(e):
     """Take a question back (G3): it leaves `orch needs`, the ticket stops waiting, an answer afterwards is refused."""
     ws = e.ws("Pilatus")
     t = e.orchj(ws, "ticket", "new", "W5T question")["id"]
-    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", by="agent:claude-code")
+    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", "--recommend", "S", by="agent:claude-code")
     check(any(r["ticket"] == t for r in e.orchj(ws, "needs")), "the question must be in needs")
     e.orch(ws, "ask", t, "--take-back", "q1", "no longer needed", by="agent:claude-code")
     d = tload(ws, t)
@@ -177,6 +177,76 @@ def w5t(e):
     rc, out, err = e.orch(ws, "review", "answer", t, "q1", "--verdict", "ok", "--picked", "S", by="human:sev", ok=False)
     check(rc != 0 and "taken back: no longer needed" in (out + err), f"answer must be refused: {out!r} {err!r}")
     return "taken back: left needs, refused an answer"
+
+
+@scenario("W8")
+def w8(e):
+    """F2 loop: an item checked without evidence is refused at done; a fitting evidence entry makes it clean."""
+    ws = e.ws("Pilatus")
+    t = e.orchj(ws, "ticket", "new", "W8 evidence loop")["id"]
+    e.orch(ws, "check", "add", t, "Write the fix")
+    e.orch(ws, "check", "add", t, "Run the tests")
+    e.orch(ws, "check", "done", t, "c2", "--command", "pytest -q", by="agent:e2e")
+    p = ws / ".orch/tickets" / f"{t}.json"
+    d = json.loads(p.read_text())
+    d["checklist"][0]["done"] = True  # an agent's hand edit: checked, no evidence
+    p.write_text(json.dumps(d))
+    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:e2e")
+    check(rc == 2 and "c1" in err and "without evidence" in err, f"c1 must be flagged: rc={rc} {err!r}")
+    e.orch(ws, "check", "done", t, "c1", "--commit", "abc1234", by="agent:e2e")
+    c = tload(ws, t)["checklist"]
+    check(all(x["done"] and x["evidence"] for x in c), f"every item needs its evidence: {c}")
+    e.orch(ws, "ticket", "status", t, "done", by="agent:e2e")
+    st = tload(ws, t)["status"]  # an agent's finish goes to a person's review
+    check(st in ("done", "review"), f"ticket must finish once every item has evidence: {st}")
+    return "flagged without evidence, clean with commit + command evidence"
+
+
+@scenario("W9")
+def w9(e):
+    """F2 loop: ask sets waiting_on, the agent goes on with an independent item, the answer is there on its next run."""
+    ws = e.ws("Pilatus")
+    t = e.orchj(ws, "ticket", "new", "W9 waiting")["id"]
+    e.orch(ws, "check", "add", t, "Needs the colour")
+    e.orch(ws, "check", "add", t, "Independent step")
+    e.orch(ws, "ask", t, "Which colour?", "--option", "red", "--option", "blue", "--recommend", "blue", by="agent:e2e")
+    d = tload(ws, t)
+    check(d["status"] == "waiting" and d["waiting_on"] == {"kind": "question", "ref": "q1"}, f"not waiting: {d['status']}")
+    e.orch(ws, "check", "done", t, "c2", "--note", "did the part that needs no answer", by="agent:e2e")
+    d = tload(ws, t)
+    check(d["checklist"][1]["done"] and d["waiting_on"] == {"kind": "question", "ref": "q1"}, "waiting must survive the work")
+    e.person(ws, "answer", t, "q1", "red")
+    d = tload(ws, t)
+    check(d["waiting_on"] is None and d["questions"][0]["answer"] == "red", f"answer not recorded: {d['questions'][0]}")
+    _, out, _ = e.orch(ws, "ticket", "show", t, by="agent:e2e")  # the next run reads the ticket first
+    check("Answered q1" in out and "red" in out, f"the answer must be in what the agent reads: {out[-300:]}")
+    e.orch(ws, "check", "done", t, "c1", "--note", "used red", by="agent:e2e")
+    check(tload(ws, t)["checklist"][0]["done"], "the dependent item is done after the answer")
+    return "waiting_on set, independent item done meanwhile, answer picked up"
+
+
+@scenario("W10")
+def w10(e):
+    """R2.7: every F2 command prints a Next: line in text mode (and none in --json)."""
+    ws = e.ws("Pilatus")
+    t = e.orchj(ws, "ticket", "new", "W10 next steps")["id"]
+    steps = [
+        ("ticket", "new", "W10 second"),
+        ("check", "add", t, "One item"),
+        ("ask", t, "Which size?", "--option", "S", "--option", "L"),
+        ("check", "done", t, "c1", "--note", "done"),
+        ("ticket", "show", t),
+        ("ticket", "list"),
+        ("ticket", "summary", t, "A short handover"),
+        ("ticket", "wait", t, "--on", "external:the client"),
+    ]
+    for args in steps:
+        _, out, _ = e.orch(ws, *args, by="agent:e2e")
+        check("Next:" in out, f"no Next: line after `orch {' '.join(args)[:50]}`: {out[-200:]!r}")
+    e.person(ws, "answer", t, "q1", "S")
+    _, out, _ = e.orch(ws, "ticket", "show", t, "--json")
+    check("Next:" not in out, "--json must stay pure")
+    return "Next: after every command, none in --json"
 
 
 @scenario("W6")

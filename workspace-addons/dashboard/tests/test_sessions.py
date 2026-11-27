@@ -334,9 +334,9 @@ def test_the_api_answer_carries_the_groups(tmp_path, screens):
 def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
     """ORCH-674: the tile said Idle while the layer (the ticket's pill) said Check for the same session."""
     idle = sessions.session(_t(9, status="review"), _run("idle", "Idle"), False, None)
-    assert (idle["status"], idle["word"]) == ("idle", "Check")
+    assert (idle["status"], idle["word"]) == ("idle", "Review")
     closed = sessions.session(_t(10, status="review"), {"running": False}, False, None)
-    assert (closed["status"], closed["word"]) == ("closed", "Check")
+    assert (closed["status"], closed["word"]) == ("closed", "Review")
     plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
     assert plain["word"] == "Idle"
     asks = sessions.session(_t(12, status="review"), _run("you", "Needs you"), False, None)
@@ -372,4 +372,4 @@ def test_a_closed_session_that_needs_you_says_why():
     check = sessions.session(_t(1, "review"), run, False, None)
     assert (failed["status"], failed["needs"], failed["word"]) == ("closed", True, "Could not start")
     assert (asked["needs"], asked["word"]) == (True, "Needs you")
-    assert (check["needs"], check["word"]) == (True, "Check")
+    assert (check["needs"], check["word"]) == (True, "Review")

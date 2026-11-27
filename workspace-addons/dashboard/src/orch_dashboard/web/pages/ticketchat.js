@@ -270,10 +270,10 @@ window.addEventListener('orch:state', () => {
 });
 window.addEventListener('DOMContentLoaded', tcRoute);
 
-// The ticket page's Open chat (in the ticket's strip, next to its other actions).
+// The ticket page's Ticket chat (third in the bar under the title, ORCH-2155).
 function ticketChatButton(t) {
   if (snapshot || !t || !tcId(t.id) || !(state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return null;
-  return h('a', {className:'btn outline sm', href:tcHash(t.id), 'data-key':'ticket-open-chat'}, iconEl('chat'), 'Open chat');
+  return h('a', {className:'btn outline sm', href:tcHash(t.id), 'data-key':'ticket-open-chat'}, iconEl('chat'), 'Ticket chat');  // ORCH-2155: "Ticket chat", Chat in the top bar is the workspace chat
 }
 
 // ---- Other workspaces in a ticket chat (team chat step 2, ORCH-1174; draft picked in ORCH-1098) ----

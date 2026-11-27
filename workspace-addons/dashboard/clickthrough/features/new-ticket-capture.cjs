@@ -1,6 +1,7 @@
-// ORCH-1852: capture first. On #new the text box has the focus, Save ticket sits beside it (right under it on a phone;
-// the options come after, under "Optional"), and with a helper Start now is outlined under Save with its cost said. Text left on
-// the page comes back; a refused save keeps it, and pressing Save again makes exactly one ticket that did not start.
+// ORCH-1852 capture first, laid out as ORCH-2162 option A (owner, 25 Nov): on #new the text box has the focus; under the
+// request Save ticket and Start now sit side by side, each with one line saying what it does (Start now outlined, with its
+// cost); the helper and the optional settings are the right column. Text left on the page comes back; a refused save keeps
+// it, and pressing Save again makes exactly one ticket that did not start.
 module.exports = {
   name: 'New ticket: write one sentence, save it, nothing starts',
   covers: ['ticket.new', 'page:new'],
@@ -14,16 +15,18 @@ module.exports = {
     const start = form.getByRole('button', { name: 'Start now' });
     must(await start.isVisible(), 'with a helper, Start now is not offered');
     must(/primary/.test(await save.getAttribute('class')) && !/primary/.test(await start.getAttribute('class')), 'Save ticket must be the filled button, not Start now');
-    const words = await form.locator('.new-ticket-what').innerText();
+    const words = (await form.locator('.new-ticket-what').allInnerTexts()).join(' ');
     must(/no work starts/.test(words) || /Nothing starts/.test(words), 'the line under the buttons does not say Save starts nothing');
     must(/may cost money/.test(words), 'the cost of Start now is not said');
     const order = await form.evaluate(f => {
       const y = el => el.getBoundingClientRect().top;
       const q = s => f.querySelector(s);
       const bottom = el => el.getBoundingClientRect().bottom;
-      return [bottom(q('.new-ticket-text')), y(q('.new-ticket-save [type=submit]')), bottom(q('.new-ticket-save [type=submit]')), y(q('.new-ticket-more'))];
+      const sv = q('.new-ticket-buttons [type=submit]'), st = [...f.querySelectorAll('.new-ticket-buttons button')].find(b => b.textContent.trim() === 'Start now');
+      return [bottom(q('.new-ticket-text')), y(sv), bottom(sv), y(st), innerHeight];
     });
-    must(order[1] <= order[0] + 24 && order[2] < order[3], 'Save ticket is not beside or right under the request, before the options');
+    must(order[1] >= order[0] && order[2] <= order[4], 'Save ticket is not under the request in the first screen');
+    must(Math.abs(order[1] - order[3]) < 8, 'Save ticket and Start now are not side by side');
 
     // Text left on the page comes back on the next New ticket.
     await box.fill(wish);

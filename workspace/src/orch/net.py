@@ -86,11 +86,12 @@ def _open(req, timeout, redirects: bool):
     return opener.open(req, timeout=timeout)
 
 
-def _send(req, timeout, limit=None, redirects: bool = True):
+def _send(req, timeout, limit=None, redirects: bool = True, retry: bool = True):
     """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response.
+    `retry=False`: one try only (a page that must open at once, publish list).
     A request that used up its whole time limit is tried once more at most: a server that stalls twice is
     down, and four full waits held `orch relay send` for minutes while the message was safe in the outbox."""
-    delays = list(RETRY_DELAYS)
+    delays = list(RETRY_DELAYS) if retry else []
     stalled = False
     while True:
         try:
@@ -139,6 +140,7 @@ def call(
     timeout: float = 120,
     limit: int | None = None,
     redirects: bool = True,
+    retry: bool = True,
 ) -> tuple[int, bytes]:
     """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message.
     `redirects=False`: a 3xx is refused too (a token in a header must not follow it elsewhere)."""
@@ -158,7 +160,7 @@ def call(
         err.status = None
         raise err
     try:
-        return _send(req, timeout, limit, redirects)
+        return _send(req, timeout, limit, redirects, retry)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = _status_text(url, e.code), ""
@@ -195,14 +197,17 @@ def call_json(
     body=None,
     timeout: float = 120,
     redirects: bool = True,
+    retry: bool = True,
 ):
-    status, raw = call(method, url, headers, body, timeout, redirects=redirects)
+    status, raw = call(method, url, headers, body, timeout, redirects=redirects, retry=retry)
     if not raw:
         return status, None
     try:
         return status, json.loads(raw)
     except ValueError:
-        raise Refused("The server sent something that is not JSON.") from None
+        raise Refused(
+            "The server sent an answer orch cannot read. Try again in a moment; if it stays, run: orch doctor"
+        ) from None
 
 
 def items(resp):
@@ -230,8 +235,10 @@ def write_atomic(path: Path, data: bytes, private: bool = False) -> None:
 
         for anc in path.parents:
             if anc.name.lower() == ".orch":
-                skills.ensure_gitignore(anc.parent)
-                harness.check_private_path(anc.parent, path)
+                root = anc.parent
+                rel = path.absolute().relative_to(root.absolute()).as_posix()
+                known = skills.ensure_gitignore(root, rel)  # one git run each for tracked and ignored
+                harness.check_private_path(root, path, known)
                 break
         else:
             raise skills.Refused(f"{path} is not inside .orch; orch will not store private files there.")

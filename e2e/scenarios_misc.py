@@ -66,7 +66,7 @@ def m3(e):
     ids, p1 = pair(e, ["Pilatus"], "Phone one")
     _, p2 = pair(e, ["Pilatus"], "Phone two")
     t = e.orchj("Pilatus", "ticket", "new", "M3 two phones")["id"]
-    e.orch("Pilatus", "ask", t, "Which one?", "--option", "a", "--option", "b", "--phone")
+    e.orch("Pilatus", "ask", t, "Which one?", "--option", "a", "--option", "b", "--recommend", "a", "--phone")
     q = [x for x in phone(e, p1, "GET", "/v1/phone/questions").json()["items"] if x["message"]["ticket"] == t]
     check(q and [x for x in phone(e, p2, "GET", "/v1/phone/questions").json()["items"] if x["message"]["ticket"] == t], "question not on both phones")
     mid = q[0]["message"]["id"]
@@ -106,7 +106,7 @@ def f1(e):
     ids, ph = pair(e, [ws])
     t = e.orchj(ws, "ticket", "new", "Weekly report")["id"]
     e.orch(ws, "check", "add", t, "Report published")
-    e.orch(ws, "ask", t, "Publish now?", "--option", "yes", "--option", "no", "--phone")
+    e.orch(ws, "ask", t, "Publish now?", "--option", "yes", "--option", "no", "--recommend", "yes", "--phone")
     q = [x for x in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if x["message"]["ticket"] == t][0]
     check(phone(e, ph, "POST", "/v1/phone/answer", {"question_message_id": q["message"]["id"], "answer": "yes"}).status == 201, "answer")
     e.orch(ws, "relay", "inbox")
@@ -167,7 +167,7 @@ def v2_m1(e):
     _, other = pair(e, ["Home"], label="V2-M1 other")
     check(phone(e, other, "GET", f"/v1/phone/blobs/{imgs[0]['blob_id']}").status == 404, "another phone read the blob")
     # question -> answer from the phone; the ticket chat got a fresh snapshot with the question
-    e.orch("Pilatus", "ask", tid, "Use last year's colours?", "--option", "yes", "--option", "no", "--phone")
+    e.orch("Pilatus", "ask", tid, "Use last year's colours?", "--option", "yes", "--option", "no", "--recommend", "yes", "--phone")
     qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == tid]
     check(len(qs) == 1, f"phone questions: {qs}")
     one = phone(e, ph, "GET", f"/v1/phone/updates?workspace={ids['Pilatus']}&ticket={tid}").json()["items"]

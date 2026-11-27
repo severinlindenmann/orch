@@ -1,5 +1,5 @@
 name: e2e-smoke
-# A short e2e set on every pull request that touches the CLI, an add-on, the e2e scenarios or the installer: 13
+# A short e2e set on every pull request that touches the CLI, an add-on, the e2e scenarios or the installer: 14
 # scenarios without relay/publish servers and without agents, so no cargo build. Under 5 minutes (the step has a hard
 # limit of 5). The full suite (e2e.yml) runs at night and before each release.
 on:

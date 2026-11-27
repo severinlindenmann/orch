@@ -747,6 +747,25 @@ def test_token_can_come_from_stdin(live, capsys, monkeypatch):
     assert code == 0 and json.loads(out)["text"] == "hi"
 
 
+def test_table_and_token_both_from_stdin_is_a_plain_refusal(live, capsys, monkeypatch):
+    """#564: `--table -` read the token line as table text; both from stdin is refused before any read."""
+    import io
+
+    started = json.loads(run_cli(capsys, "start", "--title", "X", "--json")[1])
+    monkeypatch.setattr("sys.stdin", io.StringIO(started["token"] + "\n"))
+    code, _, err = run_cli(capsys, "table", "--table", "-", "--job", started["job"], "--token", "-", "--json")
+    assert code == 2 and "stdin" in err
+    assert sys.stdin.read() == started["token"] + "\n"  # nothing was read
+
+
+@pytest.mark.parametrize("bad", [["table"], {"t": 1}])
+def test_an_unhashable_type_is_invalid_not_a_crash(bad):
+    """#564: a list or object `type` raised TypeError in the field lookup."""
+    with pytest.raises(jobs.JobError) as e:
+        jobs.validate_input({"type": bad})
+    assert e.value.code == "invalid"
+
+
 def test_a_repaired_torn_file_is_reread(live, monkeypatch):
     root, run, _ = live
     job = start(root)

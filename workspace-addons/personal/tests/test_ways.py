@@ -222,3 +222,22 @@ def test_short_output_is_complete_when_a_child_keeps_the_pipe_open(ws):
     t = time.time()
     assert ways.ask(ws, "teams", "unread")["text"] == "short answer\n"
     assert time.time() - t < 10
+
+
+def test_a_way_in_gets_words_with_spaces_quotes_and_umlauts_as_written(tmp_path):
+    """R1.6: the person's command is an argument list, never a shell line; its folder and the values may hold
+    spaces, quotes and umlauts."""
+    from orch_personal import ways
+
+    where = tmp_path / "ways" / "Grüße – Müller's & Co"
+    where.mkdir(parents=True)
+    (where / "echo.py").write_text(
+        "import json, os, sys\nprint(json.dumps({'argv': sys.argv[1:], 'in': json.load(sys.stdin), 'cwd': os.getcwd()}))\n",
+        encoding="utf-8",
+    )
+    words = ['He said "hi" & bye', "Grüße $HOME %PATH% `x` | y; z"]
+    values = {"who": 'Zoë "Ä" O\'Brien'}
+    code, out = ways.run_command([PY, "./echo.py", *words], where, {"values": values})
+    got = json.loads(out)
+    assert code == 0 and got["argv"] == words
+    assert got["in"]["values"] == values and os.path.samefile(got["cwd"], where)

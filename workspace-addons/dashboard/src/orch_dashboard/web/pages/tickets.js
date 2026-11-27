@@ -584,7 +584,7 @@ function boardCard(t, lane = '') {
   return card;
 }
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
-  blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
+  blocked:'Nothing waits for a date', review:'Nothing to review', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
 // ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
 const BOARD_MOVES = window.DashHelpers.MOVE_CHOICES;
 const CAPPED_LANES = BOARD_ROWS;  // every row: two rows of tiles, then "Show N more"
@@ -876,7 +876,7 @@ function groupAction(status, group, folded = foldedGroups.has(status)) {
       if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
     });
   }
-  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
+  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Review ' + group.length + (group.length === 1 ? ' result' : ' results'));
   return null;
 }
 const searchHead = n => { const q = String(ticketSearch).trim(); if (q && searchServed() && !savedView()) n = Math.max(n, hits.total); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
@@ -1247,11 +1247,13 @@ function list() {
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
   return fragment(top, !tickets().length ? ticketsEmpty() : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
 }
-// No tickets at all: the master empty state with one sentence and New ticket (the page's one filled button).
+// No tickets at all: the master's one empty page (D4, UI.pageEmpty) with one sentence and New ticket (the page's one
+// filled button).
 function ticketsEmpty() {
   const text = 'Describe a job in plain words; a helper works on it and asks you only when it needs a decision.';
-  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
   const add = typeof newButton === 'function' ? newButton() : null;
+  if (window.UI?.pageEmpty) return window.UI.pageEmpty({title:'No tickets yet', text, step:add, dataKey:'empty'});
+  const box = window.UI?.state ? window.UI.state({kind:'empty', title:'No tickets yet', text}) : h('div', {}, h('h2', {}, 'No tickets yet'), h('p', {className:'muted'}, text));
   if (add) box.append(add);
   box.dataset.key = 'empty';
   return box;
@@ -1259,7 +1261,7 @@ function ticketsEmpty() {
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.
 const TRIAGE_LANES = [['backlog', 'Backlog'], ['todo', 'To do'], ['working', 'Working'], ['needs-you', 'Needs you'], ['waiting', 'Waiting'],
-  ['check', 'Check'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
+  ['check', 'Review'], ['done', 'Done'], ['wont-do', "Won't do"], ['superseded', 'Superseded']];
 const triagePicked = new Set(['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']);
 // The board's own lane rule (DashHelpers.laneOf, ORCH-152), named with the lane ids core triage takes.
 const TRIAGE_ID = {open:'backlog', ready:'todo', active:'working', waiting:'needs-you', blocked:'waiting', review:'check', done:'done', dropped:'wont-do', superseded:'superseded'};

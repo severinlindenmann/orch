@@ -21,7 +21,18 @@ def _plain(out, err):
 def _question(run, new_ticket):
     tid = new_ticket()
     code, out, err = run(
-        "ask", tid, "Which file?", "--option", "a", "--option", "b", "--by", "agent:claude", "--json"
+        "ask",
+        tid,
+        "Which file?",
+        "--option",
+        "a",
+        "--option",
+        "b",
+        "--recommend",
+        "a",
+        "--by",
+        "agent:claude",
+        "--json",
     )
     assert code == 0, out + err
     return tid, json.loads(out)["id"]

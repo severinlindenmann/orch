@@ -67,6 +67,32 @@
   --form-width: 1024px;
   --panel-width: 296px;
   --reading-width: 76ch;
+  --link-ink: #ffffff;
+  --link-ink-dark: #111111;
+  --link-github: #2b3137;
+  --link-confluence: #1868db;
+  --link-notion: #e8eaed;
+  --link-figma: #a259ff;
+  --link-youtube: #e5302a;
+  --link-google: #2f7cf6;
+  --link-jira: #2684ff;
+  --link-linear: #5e6ad2;
+  --link-gslides: #f4b400;
+  --link-slack: #4a154b;
+  --link-miro: #ffd02f;
+  --link-gsheets: #1e8e3e;
+  --link-loom: #625df5;
+  --link-teams: #5b5fc7;
+  --link-sharepoint: #038387;
+  --link-trello: #0c66e4;
+  --link-dropbox: #0061fe;
+  --mm-dark-page-start: #102925;
+  --mm-dark-banner: #164b43;
+  --mm-dark-ink: #e8eaed;
+  --mm-light-page-start: #e3f5ef;
+  --mm-light-page-end: #f5fbf8;
+  --mm-light-banner: #bce9dc;
+  --mm-light-ink: #123b35;
   --fs-1: 12px; /* meta */
   --fs-2: 14px; /* compact */
   --fs-3: 14px; /* body */

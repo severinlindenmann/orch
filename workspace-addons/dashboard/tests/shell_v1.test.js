@@ -49,7 +49,7 @@ test('dialogs have one close button: the master removes a repeated plain Close',
 });
 test('Contacts is a top-level sidebar entry, not in the Add-ons fold-out', () => {
   assert.match(app, /contactsAddon \? navLink\(/);
-  assert.match(app, /a\.dashboard && a\.dashboard\.place !== 'settings' && a !== contactsAddon/);
+  assert.match(app, /a\.dashboard && a\.dashboard\.panel !== 'phone'/);  // menuPages(): Contacts is not listed again under Add-ons
 });
 test('the master empty state is used for add-on blocks and Insights errors', () => {
   // Chat has no Earlier screen any more (ORCH-2171): earlier days come back by scrolling up in the same chat

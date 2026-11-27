@@ -105,9 +105,8 @@
     toggle.hidden = needsPhone();
     toggle.setAttribute('aria-checked', mm.on ? 'true' : 'false');
     toggle.disabled = busy;
-    toggle.title = '';
-    const label = toggle.querySelector('.mm-label');
-    if (label) label.textContent = mm.on ? 'Phone' + (hm(mm.ends_at) ? ' · until ' + hm(mm.ends_at) : '') : 'Phone';
+    // an icon in the one-row person block (ORCH-1880): its state is the tooltip
+    toggle.title = mm.on ? 'Phone: on' + (hm(mm.ends_at) ? ' until ' + hm(mm.ends_at) : '') : 'Phone: off';
   }
 
   // A mode whose end time has passed is over, whatever the last state said: the chip, the switch and the bar all go quiet
@@ -128,7 +127,7 @@
     busy = true; paint();
     const r = await window.orchAct(op, args);
     busy = false;
-    if (!r.ok) window.orch?.toast(r.text || 'That did not work.', 'error');
+    if (!r.ok) window.orch?.toast(r.text || 'That did not work. Try again.', 'error');
     paint();
     return r;
   }

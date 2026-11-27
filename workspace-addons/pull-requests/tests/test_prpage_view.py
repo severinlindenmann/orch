@@ -27,6 +27,8 @@ def test_empty_page(prws):
     v = valid(view.build(prws, running=True, queue_alive=True))
     assert [b["type"] for b in v["blocks"]] == ["list", "footnote"]  # one empty state, not two
     assert v["blocks"][0]["empty"]["title"] == "No pull requests yet"
+    assert v["blocks"][0]["title"] == "Open pull requests"  # not the page's own title again
+    assert v["blocks"][0]["empty"]["button"] == {"label": "Open tickets", "to": "app:tickets"}  # a next step
     assert "notice" not in v
 
 
@@ -161,7 +163,10 @@ def test_github_trouble_is_the_notice(prws):
     add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
     poll.once(prws, fetch=FakeGitHub({}, fail={"acme/app": gh.NOT_SIGNED_IN}))
     v = valid(view.build(prws, running=True, queue_alive=True))
-    assert v["notice"] == gh.NOT_SIGNED_IN and v["notice_tone"] == "bad"
+    # D5: no command, no "this computer"
+    assert v["notice"] == view.NOT_CONNECTED and v["notice_tone"] == "warn"
+    assert "gh auth" not in v["notice"] and "this computer" not in v["notice"]
+    assert v["button"] == {"label": "Try again", "action": {"op": "addon.refresh"}}
     assert v["blocks"][0]["type"] == "list"  # nothing readable: the empty state, not an empty table
 
 
@@ -306,7 +311,7 @@ def test_with_no_open_pull_request_the_queues_recent_work_still_shows(prws):
     (store.folder(prws) / "queue.json").write_text(json.dumps({"entries": rows}), encoding="utf-8")
     v = valid(view.build(prws, running=True, queue_alive=True, now=now, tz=UTC))
     assert [b["type"] for b in v["blocks"]] == ["flow", "chart", "chart", "list", "footnote"]
-    assert v["blocks"][0]["stages"][2]["value"] == "1 of 1 groups"
+    assert v["blocks"][0]["stages"][2]["value"] == "1 of 1 group"
     assert v["blocks"][3]["empty"]["title"] == "No pull requests yet"
 
 
@@ -367,3 +372,14 @@ def test_a_conflict_without_a_ticket_says_to_make_one():
     assert "Open the ticket" in view._pr_state({"status": "conflict"})[2]
     note = view._pr_state({"status": "conflict"}, has_ticket=False)[2]
     assert "make a ticket" in note and "Open the ticket" not in note
+
+
+def test_failed_checks_read_as_one_sentence():
+    # report r-1127-0539-ws-3: 'lint, light failed.' read like one check called 'lint, light'
+    w = view._failed_what
+    assert w({}) == "A check failed."
+    assert w({"failed_names": ["lint"], "failed": 1}) == "lint failed."
+    assert w({"failed_names": ["lint", "light"], "failed": 2}) == "2 checks failed: lint and light."
+    names = ["a", "b", "c", "d", "e"]
+    assert w({"failed_names": names, "failed": 7}) == "7 checks failed: a, b and 5 more."
+    assert w({"failed_names": ["a", "b", "c"], "failed": 3}) == "3 checks failed: a, b and 1 more."

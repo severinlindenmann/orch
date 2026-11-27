@@ -102,8 +102,20 @@ def test_the_stack_carries_the_look_and_puts_a_question_before_a_result(proj, ru
     tickets.set_status(proj, done, "review", "human:tester")
     ask = new_ticket("Book the team lunch")
     assert (
-        run("ask", ask, "Which day?", "--option", "Tuesday", "--option", "Thursday", "--by", "agent:x")[0]
-        == 0
+        run(
+            "ask",
+            ask,
+            "Which day?",
+            "--option",
+            "Tuesday",
+            "--option",
+            "Thursday",
+            "--recommend",
+            "Tuesday",
+            "--by",
+            "agent:x",
+        )[0]
+        == 0  # fmt: skip
     )
     items = review.stack(proj)
     assert [i["ticket"] for i in items] == [ask, done]
@@ -145,7 +157,7 @@ def test_a_question_without_a_suggested_answer_gets_the_next_step(proj, run, new
     code, out, _ = run(
         "ask", tid, "Which hotel?", "--option", "Near the station", "--option", "Old town", "--by", "agent:x"
     )
-    assert code == 0 and cardkinds.ASK_HINT in out
+    assert code == 0 and cardkinds.ASK_HINT in out  # a hint, not a refusal (owner pick, ORCH-2067)
     flight = ["Which flight?", "--option", "Morning", "--option", "Evening", "--recommend", "Morning"]
     code, out, _ = run("ask", tid, *flight, "--by", "agent:x")
     assert code == 0 and cardkinds.ASK_HINT not in out
@@ -237,8 +249,20 @@ def test_review_list_in_the_terminal_shows_the_same_groups(proj, run, new_ticket
     tickets.set_status(proj, done, "review", "human:tester")
     ask = new_ticket("Book the team lunch")
     assert (
-        run("ask", ask, "Which day?", "--option", "Tuesday", "--option", "Thursday", "--by", "agent:x")[0]
-        == 0
+        run(
+            "ask",
+            ask,
+            "Which day?",
+            "--option",
+            "Tuesday",
+            "--option",
+            "Thursday",
+            "--recommend",
+            "Tuesday",
+            "--by",
+            "agent:x",
+        )[0]
+        == 0  # fmt: skip
     )
     code, out, _ = run("review", "list")
     assert code == 0

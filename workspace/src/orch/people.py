@@ -34,6 +34,7 @@ import time
 import unicodedata
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 SCHEMA = "orch.people/1"
@@ -392,7 +393,7 @@ def _save(root: Path, doc: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)
             f.write("\n")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -654,7 +655,7 @@ def note_refused(root: Path, phone: str, why: str) -> None:
         lines.append(json.dumps({"at": now(), "device": phone[:70], "why": why[:200]}, ensure_ascii=False))
         tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
 
 
 def refused(root: Path, limit: int = 20) -> list[dict]:
@@ -854,7 +855,7 @@ def remember_answer(root: Path, tid: str, qid: str, phone: str) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(d), encoding="utf-8")  # never trimmed: a lost record would allow
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
 
 
 def answer_still_ok(root: Path, tid: str, qid: str, by: str, *rights: str, via: str | None = None) -> bool:

@@ -20,4 +20,4 @@ def add_run_parsers(r, common) -> None:
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "run" or args.sub not in SUBCOMMANDS:
         return False
-    raise Refused(f"`orch run {args.sub}` is not built yet.")
+    raise Refused(f"`orch run {args.sub}` is not built yet. Use `orch run --help` to see what is available.")

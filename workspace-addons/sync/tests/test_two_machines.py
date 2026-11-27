@@ -4,7 +4,7 @@ import re
 import subprocess
 
 import pytest
-from test_step import ART, NOW, TICKET, at, configure, run, save, success, ticket, tracked
+from test_step import ART, NOW, TICKET, at, configure, run, save, set_remote, success, ticket, tracked
 
 from orch_sync import repo, step
 
@@ -1039,3 +1039,81 @@ def test_counter_schema_is_strict(machines, counter):
     state = run(b)
     assert state["last_error"] and "Traceback" not in state["last_error"]
     assert (live.read_bytes() if live.exists() else None) == before
+
+
+def test_first_push_reaches_an_empty_remote_and_a_second_run_is_quiet(machines):
+    a, _b, bare = machines
+    save(a)
+    success(a)
+    first = remote_sha(bare)
+    assert tracked(a) == {TICKET}
+    success(a)
+    assert remote_sha(bare) == first
+
+
+def test_first_push_to_a_new_address_sends_the_whole_history_there(machines, tmp_path, monkeypatch):
+    a, _b, old = machines
+    save(a)
+    success(a)
+    new = tmp_path / "new.git"
+    subprocess.run(["git", "init", "--bare", str(new)], capture_output=True, check=True)
+    assert set_remote(a, new) == 0
+    success(a)
+    assert remote_sha(new)
+    assert remote_sha(old)  # the old address is left as it was
+
+
+def test_crlf_files_arrive_byte_for_byte(machines):
+    a, b, _bare = machines
+    raw = json.dumps(ticket(), indent=2).replace("\n", "\r\n").encode()
+    save(a, value=raw)
+    art = b"line one\r\nline two\r\n"
+    save(a, ART, art)
+    success(a)
+    success(b)
+    assert (b / ".orch" / ART).read_bytes() == art
+    assert (b / ".orch" / TICKET).read_bytes() == raw
+
+
+def test_a_ticket_file_with_a_bom_stays_here_and_the_rest_still_syncs(machines):
+    # A Windows editor adds a BOM; strict loading refuses it, so the ticket is named and kept local, never lost
+    a, b, _bare = machines
+    raw = b"\xef\xbb\xbf" + json.dumps(ticket()).encode()
+    save(a, value=raw)
+    other = "tickets/t_other1.json"
+    save(a, other, ticket() | {"id": "t_other1"})
+    state = success(a)
+    assert any("t_abc123" in line for line in state["skipped"])
+    success(b)
+    assert (a / ".orch" / TICKET).read_bytes() == raw
+    assert not (b / ".orch" / TICKET).exists() and (b / ".orch" / other).exists()
+
+
+def test_step_lock_blocks_a_second_holder_and_frees_itself(root):
+    configure(root)
+    with step.step_lock(root):
+        with pytest.raises(repo.Refused, match="already running"), step.step_lock(root):
+            pass
+        assert run(root)["last_error"]  # a step meanwhile ends with a message, never a crash
+    with step.step_lock(root):
+        pass
+    assert not repo.safe(root, "run/sync/step.lock").exists()
+
+
+def test_step_lock_is_freed_when_the_holder_fails(root):
+    configure(root)
+    with pytest.raises(RuntimeError), step.step_lock(root):
+        raise RuntimeError("boom")
+    assert not repo.safe(root, "run/sync/step.lock").exists()
+
+
+def test_step_lock_of_a_dead_holder_is_taken_over(root):
+    configure(root)
+    dead = subprocess.Popen(["git", "--version"], stdout=subprocess.DEVNULL)
+    dead.wait()
+    p = repo.safe(root, "run/sync/step.lock")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"{dead.pid} -")
+    with step.step_lock(root):
+        assert p.read_text().split()[0] != str(dead.pid)
+    assert not p.exists()

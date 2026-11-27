@@ -117,7 +117,8 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
         if m.isdigit():
             return "Every hour" if int(m) == 0 else f"Every hour at {int(m)} past"
     if dom == mon == dow == "*" and m.isdigit() and h.startswith("*/") and h[2:].isdigit():
-        return f"Every {int(h[2:])} hours"
+        n = int(h[2:])
+        return "Every hour" if n == 1 else f"Every {n} hours"  # "0 */1 * * *" (report r-1127-0539-ws-3)
     if m.isdigit() and h.isdigit() and mon == "*" and (ln := local_next(expr, tz, now, local)):
         here, shift = ln
         at = here.strftime("%H:%M")

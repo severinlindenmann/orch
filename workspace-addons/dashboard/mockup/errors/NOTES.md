@@ -98,3 +98,12 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - States: `?state=working` (default), `?state=starting` (the dashboard is starting again), `?state=failed`
   (the failed step with its reason, then "Open the dashboard"), `?state=done` ("Opening the dashboard…").
 - No new components: master parts only.
+
+## One look per page state (26 Nov, dashboard decisions D4-D6, owner picked A)
+- `addon-stopped.html`: an add-on page whose service stopped keeps its name; one notice under it (`.page-notice`):
+  what happened, what still works, one green button (Start Factory). Home says the same sentence once.
+- `addon-off.html`: a turned-off add-on's address keeps the page name; one notice with "Turn on Usage".
+- `addon-slow.html`: an add-on page that has not loaded after 10 s says so with Try again (no endless grey bars).
+- Every add-on page top carries the one Settings button (`.settings-btn`); it opens `settings/addon-detail.html`
+  (one list: on or off, options, Remove with what stays; "Back to <page>").
+- Empty pages use `.page-empty` (home `?state=empty`, lessons empty view): one sentence and the first step.

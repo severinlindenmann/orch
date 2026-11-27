@@ -519,7 +519,7 @@ def adopt_local_objects(root: Path) -> int:
             continue
         try:
             with tickets._locked(root, tid):
-                doc = json.loads(p.read_text(encoding="utf-8"))
+                doc = json.loads(p.read_text(encoding="utf-8-sig"))
                 if not isinstance(doc, dict) or doc.get("id") != tid:
                     continue
                 found = {

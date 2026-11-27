@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 module.exports = {
-  name: 'Phone link: paste the line from its admin page and Connect',
+  name: 'Relay: paste the line from its admin page and Connect',
   covers: ['relay.connect'],
   async run({ page, open, reload, act, must, text, orchAsPerson, workspace, standins, until }) {
     const r = standins.relay;

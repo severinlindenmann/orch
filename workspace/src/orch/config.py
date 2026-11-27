@@ -15,6 +15,7 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
@@ -82,7 +83,7 @@ def approve_agent(root: Path, name: str, e: dict) -> None:
         tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
         try:
             tmp.write_text(json.dumps(data[-500:] + [k]), encoding="utf-8")
-            os.replace(tmp, p)
+            procs.replace(tmp, p)
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -230,7 +231,7 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)  # private
         with os.fdopen(fd, "wb") as f:
             f.write(json.dumps(doc, indent=1).encode("utf-8"))
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
     return value
@@ -291,7 +292,7 @@ def _copies_set(root: Path, key: str, value) -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(json.dumps(doc, indent=1).encode("utf-8"))
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -1280,7 +1281,7 @@ def set_key(root: Path, table: str, key: str, value: str | int | bool | None) ->
     tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
     try:
         tmp.write_text(text, encoding="utf-8", newline="\n")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -1354,7 +1355,12 @@ def first_use_notice(command: str) -> str | None:
         return None
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(seen[-200:] + [key]), encoding="utf-8")
+        tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(json.dumps(seen[-200:] + [key]), encoding="utf-8")
+            procs.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
     except OSError:
         pass
     return f"Using agent command from this folder's settings: {command}"

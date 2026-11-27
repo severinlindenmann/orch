@@ -69,7 +69,7 @@ function reviewStuckStep(t) {
 }
 function reviewStuckHint(row) {
   if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
-  if (row.kind === 'reviewer:unsure') return 'Open the ticket to check the result yourself.';
+  if (row.kind === 'reviewer:unsure') return 'Open the ticket to review the result yourself.';
   if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
   return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
 }
@@ -202,7 +202,7 @@ async function runCardClick({ticket, key, digest, confirmed}) {
     return res;
   }
   if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
-  return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+  return {ok:false, error:String(r.text || 'Could not run it. Try again.').slice(0, 300)};
 }
 // Opens the plain terminal's session in the live layer (a sign-in card's terminal, ORCH-865); the sessions list is read
 // again first, so a terminal that was just started is there.
@@ -293,7 +293,7 @@ function reviewApi() {
     // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
     attach: async ({ticket, files}) => {
-      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
+      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here. Add them on the ticket page.'}};
       const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
       return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
     },
@@ -357,7 +357,7 @@ async function reviewSendBack(a, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
   const r = await act('ticket.changes', {ticket:a.ticket, text});
-  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) reviewSentBack.add(a.ticket);
   return r.ok;
 }
@@ -374,7 +374,7 @@ async function reviewUndo(a) {
   const args = {ticket:a.ticket};
   if (a.undo === 'answer' && a.question) args.question = a.question;
   const r = await act('review.undo', args);
-  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) { reviewUndone.add(reviewRowKey(a)); render(); }
   return r.ok;
 }
@@ -495,11 +495,13 @@ function reviewExtraRows() {
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
-    if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
-    if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
+    // work that stopped is Home's row (#2385), never "A result to check"; its stuck card is the card (carded above). The core
+    // can count a stop Home has no row for (ORCH-2339): that one is listed here, so the badge and the heading still add up
+    if (!it.question && it.stopped) { add(t, 'stopped', 'Work stopped. Open the ticket to see where.'); continue; }
+    if (!it.question && n.fromCore) add(t, 'result', 'A result to review.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
-  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to check.'));
+  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to review.'));
   return out;
 }
 // ORCH-1643: a question with two or three choices (a helper's on its screen too, when its ticket carries it) is answered in its row with one click: the same question card as the
@@ -516,7 +518,7 @@ function reviewExtraCard() {
   const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
   const act = r => r.what === 'screen' && live
     ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
-    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : r.what === 'failed' ? 'Open' : 'Answer');
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Review' : r.what === 'failed' ? 'Open' : 'Answer');
   return card('review-extra', 'Also waiting for you', '',
     rows.map(r => reviewOneClick(r)
       ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
@@ -714,7 +716,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
   mountReviewPanel(main);

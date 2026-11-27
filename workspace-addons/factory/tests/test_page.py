@@ -356,7 +356,7 @@ def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(sr
     js = get(srv, "/web/factory.js")[1].decode()
     assert (
         "['drafts', orders.filter(draftWaiting)" in js and "draftActions(o, render)" in js
-    )  # in "Waits for you"
+    )  # in "Needs you"
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
     assert (
@@ -722,7 +722,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Projects"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -742,7 +742,9 @@ def test_page_script_never_writes_html():
     js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
     assert not re.search(r"innerHTML|outerHTML|insertAdjacent|document\.write|srcdoc|eval\(|new Function", js)
     for target in re.findall(r"""['"](/#[a-z]+)""", js):
-        assert target in ("/#ticket", "/#chat"), target
+        assert target in ("/#ticket", "/#chat", "/#settings"), target
+    # the one Settings link goes to Factory's own part of Settings (D6, ORCH-2315)
+    assert "'/#settings/addons/factory'" in js
 
 
 def test_page_decisions_only_post_the_open_question():
@@ -834,11 +836,24 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
+    early = js.index(
+        "view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea()"
+    )
     assert early < js.index("await read('/api/home', signal)")
-    assert (
-        "view.append(theIdea(), askRow(auto))" in js
-    )  # the same box (and its typed text) stays when the list comes
+    # the same box (and its typed text) stays when the list comes
+    assert "const box = theIdea()" in js and "view.append(box, askRow(auto))" in js
+
+
+def test_empty_factory_is_the_idea_box_alone():
+    """D4 (26 Nov, owner pick A): with nothing in Factory yet the idea box is the page, in the master's empty-page look
+    (.page-empty: one sentence, the first step right there); no switch and no lines about what is missing."""
+    js = _page_js()
+    assert "el.classList.add('f-idea', 'page-empty')" in js and "group('page-empty-step')" in js
+    assert "const empty = !orders.length && !auto?.on;" in js
+    assert "if (empty) { view.append(box); return; }" in js
+    assert js.index("if (empty) { view.append(box); return; }") < js.index(
+        "Budget health: shows here once an order runs."
+    )
 
 
 def test_the_newest_draft_opens_without_a_click():
@@ -897,7 +912,7 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
     assert (
         "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))]"
         in js
-    )  # in "Waits for you": one review per stage
+    )  # in "Needs you": one review per stage
 
 
 def _built(ws, tid, *, picture=True, demo=True, exits=(0,), pulls=(("merged", 1),)):
@@ -1122,7 +1137,7 @@ def test_home_has_no_empty_sections():
         "planned runs are below",
     ):
         assert old not in home, old
-    assert "if (!rows.length) return;" in home and "badge('Waits for you')" in home
+    assert "if (!rows.length) return;" in home and "badge('Needs you')" in home
     assert "'Nothing else in Factory right now: no '" in home and "They show here when they come." in home
     if not shutil.which("node"):
         return

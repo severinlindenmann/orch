@@ -38,3 +38,6 @@ body:has(.shared-preview) main{padding-bottom:72px}
 /* Run it now card entry (ORCH-848) */
 .run-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:var(--s4);align-items:start}
 .run-gallery-item{display:grid;gap:var(--s2);min-width:0}
+
+/* the side menu sample (g-menu-list): two menus side by side, at their own height */
+#g-menu-list .sidebar{position:static;height:auto;width:240px;border:1px solid var(--border);border-radius:10px}

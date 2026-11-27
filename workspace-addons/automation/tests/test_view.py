@@ -149,6 +149,7 @@ def test_no_notice_row_when_running_with_nothing_planned(ws, monkeypatch):
         ("*/5 * * * *", "Every 5 minutes"),
         ("0 * * * *", "Every hour"),
         ("15 * * * *", "Every hour at 15 past"),
+        ("0 */1 * * *", "Every hour"),
         ("0 */3 * * *", "Every 3 hours"),
         ("30 6 * * *", "Every day at 06:30"),
         ("0 8 * * 1", "Mondays at 08:00"),

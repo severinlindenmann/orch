@@ -188,6 +188,8 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('run = "orch_hello"', 'run = "orch_hello"\nevent_formats = ["test/1"]'),
         lambda t: t.replace("background = false", 'background = false\nsetup = "setup"'),
         lambda t: t.replace("background = false", 'background = false\nsetup = ["../x"]'),
+        lambda t: t + '\n[merge_queue]\nread = ["status"]\n',
+        lambda t: t + '\n[merge_queue]\nread = ["../x"]\nadd = ["add"]\n',
     ],
 )
 def test_invalid_manifests_refused(tmp_path, mutate):
@@ -1583,7 +1585,7 @@ def test_factory_is_shipped_and_its_manifest_is_valid():
     m = addons.folder_manifest(folder)
     assert m["name"] == "factory"
     assert m["requires"] == []  # its own watcher wakes the agent
-    assert m["dashboard"]["label"] == "Projects"
+    assert m["dashboard"]["label"] == "Factory"
     assert m["needs"] is True
 
 
@@ -1718,6 +1720,21 @@ def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
     for line in addons.help_lines(proj):
         assert line.split()[0] in manifests, line
     assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
+
+
+def test_crash_while_saving_the_registry_keeps_the_old_list(proj, monkeypatch):
+    addons._save_registry([{"name": "hello", "source": "x", "version": "0.1.0"}])
+    p = addons.registry_path()
+    before = p.read_bytes()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(addons.procs, "replace", boom)
+    with pytest.raises(OSError):
+        addons._save_registry([])
+    assert p.read_bytes() == before
+    assert [x.name for x in p.parent.glob("addons.json*")] == ["addons.json"]
 
 
 def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):

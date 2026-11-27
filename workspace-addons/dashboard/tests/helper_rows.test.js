@@ -164,7 +164,7 @@ test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle 
   assert.deepEqual(pill(UNMERGED), ['Stuck']);
   assert.deepEqual(pill(IDLE), ['Idle']);
   // ORCH-1717: a ticket the Reviewer left for the person waits for a look, it is not stuck
-  assert.deepEqual(pill(UNSURE), ['Check']);
+  assert.deepEqual(pill(UNSURE), ['Review']);
 });
 
 test('a ticket the Reviewer left for you says its one plain reason, not the Reviewer\'s counts', () => {

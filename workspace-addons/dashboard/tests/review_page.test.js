@@ -216,7 +216,7 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
   assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
-  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
+  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to review');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
   const attached = [];
@@ -447,7 +447,7 @@ test('ORCH-1616: what the number counts but has no card is listed above the card
     {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
   const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
   const rows = none.reviewExtraRows();
-  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to review.']]));
   assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
   assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
   // with a card for each, nothing extra: the cards list them
@@ -592,4 +592,20 @@ test('ORCH-2316 (R2 A, draft r2-a): the subtitle says how many need you and how 
   assert.equal(ctx({review:{cards:[ask, look]}}).reviewSubtitle(), '2 things need you. 1 holds up work now.');
   assert.equal(ctx({review:{cards:[ask, {...ask, id:'core:q:t_abcdef:q4'}, look]}}).reviewSubtitle(), '3 things need you. 2 hold up work now.');
   assert.equal(ctx({review:{cards:[look]}}).reviewSubtitle(), '1 thing needs you.');
+});
+// ORCH-2339: the heading says cards + listed rows, the Waiting tab the cards, the badge needsToday().count. Whatever the
+// core counts must be on the page as a card or as a row of "Also waiting for you", so the three can never drift apart.
+test('ORCH-2339: every item the core counts is a card or a listed row (stopped work with no Home row too)', async () => {
+  const c = stuckHome();
+  const items = [{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null},
+    {ticket:'t_aaaa02', question:null, stopped:'helper:idle', row:'core:idle:t_aaaa02'},
+    // counted by the core, but no row on Home's list (so no stuck card is made for it)
+    {ticket:'t_aaaa03', question:null, stopped:'helper:failing', row:'core:failing:t_aaaa03'}];
+  c.state.counts = {needs_you:{count:items.length, questions:1, results:1, failed:0, stopped:2, items}};
+  c.state.review.cards = c.state.review.cards.slice(0, 2);  // the question and the result of t_aaaa01
+  c.needsList = () => [];  // Home lists nothing of the stopped work
+  const n = c.needsToday(), cards = (await c.reviewApi().stack()).length;
+  assert.equal(n.count, items.length);
+  assert.equal(cards + c.reviewExtraRows().length, n.count, 'the heading adds up to the badge');
+  assert.equal(c.reviewExtraRows().map(r => r.what).join(), 'stopped,stopped');
 });
