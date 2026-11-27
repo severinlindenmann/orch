@@ -36,6 +36,7 @@ if(UI.pageEmpty){const idea=document.createElement('div');idea.className='stack'
 q('#w-empty').append(UI.state({kind:'empty',title:'Nothing here yet',text:'Finished work shows up here.',action:{label:'Create a ticket'}}));
 q('#w-error').append(UI.state({kind:'error',title:'Could not reach your storage',text:'Check the address or your connection.',action:{label:'Try again'}}));
 q('#w-loading').append(UI.state({kind:'loading'}));
+q('#w-empty-link').append(UI.state({kind:'empty',title:'No files yet',text:'Files helpers make for your tickets show up here.',action:{label:'Open tickets',href:'#w-empty-link'}}));
 q('#w-table-empty').append(UI.table([{key:'t',label:'Ticket'},{key:'s',label:'Status'}],[],{empty:'No tickets match',emptyText:'Clear the filter to see all tickets.',emptyAction:{label:'Clear filter'}}));
 q('#w-helpers-empty').append(UI.helperList([],{}));
 q('#w-preview-fail').append(UI.state({kind:'error',title:'The preview did not load',text:'Open the card to see it, or try again.',action:{label:'Try again'}}));

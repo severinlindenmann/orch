@@ -250,7 +250,9 @@ test('same numbers: every page shows the same count, date and state for the same
         // '← Tickets' above the name (one top for every page, ORCH-2282) is the way back, not the ticket's state
         const back = (main.querySelector('.page-back')?.innerText || '').trim();
         const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && x !== back && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
-        return {state: first, due: due ? (due.nextElementSibling || due.parentElement.nextElementSibling || {innerText: ''}).innerText.trim() : ''};
+        // the words on screen only: an edit field also says ", change due date" to a screen reader (.sr-only, label in name)
+        const shown = n => { if (!n) return ''; const c = n.cloneNode(true); c.querySelectorAll('.sr-only').forEach(x => x.remove()); return c.textContent.trim(); };
+        return {state: first, due: due ? shown(due.nextElementSibling || due.parentElement.nextElementSibling) : ''};
       });
       await page.screenshot({path: path.join(OUT, 'ticket-' + key + '.png')});
     }

@@ -218,13 +218,15 @@ UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'but
 UI.fillSettings=root=>{(root||document).querySelectorAll('[data-settings-for]').forEach(s=>{const n=s.dataset.settingsFor;
  if(/^[a-z][a-z0-9-]{1,31}$/.test(n||''))s.replaceWith(UI.settingsButton({href:'/#settings/addons/'+n,top:true}));else s.remove()})};
 if(typeof document!=='undefined'&&document.querySelectorAll){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>UI.fillSettings());else UI.fillSettings()}
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}})
+   action:{label, href, target} draws the button as a link (another page, e.g. '/#tickets' with target '_top' from an add-on frame). */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
- if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
+ if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
  const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
- if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
+ if(o.action){const link=typeof o.action.href==='string';const a=el(link?'a':'button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);
+  if(link){a.href=o.action.href;if(o.action.target)a.target=o.action.target}else a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
 /* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
    UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
@@ -415,7 +417,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(oneTap(it)?'Answer ':lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
-   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.setAttribute('aria-hidden','true');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */
     if(c&&c===cur&&oneTap(it))return answerPick(it,op.id);/* Enter or Space on the answer */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
@@ -819,7 +821,7 @@ UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken b
   b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
   if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
   if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
-  b.setAttribute('aria-label',g.name+', '+n+' waiting'+(n&&g.deadline?', '+g.deadline:''));
+  /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
   if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
  /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */

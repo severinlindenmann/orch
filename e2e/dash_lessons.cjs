@@ -71,7 +71,10 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
     // the page that is open always shows in the menu, marked, even under a closed More (D2 A)
     assert.equal(await page.locator('#side-addons a[aria-current="page"]').filter({hasText: 'Lessons'}).count(), 1, 'the open Lessons page is not marked in the menu');
     await page.screenshot({path: path.join(OUT, 'lessons-page.png')});
-    await page.locator('.acc summary').first().click();   // a row opens with one click: Edit and Delete sit inside
+    // only the row with a source ticket opens (the ticket link sits inside); a plain row shows Edit and Delete (#863)
+    assert.equal(await page.locator('.acc summary').count(), 1, 'one row opens: the one with a ticket');
+    assert.equal(await page.locator('.row-acts').count(), 1, 'the plain row shows its buttons');
+    await page.locator('.acc summary').first().click();
     await page.screenshot({path: path.join(OUT, 'lessons-page-open.png')});
     await page.getByRole('button', {name: 'Edit'}).first().click();
     const dlg = page.locator('dialog[open]');

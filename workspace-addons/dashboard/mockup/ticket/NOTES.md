@@ -241,6 +241,10 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
 - Changes to add, empty copy (ORCH-1809): a copy that brings 0 commits and 0 files shows one quiet `.meta` line
   ("The copy has no changes to add. Nothing to apply.") instead of the card, with no Apply changes; Home says "No
   changes to apply" and links to the ticket.
+- Header in every state (ORCH-2089): the product now draws the unboxed strip of `ticket-idle.html` /
+  `ticket-working.html` when no helper runs too: one line "KEY · kind · status pill" above the 28 px title (24 px on a
+  phone), the sentence and facts below. A Done ticket whose only result is its completion note shows "Results · 1 note"
+  without the "Nothing yet" line, as `ticket-done.html` draws it. No mockup change was needed.
 
 ## ORCH-2140: what the owner accepted from the workflow drafts (25 Nov)
 

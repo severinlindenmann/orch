@@ -116,9 +116,21 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
   assert.equal(ctx.hashKind('#notes'), 'home');
   assert.equal(ctx.hashKind('#note/t_1'), 'home');
 });
+test('skeletonLines: master lines that show late, busy, one status text, shapes hidden', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});
+  const ctx = {h}; vm.createContext(ctx); vm.runInContext(skSource, ctx);
+  const s = ctx.skeletonLines('Loading the runs…', 3, 'runs-loading');
+  assert.equal(s.attrs['aria-busy'], 'true'); assert.equal(s.attrs['data-key'], 'runs-loading');
+  assert.ok(s.attrs.className.split(' ').includes('skeleton-late'));
+  const status = s.kids.filter(k => k.attrs.role === 'status');
+  assert.equal(status.length, 1); assert.deepEqual(status[0].kids, ['Loading the runs…']);
+  const bars = s.kids.filter(k => k.attrs.className?.startsWith('skeleton line'));
+  assert.equal(bars.length, 3); assert.ok(bars.every(b => b.attrs['aria-hidden'] === 'true'));
+  assert.equal(bars.at(-1).attrs.className, 'skeleton line short');
+});
 test('the sidebar: Review has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');
-  const foot = html.slice(html.indexOf('<div class="side-foot">'));
+  const foot = html.slice(html.indexOf('<div class="side-foot person-row">'));
   assert.ok(foot.indexOf('id="mm-toggle"') < foot.indexOf('id="side-settings"'));
   assert.ok(html.indexOf('id="side-settings"') > html.indexOf('id="side-nav"') && html.indexOf('id="side-settings"') > html.indexOf('id="side-addons"'));
   // ORCH-63: the needs-you number sits on the Review entry, right after Tickets; Home has no badge

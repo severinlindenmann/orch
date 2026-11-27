@@ -605,11 +605,13 @@ def build(
         blocks.append(
             {
                 "type": "list",
-                "title": "Pull requests",
+                "title": "Open pull requests",  # the loaded table's title, not the page's own again
+                "meta": "0 open",
                 "items": [],
                 "empty": {
                     "title": "No pull requests yet",
-                    "text": "Link a pull request to a ticket and it shows up here with its checks.",
+                    "text": "Add a pull request link to a ticket and it shows up here with its checks.",
+                    "button": {"label": "Open tickets", "to": "app:tickets"},
                 },
             }
         )

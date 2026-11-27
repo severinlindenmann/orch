@@ -12,8 +12,10 @@ const today = new Date(), NOW = at(9, 0, 0, {year:today.getFullYear(), month:tod
 const FixedDate = new Clock(NOW).Date;
 function load() {
   const el = () => ({hidden:true, disabled:false, title:'', attrs:{}, children:[], className:'', setAttribute(k, v) { this.attrs[k] = v; }, replaceChildren(...n) { this.children = n.flat().filter(x => x != null); },
-    append(...n) { this.children.push(...n); }, querySelector: sel => sel === '.mm-label' ? label : null, classList:{toggle(){}}});
-  const label = {textContent:'Send questions to my phone'}, toggle = el(), bar = el(), chip = el(), clicks = [];
+    append(...n) { this.children.push(...n); }, querySelector: () => null, classList:{toggle(){}}});
+  const toggle = el(), bar = el(), chip = el(), clicks = [];
+  // the phone icon's words are its tooltip (ORCH-1880)
+  const label = {get textContent() { return toggle.title; }};
   const doc = {getElementById:id => id === 'mm-toggle' ? toggle : id === 'mm-chip' ? chip : bar, createElement:() => el(), addEventListener(type, fn) { if (type === 'click') clicks.push(fn); }, body:{classList:{toggle(){}}}};
   const win = {listeners:{}, addEventListener(name, fn) { this.listeners[name] = fn; }};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/mobile-mode.js'), 'utf8'), {document:doc, window:win, Date:FixedDate, localStorage:{getItem(){}, setItem(){}, removeItem(){}}});
@@ -37,7 +39,7 @@ test('a paired phone, or an unknown count, leaves the switch usable; an On switc
     c.state(mm);
     assert.equal(c.toggle.hidden, false);
     assert.equal(c.toggle.disabled, false);
-    assert.equal(c.label.textContent, 'Phone');
+    assert.equal(c.label.textContent, mm.on ? 'Phone: on' : 'Phone: off');
   }
 });
 
@@ -57,7 +59,7 @@ test('on: the chip shows "Phone until HH:MM" with the menu, and the banner stays
   assert.match(menu, /Keep on for \d+ hours/);
   assert.match(menu, /Turn off/);
   assert.ok(find(c.chip, n => n.attrs?.['data-testid'] === 'mobile-mode-bar-off').length === 1);
-  assert.match(c.label.textContent, /^Phone · until \d\d:\d\d$/);
+  assert.match(c.label.textContent, /^Phone: on until \d\d:\d\d$/);
 });
 test('on but could not keep the computer awake: the chip uses the warning tone and the menu says why', () => {
   const c = load();
@@ -69,7 +71,7 @@ test('off: no chip, label is just Phone', () => {
   const c = load();
   c.state({...base, phones:1});
   assert.equal(c.chip.hidden, true);
-  assert.equal(c.label.textContent, 'Phone');
+  assert.equal(c.label.textContent, 'Phone: off');
 });
 test('the banner shows for the first-click ask, and for the last 5 minutes only', () => {
   const ask = load();
@@ -108,7 +110,7 @@ test('ORCH-184: a mode whose end time has passed is shown as ended, not "Phone u
   c.state({...base, phones:1, on:true, ends_at:soon(-60000), awake:'ok'});
   assert.equal(c.chip.hidden, true);
   assert.equal(c.bar.hidden, true);
-  assert.equal(c.label.textContent, 'Phone');
+  assert.equal(c.label.textContent, 'Phone: off');
   const helpers = require('../src/orch_dashboard/web/helpers.js');
   const real = ms => new Date(Date.now() + ms).toISOString();  // helpers.js runs on the real clock
   assert.equal(helpers.mobileOn({on:true, ends_at:real(-1000)}), false);
@@ -119,7 +121,7 @@ test('ORCH-286: an end time on another day says the day, in the chip, the menu a
   const c = load();
   c.state({...base, phones:1, on:true, ends_at:soon(26 * 3600 * 1000), awake:'ok'});
   assert.match(text(c.chip.children[0]), /^Phone until tomorrow \d\d:\d\d$/);
-  assert.match(c.label.textContent, /^Phone · until tomorrow \d\d:\d\d$/);
+  assert.match(c.label.textContent, /^Phone: on until tomorrow \d\d:\d\d$/);
   assert.match(text(c.chip.children[1]), /Questions go to your phone until tomorrow \d\d:\d\d/);
   const c2 = load();
   c2.state({...base, phones:1, on:true, ends_at:soon(4 * 24 * 3600 * 1000), awake:'ok'});

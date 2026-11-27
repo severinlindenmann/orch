@@ -76,7 +76,7 @@ const parse = value => {
 // One date and time format everywhere: the master kit's UI.stamp ("today 10:32", "Mon 08:00", "14 Nov 2026, 10:32").
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
-let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+let state, renderedRoute = '', renderedKind = '', fetching = false, writing = 0, serial = 0, mutation = 0;
 // Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
 // (session.js) and stops asking; a sign-in link reloads the page.
 let signedOut = false;
@@ -221,9 +221,17 @@ function skeletonFor(kind) {
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
+// A small part of a page still loading (a card row, a side list): master skeleton lines in place of a bare "Loading…",
+// shown after 300 ms (skeleton-late); the words stay for screen readers only.
+function skeletonLines(label = 'Loading…', n = 2, key = 'loading-lines') {
+  return h('div', {className:'skeleton-late stack-sm', 'aria-busy':'true', 'data-key':key}, h('p', {className:'sr-only', role:'status'}, label),
+    Array.from({length:n}, (_, i) => h('span', {className:'skeleton line' + (n > 1 && i === n - 1 ? ' short' : ''), 'aria-hidden':'true'})));
+}
 // One menu entry; `here` is the address of the page shown, which gets aria-current.
 function navEntry(here, url, text, glyph, tail = null) {
-  return h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+  // The spoken name starts with the words on screen and then says the count ("Review, 1 needs you"; label in name, #2243)
+  const said = tail ? (tail.getAttribute?.('aria-label') || tail.textContent || '').trim() : '';
+  return h('a', {className:'nav-item', href:url, 'aria-label':said ? text + ', ' + said : text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
 }
 // The menu before the state is there (report r-1118-2330, ORCH-692): on a busy machine the first state can take
 // seconds after 'orch start', and the menu stayed empty until then. Home, Tickets and Review never depend on the
@@ -562,7 +570,8 @@ function render(arrived = new Set()) {
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
   showMarkedRow();
   // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
-  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null,
+  // icons in the one-row person block (ORCH-1880), their words on hover
+  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? h('a', {className:'nav-item nav-icon-only', href:'#settings', 'aria-label':'Settings', title:'Settings', 'aria-current':here === '#settings' ? 'page' : null}, navIcon('settings')) : null,
     snapshot ? null : h('a', {className:'nav-item nav-icon-only', href:'#docs', 'aria-label':'Documentation', title:'Documentation', 'aria-current':here === '#docs' ? 'page' : null}, navIcon('book'))));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
@@ -614,6 +623,11 @@ function render(arrived = new Set()) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  // Another kind of page, or the focused control went with the old page: the keyboard place and a screen reader
+  // follow to the new page (#1350). A pick inside the same kind of page (a chat thread, a doc) keeps the keyboard place.
+  const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+  if (soft && changed && !document.querySelector('dialog[open]') && (r.kind !== renderedKind || lost)) soft.arrive(main, title);
+  renderedKind = r.kind;
   window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
   if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();

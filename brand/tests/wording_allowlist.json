@@ -141,9 +141,6 @@
   "agent": 1,
   "agents": 2
  },
- "workspace/src/orch/publish.py": {
-  "agent": 1
- },
  "workspace/src/orch/record.py": {
   "agent": 10,
   "agents": 1,

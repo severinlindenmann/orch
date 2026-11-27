@@ -144,6 +144,23 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-foot .side-settings .nav-item{flex:1 1 auto;min-width:0}
 .side-foot .side-settings .nav-item.nav-icon-only{flex:none;width:36px;justify-content:center;padding:8px}
 .side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
+/* Person block, look A (ORCH-1880, owner pick from draft ORCH-1763): ONE row - the person (avatar with its sign-in dot, the
+   name, the menu), then Phone, Settings and Documentation as icons with their words on hover. The rail stacks it. */
+.side-foot.person-row{display:flex;align-items:center;gap:2px}
+.person-row>.person-switch,.person-row>details.person-menu{flex:1 1 auto;min-width:0}
+.person-row>.person-switch[hidden],.side-foot.person-row .phone-toggle[hidden]{display:none}
+.person-row .person-menu>summary .nav-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-foot.person-row .person-menu>summary{gap:8px;padding:4px 6px}
+.person-row .person-menu>summary :is(.chev,.grow){display:none}
+.side-foot.person-row .phone-toggle{flex:none;justify-content:center;width:32px;padding:6px;color:var(--text-muted);cursor:pointer}
+.side-foot.person-row .side-settings .nav-item.nav-icon-only{width:32px;padding:6px}
+.side-foot.person-row .phone-toggle[aria-checked=true]{color:var(--brand)}
+.person-row>.side-settings{flex:none}
+/* no person chosen yet: "Pick your name" keeps its words, the icons go to a second line */
+.side-foot.person-row:has(.nav-label.pick){flex-wrap:wrap}
+.person-row:has(.nav-label.pick)>.person-switch{flex-basis:100%}
+/* a status dot on an avatar (signed in = .ok, not signed in = plain grey); the words sit in its owner's title and label */
+.avatar>.dot{position:absolute;right:-2px;bottom:-2px;box-shadow:0 0 0 2px var(--surface)}
 /* A long menu (12 items on a 900 px screen) scrolls above the foot; a soft edge shows there is more (report r-1118-0908-t_oxw444-2). */
 .sidebar-scroll{background:linear-gradient(var(--sidebar) 30%,transparent) top/100% 24px no-repeat local,linear-gradient(transparent,var(--sidebar) 70%) bottom/100% 24px no-repeat local,linear-gradient(rgba(0,0,0,.35),transparent) top/100% 10px no-repeat scroll,linear-gradient(transparent,rgba(0,0,0,.35)) bottom/100% 10px no-repeat scroll}
 @media(min-width:721px) and (max-height:960px){.side-foot .nav-item,.side-foot .phone-toggle,.side-foot .mm-toggle{min-height:32px;padding-block:4px}}
@@ -447,6 +464,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar:has(.nav-label) .nav-group>summary:after{display:none}
 .sidebar:has(.nav-label) .phone-toggle{padding:8px 4px}
 .sidebar:has(.nav-label) .side-foot{gap:8px}
+.sidebar:has(.nav-label) .side-foot.person-row{flex-direction:column;align-items:stretch}
+.sidebar:has(.nav-label) .side-foot.person-row .phone-toggle{width:100%}
 /* the person switch keeps only its letter; "Signed in" (the usual case) goes, any other state is a dot with its words on hover;
    its menu opens beside the rail, so the narrow rail never scrolls sideways (ORCH-1636, ORCH-1638) */
 .sidebar:has(.nav-label) .person-menu>summary>:not(.avatar),.sidebar:has(.nav-label) .session-state[data-state=signed-in],.sidebar:has(.nav-label) .session-state>:not(.chip),.sidebar:has(.nav-label) .session-state:after{display:none}
@@ -482,6 +501,10 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell[data-side=rail] .nav-group>summary:after{display:none}
 .shell[data-side=rail] .phone-toggle{padding:8px 4px}
 .shell[data-side=rail] .side-foot{gap:8px}
+.shell[data-side=rail] .side-foot.person-row{flex-direction:column;align-items:stretch}
+.shell[data-side=rail] .side-foot.person-row .phone-toggle{width:100%}
+.shell[data-side=rail] .side-foot .side-settings{flex-direction:column}
+.shell[data-side=rail] .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
 .shell[data-side=rail] .person-menu>summary>:not(.avatar),.shell[data-side=rail] .session-state[data-state=signed-in],.shell[data-side=rail] .session-state>:not(.chip),.shell[data-side=rail] .session-state:after{display:none}
 .shell[data-side=rail] .session-state{justify-content:center}
 .shell[data-side=rail] .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
@@ -507,6 +530,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar[data-open=true] .side-foot .side-settings{display:flex}
 .sidebar .side-foot .side-settings .nav-item.nav-icon-only{width:44px}
 .sidebar .side-foot{margin:0}
+.sidebar[data-open=true] .side-foot.person-row{display:flex}
+.sidebar .side-foot.person-row .phone-toggle{width:44px;min-height:44px}
 .btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
 .nav-row>.nav-pin{width:44px;height:44px;right:4px}

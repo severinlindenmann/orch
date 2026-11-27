@@ -106,9 +106,10 @@ const OrchBlocks = (() => {
   }
   function cell(col, v) {
     const td = el('td');
-    if (v == null) { td.textContent = '—'; return td; }
+    // cell-none: no value; a compact row at phone width leaves it out instead of a lone dash
+    if (v == null) { td.className = 'cell-none'; td.textContent = '—'; return td; }
     if (col.type === 'number') { td.className = 'num'; td.textContent = String(v); }
-    else if (col.type === 'duration') { td.className = 'num'; td.textContent = duration(v) || '—'; }
+    else if (col.type === 'duration') { const d = duration(v); td.className = d ? 'num' : 'num cell-none'; td.textContent = d || '—'; }
     else if (col.type === 'date') { const d = parseDate(String(v)); td.textContent = d ? (/T/.test(String(v)) ? dayLabel(d) + ' ' + hm(d) : dayLabel(d)) : '—'; }
     else if (col.type === 'tone') { td.append(toneDot(String(v))); const w = toneTag(String(v)); if (w) td.append(' ', w); }
     else td.textContent = String(v);
@@ -229,7 +230,7 @@ const OrchBlocks = (() => {
       if (a.confirm) b.dataset.confirm = String(a.confirm);
       return actionAttrs(b, a.action, a.label) ? b : null;
     }).filter(Boolean);
-    const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
+    const expandable = arr(it.detail).length || arr(it.tickets).length;
     // A switch says what it turns on: the add-on's short words sit beside it (bug hunt 17 Nov: a bare On/Off).
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
@@ -237,7 +238,11 @@ const OrchBlocks = (() => {
     const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
-    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
+    if (!expandable) {  // nothing to open: the buttons stay visible at the end of the row (#863)
+      const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row);
+      if (buttons.length) { const acts = el('div', 'row-acts'); acts.append(...buttons); li.append(acts); }
+      return finish();
+    }
     const d = el('details', 'acc grow'); d.dataset.key = key;
     const sum = el('summary', 'li-row'); sum.append(el('span', 'chev'), toneDot(it.tone), main);
     const panel = el('div', 'acc-panel');
@@ -830,7 +835,8 @@ const OrchBlocks = (() => {
         const tab = (label, n, key) => {
           const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
           if (key != null) x.dataset.f = key;
-          x.append(String(label), el('sup', '', String(n)));
+          // the count is its own word for a screen reader ("Checks failed 1", not "Checks failed1")
+          x.append(String(label), el('sup', '', String(n))); x.setAttribute('aria-label', `${label} ${n}`);
           on(x, 'click', () => {
             const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
             now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);

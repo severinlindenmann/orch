@@ -786,7 +786,7 @@ function sortedEntries(list) {
   return list.slice().sort(by[filesUI.sort] || by.newest);
 }
 function fileThumb(t, f) {
-  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
+  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind, 'aria-hidden':'true'});
   if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
@@ -801,8 +801,9 @@ function fileTile(t, f) {
   // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
-  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
+  // The name is the words on the card after a hidden "Preview"; the picture is decoration (label in name, #2243)
+  const link = h('button', {type:'button', className:'file-preview-link', 'data-key':'file-open-' + f.kind + '-' + f.name},
+    h('span', {className:'sr-only'}, 'Preview '), fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
@@ -2060,9 +2061,11 @@ function ticketWidgets(t) {
 }
 function ticketWidgetsCard(t) {
   const notes = t.status === 'review' ? [] : completionNotes(t);
-  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+  // a completion note is a result: no "Nothing yet" under it (mockup ticket-done: "Results · 1 note")
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'),
+    notes.length ? h('span', {className:'meta'}, notes.length + (notes.length === 1 ? ' note' : ' notes')) : null),
     notes.map(n => ticketCompletionNote(n, t)),
-    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:notes.length ? '' : 'Nothing yet. Pictures, pages and tables show up here.'}));
 }
 // A change you asked for: what you asked, and that new changes wait for your OK.
 function ticketRequestCard(t) {
@@ -2302,12 +2305,20 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
   if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
-  return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
+  // the same unboxed header as while a helper runs (mockup ticket-idle): number and state above the title
+  const pill = m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word);
+  return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, ticketBack(), h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(), stripKicker(t, pill, [], 'ticket-line'), h('h1', {className:'t-title title-clamp'}, inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
+}
+// The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
+function stripKicker(t, pill, extra, dataKey) {
+  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, ...extra].filter(Boolean);
+  return h('p', {className:'t-meta strip-kicker', 'data-key':dataKey}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
 }
 // One top for every page (D1, ORCH-2282): a ticket is a page inside Tickets, so '← Tickets' sits above its name, on the
 // computer and on the phone (the phone had no way back). Not in a shared copy, which has no Tickets page of its own.
@@ -2353,11 +2364,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
   const minutes = window.DashHelpers.ageWords(run?.age_seconds);  // '18 h', not '1107 min' (ORCH-1836)
-  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
-  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
-  const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+  const kicker = stripKicker(t, pill, [agent ? name(agent) : null, minutes], 'ticket-kicker');
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
@@ -2592,7 +2600,7 @@ function inlineField(t, field) {
   const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
   if (plain && !setDue) node.append(iconEl('pencil'));
   Object.assign(node, {type:'button', title:MULTILINE.includes(field) ? 'Click to change · Enter saves, Shift+Enter new line' : 'Click to change'});
-  node.setAttribute('aria-label', 'Change ' + FIELD_LABEL[field]);
+  node.append(el('span', 'sr-only', ', change ' + FIELD_LABEL[field]));  // spoken after the words on screen (label in name, #2243)
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
   return host;
