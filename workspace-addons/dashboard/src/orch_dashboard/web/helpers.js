@@ -470,8 +470,14 @@
   }
   /* ORCH-2023: who asked a question: the agent orch ask stored on it (asked_by "agent:copilot" -> "Copilot"), else the
      agent of the run on the ticket, else "Helper"; never the workspace's chosen agent as a guess. */
-  function askerLabel(settings, q, claim) {
+  function askerLabel(settings, q, claim, ticket) {
     const by = String((q && q.asked_by) || '');
+    // ORCH-2167: a task another workspace sent was asked by that workspace, never by a helper here. Its name is the
+    // label core stored with the task (ext.relay.from_name); without one it is "Another workspace", never a raw id.
+    if ((q && q.kind === 'relay:allow') || /^agent:relay from /.test(by)) {
+      const name = ticket && ticket.ext && ticket.ext.relay && ticket.ext.relay.from_name;
+      return typeof name === 'string' && name.trim() ? name.trim().slice(0, 100) : 'Another workspace';
+    }
     if (/^agent:[A-Za-z0-9_.@ -]{1,64}$/.test(by)) return agentLabel(settings, {agent:noPrefix(by)});
     return claim && (claim.agent || claim.label) ? agentLabel(settings, claim) : 'Helper';
   }

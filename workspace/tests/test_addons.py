@@ -1746,3 +1746,20 @@ def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
     with pytest.raises(Refused, match="Only a person"):
         addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
     addons._people_only("x", {"who": "anyone"}, "on", ["act", "on", "--by", "agent:a"])
+
+
+def test_a_people_act_reads_both_forms_of_by(proj, monkeypatch):
+    """ORCH-2208: `--by=agent:a` names a helper just as `--by agent:a` does (the add-on's own parser reads
+    both), so the people-only check must not fall back to the computer's user for it."""
+    monkeypatch.delenv("ORCH_AGENT", raising=False)
+    act = {"who": "people"}
+    assert addons._by_arg(["act", "on", "--by=agent:a"]) == "agent:a"
+    assert (
+        addons._by_arg(["act", "on", "--by", "human:anna", "--by=agent:a"]) == "agent:a"
+    )  # the last one wins
+    assert addons._by_arg(["act", "on", "--by=human:anna", "--", "--by", "agent:a"]) == "human:anna"
+    assert addons._by_arg(["act", "on"]) is None and addons._by_arg(["act", "on", "--by"]) is None
+    for argv in (["act", "on", "--by=agent:a"], ["act", "on", "--by", "human:anna", "--by=agent:a"]):
+        with pytest.raises(Refused, match="Only a person"):
+            addons._people_only("x", act, "on", argv)
+    addons._people_only("x", act, "on", ["act", "on", "--by=human:anna"])
