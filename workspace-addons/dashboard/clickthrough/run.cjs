@@ -645,7 +645,7 @@ async function main() {
     for (const k of v.missing) console.log(`  - ${k}`);
   }
   const nFeatures = (wanted || []).length;
-  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
+  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${!wanted ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
   if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
   for (const r of v.unsteady) console.log(`FAILED (known unsteady, does not count): ${r.c.file} (${UNSTEADY[r.c.file]} fixes it)`);
   if (v.failed.length) console.log(`failed: ${v.failed.map(r => r.c.file).join(', ')}`);
