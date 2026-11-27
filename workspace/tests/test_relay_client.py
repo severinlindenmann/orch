@@ -605,7 +605,6 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
 
 def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
     from conftest import ensure_keys
-
     from orch import relay, tickets
 
     ensure_keys(proj)
@@ -1079,9 +1078,8 @@ def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
     import socket
     import urllib.error
 
-    from test_publish_client import own_sleeps
-
     from orch import net
+    from test_publish_client import own_sleeps
 
     connect(run, rel)
     tid = new_ticket()
@@ -1140,7 +1138,9 @@ def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
     out = run("relay", "outbox", "--resend")[1]
     assert problem in out and "next orch relay command" not in out
-    assert "2 messages wait to be sent: " + problem in relay_view.view(proj)["notice"]  # the Relay tab says it too
+    assert (
+        "2 messages wait to be sent: " + problem in relay_view.view(proj)["notice"]
+    )  # the Relay tab says it too
     assert "Saved messages are waiting: " + problem in run("relay", "whoami")[2]  # before any relay command
     code, _, err = run("ask", new_ticket(), "Go?", "--phone")  # the question to the phones
     assert code == 2 and "saved on the ticket" in err and problem in err and "can't be reached" not in err
@@ -1886,22 +1886,32 @@ def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
     rel.me["description"] = "Writes the weekly reports"
     code, out, _ = connect(run, rel)
-    assert code == 0 and 'Next: orch relay send "Reports" "<text>"' in out and "describe this workspace" not in out
-    rel.me.update(description="", pending={"description": "Reports team", "tags": None, "at": "2026-11-04T13:05:00Z"})
+    assert (
+        code == 0
+        and 'Next: orch relay send "Reports" "<text>"' in out
+        and "describe this workspace" not in out
+    )
+    rel.me.update(
+        description="", pending={"description": "Reports team", "tags": None, "at": "2026-11-04T13:05:00Z"}
+    )
     assert "describe this workspace" not in connect(run, rel)[1]
     rel.me.update(description="  ", pending=None)
     assert "Next: describe this workspace: orch relay profile" in connect(run, rel)[1]
 
 
 def test_allow_ticket_keeps_the_senders_name_for_home(proj, run, rel):
-    """ORCH-2167: Home says who asked for a task another workspace sent. The ticket keeps that workspace's name
-    as a label (never its raw id); with no name known it keeps none and Home says 'Another workspace'."""
+    """ORCH-2167: Home says who asked for a task another workspace sent. The ticket keeps that workspace's
+    name as a label (never its raw id); with no name known it keeps none and Home says 'Another workspace'."""
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
     connect(run, rel)
     rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "Add rate limit", "text": "x"}))
-    rel.inbox.append(msg("m_deleg00000000002", "delegate", {"title": "Other", "text": "y"}, frm="ws_unknown001"))
+    rel.inbox.append(
+        msg("m_deleg00000000002", "delegate", {"title": "Other", "text": "y"}, frm="ws_unknown001")
+    )
     run("relay", "inbox")
-    by_from = {t["ext"]["relay"]["from"]: t["ext"]["relay"] for t in _tickets(run) if t.get("ext", {}).get("relay")}
+    by_from = {
+        t["ext"]["relay"]["from"]: t["ext"]["relay"] for t in _tickets(run) if t.get("ext", {}).get("relay")
+    }
     assert by_from[PEER]["from_name"] == "Reports"
     assert "from_name" not in by_from.get("ws_unknown001", {})
 
@@ -1969,7 +1979,6 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
     this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
     from conftest import ensure_keys
-
     from orch import history, tickets
 
     connect(run, rel)
@@ -2024,7 +2033,6 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
 
 def _synced_allow_tickets(proj, run, rel, *mids):
     from conftest import ensure_keys
-
     from orch import history
 
     connect(run, rel)
@@ -3089,7 +3097,6 @@ def test_receiver_keeps_the_card_as_data(proj, run, rel):
 def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
     from conftest import ensure_keys
-
     from orch import addons, relay, tickets
 
     addons.workspace_id(proj, create=True)
@@ -3340,7 +3347,6 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
     cards by ticket, then task; a question on no task sends neither (RULE A)."""
     from conftest import ensure_keys
-
     from orch import addons, relay, tickets
 
     addons.workspace_id(proj, create=True)

@@ -10,7 +10,6 @@ import pytest
 
 pytest.importorskip("orch")
 from orch import addons, pagelaunch, pagesession, tickets
-
 from orch_dashboard import cli, service
 
 

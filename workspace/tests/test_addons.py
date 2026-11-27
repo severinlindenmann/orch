@@ -6,7 +6,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
 from orch import addons, cli, tickets
 from orch.errors import Refused
 
@@ -1441,7 +1440,6 @@ def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind
     import tomllib
 
     import jsonschema
-
     from orch import home as orch_home
 
     base = Path(__file__).resolve().parents[2]
@@ -1749,12 +1747,14 @@ def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
 
 
 def test_a_people_act_reads_both_forms_of_by(proj, monkeypatch):
-    """ORCH-2208: `--by=agent:a` names a helper just as `--by agent:a` does (the add-on's own parser reads both),
-    so the people-only check must not fall back to the computer's user for it."""
+    """ORCH-2208: `--by=agent:a` names a helper just as `--by agent:a` does (the add-on's own parser reads
+    both), so the people-only check must not fall back to the computer's user for it."""
     monkeypatch.delenv("ORCH_AGENT", raising=False)
     act = {"who": "people"}
     assert addons._by_arg(["act", "on", "--by=agent:a"]) == "agent:a"
-    assert addons._by_arg(["act", "on", "--by", "human:anna", "--by=agent:a"]) == "agent:a"  # the last one wins
+    assert (
+        addons._by_arg(["act", "on", "--by", "human:anna", "--by=agent:a"]) == "agent:a"
+    )  # the last one wins
     assert addons._by_arg(["act", "on", "--by=human:anna", "--", "--by", "agent:a"]) == "human:anna"
     assert addons._by_arg(["act", "on"]) is None and addons._by_arg(["act", "on", "--by"]) is None
     for argv in (["act", "on", "--by=agent:a"], ["act", "on", "--by", "human:anna", "--by=agent:a"]):

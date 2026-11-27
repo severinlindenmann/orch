@@ -616,7 +616,10 @@ def _own_link_secrets(root: Path) -> list[str]:
     `.orch/secrets`), longest first. A ticket never holds one, with or without a link around it. Nothing is
     read in a workspace that never shared anything."""
     out: set[str] = set()
-    for path in (net.secrets_dir(root) / "files" / "keys.json", net.secrets_dir(root) / "apps" / "view-tokens.json"):
+    for path in (
+        net.secrets_dir(root) / "files" / "keys.json",
+        net.secrets_dir(root) / "apps" / "view-tokens.json",
+    ):
         saved = net.read_json(path, {}) if path.is_file() else {}
         if isinstance(saved, dict):
             out.update(v for v in saved.values() if isinstance(v, str) and len(v) >= 16)
