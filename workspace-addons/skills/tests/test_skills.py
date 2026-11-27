@@ -52,6 +52,50 @@ def test_needs_a_look_from_the_header_fields(ws):
     assert _item(data, "skills", "github")["problems"] == []
 
 
+def test_an_unreadable_header_says_why(ws):
+    """Report r-1127-0540-ws: a long description with an unquoted ': ' showed as 'Has no real description'."""
+    pytest.importorskip("orch.skillmeta")
+    folder = ws / ".agents/skills/docs-page"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text(
+        "---\nname: docs-page\ndescription: Write a page of the docs: how orch works, in pictures.\n---\n# Docs\n"
+    )
+    problems = _item(model.build(ws), "skills", "docs-page")["problems"]
+    assert "Has no real description" not in problems
+    assert any(p.startswith("orch cannot read its header.") and "colon" in p for p in problems)
+
+
+def test_a_skill_in_the_workspace_and_on_this_computer_says_it_has_a_second_copy(ws, tmp_path):
+    from conftest import _skill
+
+    home = tmp_path / "home"
+    _skill(home / ".claude/skills/release-walk", "release-walk", "Another release pass on this computer only.")
+    data = model.build(ws)
+    rows = [i for i in data["skills"] if i["name"] == "release-walk"]
+    assert {r["where"] for r in rows} == {"workspace", "mine"}
+    by = {r["where"]: r for r in rows}
+    assert by["workspace"]["copy"] == "A different copy is also on your computer"
+    assert by["mine"]["copy"] == "A different copy is also in this workspace"
+    assert "Keep one" in by["mine"]["copy_hint"]
+    assert "copy" not in _item(data, "skills", "github")
+    assert all("_folder" not in i for i in data["skills"])
+    json.dumps(data)  # nothing internal left in the answer
+
+
+def test_the_same_text_in_both_places_says_same_skill(ws, tmp_path):
+    import shutil
+
+    shutil.copytree(ws / ".agents/skills/release-walk", tmp_path / "home/.claude/skills/release-walk")
+    rows = [i for i in model.build(ws)["skills"] if i["name"] == "release-walk"]
+    assert {r["copy"] for r in rows} == {"Same skill also on your computer", "Same skill also in this workspace"}
+    (tmp_path / "home/.claude/skills/release-walk/run.sh").write_text("echo other\n")  # a file only one copy has
+    rows = [i for i in model.build(ws)["skills"] if i["name"] == "release-walk"]
+    assert {r["copy"] for r in rows} == {
+        "A different copy is also on your computer",
+        "A different copy is also in this workspace",
+    }
+
+
 def test_off_and_on_for_an_orch_skill_unlinks_and_relinks(ws):
     res = model.turn(ws, "skill:orch:orch-hello", on=False)
     assert res["changed"] and not res["item"]["on"]

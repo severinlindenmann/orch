@@ -103,7 +103,7 @@
    "kind": "skill",
    "name": "invoice-export",
    "where": "workspace",
-   "description": "Export the monthly invoices to the accounting folder. Use at the end of each month.",
+   "description": "Use when the owner says \"export the invoices\" (or \"monthly export\", \"Bexio\") for a task: puts the month's invoices in the accounting folder. Not for single invoices.",
    "fields": {
     "owner": "Anna",
     "status": "active",
@@ -152,7 +152,9 @@
    },
    "actions": [],
    "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
-   "can_delete": true
+   "can_delete": true,
+   "copy": "A different copy is also on your computer",
+   "copy_hint": "Helpers can get both copies. Keep one, so every helper gets the same."
   },
   {
    "id": "skill:workspace:release-check",
@@ -180,6 +182,28 @@
     "id": "e_adda6e4ea790101a37812185",
     "mode": "skill"
    },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
+   "can_delete": true
+  },
+  {
+   "id": "skill:workspace:docs-page",
+   "kind": "skill",
+   "name": "docs-page",
+   "where": "workspace",
+   "description": "",
+   "fields": {},
+   "words": 0,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [
+    "orch cannot read its header. Line 3: a value with a colon must be in quotes, or YAML reads it as a map. Put it in quotes."
+   ],
+   "can_off": true,
    "actions": [],
    "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
    "can_delete": true
@@ -260,6 +284,28 @@
    "edit_why": "Editing your computer's own files comes in a later version",
    "actions": [],
    "can_delete": true
+  },
+  {
+   "id": "skill:mine:weekly-report",
+   "kind": "skill",
+   "name": "weekly-report",
+   "where": "mine",
+   "description": "Write the weekly report for the whole company from every workspace. Use on Fridays.",
+   "fields": {},
+   "words": 14,
+   "on": true,
+   "switch": "claude",
+   "tools": {
+    "Claude": "on",
+    "Codex": "on"
+   },
+   "problems": [],
+   "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": [],
+   "can_delete": true,
+   "copy": "A different copy is also in this workspace",
+   "copy_hint": "Helpers can get both copies. Keep one, so every helper gets the same."
   },
   {
    "id": "skill:mine:spreadsheets",
