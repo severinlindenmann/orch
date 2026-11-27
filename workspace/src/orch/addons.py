@@ -2258,12 +2258,25 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
     return subprocess.run(cmd, cwd=root, env=env).returncode
 
 
+def _by_arg(argv: list[str]) -> str | None:
+    """The actor an act's arguments name, in both forms a parser reads: `--by X` and `--by=X` (the last one
+    wins, as in a parser). Only the part before a lone `--` counts: after it come the act's own values."""
+    head = argv[: argv.index("--")] if "--" in argv else argv
+    found = None
+    for i, a in enumerate(head):
+        if a == "--by" and i + 1 < len(head):
+            found = head[i + 1]
+        elif a.startswith("--by="):
+            found = a[len("--by=") :]
+    return found
+
+
 def _people_only(name: str, act: dict, verb: str, argv: list[str]) -> None:
     """An act declared who = "people" runs only for a person: an agent tool in the environment counts as an
     agent whatever --by says (the dashboard strips it from its own child processes)."""
     from orch import tickets
 
-    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    by = tickets.current_actor(_by_arg(argv))
     if act.get("who") == "people" and (tickets.agent_tool() or not by.startswith("human:")):
         raise Refused(f"Only a person runs {name} {verb}. Ask the user to do it on the dashboard page.")
 
@@ -2279,7 +2292,7 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     if len(rest) != 1:
         raise Refused(f"Say which ticket: orch {name} act refresh -- <ticket>")
     tid = tickets.resolve(root, rest[0])
-    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    by = tickets.current_actor(_by_arg(argv))
     act = discover()[name]["acts"]["refresh"]
     # like cli_config._actor: an agent tool in the environment counts as an agent whatever --by says
     if act["who"] == "people" and (tickets.agent_tool() or not by.startswith("human:")):

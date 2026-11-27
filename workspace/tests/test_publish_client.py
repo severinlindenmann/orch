@@ -149,6 +149,76 @@ def test_link_key_never_lands_in_a_ticket_or_a_run_record(proj, run, pub):
     assert key not in secretrun.record_writer(proj).hider.hide_text(f"orch publish file -> {link}")
 
 
+def test_encoded_link_keys_and_app_view_tokens_never_land_in_a_ticket(proj, run, pub):
+    """ORCH-2208 (R5.1, R5.2): a link copied out of a mail arrives percent-encoded, a key is pasted with no link
+    around it, and an app's view link carries its token: a ticket keeps none of them, the CLI echoes none."""
+    from urllib.parse import quote
+
+    from orch import tickets
+
+    connect(run, pub)
+    f = proj / "report.txt"
+    f.write_bytes(b"hello report")
+    link = json.loads(run("publish", "file", str(f), "--json")[1])["link"]
+    address, key = link.split("#k=")
+    once = address + quote("#k=", safe="") + key  # %23k%3D<key>
+    twice = address + quote(quote("#k=", safe=""), safe="") + key  # %2523k%253D<key>
+    half = address + "%23k=" + key
+    lower = address + "%23k%3d" + key
+    token = "apv_" + "Zq3" * 7 + "x"  # the shape publish gives an app's view link (22 characters)
+    (proj / ".orch/secrets/apps").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch/secrets/apps/view-tokens.json").write_text(json.dumps({"shop": token}), "utf-8")
+    app = f"{pub.url}/a/shop/?token={token}"
+    foreign = "apv_" + "Hh7" * 7 + "y"  # another workspace's app link: this workspace never stored it
+    tid = json.loads(run("ticket", "new", "Share report", "--json")[1])["id"]
+    for n in range(1, 6):
+        run("check", "add", tid, f"Step {n}")
+    outs = [
+        run("ref", "add", tid, once),
+        run("ticket", "summary", tid, f"Shared at {twice}"),
+        run("check", "done", tid, "c1", "--note", f"sent {lower} by mail"),
+        run("check", "done", tid, "c2", "--note", f"the key is {key} if the link breaks"),
+        run("check", "done", tid, "c3", "--note", f"or {half}"),
+        run("ticket", "show", tid),
+        run("ticket", "show", tid, "--json"),
+    ]
+    # a view token is an orch token: the secret scan refuses it at the door and never repeats it
+    refused = [
+        run("check", "done", tid, "c4", "--note", f"app at {app}"),
+        run("check", "done", tid, "c5", "--note", f"their app: https://pub.example.org/a/crm/?token={foreign}"),
+        run("ticket", "summary", tid, f"app at {app}"),
+    ]
+    for n, (code, out, err) in enumerate(outs + refused):
+        assert code == (0 if n < len(outs) else 2), (n, out, err)
+        assert not any(v in out + err for v in (key, token, foreign)), (n, out, err)
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert not any(v in text for v in (key, token, foreign))
+    assert text.count(address + tickets.LINK_KEY_KEPT) >= 4  # every encoded form keeps the address, as `#k=…`
+    # a write that never passed the scan (a ticket from another workspace, a hand-made file) is stripped as well
+    t = tickets.load(proj, tid)
+    t["summary"] = f"app at {app}, theirs at /a/crm/?token={foreign}, key {key}"
+    tickets._write(proj, t)
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert not any(v in text for v in (key, token, foreign))
+    assert f"{pub.url}/a/shop/?token={tickets.LINK_SECRET_KEPT}, theirs at /a/crm/?token={tickets.LINK_SECRET_KEPT}" in text
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file()
+        and "secrets" not in p.parts
+        and any(v in p.read_text("utf-8", errors="ignore") for v in (key, token, foreign))
+    ]
+    assert leaks == []
+
+
+def test_link_strip_leaves_other_text_alone():
+    """The strip is narrow: a short `#k=`, a plain percent sign and words with `apv_` stay as written."""
+    from orch import tickets
+
+    kept = {"a": "50% of #k=short and %23 alone", "b": ["apv_short", "k=AAAAAAAAAAAAAAAAAAAAAAAA"], "c": 3}
+    assert tickets.drop_link_keys(json.loads(json.dumps(kept))) == kept
+
+
 BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())
 
 
