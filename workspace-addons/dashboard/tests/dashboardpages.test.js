@@ -601,7 +601,7 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   const style = web('style.css'), phone = style.slice(style.indexOf('@media(max-width:720px){\n  .shell{display:flex'));
   const phoneBlock = phone.slice(0, phone.indexOf('\n}'));
   // the ticket's action row may shrink and wrap on a narrow screen (it was flex:none, 490 px wide on a 390 px phone)
-  assert.match(web('pages/ticket.css'), /@media\(max-width:760px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0;justify-content:flex-start\}/);
+  assert.match(web('pages/ticket.css'), /@media\(max-width:1099px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0;justify-content:flex-start\}/);
   // the phone top bar wraps instead of overlapping; the phone chip stays in the menu; both helpers' buttons show as icons
   assert.match(phoneBlock, /\.topbar\{flex-wrap:wrap;/);
   assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
@@ -689,7 +689,7 @@ test('ticket page: brief heading, Repeats in Properties, plain values with a pen
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What was asked'\)/);
   assert.doesNotMatch(ticket, /'What you asked'/, 'ORCH-415: one heading for the ask');
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\), 'done-when', 'rail-long'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', doneWhenField\(t\), 'done-when', 'rail-long'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);
@@ -856,7 +856,37 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.doesNotMatch(runs.text, /thing needs you/);
   assert.match(runs.text, /The Claude Code login ends on/);
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
-  assert.match(page({items:[]}).text, /All clear/);
+  assert.match(page({items:[]}).text, /No tickets yet/);  // no ticket at all: the empty page says so (ORCH-1699)
+});
+test('ORCH-1699: an empty workspace shows one first step on Home and Tickets, nothing else that does not help', () => {
+  const c = context([], {snapshot:false, state:{}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}}), URLSearchParams, location:{hash:'#tickets'}, history:{replaceState(){}}});
+  const home = c.home(), text = JSON.stringify(home);
+  // the one empty page (D4) names what is missing and the first step; never "All clear" or "All 0 tickets"
+  const step = nodes(home, n => n.attrs?.['data-key'] === 'empty');
+  assert.equal(step.length, 1, 'one first step');
+  assert.match(JSON.stringify(step[0]), /No tickets yet.*Describe a job in plain words/);
+  assert.doesNotMatch(text, /All 0 tickets|all-tickets|finished-today|All clear/);
+  vm.runInContext("ticketSearch = 'x'", c);
+  const originalH = c.h;
+  c.h = (...args) => ({...originalH(...args), dataset:{}, append(child) { this.children.push(child); }});
+  c.newButton = () => c.h('button', {className:'btn primary'}, 'New ticket');
+  const list = c.list(), words = JSON.stringify(list);
+  assert.equal(nodes(list, n => n.dataset?.key === 'empty').length, 1);
+  assert.match(words, /No tickets yet/);
+  assert.doesNotMatch(words, /board-tools|How to show tickets|No tickets match|Backlog →/, 'no views, filters or search for zero tickets');
+  assert.equal(nodes(list, n => n.tag === 'button' || n.tag === 'a').length, 1, 'one button: New ticket');
+  const one = context([{id:'t1', title:'One', status:'open', questions:[]}], {snapshot:false, state:{}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})});
+  assert.match(JSON.stringify(one.home()), /All 1 ticket →/);
+  assert.doesNotMatch(JSON.stringify(one.home()), /No tickets yet/);
+});
+test('ORCH-1699: Settings, Add-ons: a plain heading, and every switch says On or Off beside it', () => {
+  const c = context([], {snapshot:false, addons:() => []});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {addons:[{name:'publish', label:'Shared', active:false}, {name:'relay', label:'Contacts', active:true}]};
+  const panel = nodes(c.settingsPage(), n => n.attrs?.id === 'settings-panel-addons')[0];
+  assert.deepEqual(nodes(panel, n => n.tag === 'h2').map(n => n.children.join('')), ['Add-ons']);
+  assert.doesNotMatch(JSON.stringify(panel), /Installed add-ons/);
+  assert.deepEqual(nodes(panel, n => n.attrs?.className === 'switch-text').map(n => n.children.join('')), ['Off', 'On']);
 });
 
 test('ORCH-158: the edit button has a name, and a long note opens whole', () => {

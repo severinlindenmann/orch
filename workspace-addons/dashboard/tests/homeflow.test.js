@@ -134,7 +134,13 @@ test('home: a ticket finished today is in Finished once with its result, never a
   report.checklist[0].evidence[0].text = 'From the shop export.';
   const twin = {id:'twin', key:'PIL-7', title:'Monthly sales report', status:'done', done_at:'2026-11-14T11:00:00Z', checklist:[]};
   const old = {...done('old', 'Order paper cups', '2026-11-12T17:10:00Z', 'Ordered 500 cups.'), key:'PIL-1'};
-  const tickets = [sup, report, twin, old];
+  // ORCH-2297: no outcome written, but a summary, or only a result file on a finished task
+  const short = {id:'kp2', key:'KP-2', title:'Draft the start page', status:'done', done_at:'2026-11-14T11:10:00Z', summary:'Entwurf liegt in start.md',
+    checklist:[{id:'c1', text:'Write it', done:true, evidence:[{type:'file', ref:'.orch/tickets/kp2/artifacts/start.md'}]}]};
+  const filed = {id:'kp3', key:'KP-3', title:'Collect the logos', status:'done', done_at:'2026-11-14T11:20:00Z',
+    checklist:[{id:'c1', text:'Collect', done:true, evidence:[{type:'file', ref:'.orch/tickets/kp3/artifacts/logos.zip'}, {type:'file', ref:'C:\\Users\\Zoë\\list.md'}]},
+      {id:'c2', text:'Not done', done:false, evidence:[{type:'file', ref:'draft.md'}]}]};
+  const tickets = [sup, report, twin, old, short, filed];
   const c = ctx({needsList:() => rows, tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id), titleTag:() => null, sorted:v => v, shown:t => t, questions:t => t.questions || []});
   const page = c.home(), all = text(page);
   const fin = nodes(page).find(n => n.attrs?.['data-key'] === 'finished-today');
@@ -144,6 +150,12 @@ test('home: a ticket finished today is in Finished once with its result, never a
   const twinRow = text(nodes(fin).find(n => n.attrs?.['data-key'] === 'ticket-twin'));
   assert.match(twinRow, /PIL-7.*No result written yet/, 'the same title on another ticket is its own row, its missing result said plainly');
   assert.doesNotMatch(twinRow, /Sales up/);
+  const shortRow = text(nodes(fin).find(n => n.attrs?.['data-key'] === 'ticket-kp2'));
+  assert.match(shortRow, /KP-2.*Entwurf liegt in start\.md.*Finished/, 'the summary stands in for a missing outcome (ORCH-2297)');
+  assert.doesNotMatch(shortRow, /No result written yet/);
+  const filedRow = text(nodes(fin).find(n => n.attrs?.['data-key'] === 'ticket-kp3'));
+  assert.match(filedRow, /KP-3.*Result: logos\.zip and 1 more.*Finished/, 'with no words at all the row names the result of the finished tasks');
+  assert.doesNotMatch(filedRow, /No result written yet|draft\.md/);
   assert.equal(all.split('Sales up 8%').length - 1, 1, 'the result is said once on Home');
   const changed = nodes(page).find(n => n.attrs?.['data-key'] === 'what-changed');
   assert.match(text(changed), /Ordered 500 cups\./, 'earlier results stay in What changed');
