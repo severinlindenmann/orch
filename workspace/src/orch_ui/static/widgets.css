@@ -1184,6 +1184,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
   .live-stat .pill{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .live-ph[data-compact]>.live-pt{min-width:0}
 }
+/* two panes on the right at 1280 (about 307 px each): state, key, title and three buttons need about 331 px, so More
+   slid under the next pane (queue group of the 27 Nov train, axe target-size). The key waits in the More heading. */
+@container live-pane (max-width:339px){.live-ph .key{display:none}}
 @container live-pane (max-width:639px){.live-term-tools .term-copy-w{display:none}}
 @container live-pane (max-width:479px){.live-term-tools .term-copy{display:none}}  /* a selection still copies with Ctrl+C or Cmd+C */
 .live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}

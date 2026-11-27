@@ -497,7 +497,7 @@ function navAddons(pages, here, navLink) {
   const open = more || navEditing, shownRest = open ? rest : rest.filter(a => here === url(a));
   const word = open ? 'Fewer' : 'More (' + rest.length + ')';
   // 'Change this list' ends the unfolded list; with nothing under More it ends the list itself
-  const change = open || !rest.length ? h('button', {type:'button', className:'nav-item nav-change', 'data-key':'nav-change', 'aria-pressed':String(navEditing)}, navIcon(navEditing ? 'done' : 'edit'), h('span', {className:'nav-label'}, navEditing ? 'Done' : 'Change this list')) : null;
+  const change = open || !rest.length ? h('button', {type:'button', className:'nav-item nav-change', 'data-key':'nav-change', 'aria-pressed':String(navEditing), 'aria-label':navEditing ? 'Done' : 'Change this list'}, navIcon(navEditing ? 'done' : 'edit'), h('span', {className:'nav-label'}, navEditing ? 'Done' : 'Change this list')) : null;
   return h('div', {className:'nav-addons' + (navEditing ? ' nav-editing' : ''), 'data-key':'nav-addons'},
     h('p', {className:'eyebrow'}, 'Add-ons'),
     pinned.length ? h('nav', {'aria-label':'Add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
