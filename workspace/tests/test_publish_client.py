@@ -226,7 +226,7 @@ def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, pub):
 
 
 def test_link_strip_leaves_other_text_alone():
-    """The strip is narrow: a short `#k=`, a plain percent sign and words with `apv_` stay as written."""
+    """The strip is narrow: a short `#k=`, a plain percent character and words with `apv_` stay as written."""
     from orch import tickets
 
     kept = {"a": "50% of #k=short and %23 alone", "b": ["apv_short", "k=AAAAAAAAAAAAAAAAAAAAAAAA"], "c": 3}
