@@ -72,10 +72,10 @@ print(json.dumps({"body": {"envelope": env, "new_sig": msgsig.b64url(new.sign(in
 @scenario("R19", local_only=True)  # turns the relay's signed-only switch on for a moment: never on the live relay
 def r19(e):
     """ORCH-1206 signed messages end to end: two workspaces on the local test relay, each with its own key.
-    c2 nothing from a new contact is handled until a person accepts it, on each side; c3 a wrong, missing or changed
-    signature is refused by the relay and, with the relay bypassed, by the receiving workspace; c4 the Contacts data
-    (`orch relay view --json`, the dashboard's Contacts page) shows Accepted / Not accepted yet / a changed key /
-    Not valid, each with the right fingerprint. Scripted, no agent."""
+    c2 two workspaces the admin paired take each other in on the first message, no Accept step (RP3 A); c3 a wrong,
+    missing or changed signature is refused by the relay and, with the relay bypassed, by the receiving workspace; c4
+    the Contacts data (`orch relay view --json`, the dashboard's Contacts page) shows Accepted / Not accepted yet / a
+    changed key / Not valid, each with the right fingerprint. Scripted, no agent."""
     import jsonschema
 
     py = tool_python(e.bin)
@@ -139,31 +139,18 @@ def r19(e):
         check(c["state"] == "not_accepted" and c["fingerprint"] == fp[other], f"{me} sees {other}: {c}")
         check(contacts(me).get("own", {}).get("fingerprint") == fp[me], f"{me}: own fingerprint on the page")
 
-    # c2 A -> B: held at B, nothing handled, until a person at B accepts A
+    # c2 (RP3 A, owner 25 Nov, ORCH-2166): the admin paired A and B on the relay, so the first message goes straight
+    # through with the key the refresh kept (ORCH-2349): no Accept step, no fingerprint compare. Each side takes the
+    # other in on its own first message. A key that changes later is still held (c4 below, and the msgtrust tests).
     sent = e.orchj("SigA", "relay", "send", b, "R19 first contact")
     mid = sent["id"]
     check(sent.get("sent") is True, f"first send did not reach the relay: {sent}")
-    check(mid not in pulled("SigB") and not saved("SigB", mid), "a message from a new contact was handled before Accept")
+    check(row("SigA", b)["state"] == "not_accepted", "A took B in before B sent anything")
+    check(mid in pulled("SigB") and saved("SigB", mid), "a paired workspace's first message was held (RP3 A)")
     c = row("SigB", a)
-    check(c["state"] == "not_accepted" and c["held"] == 1, f"B holds A's message: {c}")
-    check(mid not in pulled("SigB"), "held message handled on the next pull")
-    rc, out, err = e.orch("SigB", "relay", "contacts", "accept", a, "--fingerprint", fp["SigA"], ok=False)
-    check(rc != 0 and "Only a person" in (err + out), f"a helper accepted a contact: {rc} {out} {err}")
-    # a person with a fingerprint that is not A's: nothing accepted, the message stays held
-    wrong_fp = fp["SigB"]
-    rc, out, err = e.at_terminal(["orch", "relay", "contacts", "accept", a, "--fingerprint", wrong_fp], cwd=e.path_of("SigB"))
-    check(rc != 0 and "does not match" in (err + out), f"accepted with a wrong fingerprint: {rc} {out} {err}")
-    check(row("SigB", a)["state"] == "not_accepted" and not saved("SigB", mid), "wrong fingerprint let A in")
-    e.person_at_terminal("SigB", "relay", "contacts", "accept", a, "--fingerprint", fp["SigA"])
-    check(saved("SigB", mid) and mid in pulled("SigB"), "held message not let in after Accept")
-    check(row("SigB", a)["state"] == "accepted", "B: A accepted")
-
-    # c2 B -> A: B accepting A is no Accept on A's side
+    check(c["state"] == "accepted" and c["held"] == 0 and c["fingerprint"] == fp["SigA"], f"B took A in: {c}")
     back = e.orchj("SigB", "relay", "send", a, "R19 reply")["id"]
-    check(back not in pulled("SigA") and not saved("SigA", back), "A handled B's reply before its own Accept")
-    check(row("SigA", b)["held"] == 1, "A holds B's reply")
-    e.person_at_terminal("SigA", "relay", "contacts", "accept", b, "--fingerprint", fp["SigB"])
-    check(saved("SigA", back) and back in pulled("SigA"), "B's reply not let in after A's Accept")
+    check(back in pulled("SigA") and saved("SigA", back), "A held B's first message (RP3 A)")
     for me, peer, other in (("SigA", b, "SigB"), ("SigB", a, "SigA")):
         c = row(me, peer)
         check(c["state"] == "accepted" and c["fingerprint"] == fp[other] and c["held"] == 0, f"c4 Accepted: {me} {c}")
@@ -216,4 +203,4 @@ def r19(e):
     c = row("SigA", b)
     check(c["state"] in ("new_key", "changed") and c["fingerprint"] == rot["fingerprint"]
           and c.get("old_fingerprint") == fp["SigB"], f"c4 changed key: {c}")
-    return "held until Accept both ways; relay and workspace refuse wrong/missing/changed; Contacts states and fingerprints"
+    return "paired workspaces trusted from the first message (RP3 A); relay and workspace refuse wrong/missing/changed; Contacts states"
