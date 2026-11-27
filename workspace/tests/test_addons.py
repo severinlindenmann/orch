@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
 from orch import addons, cli, tickets
 from orch.errors import Refused
 
@@ -1440,6 +1441,7 @@ def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind
     import tomllib
 
     import jsonschema
+
     from orch import home as orch_home
 
     base = Path(__file__).resolve().parents[2]

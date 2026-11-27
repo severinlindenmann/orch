@@ -605,6 +605,7 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
 
 def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
     from conftest import ensure_keys
+
     from orch import relay, tickets
 
     ensure_keys(proj)
@@ -1078,8 +1079,9 @@ def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
     import socket
     import urllib.error
 
-    from orch import net
     from test_publish_client import own_sleeps
+
+    from orch import net
 
     connect(run, rel)
     tid = new_ticket()
@@ -1979,6 +1981,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
     this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
     from conftest import ensure_keys
+
     from orch import history, tickets
 
     connect(run, rel)
@@ -2033,6 +2036,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
 
 def _synced_allow_tickets(proj, run, rel, *mids):
     from conftest import ensure_keys
+
     from orch import history
 
     connect(run, rel)
@@ -3097,6 +3101,7 @@ def test_receiver_keeps_the_card_as_data(proj, run, rel):
 def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
     from conftest import ensure_keys
+
     from orch import addons, relay, tickets
 
     addons.workspace_id(proj, create=True)
@@ -3347,6 +3352,7 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
     cards by ticket, then task; a question on no task sends neither (RULE A)."""
     from conftest import ensure_keys
+
     from orch import addons, relay, tickets
 
     addons.workspace_id(proj, create=True)
