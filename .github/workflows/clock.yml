@@ -6,6 +6,8 @@ name: clock
 # fixture made "a few minutes ago" lands on yesterday. scripts/at-clock.sh moves only the wall clock (libfaketime).
 # ORCH-1118: one cell ran everything in a row (about 15 min, and up to the 30-minute limit when it hung); now each hour
 # runs in four parts at the same time, about 5 min each, with a short limit per step.
+# ORCH-2363 (owner 27 Nov): quarantined. Only quarantine.yml calls it (nightly, release branches), never ci.yml: it
+# made most red merge queue groups. Back into ci.yml once it is green there again (docs/ci-checks.md, Quarantine).
 on:
   workflow_call:
     inputs:
@@ -45,8 +47,8 @@ jobs:
       # the orch edge runner has it already (scripts/edge-runner/setup.sh) and no sudo
       - run: command -v faketime >/dev/null || sudo apt-get install -y -qq faketime
       # A real tmux server hangs under libfaketime and held both cells to the 30-minute limit in 9 of 30 groups on
-      # 20 Nov (a tmux process was left over each time). No test here needs a live session: a stand-in answers
-      # "no" and writes down which test asked, shown at the end of the job.
+      # 20 Nov (a tmux process was left over each time). A stand-in answers "no" and writes down
+      # which test asked, shown at the end of the job; the tests that need a live session are left out below.
       - name: tmux stand-in
         run: |
           mkdir -p "$RUNNER_TEMP/notmux"
@@ -81,11 +83,12 @@ jobs:
         run: |
           failed=""
           # Left out here only, each for a reason of the fake clock, not of the code (they run in addons.yml):
-          # - dashboard test_term.py: a real tmux server hangs under libfaketime (no dates in it)
+          # - dashboard test_term.py, test_term_confirm.py: they need a live tmux session, which the stand-in above
+          #   refuses (a real tmux server hangs under libfaketime); no dates in them (ORCH-2333)
           # - dashboard test_state_speed.py: measures speed; libfaketime slows every clock call
           # - automation test_recent_runs_short_list_with_titles: a run's length is its log file's time (real, from the
           #   kernel) minus its start (fake), so a fast fail looks like a long good run
-          skip="--ignore=tests/test_term.py --ignore=tests/test_state_speed.py"
+          skip="--ignore=tests/test_term.py --ignore=tests/test_term_confirm.py --ignore=tests/test_state_speed.py"
           skip="$skip --deselect=tests/test_view.py::test_recent_runs_short_list_with_titles"
           for d in $DIRS; do
             [ -d "$d/tests" ] && [ -x "$d/.venv/bin/python" ] || continue

@@ -3,7 +3,7 @@
 
 A pull request on its own runs only what its files can break: the words and style checks, ruff and the workspace
 tests that read the modules it changed, and the suite of every add-on it changed. The full suite (all add-ons,
-click-throughs, clock, e2e smoke, CLI smoke, both Linux workspace parts) runs once per merge queue group on top of
+click-throughs, e2e smoke, CLI smoke, both Linux workspace parts) runs once per merge queue group on top of
 develop (`orch-queue/...` branches), so nothing reaches develop without it (docs/ci-checks.md).
 
 On 18 Nov nearly every pull request ran the full set (any change under workspace/ turned on everything): 365 ci

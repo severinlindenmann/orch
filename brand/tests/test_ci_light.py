@@ -393,7 +393,7 @@ def _job_if(job: str) -> str:
 
 
 def test_the_full_suite_leaves_light_pull_requests_and_runs_on_every_queue_group():
-    for job in ("addons", "clock", "brand"):
+    for job in ("addons", "brand"):  # clock: quarantined (ORCH-2363, test_ci_quarantine.py)
         cond = _job_if(job)
         assert "outputs.light != 'true'" in cond, job
         assert "outputs.queue == 'true'" in cond, job
@@ -404,7 +404,7 @@ def test_the_full_suite_leaves_light_pull_requests_and_runs_on_every_queue_group
 
 
 def test_a_proven_develop_push_runs_no_suite():
-    for job in ("clock", "brand", "contracts", "publish", "relay"):  # mobile: see the phone build test below
+    for job in ("brand", "contracts", "publish", "relay"):  # mobile: see the phone build test below
         assert "outputs.proven != 'true'" in _job_if(job), job
     # a proven push still calls these two: addons for page-smoke only (ORCH-1457), workspace for the Windows parts
     # only, which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py, ORCH-1107)
