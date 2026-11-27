@@ -569,6 +569,8 @@ def _uninstall_text(root: Path, res: dict) -> str:
             out.append(f"  {k['why'][0].upper()}{k['why'][1:]}{where}.")
             if k.get("command"):
                 out.append(f"    To remove it, in this folder: {k['command']}")
+            else:
+                out.append("    Delete that folder when you no longer need the work in it.")
     out.append(
         f"Kept your tickets and settings in {root / '.orch'}. "
         f"To uninstall orch itself: uv tool uninstall {TOOL}"

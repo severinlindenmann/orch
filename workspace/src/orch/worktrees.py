@@ -4286,7 +4286,10 @@ def leave(root: Path) -> dict:
                 if gone:
                     out["removed"].append(f"The separate copy of {name} (nothing was in it)")
                     continue
-                command = f'git worktree remove --force "{where}"' if where else ""
+                # one git project: git's own command; a copy of several projects has one per project, so
+                # none is printed (the folder is named and the person decides)
+                one = where and not _is_multi(paths)
+                command = f'git worktree remove --force "{where}"' if one else ""
                 out["kept"].append(
                     {
                         "ticket": tid,
