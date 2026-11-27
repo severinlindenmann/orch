@@ -276,13 +276,21 @@ function liveWallBand(id, title, empty, list, ui, many) {
 }
 // The bands and the summary (repainted in place on every answer of the sessions API).
 // The tickets the needs-you number counts, as wall entries (home.js needsToday: questions, results, failed starts).
+// Read once per page state: the summary and the bands both ask on every answer of the sessions API, and each entry
+// looks its ticket up in the whole list (at 10,000 tickets a second read per paint made the page a third slower,
+// perf check of ORCH-2149).
+let liveWallNeedsMemo = null;
 function liveWallNeeds() {
   if (typeof needsToday !== 'function' || typeof ticketOf !== 'function') return [];
+  const st = typeof state === 'object' ? state : null, m = liveWallNeedsMemo;
+  if (st && m && m.state === st && m.tickets === st.tickets && m.needs === st.needs && m.counts === st.counts && m.runs === st.runs) return m.list;
   let n;
   try { n = needsToday(); } catch (e) { return []; }
   const ids = [...array(n.askedItems).map(i => i.ticket), ...array(n.review).map(t => t.id), ...array(n.failed).map(([t]) => t.id)];
-  return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
+  const list = [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
     word:t.status === 'review' ? 'Review' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
+  if (st) liveWallNeedsMemo = {state:st, tickets:st.tickets, needs:st.needs, counts:st.counts, runs:st.runs, list};
+  return list;
 }
 // One of the master's states (kit UI.state via stateNote) under the filter; its button is caught by the click below.
 function liveWallNote(key, title, text, kind, label, attr) {
