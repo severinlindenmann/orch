@@ -189,7 +189,7 @@ test('same numbers: every page shows the same count, date and state for the same
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
-    note('needs you', 'Review Waiting tab + rows listed above the cards', int(review.waiting) + review.extra);
+    note('needs you', 'Review Waiting tab (cards + rows listed above them, ORCH-2339)', int(review.waiting));
     note('needs you', 'Review "All cards" rows waiting + rows listed above the cards', review.queue + review.extra);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
     noise('top bar (on Review)', reviewChrome.topBar);

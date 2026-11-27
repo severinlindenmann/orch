@@ -495,7 +495,9 @@ function reviewExtraRows() {
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
-    if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
+    // work that stopped is Home's row (#2385), never "A result to check"; its stuck card is the card (carded above). The core
+    // can count a stop Home has no row for (ORCH-2339): that one is listed here, so the badge and the heading still add up
+    if (!it.question && it.stopped) { add(t, 'stopped', 'Work stopped. Open the ticket to see where.'); continue; }
     if (!it.question && n.fromCore) add(t, 'result', 'A result to review.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
@@ -714,7 +716,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
   mountReviewPanel(main);
