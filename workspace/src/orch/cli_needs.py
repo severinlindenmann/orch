@@ -129,17 +129,22 @@ def dispatch(args, root: Path) -> bool:
     if args.refresh_addon:
         needs_mod.refresh(root, args.refresh_addon)
         return True
-    rows = needs_mod.needs(root)
-    if args.json:
-        nextstep.remember(args, rows)
-        print(json.dumps(rows, indent=2, ensure_ascii=False))
-        return True
-    more = _person_rows(root, rows)
-    nextstep.remember(args, {"rows": rows, "more": len(more)})
-    if not rows and not more:
-        print("Nothing needs you.")
-    else:
-        print(f"Needs you ({len(rows) + len(more)})")
-        keys = _keys(root, rows)
-        print("\n".join([*(_line(r, keys) for r in rows), *(_person_line(i, t) for i, t in more)]))
+    from orch import ticketindex
+
+    # one read-only pass: the ticket files are looked at once, not once per list (ORCH-2289: the rows, the
+    # shown fields and the results to review each stat'ed all 10,000 files again)
+    with ticketindex.reuse():
+        rows = needs_mod.needs(root)
+        if args.json:
+            nextstep.remember(args, rows)
+            print(json.dumps(rows, indent=2, ensure_ascii=False))
+            return True
+        more = _person_rows(root, rows)
+        nextstep.remember(args, {"rows": rows, "more": len(more)})
+        if not rows and not more:
+            print("Nothing needs you.")
+        else:
+            print(f"Needs you ({len(rows) + len(more)})")
+            keys = _keys(root, rows)
+            print("\n".join([*(_line(r, keys) for r in rows), *(_person_line(i, t) for i, t in more)]))
     return True

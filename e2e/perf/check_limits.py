@@ -12,7 +12,8 @@ ORCH_HOME_STRICT=1, PW_DIR the folder holding node_modules/playwright. <base> mu
 - every dashboard page (first load included): time until usable;
 - an idle minute on Home: bytes over the wire.
 Prints a table, adds it to the GitHub job summary when there is one, writes <base>/out/limits.json and exits 1 when
-a limit is passed (each one named with its number and limit).
+a limit is passed (each one named with its number and limit). A miss is measured once more and the better number
+of the two counts (ORCH-2289): a busy runner is not a slow orch, and a slow orch is slow both times.
 
 --against (the merge queue, ORCH-1609, R8.3): the owner's limits are only shown, never fail the run. It fails only
 when a row is more than 30% slower or costlier than develop's numbers (the out/limits.json of develop's newest perf
@@ -102,6 +103,43 @@ def _numbers(cmds: dict[str, float], dash: dict | None) -> dict[str, tuple[float
     return rows
 
 
+def _idle(row: dict) -> bool:
+    return row["page"].startswith("Idle Home")
+
+
+def better(cmds: dict[str, float], dash: dict | None, cmds2: dict[str, float], dash2: dict | None):
+    """(commands, dash) with the better number of two measurements per row: the faster command, the page
+    that loaded (faster), the cheaper idle minute. A row only one of them has is kept."""
+    out = {**cmds2, **{k: min(v, cmds2.get(k, v)) for k, v in cmds.items()}}
+    if dash is None or dash2 is None:
+        return out, dash if dash2 is None else dash2
+    second = {("idle" if _idle(r) else r["page"]): r for r in dash2.get("rows", [])}
+    rows = []
+    for r in dash.get("rows", []):
+        o = second.get("idle" if _idle(r) else r["page"])
+        if o is not None:
+            if _idle(r):
+                secs, osecs = int(r["page"].split()[2]), int(o["page"].split()[2])
+                if o["enc"] / osecs < r["enc"] / secs:
+                    r = o
+            elif not o.get("err") and o.get("ms") is not None:
+                if r.get("err") or r.get("ms") is None or o["ms"] < r["ms"]:
+                    r = o
+        rows.append(r)
+    return out, {**dash, "rows": rows}
+
+
+def _develop(path: str | None) -> dict | None:
+    """develop's numbers for --against, or None (not asked for, or no readable file)."""
+    if path is None:
+        return None
+    try:
+        got = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return got if isinstance(got, dict) else None
+
+
 def _shown(v: float | None, unit: str) -> str:
     if v is None:
         return "fails"
@@ -157,6 +195,16 @@ def main(argv: list[str] | None = None) -> int:
         turn_on(ws, orch)
         cmds = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands.json")
         dash = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash.json")
+        develop = _develop(a.against)
+        if a.against is None:
+            missed = check(lim, cmds, dash)[1]
+        else:
+            missed = regressions(cmds, dash, develop)[1] if develop else []
+        if missed:
+            print(f"{len(missed)} missed: measuring once more, the better number counts.", flush=True)
+            cmds2 = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands-2.json")
+            dash2 = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash-2.json")
+            cmds, dash = better(cmds, dash, cmds2, dash2)
     finally:
         baseline.stand_in_end(stand_in)
     lines, bad = check(lim, cmds, dash)

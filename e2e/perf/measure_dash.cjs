@@ -121,11 +121,14 @@ async function heapMb(cdp) {
     try { await usable(page, false); } catch (_) { /* the pages below report their own time */ }
   }
   for (const [name, hash] of PAGES) {
+    // A fresh page each time: the time a person waits when opening it by its link. The page before is left
+    // first, outside the time: going to the link from it and then reloading counted that page's own switch
+    // and teardown (0.5 to 1.5 s after Tickets or Review at 10,000 tickets) on top of the load (ORCH-2289).
+    await page.goto('about:blank').catch(() => {});
     s0 = snap(m); t0 = Date.now();
     let ms = null, err = null;
     try {
       await page.goto(base + '/' + hash);
-      await page.reload();  // a fresh page each time: the time a person waits when opening it by its link
       await usable(page, hash.startsWith('#addon/'));
       ms = Date.now() - t0;
     } catch (e) { err = String(e.message || e).split('\n')[0]; }
@@ -134,8 +137,8 @@ async function heapMb(cdp) {
     rows.push({ page: name, ms, err, ...diff(s0, snap(m)), reads, heapMb: await heapMb(cdp) });
   }
   // an idle minute on Home: nothing clicked, the tab shown
+  await page.goto('about:blank').catch(() => {});
   await page.goto(base + '/#home');
-  await page.reload();
   await usable(page, false).catch(() => {});
   await page.waitForTimeout(3000);
   s0 = snap(m);
