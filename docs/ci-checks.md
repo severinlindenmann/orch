@@ -217,8 +217,10 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
-- **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
-  queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
+- **Busy**: a develop push or a manual run while the runner is busy goes to GitHub's machines (one runner, one
+  job at a time: a manual proof run sat queued behind the run before it, ORCH-2323); set
+  `MAC_RUNNER_WHEN_BUSY=wait` to queue it on the Mac instead. The nightly run and release pull requests always
+  wait for the Mac. A second Mac runner is a machine job for the owner (`scripts/mac-runner/setup.sh` on that Mac).
 - **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
   owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
   stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root, and gives the
