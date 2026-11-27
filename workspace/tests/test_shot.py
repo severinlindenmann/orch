@@ -115,7 +115,7 @@ def test_launch_link_only_on_first_width(tmp_path, monkeypatch):
 
 
 def test_a_browser_slow_to_end_never_fails_a_made_picture(tmp_path, monkeypatch):
-    # ORCH-2206: on a loaded Windows machine Edge outlived its wait and its kill; the picture was made by then.
+    # ORCH-2206: on a loaded Windows machine Edge outlived its wait and its kill; the picture was made.
     class Stuck:
         killed = 0
 

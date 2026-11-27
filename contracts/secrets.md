@@ -188,7 +188,9 @@ of this workspace's own stored keys: the same detection as the phone view (`work
   `{"error", "code": "refused", "found": [{"kind", "line"}]}`. Too large: exit 2, `code: "too_large"`.
 - Strict: if the stored keys cannot be read, exit 2, `code: "stored_keys_unreadable"`. Sends (relay, publish, resend) instead
   skip only the stored-key comparison and print `Couldn't read your saved keys, so this check skipped them. Every other
-  secret check ran.` on stderr (also in the debug log); all other detectors still block.
+  secret check ran.` on stderr, followed by a line `Why: <reason and way out>` (also in the debug log); all other detectors
+  still block. Ticket writes do the same. The note goes to stderr only (`--json` on stdout stays clean) and a workspace
+  reads it at most once a day per reason (remembered in the gitignored `.orch/local/keys-note`), not on every command.
   Local evidence writes (`orch check done`, `orch check run`, evidence files) are not sends: they stay strict and refuse
   before the ticket changes or a file is copied, `orch could not compare the evidence with your saved keys, so nothing was
   saved: <reason and way out>`. A readable store with no keys is not unreadable.
