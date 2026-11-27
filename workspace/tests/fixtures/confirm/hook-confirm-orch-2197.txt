@@ -1,0 +1,30 @@
+● Case 3 passed with a repeat heal, and two sandbox runs remain: Case 4 restores perpersonal to test the
+  removed_column heal, then a normal no-change run.
+
+  Restoring the test table and starting the removed-column run
+  ⎿ $ S=/private/tmp/claude-502/-Users-severin-lindenmann--orch-work-7196d50b-t-b7nkl1/a692ab4a-44f6-46ae-
+    80c2-68ae8c7919ff/scratchpad/sq.py; cd /tmp && python3 $S "RESTORE TABLE
+    pilatus_hub_sbox.bronze_successfactors.perpersonal TO VERSION AS OF 67" "SELECT count(*) n FROM
+    (DESCRIBE TABLE pilatus_hub_sbox.bronze_…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Restore the test table and start the removed-column run
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ S=/private/tmp/claude-502/-Users-severin-lindenmann--orch-work-7196d50b-t-b7nkl1/a692ab4a-44f6-46ae-80c
+ 2-68ae8c7919ff/scratchpad/sq.py; cd /tmp && python3 $S "RESTORE TABLE
+ pilatus_hub_sbox.bronze_successfactors.perpersonal TO VERSION AS OF 67" "SELECT count(*) n FROM
+ (DESCRIBE TABLE pilatus_hub_sbox.bronze_successfactors.perpersonal) WHERE col_name LIKE 'dis3463%'";
+ databricks jobs run-now 588496183906654 --no-wait --profile pilatus_hub_sbox -o json | python3 -c
+ "import json,sys; print('run', json.load(sys.stdin)['run_id'])"
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Hook PreToolUse:Bash requires confirmation for this command:
+ Guard: `databricks jobs run-now` starts a job run. Confirm it is wanted (AGENTS.md, 'The AI never';
+ opt-in guard in .claude/hooks)
+ settings.json to update hooks
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
