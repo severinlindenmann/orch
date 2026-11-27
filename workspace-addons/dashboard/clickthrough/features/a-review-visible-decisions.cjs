@@ -34,9 +34,10 @@ module.exports = {
     await open('#review?card=' + encodeURIComponent('core:review:' + tid));
     const card = page.locator('.swipe-card:not(.under):not(.under2)').first();
     await card.waitFor();
-    if (!(await card.innerText()).includes('Summarise the customer survey')) {  // the first load may still show the first card
-      await page.locator('.review-side').getByText('Summarise the customer survey').first().click();
-      await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Summarise the customer survey'}).first().waitFor();
+    // R6 A (ORCH-2173): a result card is titled with the helper's first summary sentence, the ticket's name is not repeated
+    if (!(await card.innerText()).includes('Most customers like our staff.')) {  // the first load may still show the first card
+      await page.locator('.review-side').getByText('Most customers like our staff.').first().click();
+      await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Most customers like our staff.'}).first().waitFor();
     }
     await page.locator('#live-bar').waitFor();
     await shot('loaded');
@@ -52,7 +53,10 @@ module.exports = {
         must(hit.visible, `${label} hidden at ${width}x${height}: ${JSON.stringify(hit)}`);
       }
       const overlap = await card.evaluate(c => {
-        const a=c.querySelector('.swipe-expand').getBoundingClientRect(), b=c.querySelector('.doc-progress').getBoundingClientRect();
+        // ORCH-2173: Make bigger is for pictures only, so a words-only result has none (then nothing can overlap)
+        const ex=c.querySelector('.swipe-expand'), pg=c.querySelector('.doc-progress');
+        if (!ex || !pg) return false;
+        const a=ex.getBoundingClientRect(), b=pg.getBoundingClientRect();
         return a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
       });
       must(!overlap, `expand overlaps progress at ${width}`);

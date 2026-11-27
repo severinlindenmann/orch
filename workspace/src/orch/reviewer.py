@@ -889,6 +889,17 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
     return True, ROUTINE_WHY
 
 
+QUOTE_STALE = "the person's words it quotes changed since: they answer it themselves"
+
+
+def quote_stale(root: Path, ticket: dict, q: dict) -> bool:
+    """ORCH-2183: a question quoting a person whose words, or the ticket's goal, changed since is never
+    answered for them (it asks again instead of only warning)."""
+    from orch import cardcontext
+
+    return "said" in q and cardcontext.stale(root, ticket, q) is not None
+
+
 def answer_routine(root: Path, dry_run: bool = False, now: float | None = None) -> list[dict]:
     """Every open question on a working ticket: answer the routine ones for the owner. Returns
     [{ticket, key, question, routine, why, answer, done}]."""
@@ -900,6 +911,8 @@ def answer_routine(root: Path, dry_run: bool = False, now: float | None = None) 
             if q.get("answer") is not None:
                 continue
             ok, why = routine(root, t, q, now)
+            if ok and quote_stale(root, t, q):
+                ok, why = False, QUOTE_STALE
             row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "routine": ok,
                    "why": why, "answer": q.get("recommended") if ok else None, "done": False}  # fmt: skip
             if ok and not dry_run:

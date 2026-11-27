@@ -81,6 +81,7 @@ SETTINGS_OPS = (
     "prepare.set",
     "auto_reviewer.set",
     "away.set",
+    "reviewer_mode.set",
     "diag.set",
     "typing.set",
     "terminal-typing.set",  # ORCH-1656: the plain terminal's switch showed its old state until the full build
@@ -294,7 +295,7 @@ FILE_STAMP_MAX = 64
 
 TERMINAL_OFF = (
     "Typing into the plain terminal is off. "
-    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+    "The owner turns on 'Let me type into the plain terminal' in Settings \u2192 People."
 )
 TYPING_OFF = (
     "Typing into the helper's screen is off. "

@@ -229,6 +229,17 @@ function peopleCan(p) {
   return 'May ' + (can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]) + '.';
 }
 const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-people-rights'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))));
+// The plain terminal's typing switch (ORCH-1684): a plain terminal is a shell with the owner's logins and keys, so its
+// switch sits in People, the owner's own tab, not on an add-on's page; the server refuses it from anyone else too.
+// Shown when an add-on with live sessions is on and the core has the setting.
+function terminalTypingCard(settings) {
+  const on = settings?.terminal_typing_on;
+  if (typeof on !== 'boolean' || !addons().some(a => a.active !== false && a.page?.live_session === true)) return null;
+  return h('div', {className:'stack', 'data-key':'settings-terminal-typing'}, h('h2', {className:'set-sub'}, 'Plain terminal'),
+    h('div', {className:'card'}, h('div', {className:'card-row name-row', 'data-key':'settings-terminal-typing-row'},
+      h('div', {className:'grow'}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it. Only the owner can change this.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'settings-terminal-typing-switch', disabled:snapshot || settingsBusy.has('terminal-typing')}, on ? 'On' : 'Off'))));
+}
 function peoplePanel(settings) {
   const list = settings.people_list || {state:'off', people:[]};
   const busy = settingsBusy.has('people');
@@ -768,7 +779,7 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Phones are paired on your phone link’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Ask your admin for a phone code.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -781,50 +792,61 @@ function phonePanel(phoneAddon, settings) {
   const mm = snapshot ? null : window.OrchMobileMode?.settingsSection(h);
   const rowOf = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
   const btn = (label, cls, name, extra = {}) => snapshot ? null : h('button', {type:'button', className:'btn sm ' + cls, 'data-action':name, 'data-key':'phone-' + name, ...extra}, label);
-  const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Phone link'), h('div', {className:'card'},
-    rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
-      settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No phone link connected')],
-      h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
-    // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
-    connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
-      h('li', {}, 'Open the admin page of your phone link and add this workspace. It gives you one line to copy.'),
-      h('li', {}, 'Paste that line below and press Connect.'))),
-    connected || snapshot ? null : relayPaste(),
-    settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your phone link.')));
-  // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
+  const note = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'relay-note', 'data-key':'phone-relay-note'}, 'Copy a note for my admin');
+  const step = (n, done, title, ...rest) => h('div', {className:'card-row', 'data-key':'phone-step-' + n}, h('div', {className:'grow stack-sm'}, h('strong', {}, (done ? '✓ ' : n + '. ') + title), ...rest));
+  const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, 'Connection'), h('div', {className:'card'},
+    step(1, connected, connected ? 'Connect this workspace' : 'Connect this workspace',
+      connected ? settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, 'Connected' + (address ? ' to ' + address : '') + '.')
+        : settingsText('p', {className:'meta', 'data-key':'phone-relay-steps'}, 'Your admin adds this workspace on the admin page and gives you a short text. Paste the whole text here. orch finds the right line by itself. Nothing leaves this workspace until you press Connect.'),
+      connected ? null : relayPaste(), connected ? null : note),
+    step(2, connected && workspaces.length > 0, 'Your admin chooses who you can write to',
+      settingsText('p', {className:'meta', 'data-key':'phone-step2-line'}, !connected ? 'This is your admin’s step. Nothing for you to do.' : workspaces.length ? workspaces.length + (workspaces.length === 1 ? ' workspace is' : ' workspaces are') + ' connected to you.' : 'Nobody yet. This is your admin’s step, not yours. This page checks by itself; a new workspace shows up here without a click.'),
+      connected && !workspaces.length ? note : null)));
   const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
-  const pair = h('div', {className:'stack', 'data-key':'phone-phones'}, h('h2', {className:'set-sub'}, '2. Phones'), h('div', {className:'card'},
-    rowOf('Pairing', [settingsText('p', {'data-key':'phone-pair-line'}, 'Phones are paired on your phone link’s admin page.')],
-      adminHref && !snapshot ? h('a', {className:'btn sm outline', href:adminHref, target:'_blank', rel:'noopener', 'data-key':'phone-relay-admin'}, 'Open the phone link admin page') : null, 'phone-pairing-row'),
-    mm));
-  const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
+  const phones = array(state.settings?.people_list?.phones);
+  const phoneRows = phones.length ? h('div', {className:'card', 'data-key':'phone-list'}, phones.map(ph => h('div', {className:'card-row', 'data-key':'phone-row-' + ph.id}, h('div', {className:'grow'}, settingsText('h3', {}, String(ph.name)), settingsText('p', {className:'meta'}, ph.cut ? 'Removed.' : 'Paired.')),
+    snapshot || ph.cut ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut-yes', 'data-phone':ph.id, 'data-key':'phone-remove-' + ph.id, 'aria-label':'Remove ' + ph.name}, 'Remove')))) : null;
+  const pair = h('div', {className:'stack', 'data-key':'phone-phones'}, h('h2', {className:'set-sub'}, 'Phones'), h('div', {className:'card'},
+    step(1, false, 'Ask your admin for a phone code', note),
+    step(2, false, 'Install the orch app on your iPhone and scan the code'),
+    step(3, phones.length > 0, 'Done. Your phone shows up in the list below'),
+    adminHref && !snapshot ? h('div', {className:'card-row'}, h('a', {className:'btn sm outline', href:adminHref, target:'_blank', rel:'noopener', 'data-key':'phone-relay-admin'}, 'Open the relay admin page')) : null),
+    phoneRows, mm);
+  const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Workspaces'),
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
     connected && workspaces.length ? h('div', {className:'card'}, workspaces.map(w => h('div', {className:'card-row', 'data-key':'phone-ws-' + w.name}, h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))))
-      : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
+      : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Your admin chooses who you can write to.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
-    h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+    h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open Relay →')));
 }
 // Not connected: the line from the phone link's admin page is pasted here and Connect runs it (ORCH-1693).
-const relayUi = {line:'', busy:false};
+const relayUi = {line:'', busy:false, error:''};
 function relayPaste() {
-  const input = h('input', {type:'text', className:'input grow', 'data-key':'phone-relay-line', 'aria-label':'Line from your phone link', placeholder:'Paste the line here', autocomplete:'off', spellcheck:'false', disabled:relayUi.busy});
+  const input = h('textarea', {rows:4, className:'input', 'data-key':'phone-relay-line', 'aria-label':'Text from your admin', placeholder:'Paste the whole text here. It starts with “Connect this workspace…”', autocomplete:'off', spellcheck:'false', disabled:relayUi.busy});
   input.value = relayUi.line;
   input.oninput = () => { relayUi.line = input.value; };
-  input.onkeydown = e => { if (e.key === 'Enter') relayConnect(); };
-  return h('div', {className:'card-row row'}, input,
-    h('button', {type:'button', className:'btn sm', 'data-action':'relay-connect', 'data-key':'phone-relay-connect', disabled:relayUi.busy}, relayUi.busy ? 'Connecting…' : 'Connect'));
+  return h('div', {className:'stack-sm'}, input,
+    relayUi.error ? settingsText('p', {className:'meta', role:'alert', 'data-key':'phone-relay-error'}, relayUi.error) : null,
+    h('button', {type:'button', className:'btn sm primary', 'data-action':'relay-connect', 'data-key':'phone-relay-connect', disabled:relayUi.busy}, relayUi.busy ? 'Connecting…' : 'Connect'));
+}
+async function relayNote() {
+  const name = clean(state?.workspace) || 'this workspace';
+  const text = 'Please connect ' + name + ' on the relay admin page and send me the connect text. Then tell me which workspaces I may write to.';
+  try { await navigator.clipboard.writeText(text); window.orch.toast('Copied. Send it to your admin.', 'ok'); }
+  catch (_) { window.orch.toast('Could not copy. Ask your admin to connect ' + name + '.', 'error'); }
 }
 async function relayConnect() {
   const line = relayUi.line.trim();
   if (relayUi.busy) return;
-  if (!line) { window.orch.toast('Paste the line from your phone link’s admin page first.', 'error'); return; }
+  if (!line) { relayUi.error = 'Paste the text from your admin first.'; render(); return; }
+  relayUi.error = '';
   relayUi.busy = true; render();
   const result = await act('relay.connect', {line});
   relayUi.busy = false;
-  if (!result.ok) { window.orch.toast(result.text, 'error'); render(); return; }
+  if (!result.ok) { relayUi.error = result.text || 'That did not work. The relay can’t be reached or the text is not valid.'; render(); return; }
   relayUi.line = '';
   await refresh();
-  window.orch.toast('Connected. Your phone link is set up.', 'ok');
+  window.orch.toast('Connected to the relay.', 'ok');
 }
 async function relayReconnect(control) {
   if (control.disabled) return;
@@ -832,7 +854,7 @@ async function relayReconnect(control) {
   await refresh();
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
   const ok = phoneAddon && relayInfo(phoneAddon).connected;
-  window.orch.toast(ok ? 'Checked. Your phone link is connected.' : 'Your phone link is not connected.', ok ? 'ok' : 'error');
+  window.orch.toast(ok ? 'Checked. Relay is connected.' : 'Relay is not connected.', ok ? 'ok' : 'error');
   control.disabled = false;
 }
 // One add-on's own settings page (draft addon-detail): the switch, the connection, what it holds, and a quiet
@@ -848,8 +870,6 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
-    addon.page?.live_session === true && addon.active && typeof state.settings?.terminal_typing_on === 'boolean' ? row('Plain terminal', h('div', {}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.terminal_typing_on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'addon-detail-terminal-typing', disabled:snapshot || settingsBusy.has('terminal-typing')}, state.settings.terminal_typing_on ? 'On' : 'Off'), 'addon-detail-terminal-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -865,8 +885,9 @@ function addonDetailPage(addon) {
     h('div', {className:'card'}, settingsRows),
     where,
     snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
-    h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
-      settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
+    // the description is the Add-on row's text already: About shows only what is not said above (ORCH-1684)
+    connected && d.address ? h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
+      settingsText('p', {className:'meta'}, 'Connection address: ' + d.address)) : null));
 }
 function settingsPage() {
   const settings = state.settings;
@@ -927,7 +948,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
       moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
-    panel('people', peoplePanel(settings)),
+    panel('people', [...peoplePanel(settings), terminalTypingCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings)), prepareCard(settings)]),
@@ -1439,7 +1460,7 @@ function shownAddon() {
   const r = route();
   return r.kind === 'addon' && !(r.id === SYNC && syncNative()) && panelOf(r.id) !== 'browser' ? r.id : null;
 }
-// The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
+// The address names a tab like its label: Helper is #settings/helper, Relay is #settings/contacts.
 const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
 // Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> (one history entry, so Back returns to the tab before).
 function settingsGo(tab) {
@@ -1660,37 +1681,16 @@ async function addonRadio(input) {
   window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
 }
-// Contacts (message keys, ORCH-1203): Accept sends the fingerprint the person saw (the core refuses it when the
-// key changed meanwhile) and their own name for the contact; Stop trusting asks once, with the action's own word.
-const CONTACT_ID = /^(ws|ph)_[a-z0-9]{10}$/;
-async function contactAccept(control) {
-  const id = shownAddon();
-  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(control.dataset.contactAccept || '')) return;
-  const name = (control.closest('form')?.querySelector('input[name=name]')?.value || '').trim().slice(0, 60);
+// RP5: write in a workspace's thread on the Relay page itself (the same message.send path as the Chat page).
+async function convSendClick(control) {
+  const id = shownAddon(), ws = control.dataset.convSend, box = control.parentElement?.querySelector('input');
+  const text = (box?.value || '').trim();
+  if (snapshot || !id || !/^ws_[a-z0-9]{10}$/.test(ws || '') || !text || locks.has('addon-act')) return;
   locks.add('addon-act'); control.disabled = true;
-  const result = await act('contact.accept', {peer:control.dataset.contactAccept, fingerprint:control.dataset.fingerprint, name});
-  locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
-  window.orch.toast(result.ok ? 'Accepted ' + clean(name || control.dataset.who || '').slice(0, 60) + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  const result = await act('message.send', {workspace:ws, text});
+  locks.delete('addon-act'); control.disabled = false;
+  if (result.ok) { OrchBlocks.convSent(ws); if (box) box.value = ''; } else window.orch.toast(result.text || 'That did not work.', 'error');
   await loadAddon(id);
-}
-function contactWithdraw(control) {
-  const id = shownAddon(), peer = control.dataset.contactWithdraw;
-  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(peer || '')) return;
-  const who = clean(control.dataset.who || '').slice(0, 60);
-  const {d, actions} = dialog('Stop trusting ' + who + '?', 'dialog');
-  const list = el('ul');
-  ['Its messages wait and nothing from it runs.', 'You can accept it again here at any time.'].forEach(line => list.append(el('li', '', line)));
-  d.append(el('p', '', 'This is what happens:'), list);
-  actions.firstChild.textContent = 'Keep trusting';
-  actions.append(button('Stop trusting', 'danger', async () => {
-    await window.orch.close(d);
-    locks.add('addon-act');
-    const result = await act('contact.withdraw', {peer});
-    locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Stopped trusting ' + who + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    await loadAddon(id);
-  }));
-  d.append(actions); window.orch.open(d);
 }
 // Workspace messages are composed in their persistent Chat thread.
 function messageSend(control) {

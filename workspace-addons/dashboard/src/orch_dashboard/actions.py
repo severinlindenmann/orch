@@ -685,6 +685,15 @@ def _away_set(a):
     return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
 
 
+def _reviewer_mode_set(a):
+    """Review > Nothing closes by itself (owner, 25 Nov 2026): `orch config set workflow.reviewer_mode propose|accept`;
+    only a person turns accept back on (the CLI refuses an agent)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.reviewer_mode", "propose" if a["on"] else "accept"], [], []
+
+
 def _review_undo(a):
     """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
     _only(a, ("ticket", "question"))
@@ -1576,6 +1585,7 @@ OPS = {
     "people.tie": _people_tie,
     "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
+    "reviewer_mode.set": _reviewer_mode_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
     "live.set": _live_set,
@@ -1612,6 +1622,8 @@ PEOPLE_OPS = "people."
 PEOPLE_OWNER_ONLY = (
     "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
 )
+# The plain terminal's typing switch (ORCH-1684): a shell with the owner's logins and keys, so the owner's alone too.
+TERMINAL_OWNER_ONLY = "Only the owner can turn typing into the plain terminal on or off. Ask the owner to do it in Settings, People."
 BROWSER_ENV = "ORCH_BROWSER_PERSON"  # orch.people.BROWSER_ENV: the core refuses list changes when it is set
 REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "orch_request_person", default=None
@@ -1940,6 +1952,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     request that carries the page session; False = watch-only (the click is refused)."""
     if isinstance(op, str) and op.startswith(PEOPLE_OPS) and REQUEST_PERSON.get():
         raise NeedsPerson(PEOPLE_OWNER_ONLY)  # a token-login browser is never the owner (ORCH-1486)
+    if op == "terminal-typing.set" and REQUEST_PERSON.get():
+        raise NeedsPerson(TERMINAL_OWNER_ONLY)
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
@@ -2092,6 +2106,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "prepare.set",
             "auto_reviewer.set",
             "away.set",
+            "reviewer_mode.set",
             "review.undo",
             "live.set",
             "copies.set",

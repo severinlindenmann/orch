@@ -1,5 +1,5 @@
 // Messages and group chats with the stand-in relay (server.py; the workspace "Kitchen" may receive text and files):
-// - Contacts: the person presses "Send a message" for Kitchen, writes in the chat with Kitchen and sends it; it is
+// - Relay: the person presses "Send a message" for Kitchen, writes in the chat with Kitchen and sends it; it is
 //   delivered and still there after a reload.
 // - A group chat on a ticket (made here as a helper would): the person writes to the group, finds it again as the
 //   ticket's chat, and shares a ticket file with the group from the ticket page.
@@ -20,17 +20,17 @@ module.exports = {
     await open('#home');
     await until(s => (s.addons || []).some(a => a.dashboard?.panel === 'phone'), 'the relay turned on');
 
-    // a message to Kitchen, started from Contacts
+    // a message to Kitchen, started from Relay
     await open('#addon/relay');
     const send = page.getByRole('button', { name: 'Send a message' }).first();
-    await send.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Send a message button on Contacts:\n' + (await text()).slice(0, 500)); });
+    await send.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('no Send a message button on Relay:\n' + (await text()).slice(0, 500)); });
     await send.click();
     const box = page.getByRole('textbox', { name: 'Message Kitchen' });
     await box.waitFor({ timeout: 20000 });
     await box.fill('Can you cook for twelve on Friday?');
     // the Send of this chat's own message box: a second Send button (left by an earlier click-through on the same
     // server; seen in two CI runs) can be on the page too (ORCH-1629)
-    await act('chat.send_ws', () => page.locator('form.chat-compose').filter({ has: box }).getByRole('button', { name: 'Send' }).click());
+    await act('chat.send_ws', () => page.locator('.chat-composer-area').filter({ has: box }).getByRole('button', { name: 'Send' }).click());
     await page.getByText('Delivered').first().waitFor({ timeout: 20000 }).catch(async () => { throw new Error('the message was not delivered:\n' + (await text()).slice(0, 500)); });
     await reload();
     await page.locator('text=Can you cook for twelve on Friday? >> visible=true').first().waitFor({ timeout: 20000 })
@@ -46,7 +46,7 @@ module.exports = {
     await until(s => members(s).includes('ws_kitchen001'), 'the group with Kitchen');
     await open('#chat');
     await page.locator('[data-chat-action="select"]').filter({ hasText: 'Plan the summer party' }).first().click();
-    const draft = page.locator('.chat-page .chat-draft');
+    const draft = page.locator('.chat-page textarea[data-thread]');
     await draft.waitFor({ timeout: 20000 });
     await draft.fill('Kitchen, can you bring the dessert?');
     await act('group.say', () => draft.press('Enter'));

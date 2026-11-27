@@ -18,7 +18,7 @@ module.exports = {
     await reload();
     const row = page.locator(`.chat-list-row[data-id="${tid}"]`);
     await row.waitFor();
-    must(/ticket chats/i.test(await page.locator('.chat-list').innerText()), 'there is no Ticket chats heading in the list');
+    must(/^tickets$/i.test((await page.locator('[data-key="ticket-chats-heading"]').innerText()).trim()), 'there is no Tickets heading in the list');
     must(/2/.test(await row.locator('.count').innerText()), 'the row does not show 2 unread');
 
     // open it: the helper's line, the question card, the ticket beside the chat; it is marked read
@@ -33,8 +33,8 @@ module.exports = {
     await shot('open-chat', page.locator('.chat-page'));
 
     // write to the helper: a chat line on the ticket, still there after a reload
-    await page.locator('.chat-page .chat-draft').fill('Please keep the logo small');
-    await act('chat.say', () => page.locator('[data-key="ticket-chat-send"]').click());
+    await page.locator('.chat-page textarea[data-thread]').fill('Please keep the logo small');
+    await act('chat.say', () => page.locator('.chat-page [data-key="send"]').click());
     await reload();
     must((await text()).includes('Please keep the logo small'), 'the message is gone after a reload');
     must(!(await row.locator('.count').count()), 'the opened chat still shows unread after a reload');
