@@ -344,3 +344,77 @@ def test_group_copies_status_notes_and_old_log_lines_are_never_asked_about(proj,
     assert not any(e.get("watch") for e in relay_view._sent(proj))
     run("relay", "inbox")
     assert relay.no_answer(proj) == [] and _no_answer_questions(proj, tid) == []
+
+
+# ---------------------------------------------------------------- Decline tells the sender (ORCH-2189, RP4 A)
+
+
+def _allow_ticket(run, mid: str) -> dict:
+    out = json.loads(run("ticket", "list", "--all", "--json")[1])
+    rows = out["tickets"] if isinstance(out, dict) else out
+    return next(t for t in rows if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid)
+
+
+def test_decline_sends_the_sender_one_fixed_line(proj, run, rel):
+    """The receiver's person presses Decline on a 1:1 task: one `Declined` goes back, once, with no reason and
+    no name in it, in the form the contract gives (relay-api.md, Receipts between workspaces)."""
+    _listed(rel)
+    connect(run, rel)
+    mid = "m_dele000000000140"
+    rel.inbox.append(msg(mid, "delegate", {"title": "Delete all", "text": "now"}))
+    run("relay", "inbox")
+    tid = _allow_ticket(run, mid)["id"]
+    run("answer", tid, "q1", "Decline", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "inbox")  # a second look says nothing again
+    texts = [r["body"]["text"] for r in _receipts_sent(rel)]
+    assert texts == ["Delivered", "Declined"]
+    said = _receipts_sent(rel)[1]
+    assert said["reply_to"] == mid and said["to"] == PEER and said["body"]["general"] is True
+    assert "ticket" not in said and "Marco" not in json.dumps(said)
+    _valid(said)
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+
+
+def test_an_allowed_task_is_never_called_declined(proj, run, rel):
+    _listed(rel)
+    connect(run, rel)
+    mid = "m_dele000000000141"
+    rel.inbox.append(msg(mid, "delegate", {"title": "Price list", "text": "PDF"}))
+    run("relay", "inbox")
+    tid = _allow_ticket(run, mid)["id"]
+    run("answer", tid, "q1", "Allow this task", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    assert "Declined" not in [r["body"]["text"] for r in _receipts_sent(rel)]
+
+
+def test_the_sender_sees_declined_on_the_task_and_the_ticket(proj, run, rel, new_ticket):
+    """Before, the Relay page said "Waiting for Reports" for ever. Declined replaces Delivered and stays."""
+    _listed(rel)
+    connect(run, rel)
+    tid = new_ticket("Hand it over")
+    out = run("relay", "delegate", PEER, "Check the report", "--text", "x", "--check", "one", "--ticket", tid)
+    assert out[0] == 0, out[2]
+    sent = next(m for m in rel.sent if m["type"] == "delegate")
+    assert _states(proj)[""] == "Waiting for Reports"
+    ack = {"update": {"kind": "ack"}, "general": True}
+    for n, text in enumerate(("Delivered", "Declined", "Delivered")):
+        rel.inbox.append(msg(f"m_text00000000015{n}", "text", {"text": text, **ack}, reply_to=sent["id"]))
+        run("relay", "inbox")
+    assert _states(proj)[""] == "Declined"
+    assert relay.receipts(proj)["got"][sent["id"]]["state"] == "declined"
+    lines = [h for h in _history(proj, tid) if h.startswith("Message to Reports")]
+    assert lines == ["Message to Reports: Delivered", "Message to Reports: Declined"]
+
+
+def test_declined_about_a_text_is_just_delivered(proj, run, rel, new_ticket):
+    """The line counts only for a task we handed over: a text cannot be declined (R3.2: words are data)."""
+    _listed(rel)
+    connect(run, rel)
+    tid = new_ticket("Ask them")
+    mid = _send(run, tid)
+    rel.inbox.append(
+        msg("m_text000000000160", "text", {"text": "Declined", "update": {"kind": "ack"}}, reply_to=mid)
+    )
+    run("relay", "inbox")
+    assert _states(proj)["Can you check the numbers?"] == "Delivered"
