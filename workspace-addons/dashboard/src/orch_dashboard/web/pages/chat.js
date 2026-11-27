@@ -555,7 +555,9 @@ async function chatOperation(op, args, failure) {
     try { why = String(JSON.parse(result?.text || '{}').error || ''); } catch { why = ''; }  // the server's own reason
   } catch { /* Keep drafts and controls available after failure. */ }
   const base = failure || 'Could not update the group.';
-  window.orch.toast(why && why.length <= 160 ? base.replace(/\.$/, '') + ': ' + why : base, 'error'); return false;
+  const said = why && why.length <= 160 ? base.replace(/\.$/, '') + ': ' + why.replace(/[.\s]*$/, '.') : base;
+  // R8.4: the server's reason may say what to do; else the toast ends with the one next step there is
+  window.orch.toast(/\b(try|run|orch [a-z]|ask|open|turn|start|pick|add|reload)\b/i.test(why) ? said : said + ' Try again.', 'error'); return false;
 }
 // Send: the words (and, in the helper chat, the files) of the open chat. A message that did not go out stays in the
 // conversation with "Not sent" and Try again; the box is free for the next one.
@@ -689,7 +691,7 @@ const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false
 const CHAT_DM_POLL = 2000;
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
-// "Send a message" on Contacts already knows the name: the thread opens with it, before the contacts have loaded.
+// "Send a message" on Relay already knows the name: the thread opens with it, before the contacts have loaded.
 const chatDmNames = new Map();
 const chatDmHint = (ws, name) => { if (chatDmId(ws) && typeof name === 'string' && name.trim()) chatDmNames.set(ws, name.trim().slice(0, 80)); };
 // A contact's name for a raw workspace id ("agent:ws_..." as who answered): known contacts first, read once if none is

@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Does this change touch file, process or path code? Then its pull request also runs the Windows tests.
+"""Does this change touch file, process or path code? Then its queue group also runs the Windows tests.
 
 Windows breaks where code moves files, sets file times or rights, starts or stops processes, or builds paths
 (78 Windows failures went unseen in Nov 2026: a test called os.utime in a way Windows refuses). This reads the
 diff against the base branch and answers `true` when a changed Python line under workspace/ or
 workspace-addons/ uses such a call, or when a file whose job is exactly that changed (WHOLE_FILES).
 
-While Windows is known red (KNOWN_RED in .github/workflows/workspace.yml, docs/ci-checks.md) the answer for a pull
-request is `false` with --pr: the Windows parts run on queue groups and nightly only, until they are green
+ci.yml asks it for queue groups and pull requests into main, never for a light pull request into develop (ORCH-1118
+q7, owner 24 Nov: such a pull request ran all 20 Windows parts on every push, about 150 runner-minutes; its queue
+group runs them once, before the merge). This file is the one place that defines "os code".
+
+While Windows is known red (KNOWN_RED in .github/workflows/workspace.yml, docs/ci-checks.md) the answer is `false`
+with --pr: the Windows parts run after the merge and nightly only, until they are green
 (ORCH-453: 841 Windows minutes on pull requests in one night, every result known red and unable to block).
 
 Usage: python3 scripts/touches_os_code.py --base origin/develop   prints true or false (exit 0)
        python3 scripts/touches_os_code.py --base origin/develop --why   also names the first lines that matched
-       python3 scripts/touches_os_code.py --base origin/develop --pr    false while Windows is known red
+       python3 scripts/touches_os_code.py --base origin/develop --pr    false while Windows is known red (CI)
 Plain text over `git diff`; no packages.
 """
 
@@ -93,12 +97,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", required=True, help="the base branch, such as origin/develop")
     ap.add_argument("--why", action="store_true", help="name the first lines that matched")
-    ap.add_argument("--pr", action="store_true", help="a pull request: false while Windows is known red")
+    ap.add_argument("--pr", action="store_true", help="asked by CI (queue group, pull request into main): false while Windows is known red")
     args = ap.parse_args(argv)
     if args.pr and windows_known_red():
         print("false")
         if args.why:
-            print("  Windows is known red (docs/ci-checks.md): its parts run on queue groups and nightly", file=sys.stderr)
+            print("  Windows is known red (docs/ci-checks.md): its parts run after the merge and nightly", file=sys.stderr)
         return 0
     found = reasons(changed(args.base))
     print("true" if found else "false")

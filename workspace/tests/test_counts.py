@@ -99,7 +99,7 @@ def test_needs_you_equals_the_review_cards(proj, run):
     c = json.loads(out)
     assert c["needs_you"] == n and c["working"] == 0
     code, out, _ = run("counts")
-    assert "Needs you: 3 (2 questions, 1 result to check)" in out
+    assert "Needs you: 3 (2 questions, 1 result to review)" in out
 
 
 def test_a_left_over_session_of_a_ticket_in_review_is_no_helper():
@@ -159,3 +159,19 @@ def test_orch_counts_counts_a_stuck_ticket(proj, run):
     c = json.loads(run("counts", "--json")[1])
     assert c["needs_you"]["count"] == 1 and c["needs_you"]["stopped"] == 1
     assert "1 stopped short" in run("counts")[1]
+
+
+def test_in_progress_and_not_started_leave_out_what_needs_you():
+    """ORCH-2140: Home and `orch counts` split the open tickets that do not need the person."""
+    ts = [
+        _t("t_backlg", status="open"),
+        _t("t_readyy", status="ready"),
+        _t("t_begun1", status="open", checklist=[{"id": "c1", "done": True}, {"id": "c2"}]),
+        _t("t_active", status="active"),
+        _t("t_askedq", status="active", questions=[{"id": "q1", "answer": None}]),
+        _t("t_review", status="review"),
+        _t("t_finish", status="done"),
+    ]
+    s = counts.summary(ts, {"t_readyy": {"running": True, "helper": {"state": "working"}}})
+    assert s["not_started"] == ["t_backlg"]
+    assert s["in_progress"] == ["t_readyy", "t_begun1", "t_active"]

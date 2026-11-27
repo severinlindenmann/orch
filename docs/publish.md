@@ -43,7 +43,7 @@ $ orch publish view --json  # server
   and a permanent file stays permanent.
 - **Replace:** `orch publish file report.csv --replace <file id>` puts new content under the same link and the same end date.
 - **Note:** `--note "..."` (up to 280 characters) is shown to the person who opens the link.
-- **Shared tab:** `orch publish view --json` is what the dashboard shows under Shared: your files and apps, no keys.
+- **Publish tab:** `orch publish view --json` is what the dashboard shows under Publish: your files and apps, no keys.
 
 Redeploying an app (`orch publish app <folder>`) keeps its address and private view link; the old version keeps running if the
 new one fails its test.
@@ -253,7 +253,7 @@ A workspace proposes its own description and tags with `PATCH /v1/me` (see contr
 - `orch publish file <path> --replace f_…` swaps the content behind the same link (`PUT /v1/files/<id>`). It reuses the key saved in `.orch/secrets/files/keys.json`, so it only works on the computer that shared the file; the expiry stays.
 - `orch publish file <path> --note "…"` adds a one-line note (up to 280 characters) to the **encrypted** header (`crypto.md`, vector `good_with_note`). The server never sees it; the browser shows it as text.
 - `orch publish list` follows the server's paging, so it shows every file, not only the first 100.
-- `orch publish view --json` is the read-only "Shared" tab of the dashboard: files and apps with name and expiry, links **without** a key, and a hint to use the CLI for copy, extend and delete.
+- `orch publish view --json` is the read-only "Publish" tab of the dashboard: files and apps with name and expiry, links **without** a key, and a hint to use the CLI for copy, extend and delete.
 
 ## Previews
 

@@ -4,6 +4,8 @@ name: live-check
 # closed on the server's public address. The inside part (admin open over the private network,
 # round trips) runs as an orch automation script on develop, which also reads this job's newest
 # result (scripts/live_check.py --where inside --outside-from ...). No AI.
+# GitHub drops most of these hourly slots: a push to develop starts it when the newest run is 2 h old
+# (scripts/ci_catch_up.py, #2657).
 on:
   schedule:
     - cron: "17 * * * *"

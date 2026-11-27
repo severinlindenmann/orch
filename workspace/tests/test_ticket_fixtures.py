@@ -179,6 +179,82 @@ def test_broken_json_is_refused_and_not_overwritten(one_ticket, proj, run):
         assert run("ticket", "list")[0] == 0
 
 
+@pytest.mark.parametrize("variant", ["crlf", "bom", "bom-crlf"])
+def test_ticket_file_saved_by_a_windows_editor_still_works(variant, proj, run, monkeypatch):
+    """R1.6/R8.2: a ticket fixed by hand on Windows (Notepad, PowerShell 5 `Set-Content -Encoding UTF8`)
+    comes back with CRLF line ends and/or a UTF-8 BOM, in a folder with spaces and umlauts. It lists,
+    shows, takes a checklist item and an edit, and survives `orch update --project-only`."""
+    # no agent tool on PATH: nothing here may start the real claude/copilot/codex
+    bins = (sys.executable, shutil.which("git"))
+    monkeypatch.setenv("PATH", os.pathsep.join(os.path.dirname(x) for x in bins))
+    ws = proj / "Mein Ordner – Müller Ä"
+    ws.mkdir()
+    monkeypatch.chdir(ws)
+    before = _install(ws, NEWEST)
+    for p in (ws / ".orch" / "tickets").glob("t_*.json"):
+        b = p.read_bytes()
+        if "crlf" in variant:
+            b = b.replace(b"\n", b"\r\n")
+        if "bom" in variant:
+            b = b"\xef\xbb\xbf" + b
+        p.write_bytes(b)
+    assert {t["id"] for t in tickets.list_all(ws)} == set(before)
+    code, out, err = run("ticket", "list")
+    assert code == 0 and all(tid in out for tid in before), err
+    tid = sorted(before)[0]
+    code, shown, err = run("ticket", "show", tid)
+    assert code == 0 and before[tid]["title"] in shown, err
+    assert run("check", "add", tid, "Schritt für Größe", "--by", "human:tester")[0] == 0
+    assert run("ticket", "edit", tid, "--note", "geändert", "--by", "human:tester")[0] == 0
+    code, out, err = run("update", "--project-only")
+    assert code == 0 and "Traceback" not in err, err
+    new = json.loads(tickets.ticket_path(ws, tid).read_text(encoding="utf-8"))  # orch writes plain UTF-8
+    assert new["note"] == "geändert" and new["checklist"][-1]["text"] == "Schritt für Größe"
+    assert new["title"] == before[tid]["title"]
+
+
+def test_read_only_ticket_file_is_refused_with_a_next_step(one_ticket, proj, run, monkeypatch):
+    """Windows refuses to replace a read-only file (OneDrive, a synced or copied folder): one sentence that
+    says what to do, never a traceback, the file and its folder as they were."""
+    tid, p = one_ticket
+    from orch import procs
+
+    real = procs.replace
+
+    def windows_replace(src, dst):
+        if Path(dst) == p:
+            raise PermissionError(13, "Access is denied", str(dst))
+        return real(src, dst)
+
+    monkeypatch.setattr(procs, "replace", windows_replace)
+    p.chmod(0o444)
+    try:
+        raw = p.read_bytes()
+        code, out, err = run("check", "add", tid, "x", "--by", "human:tester")
+        assert code == 2 and "Traceback" not in out + err, err
+        assert "read-only" in err and "try again" in err.lower(), err
+        assert p.read_bytes() == raw
+        assert not list(p.parent.glob(".tmp-*"))
+    finally:
+        p.chmod(0o644)
+
+
+def test_locked_ticket_file_is_refused_with_a_next_step(one_ticket, proj, run, monkeypatch):
+    """Another program (OneDrive mid-download, an editor, a virus scan) holds the file open on Windows."""
+    tid, p = one_ticket
+    real = Path.read_text
+
+    def locked(self, *a, **k):
+        if self == p:
+            raise PermissionError(13, "The process cannot access the file", str(self))
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", locked)
+    code, out, err = run("ticket", "show", tid)
+    assert code == 2 and "Traceback" not in out + err, err
+    assert err.startswith(f"Refused: Ticket {tid}") and "try again" in err.lower(), err
+
+
 def test_old_proof_fields_load_show_as_plain_and_are_kept(proj, run):
     """A ticket written while Done and Won't do carried extra fields (`verdicts[]`, `wont_mac`, `wont_nonce`,
     `wont_line`, `wont_by`): they stay in the file. Done shows as Done (not Review), the fields are ignored
@@ -236,13 +312,14 @@ def test_a_persons_done_and_wont_do_are_plain(proj, run):
     assert done["history"][-1]["by"] == "human:tester"
 
 
-def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj):
+def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj, child_trust):
     """A fresh process, a fresh orch home (no key folder): a person marks an item Done and the ticket Done
     from the CLI; both are recorded as human:<name>."""
     src = Path(__file__).resolve().parents[1] / "src"
     home = proj.parent / f"{proj.name}_fresh_home" / "orchhome"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_", "ORCH_"))}
-    env.update(PYTHONPATH=str(src), ORCH_HOME=str(home))
+    path = os.pathsep.join([str(child_trust), str(src)])
+    env.update(PYTHONPATH=path, ORCH_HOME=str(home), ORCH_TEST_CHILD_TRUST="1")
 
     def orch(*argv):
         r = subprocess.run(
@@ -288,3 +365,206 @@ def test_due_day_only_and_with_time_both_load_show_and_save(folder, proj, run):
         assert run("ticket", "edit", tid, "--note", "x", "--by", "human:tester")[0] == 0
     after = _files(proj)
     assert after[other]["due"] == "2020-01-01T09:00" and after[dated[0]]["due"] == before[dated[0]]["due"]
+
+
+def _drop(*keys):
+    def f(t):
+        for k in keys:
+            t.pop(k, None)
+
+    return f
+
+
+def _drop_item(*keys):
+    def f(t):
+        for item in t["checklist"]:
+            for k in keys:
+                item.pop(k, None)
+
+    return f
+
+
+def _set(key, value):
+    def f(t):
+        t[key] = value
+
+    return f
+
+
+def _unknown_ext(t):
+    t["ext"] = {"gone_addon": {"a": [1]}, "sync": 5, "relay": "not an object", "x.y": None}
+
+
+def _huge_history(t):
+    t["history"] += [
+        {"at": "2026-01-01T00:00:00Z", "by": "agent:old", "text": f"step {i}"} for i in range(5000)
+    ]
+
+
+def _keep(t):
+    pass
+
+
+# old shapes an older orch, a hand edit or Windows tools may have left: all must keep working
+OLD_SHAPES = {
+    "no_optional_fields": _drop("key", "ext", "note", "revision", "parent", "waiting_on", "done_when", "due"),
+    "no_schema_or_times": _drop("schema", "created_at", "updated_at"),
+    "no_core_lists": _drop("checklist", "refs", "questions", "history"),
+    "no_title_or_status": _drop("title", "status"),
+    "items_without_by_at": _drop_item("by", "at"),
+    "unknown_ext_keys": _unknown_ext,
+    "empty_checklist": _set("checklist", []),
+    "huge_history": _huge_history,
+    "crlf": _keep,
+    "bom": _keep,
+    "bom_crlf": _keep,
+}
+
+
+def _write_shape(p: Path, t: dict, name: str) -> None:
+    text = json.dumps(t, indent=2)
+    if "crlf" in name:
+        text = text.replace("\n", "\r\n")
+    p.write_bytes((b"\xef\xbb\xbf" if "bom" in name else b"") + text.encode("utf-8"))
+
+
+@pytest.mark.parametrize("name", OLD_SHAPES)
+def test_old_shapes_load_list_and_save(name, one_ticket, proj, run):
+    """R8.2: missing optional fields or core lists (read as empty), unknown `ext.*`, CRLF, a byte order
+    mark, an empty checklist and a huge history: every command works and every field is kept."""
+    tid, p = one_ticket
+    t = json.loads(p.read_text(encoding="utf-8"))
+    OLD_SHAPES[name](t)
+    _write_shape(p, t, name)
+    code, out, err = run("ticket", "list")
+    assert code == 0 and tid in out, err
+    assert tid in {x["id"] for x in tickets.list_all(proj)}
+    for argv in (
+        ("ticket", "show", tid),
+        ("ticket", "tree", tid),
+        ("needs",),
+        ("check", "add", tid, "Added now", "--by", "human:tester"),
+        ("ticket", "edit", tid, "--note", "edited now", "--by", "human:tester"),
+        ("log", tid, "a note", "--by", "human:tester"),
+    ):
+        code, out, err = run(*argv)
+        assert code == 0 and "Traceback" not in out + err, (argv, err)
+    new = json.loads(p.read_text(encoding="utf-8"))
+    for key, value in t.items():
+        if key not in ("updated_at", "revision", "history", "checklist", "note"):
+            assert new[key] == value, key
+    for key in ("history", "checklist"):
+        assert new[key][: len(t.get(key, []))] == t.get(key, [])
+    assert new["checklist"][-1]["text"] == "Added now" and new["note"] == "edited now"
+
+
+UNSUPPORTED = {
+    "status_number": _set("status", 3),
+    "history_numbers": _set("history", ["line"]),
+    "refs_text": _set("refs", "x"),
+    "questions_null": _set("questions", None),
+    "checklist_text": _set("checklist", "step one"),
+    "checklist_null": _set("checklist", None),
+    "checklist_numbers": _set("checklist", [1, 2]),
+    "history_null": _set("history", None),
+    "title_null": _set("title", None),
+    "ext_text": _set("ext", "x"),
+}
+
+
+@pytest.mark.parametrize("name", UNSUPPORTED)
+def test_unsupported_shape_fails_safely_with_one_sentence(name, one_ticket, proj, run):
+    """R8.2 + R8.4: a file of a shape this orch can't read is refused with one sentence that says what to
+    do, never with a traceback, and never rewritten; the rest of the workspace keeps working."""
+    tid, p = one_ticket
+    t = json.loads(p.read_text(encoding="utf-8"))
+    UNSUPPORTED[name](t)
+    p.write_text(json.dumps(t, indent=2), encoding="utf-8")
+    raw = p.read_bytes()
+    for argv in (
+        ("ticket", "show", tid),
+        ("ticket", "tree", tid),
+        ("check", "add", tid, "x", "--by", "human:tester"),
+        ("ticket", "edit", tid, "--note", "n", "--by", "human:tester"),
+        ("log", tid, "a note", "--by", "human:tester"),
+    ):
+        code, out, err = run(*argv)
+        assert code == 2 and "Traceback" not in out + err, (argv, err)
+        assert err.startswith(f"Refused: Ticket {tid} has a format this orch can't read"), (argv, err)
+        assert err.strip().count("\n") == 0 and "restore the file from git" in err
+    assert p.read_bytes() == raw
+    assert tid not in {x["id"] for x in tickets.list_all(proj)}
+    for argv in (("ticket", "list"), ("needs",)):
+        assert run(*argv)[0] == 0
+
+
+SHAPES = Path(__file__).parent / "fixtures" / "ticket_shapes"
+SHAPE_FILES = sorted(SHAPES.glob("t_*.json"))
+
+
+def _long_history(raw: dict) -> dict:
+    raw = json.loads(json.dumps(raw))
+    raw["id"] = "t_long003"
+    raw["title"] = "Very long history"
+    raw["history"] += [
+        {"at": "2026-11-12T10:00:00Z", "by": "agent:fixture", "via": "cli", "text": f"Step {n}"}
+        for n in range(1500)
+    ]
+    return raw
+
+
+def _install_shapes(proj: Path) -> dict[str, dict]:
+    d = proj / ".orch" / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    raws = [json.loads(p.read_text(encoding="utf-8")) for p in SHAPE_FILES]
+    raws.append(_long_history(raws[0]))
+    for r in raws:
+        (d / f"{r['id']}.json").write_text(json.dumps(r, indent=2), encoding="utf-8")
+    return {r["id"]: r for r in raws}
+
+
+def test_odd_shapes_load_check_show_and_round_trip(proj, run):
+    """Missing optional fields, `ext` of a removed add-on, unknown fields (R3.1), an empty checklist,
+    every evidence kind (also an unknown one) and a very long history: nothing crashes and nothing is lost."""
+    before = _install_shapes(proj)
+    assert run("ticket", "list", "--all")[0] == 0
+    assert {t["id"] for t in tickets.list_all(proj)} == set(before)
+    for tid, raw in before.items():
+        code, shown, err = run("ticket", "show", tid)
+        assert code == 0 and raw["title"] in shown and "Traceback" not in err, err
+        state = tickets.proof_state(tickets.load(proj, tid), proj)
+        assert set(state["per_item"]) == {c["id"] for c in raw["checklist"]}
+        assert run("ticket", "show", tid, "--json")[0] == 0
+    assert run("needs")[0] == 0
+    assert run("ticket", "tree", "t_min001")[0] == 0
+
+    for tid in before:
+        assert run("ticket", "edit", tid, "--note", "edited", "--by", "human:tester")[0] == 0
+        assert run("check", "add", tid, "Added", "--by", "human:tester")[0] == 0
+        assert run("log", tid, "a note", "--by", "human:tester")[0] == 0
+    assert run("check", "done", "t_all002", "c8", "--note", "now", "--by", "agent:fixture")[0] == 0
+
+    after = _files(proj)
+    for tid, old in before.items():
+        new = after[tid]
+        for key, value in old.items():
+            if key in ("updated_at", "revision", "history", "checklist", "note", "status"):
+                continue
+            assert new[key] == value, f"{tid}: {key} changed"
+        assert new["history"][: len(old["history"])] == old["history"]
+        n = len(old["checklist"])
+        for a, b in zip(new["checklist"][:n], old["checklist"], strict=True):
+            assert {k: v for k, v in a.items() if k not in ("done", "evidence")} == {
+                k: v for k, v in b.items() if k not in ("done", "evidence")
+            }
+            assert a["evidence"][: len(b["evidence"])] == b["evidence"]
+        assert new["note"] == "edited" and new["revision"] > old["revision"]
+    assert "ext" not in after["t_min001"] and "key" not in after["t_min001"]
+    assert "removedaddon" in after["t_all002"]["ext"]
+
+
+def test_removed_addon_ext_survives_ext_changes_of_another_addon(proj, run):
+    _install_shapes(proj)
+    code, _, err = run("ext", "set", "t_all002", "otheraddon", '{"a": 1}', "--by", "agent:fixture")
+    ext = _files(proj)["t_all002"].get("ext", {})
+    assert ext.get("removedaddon") == {"state": "gone", "list": [1, 2]}, (code, err)

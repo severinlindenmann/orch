@@ -15,6 +15,8 @@ import os
 import re
 from pathlib import Path
 
+from orch import procs
+
 MAX_PEOPLE = 20
 _BAD = re.compile(r"[^A-Za-z0-9_.@ -]")
 
@@ -74,7 +76,7 @@ def _choose(root: Path, name: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
-    os.replace(tmp, p)
+    procs.replace(tmp, p)
 
 
 def load(root: Path | None) -> dict:
@@ -107,7 +109,7 @@ def _write(root: Path, doc: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
-    os.replace(tmp, p)
+    procs.replace(tmp, p)
 
 
 def choose(root: Path, name, add: bool = False) -> dict:

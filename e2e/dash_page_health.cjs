@@ -126,7 +126,7 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
   state.addons.push({name: 'lessons', dashboard: {label: 'Lessons', icon: 'book', order: 50, title: 'Lessons', subtitle: 'What your helpers learned.'}});
   // the crowded case of report r-1117-1256-ws-2: every add-on in the menu, the build badge, phone mode on, an uncovered Done-when part
   for (const [name, icon] of [['contacts', 'phone'], ['factory', 'pen'], ['focus', 'target'], ['insights', 'chart'], ['sync', 'cloud'], ['publish', 'link']])
-    state.addons.push({name, dashboard: name === 'contacts' ? {label: 'Contacts', icon, panel: 'phone'} : {label: name[0].toUpperCase() + name.slice(1), icon}});
+    state.addons.push({name, dashboard: name === 'contacts' ? {label: 'Relay', icon, panel: 'phone'} : {label: name[0].toUpperCase() + name.slice(1), icon}});
   state.build = 'development';
   state.mobile_mode = {...state.mobile_mode, on: true, ends_at: new Date(Date.now() + 3 * 3600e3).toISOString()};
   const result = state.tickets.find(t => t.status === 'review');

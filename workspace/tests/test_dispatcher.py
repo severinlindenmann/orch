@@ -9,6 +9,7 @@ import pytest
 import test_run_wrap
 
 from orch import brake, config, dispatcher, limitstop, runs, runs_live, tend, tickets
+from orch.errors import Refused
 
 NOW = 1_800_000_000.0
 gen = test_run_wrap.gen  # the generic fake agent as the folder's agent (a fixture)
@@ -170,7 +171,7 @@ def test_the_helper_limit_caps_the_target(proj, calm, monkeypatch):
 
 def test_a_busy_computer_paused_automation_or_a_limit_stop_holds_new_starts(proj, calm, monkeypatch, starts):
     _on(proj, 3)
-    _ticket(proj, "Ready one", "ready")
+    ready = _ticket(proj, "Ready one", "ready")
     monkeypatch.setattr(dispatcher, "_load", lambda: (11.0, 8))
     res = dispatcher.run(proj, now=NOW)
     assert "busy" in res["held"] and starts == []
@@ -182,9 +183,12 @@ def test_a_busy_computer_paused_automation_or_a_limit_stop_holds_new_starts(proj
     monkeypatch.setattr(limitstop, "held_words", lambda root: "the usage limit is reached until 18:00")
     assert "usage limit" in dispatcher.run(proj, now=NOW)["held"]
     monkeypatch.setattr(limitstop, "held_words", lambda root: None)
-    monkeypatch.setattr(brake, "paused", lambda root: {"by": "human:x"})
+    brake.pause(proj, "human:x")
     assert dispatcher.run(proj, now=NOW)["held"] == "automation is paused"
     assert starts == []
+    brake.resume(proj)  # R8.6: on again, the next pass starts the waiting work
+    dispatcher.run(proj, now=NOW)
+    assert starts == [(ready, dispatcher.BY)]
 
 
 # ---------------------------------------------------------------- the line
@@ -313,6 +317,22 @@ def test_config_keys(proj, run):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
+def _close(proj, tid, timeout=10):
+    """A person closes the ticket: out of the dispatcher's lanes. The run's claim ends before the wrapper's
+    last write to the ticket, so a save can meet that write: read it again and retry, as a person would."""
+    end = time.monotonic() + timeout
+    while True:
+        t = tickets.load(proj, tid)
+        t["status"] = "done"
+        try:
+            tickets.save(proj, t)
+            return
+        except Refused:
+            if time.monotonic() > end:
+                raise
+            time.sleep(0.05)
+
+
 def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, monkeypatch):
     """ORCH-813: one helper at a time, real starts of the fake agent: high first, then normal, low last."""
     monkeypatch.setattr(runs_live, "available", lambda adapter: False)  # one step at a time, no tmux
@@ -327,8 +347,6 @@ def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, m
         assert [c["ticket"] for c in res["started"]] == [want]
         assert dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))["started"] == []  # the one place is taken
         test_run_wrap._wait(proj, want)
-        t = tickets.load(proj, want)
-        t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
-        tickets.save(proj, t)
+        _close(proj, want)
     started = [ln.split()[1] for ln in test_run_wrap._lines(log, "env")]
     assert started == [high, normal, low]

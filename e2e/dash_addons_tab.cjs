@@ -1,7 +1,7 @@
 // Settings › Add-ons draws its rows, and "Report a problem" saves the page the person was looking at (ORCH-1117,
 // report r-1120-2034-ws: the picture showed an empty Add-ons tab, the saved page the whole list).
 // Chromium with the real dashboard web files and no server: /api/state comes from the screenshot fixture
-// (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json) with twelve add-ons, the relay among them,
+// (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json) with twelve add-ons, Relay among them,
 // and a new revision on every read, so the page redraws as it does at home.
 // Flow, at 1366 and 390 px: open Settings, Add-ons tab, the heading and every row are on screen; About, then the
 // browser's Back to Add-ons, the rows again. Then the report: open it, the page redraws behind the dialog, Create,

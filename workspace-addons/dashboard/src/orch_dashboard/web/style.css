@@ -47,7 +47,7 @@
 @container (max-width:300px){.acc-detail>div{grid-template-columns:minmax(0,1fr);gap:2px}}
 .acc-line{margin:0}
 .acc-tickets{display:grid;gap:0;border:1px solid var(--border);border-radius:var(--radius)}
-.acc-ticket{display:flex;align-items:center;gap:12px;padding:8px 12px;text-decoration:none;color:var(--text)}
+.acc-ticket{display:flex;align-items:center;gap:12px;min-height:var(--touch);padding:8px 12px;text-decoration:none;color:var(--text)}
 .acc-ticket+.acc-ticket{border-top:1px solid var(--border)}
 .acc-ticket .li-title{flex:1;min-width:0}
 .acc-ticket:hover .li-title{text-decoration:underline}
@@ -144,6 +144,9 @@ h1 .inline-host{display:block}
 /* Add-on pages draw their own gutter (24 px, 16 px on a phone), so the frame bleeds out of the page padding and the content sits on the same edges as dashboard pages (SX-1). */
 iframe.embed{--embed-bleed:24px;display:block;width:calc(100% + 2*var(--embed-bleed));margin:-32px calc(-1*var(--embed-bleed)) 0;height:calc(100vh - var(--topbar-height));min-height:480px;border:0}
 @media(max-width:899px){iframe.embed{--embed-bleed:var(--page-gutter)}}
+/* D1 (ORCH-2315): a framed add-on page scrolls inside its frame and keeps its own gutter, so the dashboard keeps none
+   around it: its Settings button then ends at the same right edge as on every dashboard-drawn page. */
+html:has(iframe.embed:not(.embed-loading)){scrollbar-gutter:auto}
 /* A page that is the dashboard shell itself (three columns, fb17) fills the page like the board: no page padding around it */
 .page:has(>iframe.embed-shell){max-width:none;padding:0}
 iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-height))}
@@ -266,10 +269,6 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:4px 10px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--text-muted);font:inherit;font-size:14px;cursor:pointer}
 .mm-toggle[hidden]{display:none}
 .mm-toggle[aria-checked=true]{color:var(--text);border-color:var(--brand)}
-.mm-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);flex:none}
-.mm-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform .15s}
-.mm-toggle[aria-checked=true] .mm-sw{background:var(--brand)}
-.mm-toggle[aria-checked=true] .mm-sw:after{transform:translateX(12px);background:var(--on-brand)}
 .topbar>.mm-toggle:not([hidden])+.btn.primary{margin-left:0}
 /* Open helper and New ticket are one group (fb9): side by side on one row at any width, pushed right */
 .topbar>.topbar-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:8px;align-items:center;margin-left:auto}

@@ -93,3 +93,53 @@ def test_ci_main_uses_the_base():
     assert "scripts/ci_changes_base.sh" in text
     assert "base: ${{ steps.base.outputs.sha }}" in text
     assert "fetch-depth: 0" in text  # the base commit must be in the clone
+
+
+def dev_clone(tmp_path: Path) -> tuple[Path, str]:
+    """origin: main = release 32, develop two changes ahead. Returns (a clone on develop, release 32)."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    write(origin, "relay/src.rs", "v32\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "release 32")
+    r32 = git(origin, "rev-parse", "HEAD")
+    git(origin, "switch", "-qc", "develop")
+    write(origin, "relay/src.rs", "v33\n")
+    git(origin, "commit", "-qam", "relay change")
+    write(origin, "workspace/a.py", "v33\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "workspace change")
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", "-b", "develop", str(origin), str(clone)], env=ENV, check=True)
+    return clone, r32
+
+
+def test_manual_run_on_develop_compares_with_main(tmp_path):
+    """#2559: the release keeper's manual run on develop compared develop with itself (0 changed files) and
+    skipped 14 of 17 jobs. --since-main gives where develop meets main: everything since the last release."""
+    clone, r32 = dev_clone(tmp_path)
+    assert git(clone, "diff", "--name-only", "origin/develop...HEAD") == ""  # the bug: the default
+    got = subprocess.run(
+        ["bash", str(SCRIPT), "--since-main"], cwd=clone, env=ENV, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert got == r32 and changed(clone, got) == ["relay/src.rs", "workspace/a.py"]
+
+
+def test_since_main_prints_nothing_without_main(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "develop")
+    write(repo, "a.txt", "a\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "one")
+    write(repo, "a.txt", "b\n")
+    git(repo, "commit", "-qam", "two")
+    assert base(repo, "--since-main") == ""
+
+
+def test_ci_manual_runs_on_any_branch_get_the_base():
+    text = CI.read_text(encoding="utf-8")
+    step = text[text.index("- id: base") : text.index("- id: f")]
+    assert "github.event_name == 'workflow_dispatch'" in step.split("env:")[0]
+    assert "ci_changes_base.sh --since-main" in step

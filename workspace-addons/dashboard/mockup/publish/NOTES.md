@@ -2,6 +2,7 @@
 
 ## publish.html — Shared links
 
+- `?state=empty&server=none` (ORCH-2017): no publish server yet. One master empty state (no Share a file, which would only fail) with its one next step, Shared link settings (R7.2).
 - The existing survey-results.html appears once, with HTML type, 319 bytes and a consistent expiry date (SN-11).
 - Share a file is a clear primary action; stopping sharing names the file and asks once (SN-11; BP-48).
 - Connection details move to add-on settings and the file gets a preview entry point (SN-03, SN-11).
@@ -65,3 +66,9 @@ Round 2 — working shared components.
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
 
 - Share a file (e2e 15 Nov): the window stays open after Create link, shows the link with a Copy button and says "Copied" (the link is copied once automatically). A ticket file's viewer has "Share by link…" next to "Copy link", only when sharing is on; it opens this same window for that file.
+
+## RP2 and RP7 (ORCH-2170, 26 Nov)
+
+- Title "Publish" (RP8 B). Each row: file, your note (or "No note"), the ticket and "Ends in N days"; a link that ends within a day gets a warning chip ("Ends tomorrow"). The line below says orch checks each file for passwords first.
+- `?state=connect`: not connected yet. The page is the paste box (the admin's whole text, Connect, one inline sentence when no connect line is found); the heading shows "Not connected yet" instead of Share a file.
+- `?state=offline`: publish can't be reached. The rows come from this workspace's record (the fallback label is “From this workspace’s record” when no date is known), a banner says what that means, and Share a file, Copy link, Extend and Stop sharing wait (disabled).

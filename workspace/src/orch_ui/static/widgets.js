@@ -50,7 +50,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
  const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
   if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
   setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
-  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'orch did not answer. Try again in a moment.'};setSt('failed',back?'[data-act="run"]':null)})};
  const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
   p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
  const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
@@ -81,7 +81,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
    g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
   if((st==='running'&&!inTerm)||st==='done'||st==='failed')body.push(term());
   if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
-  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
+  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work. Try again.'));e.setAttribute('role','alert');body.push(e);}
   if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
   if(cls!=='copy'&&!inTerm&&(r.changes||r.undo)){const dl=el('dl','run-facts');if(r.changes)fact(dl,'Changes',r.changes);if(r.undo)fact(dl,'Undo',null,r.undo);body.push(dl)}
   if(st!=='done'&&st!=='left'&&st!=='confirm'){const n=btn('outline sm run-leave',noLabel,leave);n.dataset.act='no';if(busy)n.disabled=true;body.push(n)}
@@ -110,13 +110,13 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Review',done:'Done',dropped:"Won't do"};
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
- if(t.status==='review')return {pill:'check',word:'Check',helper:null};
+ if(t.status==='review')return {pill:'check',word:'Review',helper:null};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
@@ -173,13 +173,60 @@ UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','r
  let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
  if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
+/* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
+   then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
+   the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
+   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>'};
+const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
+/* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
+UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
+UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
+ if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
+ const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
+ if(st&&(st.href||st.onClick))acts.push(UI.settingsButton(st));
+ (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
+ if(acts.length){const r=el('div','page-heading-actions');r.append(...acts);head.append(r)}
+ return head};
+/* One look per page state (D4-D6, 26 Nov). Text only (textContent). Every page and add-on page uses these, no own copy.
+   UI.pageEmpty({title, text, step, dataKey}) -> <section class="card page-empty">: what is missing (title), one sentence what
+     will show up here (text), and the first step (step: a node such as the page's own input and button, or
+     {label, href|onClick} for one green button). No step where the helper fills the page: then only the sentence.
+   UI.pageNotice({what, still, action, tone, dataKey}) -> <div class="banner page-notice attn|error" role="status">: what
+     happened (bold), what still works, and one green button ({label, href|onClick|data:{...}}). Goes right under the
+     page name; one per page. tone 'error' for a failure the person must act on (default 'attn').
+   UI.settingsButton({href, label, onClick, dataKey, top}) -> <a class="btn outline sm page-settings settings-btn">: gear +
+     "Settings", the one way to an add-on's settings. UI.pageTop({settings}) draws it first among the top's buttons; this
+     is its only implementation (ORCH-2315). */
+const stepButton=(a,cls)=>{const b=el(a.href?'a':'button','btn primary sm'+(cls?' '+cls:''),a.label);if(a.href)b.href=a.href;else{b.type='button';if(a.onClick)b.onclick=a.onClick}
+ if(a.data)Object.keys(a.data).forEach(k=>{b.dataset[k]=a.data[k]});return b};
+UI.pageEmpty=o=>{o=o||{};const b=el('section','card page-empty');if(o.dataKey)b.dataset.key=o.dataKey;
+ if(o.title)b.append(el('h2','',o.title));if(o.text)b.append(el('p','',o.text));
+ if(o.step){const s=el('div','page-empty-step');s.append(o.step instanceof Node?o.step:stepButton(o.step));b.append(s)}
+ return b};
+UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='error'?'error':'attn'));b.setAttribute('role',o.tone==='error'?'alert':'status');if(o.dataKey)b.dataset.key=o.dataKey;
+ const p=el('p','grow');if(o.what)p.append(el('strong','',o.what));if(o.what&&o.still)p.append(' ');if(o.still)p.append(o.still);b.append(p);
+ if(o.action)b.append(o.action instanceof Node?o.action:stepButton(o.action));
+ return b};
+UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'button','btn outline sm page-settings settings-btn');if(link){a.href=o.href||'#settings/addons';if(o.top)a.target='_top'}else a.type='button';
+ if(o.onClick)a.addEventListener('click',o.onClick);a.dataset.key=o.dataKey||'page-settings';
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),el('span','',o.label||'Settings'));return a};
+/* An add-on page drawn inside the dashboard's frame (Factory, Usage, Files, Skills, Personal, Insights ...) marks the
+   place of its Settings button in its own top: <span data-settings-for="skills"></span>. It becomes the same
+   UI.settingsButton, leading the dashboard (target _top; frame.js hands the move up) to that add-on's part of Settings. */
+UI.fillSettings=root=>{(root||document).querySelectorAll('[data-settings-for]').forEach(s=>{const n=s.dataset.settingsFor;
+ if(/^[a-z][a-z0-9-]{1,31}$/.test(n||''))s.replaceWith(UI.settingsButton({href:'/#settings/addons/'+n,top:true}));else s.remove()})};
+if(typeof document!=='undefined'&&document.querySelectorAll){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>UI.fillSettings());else UI.fillSettings()}
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}})
+   action:{label, href, target} draws the button as a link (another page, e.g. '/#tickets' with target '_top' from an add-on frame). */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
- if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
+ if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
  const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
- if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
+ if(o.action){const link=typeof o.action.href==='string';const a=el(link?'a':'button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);
+  if(link){a.href=o.action.href;if(o.action.target)a.target=o.action.target}else a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
 /* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
    UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
@@ -381,7 +428,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(oneTap(it)?'Answer ':lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
-   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.setAttribute('aria-hidden','true');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */
     if(c&&c===cur&&oneTap(it))return answerPick(it,op.id);/* Enter or Space on the answer */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
@@ -814,7 +861,7 @@ UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken b
   b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
   if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
   if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
-  b.setAttribute('aria-label',g.name+', '+n+' waiting'+(n&&g.deadline?', '+g.deadline:''));
+  /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
   if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
  /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */

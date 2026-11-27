@@ -148,16 +148,46 @@ def test_no_matched_pull_request_changes_nothing(tmp_path):
 
 
 def test_an_ok_for_an_older_head_does_not_count(tmp_path):
+    st = entry(sha="old")
+    st["security"]["prs"]["2"]["tid"] = "t_old"
     out = go(
         tmp_path,
-        state=entry(sha="old"),
-        open_reviews=["t_sec2"],
+        state=st,
+        open_reviews=["t_old"],
         security_verdicts={"2": {"sha": "old", "verdict": "ok"}},
     )
-    assert (
-        out["lines"][-1]
-        == "waits for every security OK: #2 (security review of its last change still running)"
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review SEC-2 running)"
+
+
+def test_a_moved_pull_request_ends_its_open_older_review_and_starts_one_for_the_new_head(tmp_path):
+    # #2403: the old review ticket stayed open, so the keeper waited on it forever while it could never
+    # record a verdict for the new head
+    st = entry(sha="old")
+    st["security"]["prs"]["2"].update(tid="t_old", key="SEC-1")
+    out = go(tmp_path, state=st, open_reviews=["t_old"])
+    assert out["did"] == ["security-review:#2", "drop-review:#2 t_old"]
+    assert out["state"]["security"]["prs"]["2"]["sha"] == "h2"
+    assert "#2: the review of its older commit (t_old) ended, replaced by SEC-2" in out["lines"]
+    again = go(tmp_path, state=out["state"], open_reviews=["t_sec2"])
+    assert again["did"] == []  # the new review runs; nothing is dropped twice
+
+
+def test_a_moved_review_is_dropped_as_superseded_on_the_real_ticket(tmp_path, monkeypatch):
+    from orch import tickets
+
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(tickets, "log", lambda *a, **k: calls.append(("log", a[1])))
+    monkeypatch.setattr(
+        tickets, "set_status", lambda r, t, s, by, superseded_by=None: calls.append((s, t, superseded_by))
     )
+    w = rk.World(
+        root, rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path), None
+    )
+    lines = secreview._drop_stale(w, 2, "t_old", {"tid": "t_new", "key": "SEC-9", "sha": "h2"})
+    assert calls == [("log", "t_old"), ("dropped", "t_old", "t_new")]
+    assert lines == ["#2: the review of its older commit (t_old) ended, replaced by SEC-9"]
 
 
 def test_a_finished_review_of_an_older_head_starts_a_new_one(tmp_path):
@@ -485,6 +515,47 @@ def test_an_ok_for_an_older_head_of_the_fix_does_not_count(tmp_path):
     st["security"]["prs"]["3"]["sha"] = "old"
     out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=st, security_verdicts=v, open_reviews=["t_sec3"])
     assert "#2 (security review found problems; its fix #3 has no security OK yet)" in out["lines"][-1]
+
+
+# #1568: a fix that changes no matched file (the fix of a server finding in a client file) was never reviewed,
+# so its OK never came and the problems verdict could not be cleared
+SAFE_FIX = change(3, ["workspace/src/orch/cli.py", "workspace/tests/test_cli.py"])
+LINKED = {"2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3}}
+
+
+def test_an_open_fix_that_touches_no_matched_file_gets_its_security_review(tmp_path):
+    st = entry(card_sha="h2", qid="q7")
+    out = go(tmp_path, state=st, security_verdicts=LINKED, open_prs=[pr(3, ["workspace/src/orch/cli.py"])])
+    assert "security-review:#3" in out["did"]
+    assert out["state"]["security"]["prs"]["3"]["files"] == ["workspace/src/orch/cli.py"]
+
+
+def test_a_merged_fix_that_touches_no_matched_file_is_reviewed_and_its_ok_ends_the_hold(tmp_path):
+    changes = [SAFE, RELAY, SAFE_FIX]
+    out = go(tmp_path, changes=changes, state=entry(card_sha="h2", qid="q7"), security_verdicts=LINKED)
+    assert "security-review:#3" in out["did"]
+    assert out["state"]["security"]["prs"]["3"]["files"] == ["workspace/src/orch/cli.py"]  # tests left out
+    v = {**LINKED, "3": {"sha": "h3", "verdict": "ok", "line": "fine"}}
+    done = go(tmp_path, changes=changes, state=out["state"], security_verdicts=v)
+    assert not any("waits for every security OK" in x for x in done["lines"])
+
+
+def test_a_fix_merged_inside_a_queue_group_is_reviewed_as_its_member(tmp_path):
+    grp = {**change(9, ["workspace/src/orch/cli.py"]), "title": "Merge pull request #9 from x/orch-queue/a1"}
+    out = go(
+        tmp_path,
+        changes=[SAFE, RELAY, grp],
+        state=entry(card_sha="h2", qid="q7"),
+        security_verdicts=LINKED,
+        groups={"9": [(3, "h3", [])]},
+    )
+    assert "security-review:#3" in out["did"] and out["state"]["security"]["prs"]["3"]["sha"] == "h3"
+    assert "security-review:#9" not in out["did"]
+
+
+def test_an_unlinked_change_that_touches_no_matched_file_still_gets_no_review(tmp_path):
+    out = go(tmp_path, changes=[SAFE, RELAY, SAFE_FIX], state=entry(), security_verdicts={})
+    assert "security-review:#3" not in out["did"]
 
 
 # ---------------------------------------------------------------- the verdict command

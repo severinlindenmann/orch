@@ -1,5 +1,6 @@
 'use strict';
-// "You: <name>" above Settings: pick who is using this dashboard, or add a person (a name only, no password, no rights).
+// The person block (look A, ORCH-1880): one row with the avatar (a green dot = signed in), the name, then Phone and Settings
+// as icons. Pick who is using this dashboard, or add a person (a name only, no password, no rights).
 // The chosen person is who tickets and history lines say did it. Data: state.people ({me, people}); null = nothing shown.
 (() => {
   const root = document.getElementById('side-person');
@@ -49,14 +50,17 @@
         node('input', {className: 'input', name: 'name', maxlength: '40', placeholder: 'Name', 'aria-label': 'Name of the new person', autocomplete: 'off', 'data-testid': 'person-name'}),
         node('button', {type: 'submit', className: 'btn primary sm', 'data-testid': 'person-add-save', disabled: busy}, 'Add'))
       : node('button', {type: 'button', className: 'menu-item', 'data-person-add': '', 'data-testid': 'person-add'}, 'Add person');
+    const label = SESSION_LABEL[sess];
+    const face = avatar(me || 'You');
+    if (label) face.append(node('span', {className: 'dot' + (sess === 'signed-in' ? ' ok' : ''), 'aria-hidden': 'true'}));
     const d = node('details', {className: 'menu person-menu', open: open || adding},
-      node('summary', {className: 'nav-item', 'aria-label': 'Switch person', 'data-testid': 'person-switch'},
-        avatar(me || 'You'), (me ? node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me)) : node('span', {className: 'nav-label', 'data-testid': 'person-pick'}, node('strong', {}, 'Pick your name'))), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
+      node('summary', {className: 'nav-item', 'aria-label': (me ? 'You: ' + me : 'Pick your name') + (label ? ', ' + label[0].toLowerCase() : '') + '. Switch person', title: [me, label ? (sess === 'signed-in' ? label[0] : label[0] + ': ' + label[1]) : null].filter(Boolean).join(' · ') || null, 'data-testid': 'person-switch'},
+        face, (me ? node('span', {className: 'nav-label'}, me) : node('span', {className: 'nav-label pick', 'data-testid': 'person-pick'}, node('strong', {}, 'Pick your name'))), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
       node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add,
         window.orchLogin?.token() ? node('button', {type: 'button', className: 'menu-item', 'data-logout': '', 'data-testid': 'logout'}, 'Log out') : null));
     root.append(d);
-    const label = SESSION_LABEL[sess];
-    if (label) root.append(node('div', {className: 'nav-item meta session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess, title: label[1]}, node('span', {className: 'chip' + (sess === 'signed-in' ? '' : ' outline')}, label[0]), sess === 'helper' ? node('span', {}, ' ', label[1]) : null));
+    // the dot's words for a screen reader: "Signed in", "View only", or why a helper's page is view only
+    if (label) root.append(node('span', {className: 'sr-only session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess}, sess === 'helper' ? label[1] : label[0]));
     if (adding) d.querySelector('input')?.focus();
   }
 
@@ -70,7 +74,7 @@
       r = {ok: !why, text: why};
     } else r = await window.orchAct(op, {name});
     busy = false;
-    if (!r.ok) window.orch?.toast(r.text || 'That did not work.', 'error');
+    if (!r.ok) window.orch?.toast(r.text || 'That did not work. Try again.', 'error');
     else { adding = false; closeNext = true; }  // picked: the menu closes
     paint();
   }

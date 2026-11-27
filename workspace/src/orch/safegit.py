@@ -251,20 +251,36 @@ def trivial(name: str, cwd: Path, root: Path | None = None) -> str | None:
     Windows (no true/false programs) the python running orch, quoted. None = not found: the caller refuses."""
     if os.name == "nt":
         return _python_trivial(name, cwd, root)
-    exe = find_exe(name, _avoid(cwd, root))
+    avoid = _avoid(cwd, root)
+    key = avoid | {"PATH=" + os.environ.get("PATH", ""), "CWD=" + os.getcwd(), "TRIVIAL=" + name}
+    with _lock:  # kept like git_exe's answer: the same PATH search on every git call (#1055, #1325)
+        if key in _exes:
+            exe = _exes[key]
+        else:
+            exe = _exes[key] = find_exe(name, avoid)
     return shlex.quote(exe) if exe else None
 
 
 def safe_path(cwd: Path, root: Path | None = None) -> str:
     """PATH for git and everything it starts: absolute entries only, none inside the folder we work in, the
-    workspace root, the copy or an orch worktrees folder (a program an agent committed is never found)."""
+    workspace root, the copy or an orch worktrees folder (a program an agent committed is never found).
+    Kept like git_exe's answer (same key, same dict): resolving every PATH entry against every avoided folder
+    cost more than the git process itself on every call (#1055, #1325)."""
     avoid = _avoid(cwd, root)
+    key = avoid | {"PATH=" + os.environ.get("PATH", ""), "CWD=" + os.getcwd(), "SAFE_PATH"}
+    with _lock:
+        hit = _exes.get(key)
+    if hit is not None:
+        return hit
     keep = [
         d
         for d in os.environ.get("PATH", "").split(os.pathsep)
         if d and os.path.isabs(d) and not any(_inside(d, a) for a in avoid)
     ]
-    return os.pathsep.join(keep)
+    out = os.pathsep.join(keep)
+    with _lock:
+        _exes[key] = out
+    return out
 
 
 def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] | None = None):

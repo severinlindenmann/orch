@@ -177,6 +177,8 @@ def dispatch(args, root: Path) -> bool:
                     raise jobs.JobError("no_job")
                 _emit(jobs.show_job(root, job_id))
             return True
+        if getattr(args, "table", None) == "-" and args.token == "-":
+            raise Refused("Only one of --table and --token can come from stdin (-); give the other inline.")
         stored = jobs.ingest(root, _input(args), job=args.job, token=_token(args))
     except record.RecordRefused as e:
         raise jobs.JobError(e.code, str(e)) from None
