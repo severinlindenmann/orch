@@ -224,12 +224,13 @@ UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'but
 UI.fillSettings=root=>{(root||document).querySelectorAll('[data-settings-for]').forEach(s=>{const n=s.dataset.settingsFor;
  if(/^[a-z][a-z0-9-]{1,31}$/.test(n||''))s.replaceWith(UI.settingsButton({href:'/#settings/addons/'+n,top:true}));else s.remove()})};
 if(typeof document!=='undefined'&&document.querySelectorAll){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>UI.fillSettings());else UI.fillSettings()}
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}})
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, icon, action:{label, onClick}})
+   icon: an icons.js name (the page's own icon, SX-10); without one the empty mark is the To do ring.
    action:{label, href, target} draws the button as a link (another page, e.g. '/#tickets' with target '_top' from an add-on frame). */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
- const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
+ const ico=el('span','ico');if(kind==='error')ico.append(el('span','dot-err'));else if(o.icon&&typeof window.icon==='function')ico.innerHTML=window.icon(String(o.icon),20);else ico.append(UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const link=typeof o.action.href==='string';const a=el(link?'a':'button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);
   if(link){a.href=o.action.href;if(o.action.target)a.target=o.action.target}else a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}

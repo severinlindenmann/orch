@@ -944,7 +944,7 @@ function settingsPage() {
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
   const jobLive = !!window.addonJobLive?.();  // ORCH-1739: one add-on run at a time; the switches wait for it too
   const addonsPanel = h('div', {className:'stack', 'data-key':'settings-addon-list'},
-    h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Installed add-ons'),
+    h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Add-ons'),
       snapshot ? null : h('div', {className:'action-note'}, h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog', disabled:jobLive}, 'Add add-ons'),
         jobLive ? settingsText('p', {className:'meta', 'data-key':'settings-addon-busy'}, 'You can add more when this is done.') : null)),
     typeof addonJobBanner === 'function' ? addonJobBanner() : null,
@@ -1872,7 +1872,7 @@ function repeatsDialog(only = null, addonName = null) {
   const {d, actions} = dialog(had ? 'Edit repeat' : 'New repeat', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(repeatTicketName(t) + (!only && repeatOf(t.id) ? ' · already repeats' : ''), t.id)));
-  const nameOf = id => repeatTicketName(tickets().find(t => t.id === id) || {id});
+  const nameOf = id => { const t = tickets().find(t => t.id === id) || {id}; return t.title || t.id; };  // as its row says it (ORCH-1697: no key)
   const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
   const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
   if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});

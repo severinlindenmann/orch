@@ -73,6 +73,15 @@ def test_gallery_links_exist_and_use_only_the_master():
         assert builder in js, builder
 
 
+def test_gallery_widget_targets_exist():
+    html = (STATIC / "gallery.html").read_text(encoding="utf-8")
+    js = (STATIC / "gallery.js").read_text(encoding="utf-8")
+    targets = set(re.findall(r"q\(['\"]#(w-[a-z0-9-]+)['\"]\)", js))
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    assert targets, "no gallery widget targets found"
+    assert not targets - ids, f"gallery widget containers missing: {sorted(targets - ids)}"
+
+
 def test_design_doc_names_how_to_add_a_component():
     doc = (STATIC / "DESIGN.md").read_text(encoding="utf-8")
     assert "How to add a component" in doc and "gallery" in doc and "SX-1" in doc

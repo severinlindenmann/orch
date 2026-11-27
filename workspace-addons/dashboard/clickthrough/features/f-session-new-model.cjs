@@ -1,5 +1,5 @@
 // Runs on in the live bar's New menu (ORCH-710, ORCH-1660, draft D feature 12): the menu says the tool and model a new
-// helper runs on, the usual ones preselected, and the helper places in use; the person picks Haiku and starts it. The click is real: the server
+// helper runs on, the usual ones preselected, and the helpers working; the person picks Haiku and starts it. The click is real: the server
 // runs this checkout's `orch session new empty --model haiku` in the demo workspace (a stand-in helper). orch then
 // lists the Empty helper on Haiku and its pane opens, found by the session and not by its title (the model line of a running pane: tests/live_model.test.js;
 // the stand-in helper ends by itself within seconds, so it is not waited for here). The session is closed again at the end.
@@ -46,7 +46,7 @@ module.exports = {
     const menu = page.locator('#live-bar [data-key="lbar-new-menu"]');
     await menu.waitFor();
     must((await menu.innerText()).includes('This tool uses its own model.'), 'a tool without models does not say so');
-    must(/helper places? in use/.test(await menu.innerText()), 'the New menu does not show the helper places');
+    must(/helpers? working/.test(await menu.innerText()), 'the New menu does not show the helpers working');
     models = true;
     await reload();
     await page.locator('#live-bar [data-lbar-new]').click();

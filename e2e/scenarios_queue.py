@@ -115,7 +115,7 @@ def mq1(e):
          check_rc=True)  # fmt: skip
     role = e.orchj(ws, "ticket", "new", "Releases")["id"]
     for k, v in (("release_keeper", role), ("release_repo", "acme/app"), ("release_clone", str(e.tmp / "acme-clone"))):
-        e.orch(ws, "config", "set", f"github.{k}", v)
+        e.person(ws, "config", "set", f"github.{k}", v)  # only a person sets the keeper (ORCH-2108: at a terminal)
     fg.open_pr(home, 6, "feat/relay-auth", "Relay: check the sign-in token", {"relay/src/auth.rs": "// x\n"})
     _, out, _ = e.orch(ws, "github", "release", "--dry-run")
     check("Dry run" in out and "#6: would start a security review" in out, f"the dry run names the review: {out!r}")

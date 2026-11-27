@@ -551,6 +551,18 @@ test('without api.run the card says it cannot run', async () => {
   assert.equal(res.ok, false);
 });
 
+test('UI.moreText: a text of more than three lines is cut; o.node (an editable field) is cut the same way (ORCH-1696)', () => {
+  const {UI, document} = load();
+  const short = UI.moreText('One line.');
+  assert.ok(!short.classList.contains('clamped'));
+  const lines = UI.moreText('a\nb\nc\nd');
+  assert.ok(lines.classList.contains('clamped'), 'four short lines are cut');
+  const field = document.createElement('button');
+  const w = UI.moreText('x'.repeat(400), {node: field});
+  assert.equal(w.children[0], field, 'the field shows, not a plain line');
+  assert.ok(w.classList.contains('clamped'));
+  assert.equal(w.children[1].textContent, 'Show more');
+});
 // ORCH-1847: orch marks a plain reversible question one_tap; the page passes it on and saves the tap as the usual answer
 const plainQ = (extra = {}) => card('core:q:t_1:q1', {key: 'q1', ticket_key: 'PIL-2', recommended: 'Tuesday', one_tap: true, text: 'The supplier can deliver on Tuesday or Thursday. Which day?',
   card: {kind: 'choice', title: 'The supplier can deliver on Tuesday or Thursday. Which day?', preview: {type: 'options', options: [{id: 'Tuesday', title: 'Tuesday'}, {id: 'Thursday', title: 'Thursday'}]}}, ...extra});

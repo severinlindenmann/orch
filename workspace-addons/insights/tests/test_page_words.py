@@ -51,3 +51,10 @@ def test_orch1687_the_health_check_line_repeats_no_old_count():
     line = (web / "checkup.js").read_text()
     assert "helpers worked ${" not in line and "plural(last.tickets" not in line
     assert "plural(last.found, 'proposal')" in line
+
+
+def test_orch1694_health_check_is_not_the_main_button_and_says_who_ran_it():
+    """A paid helper start is no filled button; the last time is the hand-run one, beside a weekly switch that is off."""
+    js = (Path(__file__).resolve().parents[1] / "src/orch_insights/web/checkup.js").read_text()
+    assert "'Run a health check', 'btn')" in js and "'Run a health check', 'btn primary')" not in js
+    assert "Last health check (run by hand): ${when(last.at)}" in js

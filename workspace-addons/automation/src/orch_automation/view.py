@@ -40,9 +40,9 @@ def clean(s: object, n: int = 80) -> str:
 
 
 def _name(t: dict) -> str:
-    """A ticket as people read it: its short key first when it has one ("DM1-12 · Invoice export")."""
+    """A ticket as people read it: its title (ORCH-1697: no key in front, it led every row); the key only without one."""
     key = t.get("key")
-    return clean(f"{key} · {t['title']}" if isinstance(key, str) and key else t["title"])
+    return clean(t.get("title") or (key if isinstance(key, str) else "") or t.get("id", ""))
 
 
 def clip(s: str, n: int = 80) -> str:
@@ -452,7 +452,8 @@ def _schedules(
                     "cells": {
                         "schedule": _name(t),
                         "repeats": clean(words, 200),
-                        "next": "Off" if paused else "Paused" if not running else clean(nxt_s, 40),
+                        # ORCH-1697: a repeat turned off says so once, on its switch ("Off · Started · ..." twice)
+                        "next": "None" if paused else "Paused" if not running else clean(nxt_s, 40),
                         "last": result
                         or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
@@ -587,12 +588,12 @@ ROWS = 100  # rows a table carries at most (the contract's limit); the rest is "
 
 
 def files_words(tot: dict) -> str:
-    """Run files nobody opened, in words: "2 unopened, 5 unknown"; "unknown" when nothing is measured."""
+    """Run files nobody opened, in words: "2 not opened, 5 unknown"; "unknown" when nothing is measured."""
     f = tot["files"]
     if not any(f.values()):
         return "none"
     parts = [
-        f"{f['unopened']} unopened" if f["unopened"] else "",
+        f"{f['unopened']} not opened" if f["unopened"] else "",
         f"{f['unknown']} unknown" if f["unknown"] else "",
     ]
     return ", ".join(x for x in parts if x) or "all opened"
@@ -634,13 +635,13 @@ def roles_table(root: Path, tickets: list[dict]) -> dict | None:
         return None
     return {
         "type": "table",
-        "title": "What the roles found",
+        "title": "What repeats found",
         "columns": [
             {"key": "role", "label": "Runs by itself", "type": "text"},
             {"key": "runs", "label": "Runs", "type": "text"},
             {"key": "findings", "label": "Findings", "type": "text"},
             {"key": "tickets", "label": "Their tickets", "type": "text"},
-            {"key": "files", "label": "Files nobody opened", "type": "text"},
+            {"key": "files", "label": "Result files", "type": "text"},
         ],
         "rows": rows[:20],
         "more": max(0, len(rows) - 20),

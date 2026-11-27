@@ -42,12 +42,18 @@ function liveTermSay(r) {
   else window.orch?.toast?.(r.text.slice(0, 120) || 'The screen did not take that. Try again.', 'error');
 }
 const liveTermJSON = s => { try { return JSON.parse(s); } catch (e) { return null; } };
-function liveTermFor(id, label, plain) {
+// ORCH-1695: the one next step when there is no screen: a ticket's pane goes back to its chat (the same Chat | Terminal
+// switch, pages/livechat.js); a session without a ticket closes its pane (the layer's Close; the bar keeps it).
+function liveTermNext(id, ticket) {
+  return ticket ? {text:'Show the chat', attrs:{'data-live-view':'chat', 'data-session':id, 'data-key':'term-show-chat'}}
+    : {text:'Close', attrs:{'data-live':'close', 'data-session':id, 'data-key':'term-close', 'aria-label':'Close this pane'}};
+}
+function liveTermFor(id, label, plain, ticket) {
   let t = liveTerms.get(id);
   if (t) return t;
   const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
-    label, plain, toolsOut:true,
+    label, plain, toolsOut:true, next:liveTermNext(id, ticket),
     // ORCH-1600: the typing switch is there; the plain terminal's is the owner's, in People (ORCH-1684)
     settingsHref: page ? (plain ? '#settings/people' : '#settings/addons/' + encodeURIComponent(page)) : null,
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
@@ -125,7 +131,10 @@ function liveTermOpen(id, t) {
   });
   es.addEventListener('out', e => t.ui.write(e.data));
   es.addEventListener('size', e => t.ui.size(liveTermJSON(e.data)));
-  es.addEventListener('end', e => { t.ui.end((liveTermJSON(e.data) || {}).state || 'none'); t.ended = true; liveTermClose(t, LIVE_TERM_RETRY); });
+  es.addEventListener('end', e => {
+    t.ui.end((liveTermJSON(e.data) || {}).state || 'none'); t.ended = true; liveTermClose(t, LIVE_TERM_RETRY);
+    if (typeof liveLayerFill === 'function') liveLayerFill();  // the pane's line follows at once (ORCH-1695)
+  });
   es.onerror = () => {
     if (t.ended) return;
     // the bridge takes typing only while this page's stream is open: no typing until a new hello and screen arrive
@@ -167,7 +176,7 @@ function liveTermApply(body, live) {
     return;
   }
   const label = body.closest('.live-pane')?.querySelector('.live-pt')?.textContent || 'the helper';
-  const t = liveTermFor(id, label, plain);
+  const t = liveTermFor(id, label, plain, !body.dataset.liveKind);
   t.seen = Date.now();
   if (t.ui.el.parentNode !== body) {
     if (pre) pre.after(t.ui.el); else body.append(t.ui.el);
@@ -176,6 +185,9 @@ function liveTermApply(body, live) {
   if (pre) pre.hidden = true;
   const slot = body.closest('.live-pane')?.querySelector('[data-live-term-tools]');
   if (slot && t.ui.tools && t.ui.tools.parentNode !== slot) slot.append(t.ui.tools);
+  // a plain terminal without its screen: the box's line is the pane's one line (ORCH-1695)
+  const now = body.querySelector('[data-live-now]');
+  if (plain && now && t.ui.el.dataset.note != null) now.hidden = true;
   liveTermOpen(id, t);
 }
 // A terminal no pane shows stops typing and closes its stream; after a while it is dropped.
@@ -191,4 +203,4 @@ function liveTermTick() {
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   setInterval(liveTermTick, LIVE_TERM_EVERY);
 }
-if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermMount, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};
+if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermMount, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveTermNext, liveLogNote};
