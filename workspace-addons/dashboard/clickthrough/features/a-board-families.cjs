@@ -22,10 +22,11 @@ module.exports = {
     must(scoped > 0 && scoped < all, 'the scoped board does not show only the family (' + scoped + ' of ' + all + ')');
     await page.getByRole('button', { name: 'Back to all tickets' }).click();
     must(await page.locator('.scope-bar').count() === 0, 'Back to all tickets left the scope bar');
-    // ORCH-2153: the board re-renders after Back; wait for the tiles instead of counting at once
-    const back = await page.waitForFunction((n) => document.querySelectorAll('.status-row .ticket-tile').length === n,
-      all, { timeout: 15000 }).then(() => true, () => false);
-    must(back, 'not every tile came back');
+    // ORCH-2153: the board re-renders after Back; wait for the tiles instead of counting at once. At least as many as
+    // before: the board polls and may show tickets that arrived meanwhile, so an exact count can never come back.
+    const back = await page.waitForFunction((n) => document.querySelectorAll('.status-row .ticket-tile').length >= n,
+      all, { timeout: 20000 }).then(() => true, () => false);
+    must(back, 'not every tile came back (' + await page.locator('.status-row .ticket-tile').count() + ' of ' + all + ')');
     const bars = page.locator('.ticket-tile .parts-bar');
     if (await bars.count()) {
       await bars.first().click();
