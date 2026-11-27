@@ -767,13 +767,15 @@ def test_page_decisions_only_post_the_open_question():
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
 
 
-def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
+def test_page_has_no_frame_header_and_an_idea_box_with_the_pauses_row(srv):
     html = get(srv, "/")[1]
     assert b'id="navigation"' not in html and b"New idea in Chat" not in html
     assert b"/kit/widgets.css" in html
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "Start with this idea" in js and "Ask me at every pause" in js
-    assert "setting-row" in js and "'switch'" in js
+    assert "Start with this idea" in js and "setting-row f-pauses" in js
+    # ORCH-2065: the row only opens Chat, so it is a Change in Chat button, never a switch that rolls back
+    assert "'Change in Chat'" in js and "'switch'" not in js and "Ask me at every pause" not in js
+    assert "run to the end" not in js
     assert "Open Chat" not in js
 
 
