@@ -116,6 +116,24 @@ def test_cap_truncates_and_hints(cli, ws):
     assert view["notice_tone"] == "warn"
 
 
+def test_same_tick_adds_stay_newest_first(cli, ws, monkeypatch):
+    """A fast machine writes several lessons within one tick of the file system clock: same second in the file,
+    same file time. The list still shows them newest first (it used to fall back to the random id)."""
+    write = store._atomic_write
+
+    def coarse_clock(path, data):
+        write(path, data)
+        if path.name != store.EXTRA:
+            os.utime(path, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+
+    monkeypatch.setattr(store, "_atomic_write", coarse_clock)
+    monkeypatch.setattr(store, "now", lambda: "2026-11-27T10:00:00Z")
+    for i in range(12):
+        jrun(cli, "add", f"Lesson {i:02d}")
+    _, data = jrun(cli, "list")
+    assert [x["text"] for x in data["lessons"]] == [f"Lesson {i:02d}" for i in reversed(range(12))]
+
+
 def test_crlf_file_and_unreadable_skipped(cli, ws):
     d = ws / ".orch" / "addons" / "lessons"
     d.mkdir(parents=True)
