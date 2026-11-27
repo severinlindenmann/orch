@@ -66,7 +66,7 @@ test('an empty release reads "No tickets yet", never "0 of 0 done"', () => {
 });
 
 test('ticket page header (both variants) and an empty board card show the kind', () => {
-  assert.match(ticketSrc, /window\.DashHelpers\.keyTag\(t, h\), window\.DashHelpers\.kindTag\(t, h\), inlineField\(t, 'title'\)/, 'plain header: beside the number');
+  assert.match(ticketSrc, /const head = \[window\.DashHelpers\.keyTag\(t, h\), window\.DashHelpers\.kindTag\(t, h\), pill\]/, 'plain header: beside the number, in the line above the title (ORCH-2155)');
   assert.match(ticketSrc, /const parts = \[key \? h\('span', \{className:'key'\}, key\) : null, kind, pill,/, 'while a helper runs: in the line above the title');
   assert.match(listSrc, /kind \? h\('span', \{className:'kind-tag', 'data-kind':kind\.toLowerCase\(\)\}, kind\)/, 'a board tile (ORCH-576 status rows) shows its kind before the title');
 });

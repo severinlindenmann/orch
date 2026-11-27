@@ -316,7 +316,7 @@ function helperRow(row, key) {
   // ORCH-1717: a ticket the Reviewer left for the person is not stuck, it waits for a look: the calm Check pill of a
   // ticket in Review and the one plain reason (`short`), never the Reviewer's file counts.
   const unsure = row.kind === 'reviewer:unsure';
-  const mark = unsure ? (window.UI?.ticketPill ? window.UI.ticketPill({pill:'check', word:'Check'}) : null)
+  const mark = unsure ? (window.UI?.ticketPill ? window.UI.ticketPill({pill:'check', word:'Review'}) : null)
     : window.UI?.helperPill ? (row.kind === 'helper:idle' ? window.UI.helperPill('idle', 'Idle') : window.UI.helperPill('stuck', 'Stuck')) : null;
   const said = unsure && typeof row.short === 'string' && row.short ? row.short : row.text;
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id, 'data-stopped':row.kind},
@@ -332,14 +332,6 @@ function startFailedRow(t, sf) {
       const result = await act('run.start', {ticket:t.id});
       window.orch.toast(result.ok ? 'Starting again' : changeError(result), result.ok ? 'ok' : 'error');
     })), parentLine(t));
-}
-// Working now: title and the task being done, nothing else (the ticket page shows the steps).
-function workingRow(t) {
-  const tasks = array(t.checklist), claim = state.runs?.[t.id]?.claim, task = tasks.find(task => !window.DashHelpers.resolved(task));
-  const who = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, claim) : capitalise(name(claim?.label || claim?.agent || t.owner));
-  return h('a', {className:'card-row working-row', href:href(t.id), 'data-key':'ticket-' + t.id},
-    h('span', {className:'avatar', 'aria-hidden':'true'}, String(who || 'H').slice(0, 1).toUpperCase()),
-    h('span', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
 }
 // Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
 // state word (Working, Needs you, Waiting, Idle, Stuck); Remind on an idle or stuck row, Stop on one whose ticket
@@ -363,10 +355,51 @@ function helpersCard(rows) {
       : [action(r, 'Remind', () => nudgeHelper(r.ticket.id, NUDGE), 'Message sent')],
   })), {dataKey:'helpers'});
 }
-// G2: a Working ticket with no news for 6 h is one quiet line ("Quiet since 09:20: title"), never a need.
-function quietRow(t) {
-  return h('a', {className:'card-row working-row quiet-row', href:href(t.id), 'data-key':'quiet-' + t.id},
-    h('span', {className:'grow'}, h('span', {className:'meta'}, window.DashHelpers.quietWords(t.quiet_since, now()) + ': '), h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title))));
+// ORCH-2140 (owner, Fable block 1, W1-A + W1-B): four numbers on top, then the open tickets that wait for nobody,
+// In progress and Not started, five each. The ids are the core's (orch counts), so Home, the tiles and `orch counts`
+// say the same. G2: a quiet one says "Quiet since 09:20" in its row, never a need.
+const HOME_LIST_SHOWN = 5;
+function openLists(all, waits) {
+  const c = state.counts || {};
+  if (Array.isArray(c.in_progress) && Array.isArray(c.not_started)) {
+    const pick = ids => ids.map(ticketOf).filter(Boolean);
+    return {inProgress:pick(c.in_progress), notStarted:pick(c.not_started)};
+  }
+  // a snapshot without the core's count: the same rule from the tickets themselves
+  const open = all.filter(t => ['open', 'ready', 'active', 'waiting', 'blocked'].includes(shown(t).status) && !waits.has(t.id));
+  const begun = t => !['open', 'ready'].includes(shown(t).status) || array(t.checklist).some(x => window.DashHelpers.resolved(x));
+  return {inProgress:open.filter(begun), notStarted:open.filter(t => !begun(t))};
+}
+function inProgressRow(t) {
+  const tasks = array(t.checklist), done = tasks.filter(x => window.DashHelpers.resolved(x)).length, next = tasks.find(x => !window.DashHelpers.resolved(x));
+  const helper = state.counts?.tickets?.[t.id]?.helper;
+  const when = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : t.updated_at ? 'last change ' + time(t.updated_at) : '';
+  return h('div', {className:'card-row home-ticket', 'data-key':'progress-' + t.id},
+    ticketTitle(t, tasks.length ? h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length) + ' done') : null),
+    next ? h('p', {className:'muted'}, 'Next task: ' + clean(next.text || next.title)) : null,
+    h('p', {className:'meta'}, [helper ? 'A helper is on it' : 'No helper is on it right now', when].filter(Boolean).join(' · ')));
+}
+function notStartedRow(t) {
+  return h('div', {className:'card-row', 'data-key':'not-started-' + t.id},
+    h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title))), t.created_at ? h('p', {className:'meta'}, 'Saved ' + time(t.created_at)) : null),
+    h('a', {className:'btn outline sm', href:href(t.id)}, 'Open'));
+}
+function openCard(key, title, list, row) {
+  if (!list.length) return null;
+  const more = list.length > HOME_LIST_SHOWN ? h('div', {className:'card-row', 'data-key':key + '-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'All tickets →')) : null;
+  return h('section', {className:'card home-card', 'data-key':key},
+    h('div', {className:'card-h'}, h('h2', {}, title), h('span', {className:'grow'}), h('span', {className:'meta'}, list.length + (list.length === 1 ? ' ticket' : ' tickets'))),
+    list.slice(0, HOME_LIST_SHOWN).map(row), more);
+}
+function homeTiles(needCount, inProgress, notStarted, finished) {
+  const running = Number(state.counts?.running) || 0, last = finished.map(finishedAt).filter(Boolean).sort((a, b) => b - a)[0];
+  const tile = (key, label, n, delta, tone = '') => h('div', {className:'stat-tile', 'data-key':'tile-' + key},
+    h('span', {className:'stat-label'}, label), h('span', {className:'stat-value'}, String(n)), h('span', {className:'stat-delta' + tone}, delta));
+  return h('div', {className:'stat-row four', 'data-key':'tiles'},
+    tile('needs-you', 'Needs you', needCount, needCount ? 'Questions and results below' : 'Nothing to answer'),
+    tile('in-progress', 'In progress', inProgress.length, running ? running + (running === 1 ? ' helper working' : ' helpers working') : 'No helper right now'),
+    tile('not-started', 'Not started', notStarted.length, notStarted.length ? 'Nobody is on them yet' : 'Nothing waiting'),
+    tile('finished-today', 'Finished today', finished.length, last ? 'Last ' + time(last) : 'Nothing yet today', last ? ' up' : ''));
 }
 // Results with the same name are one row ("9 versions"): the row opens the newest; "Mark older as done" closes the rest
 // (each move shows its Undo). Signing off a single result happens in the result view, not here.
@@ -444,7 +477,7 @@ function needListRow(row, count, same) {
 // A result to check: same-name results are one row ("3 versions"); the row opens the newest.
 function resultRow(group) {
   const t = group[group.length - 1];
-  return listRow('check-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Check the result' + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
+  return listRow('check-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Result to review' + (group.length > 1 ? ' · ' + group.length + ' versions' : ''),
     h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'result-' + t.id}, 'Test results'));
 }
 // Changes a helper made in its own copy, waiting to be added to the person's files (the signed copies.approve path).
@@ -517,7 +550,7 @@ function attentionSummary(groups, failed, results, changes, stuck = [], hidden =
   const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row) && !isFactoryDraftRow(g.row)).length + soon;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const idle = stuck.filter(r => r.kind === 'helper:idle').length;
-  const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(failed.length, 'helper that could not start', 'helpers that could not start'), part(questionsAsked, 'question', 'questions'), part(drafts, 'draft to read', 'drafts to read'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(failed.length, 'helper that could not start', 'helpers that could not start'), part(questionsAsked, 'question', 'questions'), part(drafts, 'draft to read', 'drafts to read'), part(results - hidden, 'result to review', 'results to review')].filter(Boolean).join(' · ');
   const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to put live', 'changes to put live')].filter(Boolean).join(' · ');
   return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
@@ -825,13 +858,9 @@ function lineBanner() {
 function home() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, queued, count:needCount} = needsToday(), all = tickets();
-  const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   // a ticket waiting for review is the person's "Test results" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
   const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
-  // a ticket is in one box only: one with a helper row stays in Helpers, never also in Quiet (report r-1124-0536)
-  const helperIds = new Set(helpers.map(r => r.ticket.id));
-  const quiet = working.filter(t => t.quiet_since && !helperIds.has(t.id));
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
@@ -841,9 +870,11 @@ function home() {
   // The number counts open questions, results to check, work that stopped and failed starts; the list below also holds
   // changes to put live and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
+  const {inProgress, notStarted} = openLists(all, new Set([...needs.map(n => n.ticket), ...review.map(t => t.id)].filter(Boolean)));
+  const tiles = all.length ? homeTiles(needCount, inProgress, notStarted, finished) : null;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
-  // ORCH-1616 (owner, less noise): the needs-you number shows in one place, the Review badge of the menu; the heading,
-  // the card and Review all never repeat it (the line under the heading still says what kinds wait)
+  // ORCH-1616 (owner, less noise): the heading and the Needs you card never repeat the needs-you number; since
+  // ORCH-2140 (owner, W1-B) it shows on the Review badge and in the first of the four tiles, the same number
   const title = needCount || anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
   // ORCH-1616 (owner): the number lives only on the Review badge, so the line under the heading is the date alone
@@ -852,9 +883,9 @@ function home() {
     actions:fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
       h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')))});
   const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
-  if (!anyNeeds && !working.length && !helpers.length) {
-    return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
-      h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
+  if (!anyNeeds && !helpers.length && !inProgress.length && !notStarted.length) {
+    return fragment(head, banner, tiles, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
+      h('p', {}, 'Questions and results to review will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
       card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)), changedCard);
   }
@@ -867,15 +898,16 @@ function home() {
   const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(g => { const {row, count, same} = g; return weigh(needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || isFactoryDraftRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same), g.asked); });
   const list = [...stuck.map(g => weigh(needRow(g.row, newest, g.count, g.same), 1)), first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 1)),
     ...results.map(g => g.filter(t => !unsure.has(t.id))).filter(g => g.length).map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
-  const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null;
-  // ORCH-1643: with no Needs you card (only helpers that wait on their screen, shown in Helpers) the helpers take the
-  // wide column, so the left half is never empty next to them
-  const lead = anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : helpersEl;
-  return fragment(head, banner,
-    h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'}, lead),
+  // a read-only copy has no run data: its open tickets show in In progress, so no second Working now card
+  const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : null;
+  // ORCH-1643: the left half is never empty: with nothing that needs the person and no open ticket, Helpers take it
+  const left = [anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null,
+    openCard('in-progress', 'In progress', inProgress, inProgressRow), openCard('not-started', 'Not started', notStarted, notStartedRow)].filter(Boolean);
+  const helpersLeft = !left.length;
+  return fragment(head, banner, tiles,
+    h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'}, helpersLeft ? helpersEl : left),
     h('aside', {className:'stack', 'data-key':'right'},
-      anyNeeds ? helpersEl : null,
-      quiet.length ? card('quiet-now', 'Quiet', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
+      helpersLeft ? null : helpersEl,
       card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)))),
     changedCard);
 }

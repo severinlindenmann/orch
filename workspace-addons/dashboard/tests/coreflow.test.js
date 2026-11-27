@@ -160,7 +160,7 @@ function pageContext(snapshot = false) {
     setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text, ticketKey:t => (t && t.key) || ''}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('function workingRow')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('// Helpers (ORCH-61')), ctx);
   vm.runInContext('ANSWER_UNDO_MS = 5', ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('const HELD_WORDS'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};

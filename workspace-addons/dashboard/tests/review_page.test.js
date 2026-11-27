@@ -216,7 +216,7 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
   assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
-  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
+  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to review');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
   const attached = [];
@@ -447,7 +447,7 @@ test('ORCH-1616: what the number counts but has no card is listed above the card
     {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
   const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
   const rows = none.reviewExtraRows();
-  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to review.']]));
   assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
   assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
   // with a card for each, nothing extra: the cards list them
