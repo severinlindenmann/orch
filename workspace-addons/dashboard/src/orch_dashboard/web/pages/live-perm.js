@@ -11,6 +11,7 @@
 const LIVE_PERM_KINDS = ['manager', 'empty', 'chat'];
 const LIVE_PERM_WARN = 'Bypass permissions: the helper runs every command without asking, also risky ones. Use it only in a workspace you trust.';
 const LIVE_PERM_OFF = 'Not allowed in this workspace. A person can allow it in Settings.';
+const LIVE_PERM_RESTART = 'A change restarts the helper; its conversation stays.';
 // The Permissions row for a kind: {choices: [{mode, label, allowed, on}], cur, label, running, runningLabel, warn}, or
 // null when there is nothing to choose (no tool, the plain terminal, an older orch). pick: the person's choice in the
 // menu ('' = the kind's remembered one); a mode the workspace does not allow is never picked.
@@ -38,7 +39,7 @@ function livePermPaneText(row) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {LIVE_PERM_KINDS, LIVE_PERM_WARN, LIVE_PERM_OFF, livePermRow, livePermArgs, livePermPaneText};
+  module.exports = {LIVE_PERM_KINDS, LIVE_PERM_WARN, LIVE_PERM_OFF, LIVE_PERM_RESTART, livePermRow, livePermArgs, livePermPaneText};
 } else {
   const rowOf = kind => livePermRow(state?.session_modes, kind, '');
   // for the dock's repaint key: what each pane's mode line shows
@@ -62,16 +63,27 @@ if (typeof module === 'object' && module.exports) {
             ? h('p', {className:'meta'}, LIVE_PERM_WARN) : null,
           h('p', {className:'meta'}, 'A new mode ends the session and goes on with the same conversation.')) : null));
   };
+  // ORCH-2199 (owner): the permission mode sits in the status pill's popover and says that a change restarts the helper
+  window.livePermChoices = function livePermChoices(sess) {
+    const r = rowOf(sess.kind);
+    if (!livePermPaneText(r)) return null;
+    return h('div', {className:'live-stat-perm', role:'group', 'aria-label':sess.title + ': permissions', 'data-key':'live-perm-pick'},
+      h('span', {className:'meta'}, 'Permissions'),
+      h('span', {className:'segmented'}, r.choices.map(c => h('button', {type:'button', className:'btn sm', 'data-live-perm':c.mode, 'data-kind':sess.kind, 'data-session':sess.id,
+        'aria-pressed':String(c.mode === r.running), disabled:!c.allowed, title:c.allowed ? null : LIVE_PERM_OFF}, c.label))),
+      h('p', {className:'meta'}, LIVE_PERM_RESTART));
+  };
   document.addEventListener('click', async e => {
     const b = e.target.closest?.('#live-dock [data-live-perm]');
     if (!b || b.disabled) return;
     const id = b.dataset.session, kind = b.dataset.kind, mode = b.dataset.livePerm, r = rowOf(kind);
-    if (typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:'perm:' + id}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-key="live-perm"]`);
+    const open = typeof liveLayerModel === 'function' ? liveLayerModel().menu : '';
+    if (open && typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:open}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] :is([data-key="live-status"], [data-key="live-perm"])`);
     if (!r || r.running === mode) return;
     const word = (r.choices.find(c => c.mode === mode) || {}).label || mode;
     const go = async () => {
       const res = await act('session.new', livePermArgs(kind, mode));
-      if (res.ok) window.orch?.toast?.('Goes on in ' + word + '.', 'ok');
+      if (res.ok) window.orch?.toast?.('Restarted in ' + word + '. The conversation stays.', 'ok');
       else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(res.text, 'Could not change the permissions.', go);
     };
     await go();

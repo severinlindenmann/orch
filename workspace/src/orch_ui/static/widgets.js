@@ -120,7 +120,7 @@ UI.ticketState=(t,helper)=>{t=t||{};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
- if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:HELPER_WORD[helper.state],helper};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:(helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||'')?helper.word:HELPER_WORD[helper.state],helper};
  if(helper)return {pill:'working',word:'Working',helper:null};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};

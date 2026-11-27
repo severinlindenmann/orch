@@ -57,12 +57,21 @@ if (typeof module === 'object' && module.exports) {
             'aria-pressed':String((l.next ? l.next === word : l.name === v))}, h('span', {}, word + (l.name === v ? ' (now)' : '')))),
           h('p', {className:'meta'}, 'A new model applies when the helper finishes its current step (or at its next start).')) : null));
   };
+  // ORCH-2199 (owner pick A a): the model sits in the status pill's popover of the pane, as one row of choices
+  window.liveModelChoices = function liveModelChoices(sess) {
+    const l = lineOf(sess.id);
+    if (!l.canPick) return null;
+    return h('span', {className:'segmented live-mdl-pick', role:'group', 'aria-label':(l.tool || 'Helper') + ': model', 'data-key':'live-model-pick'},
+      LIVE_MODEL_NAMES.map(([v, word]) => h('button', {type:'button', className:'btn sm', 'data-live-model':v, 'data-session':sess.id,
+        'aria-pressed':String(l.next ? l.next === word : l.name === v), title:l.next === word ? 'After this step' : null}, word)));
+  };
   document.addEventListener('click', async e => {
     const b = e.target.closest?.('#live-dock [data-live-model]');
     if (!b) return;
     const id = b.dataset.session, v = b.dataset.liveModel, t = ticketOfId(id);
     const key = t && !t.status && t.title ? 'the ' + t.title : t && window.DashHelpers?.ticketKey ? window.DashHelpers.ticketKey(t) : 'the ticket';
-    if (typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:'model:' + id}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-key="live-model"]`);
+    const open = typeof liveLayerModel === 'function' ? liveLayerModel().menu : '';  // the popover or menu it sat in closes
+    if (open && typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:open}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] :is([data-key="live-status"], [data-key="live-model"])`);
     if (t?.model?.name === v && t.model.by !== 'orch') return;
     const back = liveModelUndo(t);
     const pick = async () => {
