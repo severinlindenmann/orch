@@ -50,9 +50,14 @@ def _literal(t: str) -> str:
 
 
 def waiting_input(key: tuple[str, str], screen: str, now: float | None = None) -> bool:
-    """The screen has not changed for QUIET seconds and its last lines look like a question or a confirm prompt."""
+    """The screen shows the tool's confirm prompt (read from the whole dialog, core runs_live.confirm_prompt; at once,
+    ORCH-2197), or it has not changed for QUIET seconds and its last lines look like a question."""
     import time
 
+    from orch import runs_live
+
+    if runs_live.confirm_prompt(screen) is not None:
+        return True
     now = time.monotonic() if now is None else now
     old = _SEEN.get(key)
     if old is None or old[0] != screen:
@@ -151,6 +156,57 @@ def snapshot(root: Path, orch_bin: str | None, tid: str) -> dict:
         "cursor": cur == 1,
         "waiting_input": waiting_input((sock, sess), screen),
     }
+
+
+def _plain_screen(root: Path, orch_bin: str | None, tid: str) -> tuple[tuple[str, str] | None, str | None]:
+    """((socket, session), the visible screen as plain text) of the ticket's helper; the screen is None when it cannot
+    be read or is scrolled up (a prompt may be below)."""
+    r = ref(root, orch_bin, tid)
+    if isinstance(r, str):
+        return None, None
+    sock, sess = r
+    try:
+        p = _tmux(
+            sock, "capture-pane", "-p", "-t", f"={sess}:", ";",
+            "display-message", "-p", "-t", f"={sess}:", _MARK + "#{pane_in_mode}",
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return r, None
+    body, _, meta = p.stdout.rpartition(_MARK)
+    if p.returncode != 0 or meta.strip() != "0":
+        return r, None
+    return r, body.removesuffix("\n")
+
+
+def confirm(root: Path, orch_bin: str | None, tid: str) -> dict | None:
+    """The confirm prompt the helper shows now (core runs_live.confirm_prompt), or None: what the OK card shows
+    (ORCH-2197). Never raises."""
+    from orch import runs_live
+
+    _, screen = _plain_screen(root, orch_bin, tid)
+    return runs_live.confirm_prompt(screen) if screen is not None else None
+
+
+def answer(root: Path, orch_bin: str | None, tid: str, choice, digest) -> tuple[int, str]:
+    """Allow once or Don't allow on the confirm prompt the person saw (ORCH-2197): only while the screen shows that
+    same prompt (its digest), and only its plain Yes or its No option, as one key. (status, message)."""
+    from orch import runs_live
+
+    if choice not in ("yes", "no") or not isinstance(digest, str) or not digest:
+        return 400, "That request could not be read."
+    r, screen = _plain_screen(root, orch_bin, tid)
+    if r is None:
+        return 409, "There is no live session to answer."
+    prompt = runs_live.confirm_prompt(screen) if screen is not None else None
+    if prompt is None or prompt["digest"] != digest or prompt.get("unclear"):
+        return 409, "The helper no longer asks this. Open the terminal to see what it shows now."
+    sock, sess = r
+    try:
+        if _tmux(sock, "send-keys", "-t", f"={sess}:", "-l", "--", prompt[choice]).returncode != 0:
+            return 502, "The session did not take that."
+    except (OSError, subprocess.TimeoutExpired):
+        return 502, "The session did not answer."
+    return 200, "{}"
 
 
 def keys(root: Path, orch_bin: str | None, tid: str, items) -> tuple[int, str]:

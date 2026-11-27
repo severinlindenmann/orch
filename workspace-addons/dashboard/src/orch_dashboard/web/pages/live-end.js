@@ -18,12 +18,15 @@ function liveEndLogin(lines) {
 // ticket's helper. on: there is something to stop or end; stop: a helper (a plain terminal has no step); busy: a step
 // runs now (Stop is greyed otherwise); hung: idle or the login changed, so the pane offers Start again.
 function liveEndModel(s) {
-  if (!s || typeof s.id !== 'string') return {on:false, stop:false, busy:false, hung:false, login:false, kind:''};
+  if (!s || typeof s.id !== 'string') return {on:false, stop:false, busy:false, hung:false, login:false, stuck:false, kind:''};
   const kind = LIVE_END_KINDS.includes(s.kind) ? s.kind : '', st = String(s.status || 'closed');
   const terminal = kind === 'terminal', on = terminal ? st !== 'closed' : ['working', 'needs-you', 'idle'].includes(st);
   const login = on && !terminal && liveEndLogin(s.lines);
   return {on, kind, stop:on && !terminal, busy:on && !terminal && !login && (st === 'working' || st === 'needs-you'),
     hung:on && !terminal && (st === 'idle' || login), login,
+    // ORCH-2201: only a ticket's helper that really looks stuck (Stuck: at its prompt 20 min with nothing to wait on, or no
+    // update) or whose login changed gets the slim line; a quiet session shows its pill and nothing else
+    stuck:on && !terminal && (login || (!kind && s.word === 'Stuck')),
     stopOp:['run.interrupt', {ticket:s.id}],
     endOp:kind ? ['session.end', {kind}] : ['run.stop', {ticket:s.id}],
     startOp:kind ? ['session.new', {kind}] : ['run.start', {ticket:s.id}]};
@@ -44,15 +47,20 @@ function liveFailText(text, fallback) {
   const said = String(text || '').trim() || String(fallback || 'That did not work.');
   return /[.!?]$/.test(said) ? said : said + '.';
 }
-// The note an idle helper's pane shows instead of an empty box: what is going on, what to type, a way out.
-function liveEndIdleText(m, now) {
-  if (m.login) return {head:'The helper stopped: its login changed.', tail:'Start it again to use the new login. The conversation is kept.'};
-  const said = String(now || '').trim().replace(/\.$/, '');
-  return {head:said ? said + '.' : 'Idle. Nothing is running.', tail:'Type a message below to give it work. If it hangs, start it again.'};
+// ORCH-2201 (owner, ORCH-2188 L a): no notice for a quiet session, only the pill ("Quiet 2 d", liveQuietWord). A helper
+// that looks stuck gets one slim line with Restart; a changed login says so in the same line.
+function liveEndIdleText(m) {
+  return m.login ? {head:'Its login changed', tail:'Restart to use the new login'} : {head:'Looks stuck', tail:''};
+}
+// The status pill's word for a session at its prompt: "Quiet 2 d", "Quiet 20 min", "Quiet" without a time.
+function liveQuietWord(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 60) return 'Quiet';
+  return 'Quiet ' + (s < 3600 ? Math.floor(s / 60) + ' min' : s < 86400 ? Math.floor(s / 3600) + ' h' : Math.floor(s / 86400) + ' d');
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {LIVE_END_KINDS, LIVE_END_IDLE_STOP, liveEndLogin, liveEndModel, liveEndWords, liveEndIdleText, liveFailText};
+  module.exports = {LIVE_END_KINDS, LIVE_END_IDLE_STOP, liveEndLogin, liveEndModel, liveEndWords, liveEndIdleText, liveQuietWord, liveFailText};
 } else {
   // --- the page ---
   // One menu at a time, wherever it is: 'pane:<id>', 'tile:<id>' or 'bar:<id>'; ask = the End question shows.
@@ -118,18 +126,16 @@ if (typeof module === 'object' && module.exports) {
       item('ask', 'power', 'End session', m.kind === 'terminal' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.', {'data-key':'live-end-end'}));
   }
   window.liveEndMenu = liveEndMenu;
-  // The idle note of a helper's pane: filled on every answer of the sessions API (pages/live-layer.js liveLayerFill).
-  window.liveEndIdleFill = function liveEndIdleFill(box, id, now) {
+  // The slim line of a helper that looks stuck (ORCH-2201): "Looks stuck · Restart". Quiet sessions have none.
+  window.liveEndIdleFill = function liveEndIdleFill(box, id) {
     const m = liveEndModel(liveEndSession(id));
-    box.hidden = !m.hung;
-    if (!m.hung) return;
-    const t = liveEndIdleText(m, now), sig = t.head + '\u0001' + t.tail;
+    box.hidden = !m.stuck;
+    if (!m.stuck) { delete box.dataset.sig; return; }
+    const t = liveEndIdleText(m), sig = t.head + '\u0001' + t.tail;
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig; box.textContent = '';
-    box.append(h('p', {}, h('strong', {}, t.head), ' ' + t.tail),
-      h('div', {className:'row live-end-row'},
-        h('button', {type:'button', className:'btn outline sm', 'data-live-end':'restart', 'data-id':id, 'data-key':'live-restart'}, 'Start again'),
-        h('button', {type:'button', className:'btn ghost sm', 'data-live-end':'ask', 'data-where':'pane:' + id, 'data-id':id, 'data-key':'live-idle-end'}, 'End session')));
+    box.append(h('span', {className:'live-stuck-t'}, h('strong', {}, t.head), t.tail ? ' · ' + t.tail : ''),
+      h('button', {type:'button', className:'btn ghost sm', 'data-live-end':'restart', 'data-id':id, 'data-key':'live-restart'}, 'Restart'));
   };
   async function liveEndRun(id, op) {
     liveEnd.busy = id; liveEndRepaint();
