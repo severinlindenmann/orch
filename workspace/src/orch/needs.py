@@ -7,7 +7,9 @@ after its checks passed, a helper idle at its prompt). An active add-on with `ne
 an add-on with a saved answer gets FAST_BUDGET from the start, one without gets PULL_TIMEOUT. A late add-on
 answers from its saved answer and one detached `orch needs --refresh-addon <name>` saves a fresh one for the
 next call; saved rows come back with stale = true when the pull failed or the saved answer is older than
-STALE_AFTER. So `orch needs` takes about as long as its core part, however many add-ons are on.
+STALE_AFTER. An add-on that was late is not waited for the next time (ORCH-2289): its saved answer is shown
+at once and the background refresh alone asks it, until one refresh gets its answer quickly again. So
+`orch needs` takes about as long as its core part, however many add-ons are on.
 The core names no add-on.
 """
 
@@ -376,6 +378,21 @@ def _pull(root: Path, name: str, m: dict) -> list[dict] | None:
     return p.rows
 
 
+def _late_mark(root: Path, name: str) -> Path:
+    """Left when this add-on answered later than FAST_BUDGET: the next needs does not wait for it again."""
+    return _cache_path(root, name).with_suffix(".late")
+
+
+def _set_late(root: Path, name: str, late: bool) -> None:
+    try:
+        if late:
+            _late_mark(root, name).touch()
+        else:
+            _late_mark(root, name).unlink(missing_ok=True)
+    except OSError:
+        pass  # only the speed: the add-on is waited for FAST_BUDGET again
+
+
 def _refresh_mark(root: Path, name: str) -> Path:
     return _cache_path(root, name).with_suffix(".refreshing")
 
@@ -419,7 +436,12 @@ def refresh(root: Path, name: str) -> bool:
         m = addons.active_manifests(root).get(name)
         if not m or not m.get("needs"):
             return False
+        began = time.monotonic()
         rows = _pull(root, name, m)
+        # asked in line again once it answers well inside the budget (half: there the core rows are made
+        # at the same time); no good answer: the next needs asks it itself and says what is wrong
+        if rows is None or time.monotonic() - began < FAST_BUDGET / 2:
+            _set_late(root, name, False)
         if rows is None:
             return False
         _write_cache(root, name, rows)
@@ -469,11 +491,17 @@ def _settle(root: Path, name: str, p: _Pull, deadline: float | None) -> list[dic
     if cached is None:
         return _unavailable(name)
     if late:
-        _spawn_refresh(root, name)
-        age = _cache_age(root, name)
-        stale = age is None or age > STALE_AFTER
-    else:
-        stale = True  # the add-on answered, but not with good rows
+        _set_late(root, name, True)
+        return _saved(root, name, cached)
+    return [{**r, "stale": True} for r in cached]  # the add-on answered, but not with good rows
+
+
+def _saved(root: Path, name: str, cached: list[dict]) -> list[dict]:
+    """A late add-on's saved rows (not up to date once older than STALE_AFTER); one background refresh
+    saves a fresh answer for the next call."""
+    _spawn_refresh(root, name)
+    age = _cache_age(root, name)
+    stale = age is None or age > STALE_AFTER
     return [{**r, "stale": stale} for r in cached]
 
 
@@ -497,23 +525,29 @@ def _option_labels(q: dict) -> list[str]:
 
 def needs(root: Path) -> list[dict]:
     start = time.monotonic()
-    pulls = {}
+    pulls: dict[str, _Pull | list[dict]] = {}
     for name, m in sorted(addons.active_manifests(root).items()):
         if m.get("needs"):
+            # late last time: its saved answer now, never a wait for (and a stop of) a child that comes late
+            saved = _read_cache(root, name) if _late_mark(root, name).is_file() else None
+            if saved is not None:
+                pulls[name] = _saved(root, name, saved)
+                continue
             pulls[name] = _Pull(root, name, m)
             pulls[name].start()  # side by side, while the core rows are made
     try:
         core = core_rows(root)
     except BaseException:
         for p in pulls.values():
-            p.stop()
+            if isinstance(p, _Pull):
+                p.stop()
         raise
     seen = {r["id"] for r in core}
     answered = {(r["ticket"], r["answer"]["question"]) for r in core if "answer" in r}
     rows = list(core)
     for name, p in pulls.items():
         budget = FAST_BUDGET if _cache_path(root, name).is_file() else PULL_TIMEOUT + 1
-        for r in _settle(root, name, p, start + budget):
+        for r in p if isinstance(p, list) else _settle(root, name, p, start + budget):
             ans = r.get("answer")
             same_q = isinstance(ans, dict) and (r["ticket"], ans.get("question")) in answered
             if r["id"] in seen or same_q:

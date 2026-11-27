@@ -315,6 +315,32 @@ def test_reuse_looks_at_the_files_once(proj, run, monkeypatch):
     assert len(looks) == 1  # one look for the whole pass, threads with a copy of the context too
     ticketindex.rows(proj)
     assert len(looks) == 2
+    looks.clear()
+    with ticketindex.reuse():
+        ticketindex.rows(proj)
+        with ticketindex.reuse():  # a pass inside a pass joins it (ORCH-2289)
+            ticketindex.rows(proj)
+        ticketindex.rows(proj)
+    assert len(looks) == 1
+
+
+def test_needs_and_the_lists_look_at_the_ticket_files_once(proj, run, monkeypatch):
+    """ORCH-2289: `orch needs` stat'ed every ticket file four times (rows, shown fields, results to review),
+    and an add-on's `ticket list --ext` read twice: at 10,000 tickets that was most of the time."""
+    from orch import reads
+
+    run("init")
+    tid = _new(run, "Invoice export")
+    run("ticket", "status", tid, "review", "--by", "agent:test")
+    looks = []
+    real = ticketindex._look
+    monkeypatch.setattr(ticketindex, "_look", lambda root: looks.append(1) or real(root))
+    assert run("needs")[0] == 0
+    assert len(looks) == 1
+    for argv in (["ticket", "list", "--all"], ["ticket", "list", "--all", "--ext", "x"], ["needs"]):
+        looks.clear()
+        reads.answer(proj, [*argv, "--json"])
+        assert len(looks) == 1, argv
 
 
 def test_hidden_ids_chats_picks_and_accepted_never_read_every_ticket(proj, run, monkeypatch):

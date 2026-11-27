@@ -174,6 +174,43 @@ def test_limits_name_every_passed_limit():
     assert mod.check(lim, fast, {"rows": short})[1] == ["An idle Home minute fetched 293 KB (limit 200 KB)"]
 
 
+def test_a_miss_is_measured_again_and_the_better_number_counts():
+    """ORCH-2289: one nightly ran on a runner twice as slow as the night before and every page missed its
+    limit. A second measurement decides: per row the better of the two; what failed both times still fails."""
+    mod = _limits_module()
+    first = {
+        "rows": [
+            {"page": "Home", "ms": 2600},
+            {"page": "Review", "ms": None, "err": "Timeout"},
+            {"page": "Search", "ms": 400},
+            {"page": "Focus", "ms": 2500},
+            {"page": "Idle Home 60 s", "ms": None, "enc": 300_000},
+        ]
+    }
+    second = {
+        "rows": [
+            {"page": "Home", "ms": 1200},
+            {"page": "Review", "ms": 1500},
+            {"page": "Search", "ms": None, "err": "Timeout"},  # loaded the first time: that one counts
+            {"page": "Focus", "ms": 2400},  # slow both times
+            {"page": "Idle Home 30 s", "ms": None, "enc": 20_000},
+        ]
+    }
+    again = {"ticket list": 0.6, "needs": 0.5}
+    cmds, dash = mod.better({"ticket list": 0.4, "needs": 1.7}, first, again, second)
+    assert cmds == {"ticket list": 0.4, "needs": 0.5}
+    assert [(r["page"], r.get("ms")) for r in dash["rows"]] == [
+        ("Home", 1200),
+        ("Review", 1500),
+        ("Search", 400),
+        ("Focus", 2400),
+        ("Idle Home 30 s", None),
+    ]
+    lim = json.loads((SEED.parent / "limits.json").read_text(encoding="utf-8"))
+    assert mod.check(lim, cmds, dash)[1] == ["Focus was usable after 2.4 s (limit 2.0 s)"]
+    assert mod.better({"needs": 1.0}, None, {"needs": 2.0}, None) == ({"needs": 1.0}, None)
+
+
 def test_against_develop_fails_only_on_more_than_30_percent_slower():
     """The merge queue's verdict (ORCH-1609, R8.3): never the absolute limit, only >30% (and above the noise
     floor) worse than develop; a page that fails on develop too never fails the group."""

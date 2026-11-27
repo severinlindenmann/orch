@@ -38,7 +38,10 @@ def reuse():
     """Inside (and in threads run with a copy of this context): the ticket files are looked at once per
     workspace and every later call answers from that look (ORCH-1621: a dashboard state build read the index
     and stat'ed every ticket file seven times). Only for one read-only pass: a change made inside is not
-    seen."""
+    seen. Inside another reuse() it joins that one: the outer pass keeps its single look."""
+    if _REUSE.get() is not None:
+        yield
+        return
     token = _REUSE.set({"lock": threading.Lock(), "files": {}})
     try:
         yield
