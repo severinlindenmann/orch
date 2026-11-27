@@ -1,4 +1,4 @@
-// Home at 1920 (ORCH-1717): a ticket the Reviewer left for the person shows on Home with the calm Check mark and one
+// Home at 1920 (ORCH-1717): a ticket the Reviewer left for the person shows on Home with the calm Review mark ("Review" since ORCH-2140) and one
 // short plain reason (never a red Stuck and never the Reviewer's file counts), and a Finished row keeps its title
 // next to its ticket number, left-aligned like the Helpers rows.
 module.exports = {
@@ -23,7 +23,7 @@ module.exports = {
     await row.waitFor();
     const said = await row.innerText();
     must(!/\bStuck\b/.test(said), 'a ticket the Reviewer left for you is marked Stuck: ' + said);
-    must(/\bCheck\b/.test(said), 'a ticket the Reviewer left for you has no Check mark: ' + said);
+    must(/\bReview\b/.test(said), 'a ticket the Reviewer left for you has no Review mark: ' + said);
     must(!/Reviewer|\d+ files|small is/.test(said), 'the row repeats the Reviewer\'s words or file counts: ' + said);
     must(/changes more than|look at it yourself|big change/i.test(said), 'the row gives no plain reason: ' + said);
 

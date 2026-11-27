@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from pathlib import PurePosixPath, PureWindowsPath
 
 from orch import hider, keystore, launchenv, term
 from orch import home as orch_home
@@ -285,8 +286,11 @@ RISKY_PROGRAMS = re.compile(
 )
 
 
-def _under(path: str, base: str) -> bool:
-    return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
+def _under(path: str, base: str, windows: bool | None = None) -> bool:
+    """path is base or lies below it. Windows paths compare without case and accept / and \\ alike."""
+    pure = PureWindowsPath if (os.name == "nt" if windows is None else windows) else PurePosixPath
+    p, b = pure(path), pure(base)
+    return p == b or b in p.parents
 
 
 XCODE_SELECT_LINK = (
@@ -817,7 +821,9 @@ def _pump(pipe, out, h, errors):
 
 def _kill_group(pid: int, grace: float = 2.0) -> None:
     """End every process of the child's own session: TERM, then KILL after a short grace. Nothing left holds a
-    key or a pipe."""
+    key or a pipe. POSIX only: Windows has no os.killpg or SIGKILL (the child gets no own session there)."""
+    if os.name == "nt":
+        return
     for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
         try:
             os.killpg(pid, sig)

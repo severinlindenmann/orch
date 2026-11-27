@@ -1329,7 +1329,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "publish-links",
    "icon": "upload",
-   "title": "Shared: private links",
+   "title": "Publish: private links",
    "one": "Share a file by link. For files, the server never sees what is in it.",
    "steps": [
     {
@@ -1477,7 +1477,7 @@ window.DOCS_SAMPLE = {
     {
      "who": "you",
      "text": "You turn the add-on on and download the browser once",
-     "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it."
+     "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it. The browser is a separate program (an .exe on Windows); a company computer that blocks new programs blocks this add-on, and the rest of orch works without it."
     },
     {
      "who": "you",
@@ -1648,7 +1648,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "factory",
    "icon": "hammer",
-   "title": "Projects",
+   "title": "Factory",
    "one": "A big idea becomes a planned run. You press Start; you judge each stage.",
    "steps": [
     {

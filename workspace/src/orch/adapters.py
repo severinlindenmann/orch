@@ -125,7 +125,7 @@ def chosen(root: Path) -> str:
     if name:
         load(name, root)
         return name
-    for row in detect():
+    for row in detect(versions=False):
         if row["found"]:
             return row["name"]
     raise Refused("No agent found; set one later: orch config set workspace.agent <name>")
@@ -870,8 +870,10 @@ def providers(names: list[str], root: Path | None = None) -> dict[str, str]:
     return out
 
 
-def detect() -> list[dict]:
-    """Built-in agents with a binary to look for: [{name, label, found, version}]."""
+def detect(versions: bool = True) -> list[dict]:
+    """Built-in agents with a binary to look for: [{name, label, found, version}]. versions=False: no
+    `<tool> --version` process (version None), for callers that only ask what is found (every private
+    write asked it: two agent processes per write)."""
     out = []
     for name, a in _registry().items():
         d = a.get("detect") or {}
@@ -884,7 +886,7 @@ def detect() -> list[dict]:
                 "name": name,
                 "label": a["label"],
                 "found": bool(path),
-                "version": _version(path) if path else None,
+                "version": _version(path) if path and versions else None,
             }
         )
     return out

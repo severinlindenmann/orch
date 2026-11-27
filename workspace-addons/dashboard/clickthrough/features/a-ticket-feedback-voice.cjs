@@ -24,8 +24,8 @@ async function newCheckTicket(page, open, act, title) {
   await open('#tickets');
   await page.getByText(title).first().click();
   await page.getByRole('button', { name: 'Change title' }).waitFor();
-  await page.getByLabel('More ticket actions').click();
-  await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Check', exact: true }).click());
+  await page.locator('summary[data-key^="ticket-actions-"]').click();
+  await act('ticket.patch', () => page.getByRole('menuitemradio', { name: 'Review', exact: true }).click());
   return decodeURIComponent(/#ticket\/([^/?&]+)/.exec(page.url())[1]);
 }
 async function record(page, scope) {

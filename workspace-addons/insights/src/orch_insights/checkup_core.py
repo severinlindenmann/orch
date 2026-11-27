@@ -25,6 +25,17 @@ import tempfile
 import time
 from pathlib import Path
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 PLAIN = "Health check"
 TITLE = "Workspace health check"
 SCHEMA = "orch.proposal/1"
@@ -59,7 +70,7 @@ class CheckupError(Exception):
 
 def orchcall(root: Path, *argv: str, timeout: float = 60):
     """Run `orch <argv> --json` ($ORCH_BIN, else `orch`); the parsed JSON, or None when it fails."""
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *argv, "--json"]
+    cmd = [*_orch_cmd(), *argv, "--json"]
     try:
         p = subprocess.run(
             cmd,

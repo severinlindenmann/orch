@@ -151,7 +151,7 @@ test('a lost answer is never sent again: the page looks for the run instead', as
   await p.ctx.ajStart(['browse']);
   assert.equal(p.posts.length, 1);
   assert.deepEqual(p.gets, ['/api/addon-job']);
-  assert.equal(p.ctx.aj.err, 'Could not reach orch.');
+  assert.equal(p.ctx.aj.err, 'orch did not answer. Try again in a moment.');
   await p.runTimers(5);
   assert.equal(p.posts.length, 1);
 });

@@ -28,6 +28,17 @@ from pathlib import Path
 from . import drivers, store
 from .store import Refused
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 WINDOW = 600  # seconds: failures counted in the last 10 minutes; healthy this long takes the question back
 LIMIT = 3  # failures in the window that make a service failing
 MANY = 5  # this many failures in the window: restarting again is not the answer, a person should look into it
@@ -351,7 +362,7 @@ def orch(root: Path, *args: str, write: bool = False):
     """`orch <args> --json` (`$ORCH_BIN`, else `orch`); the answer as JSON, Refused with the core's sentence."""
     import json
 
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"] + (["--by", BY] if write else [])
+    cmd = [*_orch_cmd(), *args, "--json"] + (["--by", BY] if write else [])
     try:
         cp = subprocess.run(
             cmd,

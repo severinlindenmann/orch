@@ -87,7 +87,7 @@ test('a refusal or a lost connection is the error line', async () => {
   assert.match(a.textContent, /changed after you saw it/);
   const b = UI.runCard(item(), {run: () => Promise.reject(new Error('x'))});
   b.byAct('run').click(); await tick();
-  assert.match(b.textContent, /Could not reach orch\./);
+  assert.match(b.textContent, /orch did not answer\. Try again in a moment\./);
 });
 
 test('a failed try from before shows at once with orch\'s own error words', () => {

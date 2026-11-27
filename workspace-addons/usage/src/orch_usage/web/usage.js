@@ -608,10 +608,11 @@
     }
     for (const w of m.warnings || []) if (w && !/switcher is not installed/.test(w)) parts.push(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w})));
     if (!m.accounts.length) {
-      parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
-        h('h2', {text: 'No account found yet'}), h('p', {text: 'Usage adds the subscriptions it finds on this computer and shows their use here.'})));
+      // D4 (26 Nov): the master's one empty page (.page-empty): what is missing, one sentence; Usage fills it itself
+      parts.push(h('section', {className: 'card page-empty state-empty'},
+        h('h2', {text: 'No account found yet'}), h('p', {text: 'Usage adds the helper subscriptions it finds and shows their use here. Nothing to do for you.'})));
     } else if (m.one_account && subs.length === 1) {
-      parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
+      parts.push(h('section', {className: 'card page-empty state-empty'},
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
     if (m.status) parts.unshift(statusLine(m.status));

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
+import shutil
 import struct
+import subprocess
 import zlib
 from pathlib import Path
 
@@ -404,6 +407,30 @@ def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
     brave = "/usr/bin/brave-browser"
     monkeypatch.setattr(cli_shot.shutil, "which", lambda n: brave if n == "brave-browser" else None)
     assert cli_shot.find_browser() == "/usr/bin/brave-browser"
+
+
+_FAKE_DOM = """
+const element = (hidden = false) => ({closest: q => q === '[hidden]' && hidden ? {} : null});
+const doc = (busy) => ({querySelectorAll: q => q === '[aria-busy="true"]' ? busy : []});
+const cases = {
+  idle: doc([]),
+  busy: doc([element()]),
+  hiddenPanel: doc([element(true)]),
+  hiddenPanelAndVisible: doc([element(true), element()]),
+};
+const out = {};
+for (const [name, document] of Object.entries(cases)) out[name] = eval(BUSY_JS);
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="no node here")
+def test_busy_check_skips_hidden_panels():
+    # ORCH-2038: a hidden panel's loading shape does not hold the picture; its checks start only when opened.
+    src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
+    want = {"idle": False, "busy": True, "hiddenPanel": False, "hiddenPanelAndVisible": True}
+    assert json.loads(out) == want
 
 
 @pytest.mark.skipif(not _has_browser(), reason="no Chrome or Chromium here")

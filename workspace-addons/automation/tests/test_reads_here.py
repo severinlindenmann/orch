@@ -96,3 +96,17 @@ def test_the_add_on_switch_and_chat_id_of_a_round_start_no_process(same_orch, tm
     assert orchcli._is_chat_ticket(ws, "t_abcdef") is False
     assert orchcli.READS["here"] == before + 2
     assert reads.answer(ws, ["chat", "id", "--json"]) == {"ticket": None, "paused": False}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a script with a #! line")
+def test_a_note_with_spaces_quotes_and_umlauts_reaches_orch_as_one_word(tmp_path, monkeypatch):
+    """R1.6: the command is an argument list, never a shell line, so the text arrives as it was written."""
+    folder = tmp_path / "Mein Ordner – Grüße 'x'"
+    folder.mkdir()
+    fake = folder / "orch"
+    fake.write_text(f"#!{sys.executable}\nimport json, sys\nprint(json.dumps({{'argv': sys.argv[1:]}}))\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(fake))
+    text = "He said \"hi\" & 'bye'; Grüße $HOME %PATH% `x` | y"
+    got = orchcli.call(folder, "log", "t_abcdef", text)
+    assert got == {"argv": ["log", "t_abcdef", text, "--json", "--by", "agent:automation"]}

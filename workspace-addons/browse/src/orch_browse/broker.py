@@ -48,6 +48,17 @@ from . import channel, localnets, netcheck, paths, takeover
 from .proxy import Filter
 from .snapshot import SNAPSHOT_JS
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 IDLE_SECONDS = int(os.environ.get("ORCH_BROWSE_IDLE_SECONDS") or 15 * 60)
 HEALTH_SECONDS = 3
 NETS_SECONDS = 15  # how often this computer's own networks are read again (Wi-Fi, cable, tethering)
@@ -400,7 +411,7 @@ class Broker:
             ):  # the browser goes on even when the note could not be written
                 subprocess.run(
                     [
-                        os.environ.get("ORCH_BIN") or "orch",
+                        *_orch_cmd(),
                         "log",
                         self.tid,
                         text,

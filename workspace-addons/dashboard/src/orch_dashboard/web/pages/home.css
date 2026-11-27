@@ -74,3 +74,5 @@
 .what-changed .home-note:hover{background:var(--surface-2)}
 .what-changed .home-note p{margin:2px 0 0}
 .what-changed .home-note .meta{flex:none;white-space:nowrap}
+/* ORCH-2140: the title links of the In progress / Not started rows are the row's tap target on a phone (44 px) */
+@media(max-width:720px){.home-card h3 a{display:inline-flex;align-items:center;min-height:44px}}

@@ -34,7 +34,7 @@ import re
 import time
 from pathlib import Path
 
-from orch import brake, config, ghlimit, ghmerge, refs, review, runs, stuck, tickets
+from orch import brake, config, ghlimit, ghmerge, mergequeue, refs, review, runs, stuck, tickets
 from orch.errors import Refused
 
 BY = "agent:merge-unblocker"
@@ -236,31 +236,6 @@ def _drop_lock(root: Path) -> None:
 # ---------------------------------------------------------------- what is linked
 
 
-def _queued(root: Path) -> set[str]:
-    """Pull requests an add-on's merge queue has waiting or running, read only: any add-on folder with a
-    `queue.json` of {"entries": [{"url", "state"}]} (core names no add-on, R1.2)."""
-    out: set[str] = set()
-    try:
-        files = sorted((root / ".orch" / "addons").glob("*/queue.json"))
-    except OSError:
-        return out
-    for p in files:
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        rows = data.get("entries") if isinstance(data, dict) else None
-        rows = rows if isinstance(rows, list) else []
-        out |= {
-            str(r["url"]).lower()
-            for r in rows
-            if isinstance(r, dict)
-            and isinstance(r.get("url"), str)
-            and r.get("state") in ("waiting", "running")
-        }
-    return out
-
-
 def linked(root: Path) -> list[dict]:
     """[{url, ticket id, key, merge_card}] for every open pull request reference of a ticket not Dropped."""
     out: list[dict] = []
@@ -347,10 +322,7 @@ def _pass(root: Path, role_id: str, role_key: str, dry: bool, now: float, gh) ->
     allowed, merging = bases(root), merge_on(root)
     st = read_state(root)
     pulls = st.get("pulls") if isinstance(st.get("pulls"), dict) else {}
-    queued = _queued(root)
-    from orch.cli import _queue_bases  # the bases `orch ref wait --merge` refuses too (ORCH-450)
-
-    queue_bases = set(_queue_bases(root))
+    queue = mergequeue.Queue(root)
     items = linked(root)[:MAX_PULLS]
     res: dict = {"off": False, "paused": False, "role": role_key, "merge": merging, "merged": [], "asked": [],
                  "limit": [], "reported": [], "held": [], "watching": 0, "errors": []}  # fmt: skip
@@ -375,7 +347,7 @@ def _pass(root: Path, role_id: str, role_key: str, dry: bool, now: float, gh) ->
         keep[url] = rec
         res["watching"] += 1
         green_secs = now - since
-        if green_secs < STUCK_MIN * 60 or item["merge_card"] or url.lower() in queued:
+        if green_secs < STUCK_MIN * 60 or item["merge_card"] or url.lower() in queue.waiting:
             continue
         mins = _mins(green_secs)
         where = f"{_num(url)} ({item['key']})"
@@ -403,12 +375,12 @@ def _pass(root: Path, role_id: str, role_key: str, dry: bool, now: float, gh) ->
                     told["limit"] = now
             res["limit"].append(where)
             continue
-        into_queue = str(v.get("baseRefName") or "") in queue_bases  # #1809: never past the merge queue
+        into_queue = str(v.get("baseRefName") or "") in queue.snapshot["bases"]
         if not merging or into_queue:
             if not told.get("reported"):
                 line = (
                     f"Checks of {url} passed {mins} minutes ago and nothing merged it. Put it in the merge "
-                    f"queue: orch pull-requests queue add {url} --ticket {item['key']}"
+                    f"queue: orch {' '.join(queue.add_args(url, item['key']))}"
                     if into_queue
                     else f"Checks of {url} passed {mins} minutes ago and nothing merged it. Merge it: "
                     f"orch ref wait {item['key']} --merge"

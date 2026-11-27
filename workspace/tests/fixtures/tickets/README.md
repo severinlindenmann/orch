@@ -2,7 +2,10 @@
 
 Each folder `<date>-<sha>/` holds the `.orch/` ticket files an OLDER orch version wrote with its own CLI.
 `workspace/tests/test_ticket_fixtures.py` runs the current code on every folder here (new folders are picked up
-automatically): list, show, edit, save, evidence write, and checks that no field is lost.
+automatically): list, show, edit, save, evidence write, and checks that no field is lost. The same test also
+derives old shapes from the newest folder (missing optional fields or core lists, unknown `ext.*`, CRLF, a byte
+order mark, an empty checklist, a huge history: all must work) and unsupported ones (no title or status, a core
+field of another type: refused with one sentence, the file left as it is).
 
 Contents of a folder: `.orch/tickets/*.json` (4 tickets: checklist with evidence of types command, note, url, pr,
 file; a question with options and an answer slot; a done-when part; waiting until a time and on an external
@@ -25,3 +28,10 @@ git worktree remove /path/to/old; rm -r "$H"          # delete exactly those pat
 The commands of `make_fixture.sh` may need small changes for another version (a flag renamed); edit the copy
 you run, not the fixtures already committed. Fixtures made: 2026-11-09 (99e09754), 2026-11-12 (74bf19ea),
 2026-11-14 (602bd79d).
+
+## Odd shapes (`../ticket_shapes/`)
+
+Flat hand-made, anonymized files modelled on shapes seen in real workspaces: only the required fields, an
+empty checklist, every evidence kind (plus an unknown one), `ext` of a removed add-on, unknown fields on the
+ticket, items and questions (R3.1). `test_odd_shapes_load_check_show_and_round_trip` also builds a ticket
+with a very long history from the minimal one. A new `t_*.json` there is picked up automatically.

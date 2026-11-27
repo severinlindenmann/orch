@@ -155,13 +155,13 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   const busy = wall.liveWallBands([{id:'t1', status:'working'}], ['t1'], '', null);
   assert.equal(wall.liveWallEmpty('need', 'x', busy), 'Nothing needs you outside Pinned.');
   // a ticket that needs you without a session joins the wall from the needs-you number and sits in the Needs you band
-  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Check'}, {id:'t3', title:'Has a session'}]);
+  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Review'}, {id:'t3', title:'Has a session'}]);
   assert.equal(joined.length, 3, 'a ticket with a session keeps its own entry');
   assert.equal(JSON.stringify(wall.liveWallBands(joined, ['s1'], '', null).need.map(s => s.id)), JSON.stringify(['t2', 't3']));  // the one that asks first
-  assert.equal(joined[2].word, 'Check');
+  assert.equal(joined[2].word, 'Review');
   // #1801: an idle session whose ticket the number counts (no needs flag from the server) moves to Needs you too
   const idle = {id:'t4', status:'idle', title:'In Review'};
-  const flagged = wall.liveWallWithNeeds([idle, {id:'t5', status:'idle'}], [{id:'t4', word:'Check'}]);
+  const flagged = wall.liveWallWithNeeds([idle, {id:'t5', status:'idle'}], [{id:'t4', word:'Review'}]);
   const fb = wall.liveWallBands(flagged, [], '', null);
   assert.deepEqual(fb.need.map(s => s.id), ['t4']);
   assert.deepEqual(fb.idle.map(s => s.id), ['t5']);

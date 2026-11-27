@@ -130,9 +130,12 @@ def secret_check(root: Path, row: dict, data: bytes) -> str | None:
     """None when a file may be served; "secret" when its text holds what the orch secret check flags, "unchecked"
     when it could not be read all the way through (it is then not served either). Plain text is checked over
     everything that would be sent; Office files and PDFs over every part of them."""
-    if row["kind"] in ("picture", "video", "audio", "archive"):
+    ext = extract.ext_of(row["name"])
+    if row["kind"] in ("video", "audio") or (row["kind"] == "archive" and ext != "zip"):
         return None
-    if row["kind"] in ("doc", "pdf") or extract.ext_of(row["name"]) == "xlsx":
+    if row["kind"] == "picture" and ext != "svg":  # a drawing is XML text and can hold a key
+        return None
+    if row["kind"] in ("doc", "pdf", "archive") or ext == "xlsx":
         text = extract.pdf_scan(data) if row["kind"] == "pdf" else extract.office_scan(data)
         if text is None:
             return "unchecked"

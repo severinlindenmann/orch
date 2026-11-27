@@ -59,7 +59,7 @@ test('a pick column, a header box that picks every shown row, and the bar only w
   assert.equal(head.attrs['data-mixed'], 'true', 'some picked: the header box is mixed');
   const bar = c.bulkBar(c.tickets());
   assert.equal(bar.opts.count, 2);
-  assert.deepEqual(nodes(bar).filter(n => n.attrs?.['data-field'] === 'status').map(n => n.children[0]), ['Backlog', 'To do', 'Working', 'Check', 'Done', "Won't do"]);
+  assert.deepEqual(nodes(bar).filter(n => n.attrs?.['data-field'] === 'status').map(n => n.children[0]), ['Backlog', 'To do', 'Working', 'Review', 'Done', "Won't do"]);
   assert.deepEqual(nodes(bar).filter(n => n.attrs?.['data-field'] === 'parent').map(n => n.attrs['data-value']), ['ep', ''], 'open epics, then Not in an epic');
   c.pickTicket('*', true);
   assert.equal(c.bulkBar(c.tickets()).opts.count, 4);

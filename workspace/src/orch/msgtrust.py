@@ -10,9 +10,12 @@ The receiver is the decisive gate. It never trusts the relay's own check:
   bytes with a key a person accepted, checks that the outer fields equal the signed ones, the `to`, freshness
   and
   the replay list, and for a group copy the author's own signature.
-- First contact is held: a valid signature from a key nobody accepted yet is kept inert in the guarded home
-  until a person presses Accept (`accept`). A wrong, missing or changed signature is never held: refused,
-  counted and shown as Not valid.
+- First contact is trusted (RP3 A, 25 Nov 2026): the relay delivers only between workspaces the admin paired,
+  so a valid signature from the key the relay lists for a workspace nobody accepted yet is accepted
+  on the spot (by `relay-pairing`) and the message goes through the same checks. A key that CHANGES later,
+  or a contact a person took back (`withdraw`), is still held inert in the guarded home until a person
+  presses Accept (`accept`). A wrong, missing or invalid signature is never held:
+  refused, counted and shown as Not valid.
 - Everything lives in the guarded orch home (keys/<workspace>/trust.json and held/), outside the workspace
   folder, so no helper, sync or relay can change who is accepted. Seen ids are kept 30 days.
 
@@ -565,11 +568,26 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
         try:
             s = _check(root, st, m, env, {frm: _accepted(st, frm)}, now_ms, me)
         except msgsig.SigError as e:
-            if e.code == "unknown_key":
-                why = _try_hint(root, st, m, env, frm, now_ms, me)
-                if why is not None:
-                    return Verdict("held", why, m, frm)
-            return _refuse(st, m, e.code)
+            if e.code != "unknown_key":
+                return _refuse(st, m, e.code)
+            why = _try_hint(root, st, m, env, frm, now_ms, me)
+            if why is None:
+                return _refuse(st, m, e.code)
+            if why != "not_accepted":
+                return Verdict("held", why, m, frm)  # a changed key or a withdrawn contact stays held
+            # First contact: the admin paired the two workspaces on the relay (the relay delivers only between
+            # paired ones), so the key it lists is trusted at once (RP3 A, 25 Nov 2026). The signature was
+            # just verified with that key; the same checks (to, freshness, replay) run on it below.
+            hint = _hint_key(root, frm)
+            c = _contact(st, frm)
+            c["keys"] = [
+                {"pub": hint.hex(), "accepted_at": _iso(now_ms), "by": "relay-pairing", "via": "pairing"}
+            ]
+            c["accepted_after_bad"] = int(c.get("not_valid", 0))
+            try:
+                s = _check(root, st, m, env, {frm: [hint]}, now_ms, me)
+            except msgsig.SigError as e2:  # pragma: no cover - verified a moment ago by _try_hint
+                return _refuse(st, m, e2.code)
         signed = msgsig.read_envelope(env).signed
         digest = hashlib.sha256(signed).hexdigest()
         out = _from_signed(m, s, me)
@@ -826,7 +844,7 @@ def _kept_fp(c: dict) -> str | None:
 def contacts(root: Path) -> list[dict]:
     """Every workspace and phone we know (directory + trust store): id, name, fingerprint (of the key the
     relay
-    lists, or of the accepted key), state, held count. For `orch relay contacts` and the Contacts page."""
+    lists, or of the accepted key), state, held count. For `orch relay contacts` and the Relay page."""
     from orch import relay
 
     st = _load(root)
@@ -888,5 +906,5 @@ def require_person_via(what: str, root: Path | None = None, by: str | None = Non
         or any(os.environ.get(k) for k in renew.RUN_MARKS)  # inside a helper run, a terminal is no proof
         or not _is_tty()
     ):
-        raise Refused(f"Only a person can do this ({what}), on the Contacts page or at a terminal.")
+        raise Refused(f"Only a person can do this ({what}), on the Relay page or at a terminal.")
     return False

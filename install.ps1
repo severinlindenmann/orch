@@ -5,6 +5,7 @@ if ($InstallKind -notin @("normal","dev","test")) { throw "InstallKind must be n
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
 # To leave: `orch uninstall` in a project (your tickets stay), then `uv tool uninstall orch-workspace`.
 # -InstallKind test|dev (given by the person running this installer) marks a test or dev install; default normal.
+# Plain Python via uv is the whole install. No installer .exe or app is downloaded or required by orch itself.
 # Works for a standard user: no admin rights, no git, no change to the execution policy.
 # Not "Stop": Windows PowerShell turns a native tool's stderr (uv's progress lines) into errors when the output is
 # redirected, which would abort the install. Every native call is checked by its exit code instead.
@@ -58,15 +59,20 @@ if (-not (Test-Path -LiteralPath $orchExe -PathType Leaf)) {
 }
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 & $orchExe update --after-install
-if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
-Write-Host "orch is installed."
+$restoreFailed = $LASTEXITCODE -ne 0
+if ($restoreFailed) {
+    # orch itself is in place; only putting the add-ons back stopped (orch's own reason is above, on stderr).
+    Write-Host "orch is installed, but putting your add-ons back did not finish (the reason is above)."
+} else {
+    Write-Host "orch is installed."
+}
 # Does plain `orch` in this window start the copy just installed? (Path order, an older orch, an alias ...)
 $found = Get-Command orch -ErrorAction SilentlyContinue | Select-Object -First 1
 $foundPath = if ($found -and $found.CommandType -in @("Application", "ExternalScript")) { [IO.Path]::GetFullPath($found.Path) }
 # Same folder and name; the extension is left out (orch.exe here, a plain orch file in the POSIX test stubs).
 if ($foundPath -and [IO.Path]::ChangeExtension($foundPath, $null) -ieq [IO.Path]::ChangeExtension($orchExe, $null)) {
     $run = "orch"
-    Write-Host "Open a new terminal, go to your project folder and run one of these:"
+    $go = "Open a new terminal, go to your project folder and run"
 } else {
     $what = if ($foundPath) { "starts another orch ($foundPath)" } elseif ($found) { "starts a PowerShell $("$($found.CommandType)".ToLower()) named orch" } else { "finds no orch" }
     $still = if ($found) { "keeps starting the other one" } else { "finds nothing" }
@@ -75,7 +81,14 @@ if ($foundPath -and [IO.Path]::ChangeExtension($foundPath, $null) -ieq [IO.Path]
     Write-Host "Typing just orch $still until your Path lists $(Split-Path $orchExe) before any other orch."
     # A single-quoted path keeps spaces, umlauts and `$ as typed; every kind of apostrophe in it is doubled.
     $run = "& '" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($orchExe) + "'"
-    Write-Host "Go to your project folder and run one of these:"
+    $go = "Go to your project folder and run"
 }
-Write-Host "  $run init                  local tickets: enough to start"
-Write-Host "  $run init --recommended    the same, plus the dashboard (optional; asks first)"
+if ($restoreFailed) {
+    # A returning person already has a project: the one next step is the update there, never a fresh init.
+    Write-Host "$go this to put your add-ons back:"
+    Write-Host "  $run update"
+} else {
+    Write-Host "$go one of these:"
+    Write-Host "  $run init                  local tickets: enough to start"
+    Write-Host "  $run init --recommended    the same, plus the dashboard (optional; asks first)"
+}

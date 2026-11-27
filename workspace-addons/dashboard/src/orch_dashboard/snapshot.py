@@ -20,9 +20,21 @@ def _inline_json(obj) -> str:
     return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
+def _env_bin() -> str | None:
+    """`$ORCH_BIN` as an orch_bin: this Python's own orch (SELF) where the launcher is not started (Windows)."""
+    env = os.environ.get("ORCH_BIN")
+    if not env:
+        return None
+    try:
+        from orch import procs
+    except ImportError:
+        return env
+    return procs.SELF if procs.orch_cmd(env) == procs.orch_python_argv() else env
+
+
 def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None = None) -> str:
     """Return the snapshot as one HTML string (css, js, logo and data inline)."""
-    orch_bin = orch_bin or os.environ.get("ORCH_BIN") or None
+    orch_bin = orch_bin or _env_bin()
     state = load_state(root, orch_bin=orch_bin, with_addons=with_addons)
     if with_addons:  # the user asked: add-on tabs go along, each with one pulled view
         puller = ViewPuller(root, orch_bin)

@@ -680,6 +680,7 @@ def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_
     assert actions._op_timeout("addon.set", {"on": False}) == 60
     assert actions._op_timeout("config.agent.test", {}) == 75
     assert actions._op_timeout("review.answer", {}) == 300  # ORCH-1415: Merge retries
+    assert actions._op_timeout("run.start", {}) == 180  # ORCH-2362: outlasts the copies lock wait (150 s)
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
@@ -843,7 +844,9 @@ def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):
 
     for with_addons in (False, True):
         html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(act_orch))
-        assert '"settings"' not in html.replace('"settings": null', "").replace('"settings":null', "")
+        # Inspect exported data, not words in the bundled JavaScript or its comments.
+        data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
+        assert data["settings"] is None
         assert str(ws) not in html and str(ws.parent) not in html
 
 

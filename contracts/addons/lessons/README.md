@@ -65,12 +65,19 @@ Unknown id → refused `No lesson <id>. See them: orch lessons list`.
   start (`AGENTS.orch.md`, the copy's `.orch-harness/AGENTS.orch.md`, the start text) carries it.
 
 ## Dashboard page (`orch lessons view --json`)
-One `list` block, title "Lessons", `count`, one row per lesson: `title` = the text, `subtitle` = "Added 15 Nov by Claude" plus
-" · from DM1-12" when it has a ticket (local date; the ticket key, else the id), `link` = the ticket id when present,
+The page heading comes from the manifest (`label` "Lessons", `subtitle` "What your helpers learned. Each new helper reads
+these when it starts."). `header.link` "← Installed add-ons" → `app:settings/addons` (the page has no nav entry, so this
+is the way back). One `list` block, title "Saved lessons" (not the page heading again), `count`, one row per lesson:
+`title` = the text, `subtitle` = "Added 15 Nov by Claude" plus " · from DM1-12" when it has a ticket (local date; the
+ticket key, else the id), `link` = the ticket id when present, `tickets` = that ticket (`id`, `key`, `title` without `<`
+or `>`) when its file reads, so the opened row links to it,
 `actions`: **Edit** = `{"op": "addon.prompt", "args": {"verb": "edit", "target": "<id>", "value": "<text>", "label": "Edit lesson"}}`,
 **Delete** (`tone` `bad`, no confirm: a routine step) = `{"op": "addon.act", "args": {"verb": "rm", "target": "<id>"}}`.
-`empty`: title "No lessons yet", text "Your helper adds a lesson when it learns something the next helper should know."
-Over the cap: `notice` "Helpers see only the newest lessons. Merge or delete some.", `notice_tone` `warn`.
+`empty`: title "No lessons yet", text "Your helper adds a lesson when it learns something the next helper should know.",
+`link` "Open tickets" to `app:tickets` (the one next step, R7.2).
+Over the cap: `notice` "The list is too long: helpers see only the newest lessons. Shorten or delete old ones.",
+`notice_tone` `warn`. Else, when files could not be read: `notice` "2 lesson files could not be read and are left out.
+Fix or delete them in the folder .orch/addons/lessons." (singular for one), `notice_tone` `warn`.
 
 ## Out of scope (later owner decisions)
 Sharing lessons through Sync or the relay; Factory proposing lessons; "not used for 60 days" (no use signal exists);

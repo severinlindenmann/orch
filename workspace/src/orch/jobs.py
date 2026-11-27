@@ -228,7 +228,9 @@ def validate_input(inp) -> dict:
         raise JobError("too_large")
     if any(k in inp for k in _NOT_ALLOWED_FIELDS) or inp.get("type") == "lost":
         raise JobError("not_allowed")
-    allowed = _FIELDS.get(inp.get("type"))
+    if not isinstance(inp.get("type"), str):
+        raise JobError("invalid")  # a list or object type is a plain refusal, not a TypeError (#564)
+    allowed = _FIELDS.get(inp["type"])
     if allowed is None or not set(inp) <= allowed | {"type", "job", "run"}:
         raise JobError("invalid")  # a field the contract does not name is never stored
     return inp

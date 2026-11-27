@@ -59,14 +59,22 @@ test('Lessons: no nav entry, row in Settings, list page, Edit dialog, Delete', {
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
     await page.goto(BASE + '/#settings/addons');
     await page.getByRole('link', {name: 'Lessons settings'}).waitFor();
-    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'no nav entry');
+    // D2 A (ORCH-2283): Lessons waits under the menu's More (closed here), so it shows only once More is opened
+    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'Lessons is not under the closed More');
     await page.screenshot({path: path.join(OUT, 'lessons-settings-addons.png')});
+    // D6 (ORCH-2315): the add-on's settings hold no "Open" row; the page is reached from the menu's More (D2 A)
     await page.getByRole('link', {name: 'Lessons settings'}).click();
-    await page.getByRole('link', {name: /^Open Lessons/}).click();
+    assert.equal(await page.getByRole('link', {name: /^Open Lessons/}).count(), 0, 'the add-on settings still have an Open row');
+    await page.locator('[data-key="nav-more"]').click();
+    await page.locator('#side-addons a').filter({hasText: 'Lessons'}).click();
     await page.getByText('Run the web tests with npm run test:web').first().waitFor();
-    assert.equal(await page.locator('#side-nav a, #side-addons a').filter({hasText: 'Lessons'}).count(), 0, 'still no nav entry');
+    // the page that is open always shows in the menu, marked, even under a closed More (D2 A)
+    assert.equal(await page.locator('#side-addons a[aria-current="page"]').filter({hasText: 'Lessons'}).count(), 1, 'the open Lessons page is not marked in the menu');
     await page.screenshot({path: path.join(OUT, 'lessons-page.png')});
-    await page.locator('.acc summary').first().click();   // a row opens with one click: Edit and Delete sit inside
+    // only the row with a source ticket opens (the ticket link sits inside); a plain row shows Edit and Delete (#863)
+    assert.equal(await page.locator('.acc summary').count(), 1, 'one row opens: the one with a ticket');
+    assert.equal(await page.locator('.row-acts').count(), 1, 'the plain row shows its buttons');
+    await page.locator('.acc summary').first().click();
     await page.screenshot({path: path.join(OUT, 'lessons-page-open.png')});
     await page.getByRole('button', {name: 'Edit'}).first().click();
     const dlg = page.locator('dialog[open]');

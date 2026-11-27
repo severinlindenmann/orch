@@ -8,6 +8,7 @@
 //   into an address change, so the keep place stays. New tab, download and modifier clicks stay the browser's,
 // - takes Back and Forward to the place on the page where the person was,
 // - says every page change once (window event 'orch:page', detail {from, to, kind}),
+// - moves the keyboard place to the new page's heading and says its title in a polite status line (arrive),
 // - falls back to a normal load once when a page cannot be drawn softly.
 // Off, the dashboard behaves exactly as before. Pure helpers take their inputs, so tests run them without a browser.
 const SoftNav = (() => {
@@ -70,10 +71,21 @@ const SoftNav = (() => {
     loc.reload();
     return true;
   }
+  // A new page takes the keyboard place and says its name once (#1350): the keyboard place moves to the page's heading (or <main>)
+  // and the polite status line #page-said gets the page title, so a screen reader follows the change. Not gated on on().
+  function arrive(main, words, doc = document) {
+    if (!main) return null;
+    const head = main.querySelector('h1') || main;
+    if (head !== main && !head.hasAttribute('tabindex')) head.setAttribute('tabindex', '-1');
+    try { head.focus({preventScroll:true}); } catch (_) { /* detached */ }
+    const live = doc.getElementById('page-said');
+    if (live) { live.textContent = ''; live.textContent = String(words || ''); }
+    return head;
+  }
   function said(from, to, kind, win = window) {
     try { win.dispatchEvent(new CustomEvent('orch:page', {detail:{from, to, kind}})); } catch (_) { /* old browser */ }
   }
-  return {on, keepEl, softHash, dialogsToClose, entryId, remember, hold, scrollAfterChange, fallBack, said, scrolls, KEEP_SCROLLS};
+  return {on, keepEl, softHash, dialogsToClose, entryId, remember, hold, scrollAfterChange, fallBack, arrive, said, scrolls, KEEP_SCROLLS};
 })();
 // The one mount place for content that survives a page change (the bar, the layer). It is empty until a later task
 // mounts something; in a shared copy nothing mounts.

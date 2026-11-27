@@ -222,6 +222,31 @@ def new_id(root: Path) -> str:
     raise Refused("Could not find a free lesson id. Try again.")
 
 
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _make_newest(d: Path, name: str) -> None:
+    """Give a new lesson file a later time than every other one. Lessons added within one tick of the file
+    system's clock (a few ms on Linux, more on synced folders) would tie, and the list order would be random."""
+    try:
+        others = [n for n in os.listdir(d) if n.endswith(".md") and n not in (name, EXTRA)]
+    except OSError:
+        return
+    newest = max((_mtime_ns(d / n) for n in others), default=0)
+    path = d / name
+    for step in (1_000, 2_000_000_000):  # 1 µs; 2 s for file systems that keep whole seconds only
+        if _mtime_ns(path) > newest:
+            return
+        try:
+            os.utime(path, ns=(newest + step, newest + step))
+        except OSError:
+            return
+
+
 def add(root: Path, text: str, by: str, ticket: str | None) -> tuple[dict, bool]:
     text = clean_text(text)
     for r in load(root)["lessons"]:
@@ -234,6 +259,7 @@ def add(root: Path, text: str, by: str, ticket: str | None) -> tuple[dict, bool]
     lid = new_id(root)
     row = {"id": lid, "text": text, "_meta": meta, "_keys": list(meta)}
     _atomic_write(d / f"{lid}.md", _render(row))
+    _make_newest(d, f"{lid}.md")
     sync_agents_text(root)
     return next(r for r in load(root)["lessons"] if r["id"] == lid), True
 

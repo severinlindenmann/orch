@@ -2,9 +2,11 @@
 """The light check set of a pull request into develop: one job, about 5 minutes (ORCH-556, ORCH-545).
 
 A pull request on its own runs only what its files can break: the words and style checks, ruff and the workspace
-tests that read the modules it changed, and the suite of every add-on it changed. The full suite (all add-ons,
-click-throughs, e2e smoke, CLI smoke, both Linux workspace parts) runs once per merge queue group on top of
-develop (`orch-queue/...` branches), so nothing reaches develop without it (docs/ci-checks.md).
+tests that read the modules it changed, and the suite of every add-on it changed. Next to it ci.yml runs the e2e
+smoke and the CLI smoke when their files changed (R3.4, ORCH-1118 q6). The full suite (all add-ons, click-throughs,
+page smoke, both Linux workspace parts, Windows for file, process or path code, relay, publish) runs once per
+merge queue group on top of develop (`orch-queue/...` branches), so nothing reaches develop without it
+(docs/ci-checks.md).
 
 On 18 Nov nearly every pull request ran the full set (any change under workspace/ turned on everything): 365 ci
 runs for 62 merges, and GitHub ran about two full runs at once, so pull requests waited up to two hours.
@@ -96,7 +98,6 @@ RULE_NODES = (
 # test that takes no fixture and walks the tree (rglob, os.walk or git ls-files) in its own body.
 TREE_WALK = re.compile(r"\.rglob\(|\bos\.walk\(|\bls-files\b")
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
-PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")  # ci.yml page-smoke runs then
 # An add-on's documentation (contracts/docs-pages.md): its docs.json, or an orch-addon.toml whose change is only the
 # docs = line. orch's own tests/test_docs.py checks every docs file, so such a change runs that file, not the add-on's
 # suite (owner 21 Nov, ORCH-735: one docs file in each of 11 add-ons ran every suite past light's 10 minutes).
@@ -387,8 +388,7 @@ def plan(
         steps.append({"name": f"add-on {name}", "cwd": f"workspace-addons/{name}", "cmd": cmd})
     clicks = sorted({m.group(1) for f in files if (m := CLICK.match(f))})
     # The Focus and Insights page smoke (e2e/focus_insights_smoke.cjs, with the whole Focus click-through: about
-    # 6 minutes) is not a step here: the pull request runs it as its own job, ci.yml page-smoke (ORCH-1333), since
-    # next to the core and dashboard steps it did not fit in this job's time limit.
+    # 6 minutes) is not a step here: it runs in the queue group (addons.yml page-smoke, ORCH-1118 q6).
     if clicks:  # the browser only when a click-through of this pull request needs it (about a minute)
         steps.append(
             {
@@ -475,6 +475,7 @@ def group_plan(
         {"name": "CI time limits", "cwd": ".", "cmd": "python3 scripts/check_ci_timeouts.py"},
         {"name": "headless launch", "cwd": ".", "cmd": "python3 scripts/check_headless_launch.py"},
         {"name": "Windows paths", "cwd": ".", "cmd": "python3 scripts/check_windows_paths.py"},
+        {"name": "contract vectors", "cwd": ".", "cmd": f"python3 scripts/check_contracts.py --base {q(base)}"},
         {
             "name": "brand wording and tokens",
             "cwd": ".",

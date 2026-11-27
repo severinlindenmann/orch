@@ -120,7 +120,7 @@ test('Home: the Helpers side card replaces Working now, with Remind on idle rows
     tickets:() => items, ticketOf:id => items.find(t => t.id === id), questions:() => [], shown:t => t, clean:v => v, name:() => '',
     href:id => '#ticket/' + id, snapshot:false, needsList:() => [], state:{runs, settings:{}}, starting:new Set(), sorted:v => v,
     heading:(...text) => h('h1', {}, text), now:() => new Date(), parse:() => null, capitalise:v => v, emptyRow:text => h('p', {}, text),
-    card:(key, title, count, body) => h('section', {'data-key':key}, title, count, body), chip:t => t, statusChip:() => null,
+    card:(key, title, count, body) => h('section', {'data-key':key}, title, count, body), chip:t => t, statusChip:() => null, titleTag:() => null,
     STATUS_CHOICES:helpers.STATUS_CHOICES});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/home.js'), 'utf8'), c);
   const text = JSON.stringify(c.home());

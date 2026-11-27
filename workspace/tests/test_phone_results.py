@@ -1299,6 +1299,12 @@ def test_r3_m4_words_ending_in_key_or_with_pw_stay(name):
     assert phone_view.redact(f"{name}=v4lu3") == f"{name}=v4lu3"
 
 
+def test_a_random_run_id_with_pw_inside_is_not_a_password_label():
+    # ORCH-1984: r_2wkgpw2e:1 made test_keystart flaky
+    assert not secretscan.find("r_2wkgpw2e:1")
+    assert not phone_view.secret_name("r_2wkgpw2e")
+
+
 def test_r3_l1_a_token_inside_the_cut_text_is_matched_whole_before_the_cut():
     tok = "dop_v1_" + "a" * 64
     # the token starts 30 characters before TEXT_CUT - CUT_MARGIN and ends well inside TEXT_CUT: when it was

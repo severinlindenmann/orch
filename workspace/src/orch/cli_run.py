@@ -29,6 +29,10 @@ from orch import (
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
+# No idle cleanup before these: a hook must stay quiet, and the reads answer what is saved. The cleanup looks
+# at every run and starts tickets waiting in line (seconds on a busy computer); the dashboard reads `run
+# history` per ticket through its three read workers, so a slow one held up every page (r-1127-0535-ws).
+NO_CLEANUP = ("event", "history", "session")
 SUBCOMMANDS = (
     "claim",
     "release",
@@ -114,10 +118,10 @@ def add_parsers(sub, common) -> None:
                 "--continue", dest="resume", action="store_true", help="the next run continues --session"
             )
         if name in ("claim", "session", "argv", "start"):
-            x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
+            x.add_argument("--agent", help="which AI tool (default: the one chosen for this folder)")
         if name == "claim":
-            x.add_argument("--session", help="the agent's session id, if known")
-            x.add_argument("--pid", type=int, help="process of the agent")
+            x.add_argument("--session", help="the helper's session id, if known")
+            x.add_argument("--pid", type=int, help="process of the helper")
             x.add_argument("--take-over", action="store_true")
             x.add_argument("--text", help="what to queue when the ticket is busy")
         if name == "release":
@@ -172,6 +176,9 @@ def add_parsers(sub, common) -> None:
             x.add_argument("--prompt-file", help="use this text as the prompt instead of the ticket summary")
     w = r.add_parser("_wrap", help=argparse.SUPPRESS)
     w.add_argument("rest", nargs=argparse.REMAINDER)
+    w = r.add_parser("_resume", parents=[common], help=argparse.SUPPRESS)  # runs_live.resume_soon
+    w.add_argument("ticket")
+    w.add_argument("question")
 
 
 def _out(args, data, text: str) -> None:
@@ -496,6 +503,15 @@ def dispatch(args, root: Path) -> bool:
     if sub == "_wrap":
         _wrap_cmd(root, args.rest)
         return True
+    if sub == "_resume":  # detached after a person's answer: start the agent that asked, if still due
+        tid = tickets.resolve(root, args.ticket)
+        q = next(
+            (x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == args.question), None
+        )
+        if q is None or q.get("answer") is None:
+            raise Refused("orch run _resume is internal.")
+        runs_live.resume_after_answer(root, tid, q, args.by or tickets.current_actor())
+        return True
     if sub is None:
         raise Refused(
             "Say what to do: orch run list, or "
@@ -532,7 +548,7 @@ def dispatch(args, root: Path) -> bool:
         text = "\n\n".join(f"{runs_live.ref(root, t)}:\n" + "\n".join(v["lines"]) for t, v in shots.items())
         _out(args, {"screens": shots}, text or "No live session among these tickets.")
         return True
-    if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
+    if sub not in NO_CLEANUP:  # everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):
             runs_live.cleanup(root)
     by = args.by or tickets.current_actor()

@@ -19,6 +19,17 @@ from pathlib import Path
 from . import prread as gh
 from . import prstate, store
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 SCHEMA = "orch.pull-requests-prs/1"
 FINAL = ("merged", "closed")
 REPOS_MAX = 10  # repositories read in one pass (one GitHub call each)
@@ -78,13 +89,16 @@ def load(root: Path) -> dict:
 
 
 def save(root: Path, data: dict) -> None:
-    """A new file next to it, then rename: a planted link at prs.json is replaced, never followed."""
+    """A new file next to it, then rename: a planted link at prs.json is replaced, never followed. The rename
+    waits out a reader holding prs.json open (Windows: the page reading it)."""
+    from orch import procs
+
     d = _safe_dir(root, create=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".prs-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, state_file(root))
+        procs.replace(tmp, state_file(root))
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -99,7 +113,7 @@ def orch(root: Path, *args: str, env: dict | None = None, timeout: int = 60):
     if "--" in head:
         cut = head.index("--")
         head, tail = head[:cut], head[cut:]
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *head, "--json", *tail]
+    cmd = [*_orch_cmd(), *head, "--json", *tail]
     try:
         p = subprocess.run(
             cmd,
