@@ -45,9 +45,11 @@ const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automat
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** `python -I -c AT_TERMINAL <orch words>`: orch with a terminal as its input, as a person types it. An unattended
- *  orch call (no terminal, no --by) is a helper (ORCH-2108); the person helpers below run this way. */
+ *  orch call (no terminal, no --by) is a helper (ORCH-2108); the person helpers below run this way. Enter is
+ *  already typed a few times, so a question orch asks at a terminal (init's name, a y/N) is skipped, never waited on. */
 const AT_TERMINAL = "import os, runpy, sys\ntry:\n    import pty\n    m, s = pty.openpty()\n    os.dup2(s, 0)\n    os.close(s)\n"
-  + "except (ImportError, OSError):\n    pass\nsys.argv = ['orch', *sys.argv[1:]]\nrunpy.run_module('orch', run_name='__main__', alter_sys=True)";
+  + "    os.write(m, b'\\n' * 16)\nexcept (ImportError, OSError):\n    pass\n"
+  + "sys.argv = ['orch', *sys.argv[1:]]\nrunpy.run_module('orch', run_name='__main__', alter_sys=True)";
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
  *  above count as shipped and "the newest orch" is read from here, never from the internet */
 const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1',

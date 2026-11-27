@@ -114,16 +114,29 @@ os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 def orch(*args: str, stdin: str | None = None) -> dict | str:
-    """One orch command in the demo workspace (this Python, isolated mode). Returns parsed --json output."""
-    r = subprocess.run(
-        [sys.executable, "-I", "-m", "orch", *args],
-        check=False,  # the return code is read below
-        cwd=WS,
-        input=stdin if stdin is not None else "",
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    """One orch command in the demo workspace (this Python, isolated mode), as the person: with a terminal as its
+    input (an unattended call is a helper, ORCH-2108), or with `stdin` as its input. Returns parsed --json output."""
+    term = None
+    if stdin is None:
+        try:
+            import pty
+
+            term = pty.openpty()
+        except (ImportError, OSError):  # no terminals here (Windows): plain empty input
+            stdin = ""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-I", "-m", "orch", *args],
+            check=False,  # the return code is read below
+            cwd=WS,
+            **({"stdin": term[1]} if term else {"input": stdin}),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    finally:
+        for fd in term or ():
+            os.close(fd)
     if r.returncode != 0:
         sys.exit(f"seed failed: orch {' '.join(args[:3])}: {r.stdout[-400:]} {r.stderr[-400:]}")
     try:
@@ -134,7 +147,7 @@ def orch(*args: str, stdin: str | None = None) -> dict | str:
 
 def seed() -> dict:
     """A small, realistic workspace: one ticket per state a person meets on the dashboard."""
-    orch("init")
+    orch("init", stdin="")  # no terminal: init asks nothing
     # The helper is a stand-in script, never a real agent tool: a click on Start runs it, it writes one log line
     # and ends. Nothing here may start a model, spend money or reach outside this computer.
     fake = D / "fake-agent.sh"

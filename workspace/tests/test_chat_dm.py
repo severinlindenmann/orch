@@ -821,8 +821,8 @@ def test_contact_carries_description_and_tags_cleaned(dm):
 
 
 def test_unattended_reads_with_the_dashboards_by(dm, monkeypatch, capsys):
-    """The dashboard's server has no terminal and passes the signed-in person as --by: contacts, a thread and a
-    sync read work with it, and stay refused without it (an unattended call is a helper, ORCH-2108)."""
+    """The dashboard's server has no terminal and passes the signed-in person as --by: contacts, a thread and
+    a sync read work with it, and stay refused without it (an unattended call is a helper, ORCH-2108)."""
     from orch import cli_chat
 
     monkeypatch.undo()  # the real actor default, not the fixture's stand-in
