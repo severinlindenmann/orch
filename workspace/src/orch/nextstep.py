@@ -352,6 +352,12 @@ def _addon_add(d, args) -> str:
     return "orch addon list"
 
 
+def _addon_check(data, args) -> str:
+    if isinstance(data, dict) and data.get("ok"):
+        return f"turn it on with: orch addon add {args.name}"
+    return f"fix what is listed, then run orch addon check {args.name} again"
+
+
 HINTS = {
     "init": _init,
     "update": _update,
@@ -364,6 +370,7 @@ HINTS = {
     "addon remove": "orch addon list",
     "addon uninstall": "orch addon list",
     "addon list": "turn one on with: orch addon add <name>",
+    "addon check": _addon_check,
     "manager start": "talk to it in Focus, or join it: orch manager status",
     "manager stop": "start it again any time: orch manager start",
     "manager status": "orch manager start",

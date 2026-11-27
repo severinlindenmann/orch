@@ -229,6 +229,17 @@ function peopleCan(p) {
   return 'May ' + (can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]) + '.';
 }
 const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-people-rights'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))));
+// The plain terminal's typing switch (ORCH-1684): a plain terminal is a shell with the owner's logins and keys, so its
+// switch sits in People, the owner's own tab, not on an add-on's page; the server refuses it from anyone else too.
+// Shown when an add-on with live sessions is on and the core has the setting.
+function terminalTypingCard(settings) {
+  const on = settings?.terminal_typing_on;
+  if (typeof on !== 'boolean' || !addons().some(a => a.active !== false && a.page?.live_session === true)) return null;
+  return h('div', {className:'stack', 'data-key':'settings-terminal-typing'}, h('h2', {className:'set-sub'}, 'Plain terminal'),
+    h('div', {className:'card'}, h('div', {className:'card-row name-row', 'data-key':'settings-terminal-typing-row'},
+      h('div', {className:'grow'}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it. Only the owner can change this.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'settings-terminal-typing-switch', disabled:snapshot || settingsBusy.has('terminal-typing')}, on ? 'On' : 'Off'))));
+}
 function peoplePanel(settings) {
   const list = settings.people_list || {state:'off', people:[]};
   const busy = settingsBusy.has('people');
@@ -859,8 +870,6 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
-    addon.page?.live_session === true && addon.active && typeof state.settings?.terminal_typing_on === 'boolean' ? row('Plain terminal', h('div', {}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.terminal_typing_on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'addon-detail-terminal-typing', disabled:snapshot || settingsBusy.has('terminal-typing')}, state.settings.terminal_typing_on ? 'On' : 'Off'), 'addon-detail-terminal-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row(label, settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on published pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -876,8 +885,9 @@ function addonDetailPage(addon) {
     h('div', {className:'card'}, settingsRows),
     where,
     snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
-    h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
-      settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
+    // the description is the Add-on row's text already: About shows only what is not said above (ORCH-1684)
+    connected && d.address ? h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
+      settingsText('p', {className:'meta'}, 'Connection address: ' + d.address)) : null));
 }
 function settingsPage() {
   const settings = state.settings;
@@ -938,7 +948,7 @@ function settingsPage() {
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
       moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
-    panel('people', peoplePanel(settings)),
+    panel('people', [...peoplePanel(settings), terminalTypingCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings)), prepareCard(settings)]),
