@@ -475,6 +475,7 @@ def group_plan(
         {"name": "CI time limits", "cwd": ".", "cmd": "python3 scripts/check_ci_timeouts.py"},
         {"name": "headless launch", "cwd": ".", "cmd": "python3 scripts/check_headless_launch.py"},
         {"name": "Windows paths", "cwd": ".", "cmd": "python3 scripts/check_windows_paths.py"},
+        {"name": "contract vectors", "cwd": ".", "cmd": f"python3 scripts/check_contracts.py --base {q(base)}"},
         {
             "name": "brand wording and tokens",
             "cwd": ".",

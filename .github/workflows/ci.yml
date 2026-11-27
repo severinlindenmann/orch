@@ -112,7 +112,7 @@ jobs:
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
             # orch at 10,000 tickets against develop (ORCH-1609): the CLI, the add-on pages it measures, its scripts
             perf: ['workspace/**', 'workspace-addons/**', 'install.sh', 'e2e/perf/**', '.github/workflows/perf.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/check_contracts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       - id: place
         env:
           HEAD_REF: ${{ github.head_ref }}
