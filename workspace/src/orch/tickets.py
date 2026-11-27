@@ -4488,26 +4488,6 @@ def _asks_for_secret(text: str) -> bool:
     )
 
 
-MIN_OPTIONS = 2
-
-
-def require_choice(
-    tid: str, by: str, options: list[str], recommended: str | None, kind: str | None = None
-) -> None:
-    """R2.4: every question a helper asks the person carries options and a recommended answer. A plain
-    question (no add-on kind) from anyone but a person is refused without at least two options and a
-    --recommend; the person can still answer in their own words. A person asking is not held to it."""
-    if _is_person(by) or kind not in (None, "plain"):
-        return
-    picks = [o for o in options if o.strip()]
-    if len(picks) >= MIN_OPTIONS and recommended is not None and recommended.strip():
-        return
-    raise Refused(
-        "A question needs at least two answers to pick from and the one you suggest: "
-        f'orch ask {tid} "<question>" --option <A> --option <B> --recommend <A>.'
-    )
-
-
 def ask(
     root: Path,
     tid: str,
@@ -4524,7 +4504,6 @@ def ask(
     links: list[dict] | None = None,
     add_workspace: str | None = None,
     because: str | None = None,
-    choice_needed: bool = False,
     if_wait: str | None = None,
     facts: list[str] | None = None,
     said: str | None = None,
@@ -4542,9 +4521,6 @@ def ask(
     refuses a reference that is not a person's words. No reference, no quote.
     if_wait / facts (ORCH-2182, the decision-first card): "If you wait:" (what happens while nobody
     answers) and up to FACTS_MAX "What matters" lines. One line each; an empty one is left out, never guessed.
-    choice_needed: `orch ask` sets it (R2.4): a helper's plain question needs options and a recommended
-    answer (require_choice). orch's own questions (allow, add to a chat, add-on kinds, cards) word their
-    answers themselves.
     because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
     suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
     when it has one.
@@ -4601,8 +4577,6 @@ def ask(
 
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
-    if choice_needed and not ideas:  # an ideas question has no --option: the person sorts each idea
-        require_choice(tid, by, options, recommended, kind)
     _guard_question(root, text, options, recommended, check)
     no_secret(
         root,

@@ -1968,7 +1968,6 @@ def run(args: argparse.Namespace) -> None:
                 args.action,
                 args.check,
                 because=args.because,
-                choice_needed=True,
                 if_wait=args.if_wait,
                 facts=args.fact,
                 said=args.said,

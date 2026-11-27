@@ -148,10 +148,10 @@ def test_a_state_report_is_not_a_question(proj, run, new_ticket):
 
 def test_a_question_without_a_suggested_answer_gets_the_next_step(proj, run, new_ticket):
     tid = new_ticket("Trip to Rome")
-    code, _, err = run(
+    code, out, _ = run(
         "ask", tid, "Which hotel?", "--option", "Near the station", "--option", "Old town", "--by", "agent:x"
     )
-    assert code != 0 and "--recommend" in err  # R2.4: refused, with the command that works
+    assert code == 0 and cardkinds.ASK_HINT in out  # a hint, not a refusal (owner pick, ORCH-2067)
     flight = ["Which flight?", "--option", "Morning", "--option", "Evening", "--recommend", "Morning"]
     code, out, _ = run("ask", tid, *flight, "--by", "agent:x")
     assert code == 0 and cardkinds.ASK_HINT not in out
