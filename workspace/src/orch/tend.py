@@ -53,6 +53,7 @@ from orch import (
     dispatcher,
     history,
     limitstop,
+    mergequeue,
     runs,
     runs_live,
     runwatch,
@@ -210,11 +211,11 @@ def _open_steps(t: dict) -> bool:
     return any(not c.get("done") and not c.get("wont_do") for c in t.get("checklist") or [])
 
 
-def _queued_pr(root: Path, waits: list[dict]) -> bool:
+def _queued_pr(queue: mergequeue.Queue, waits: list[dict]) -> bool:
     """The helper waits on a pull request in the merge queue: the queue writes its verdict on the ticket and
     wakes the helper, so it is left alone (no reminder, no fresh start) until the queue is done with it."""
     refs = [w.get("ref") for w in waits if w.get("kind") in ("external", "pr") and w.get("ref")]
-    return tickets.in_merge_queue(root, refs)
+    return any(str(url).lower() in queue.waiting for url in refs)
 
 
 def _waits(info: dict) -> list[dict]:
@@ -249,6 +250,7 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
     now = time.time() if now is None else now
     state = _read_state(root)
     table = runwatch._table()
+    queue = mergequeue.Queue(root)
     limit = runs_live.idle_seconds(root)  # the idle limit: the cache is gone after it
     crowded = runs_live._crowded(root)
     noted = limitstop.read(root).get("tickets") or {}
@@ -291,7 +293,7 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
         waits = _waits(info)
         if any(w.get("kind") == "command" for w in waits):
             continue  # a CI watcher, a test run or its own background helpers: it is waiting on purpose
-        if _queued_pr(root, waits):
+        if _queued_pr(queue, waits):
             continue  # it waits on a pull request in the merge queue: the queue's verdict wakes it
         if bgwork.talking(root, rec, now):
             continue  # ORCH-267: a person typed to it in its window lately: never ended, restarted or nudged
@@ -377,7 +379,7 @@ def _resumes(root: Path, now: float) -> list[dict]:
 
 def _wakes(root: Path) -> list[dict]:
     """Tickets waiting on another ticket that is finished now, or on a pull request that is merged or closed
-    now (the state the pull-requests add-on keeps on the ticket's link), with no run: start them again.
+    now (the state on the ticket's link), with no run: start them again.
     Nothing else is read: no helper looks before the thing changed (ORCH-815)."""
     out = []
     for t in tickets.list_all(root):

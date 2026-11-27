@@ -1113,6 +1113,57 @@ async fn phone_can_is_scoped_to_pairing_and_returned_by_patch() {
     assert_eq!(orch_relay::store::phone_can(&c, &b.0, &ws2.id), can);
 }
 
+fn vector(name: &str) -> serde_json::Value {
+    let p = format!("{}/../contracts/vectors/{name}", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+/// contracts/vectors/phone-can-v1.json replayed (R9.4): the relay's listing has every field of the paired-phone
+/// case and the very same `can`, never one of the refused shapes.
+#[tokio::test]
+async fn phone_can_vector_matches_the_listing() {
+    let vec = vector("phone-can-v1.json");
+    let cases = vec["workspaces"].as_array().unwrap();
+    let paired =
+        &cases.iter().find(|c| c["name"] == "paired-phone").unwrap()["response"]["items"][0];
+    let t = start().await;
+    let ws = t.add_ws("Pilatus").await;
+    let p = t.pair_phone(&[&ws]).await;
+    let (status, listing) = t.phone(&p, "GET", "/v1/phone/workspaces", None).await;
+    assert_eq!(status, 200, "{listing}");
+    let item = &listing["items"][0];
+    for k in paired.as_object().unwrap().keys() {
+        assert!(item.get(k).is_some(), "{k} missing in {item}");
+    }
+    assert!(listing.get("next").is_some(), "{listing}");
+    assert_eq!(item["can"], paired["can"]);
+    for c in cases.iter().filter(|c| c["ok"] == false) {
+        let bad = &c["response"]["items"][0];
+        assert_ne!(item["can"], bad["can"], "{}", c["name"]);
+    }
+}
+
+/// contracts/vectors/proposal-question-v1.json replayed (R9.4): every `valid` message is taken (201), every
+/// `invalid` one refused (422). Ids are made fresh per case; `from` is the test workspace.
+#[tokio::test]
+async fn proposal_question_vector_valid_taken_invalid_refused() {
+    let vec = vector("proposal-question-v1.json");
+    let t = start().await;
+    let a = t.add_ws("Pilatus").await;
+    let _p = t.pair_phone(&[&a]).await;
+    for (set, want) in [("valid", 201), ("invalid", 422)] {
+        for c in vec[set].as_array().unwrap() {
+            let m = &c["message"];
+            let own = m["id"].as_str().unwrap();
+            let text = serde_json::to_string(m).unwrap().replace(own, &mid());
+            let mut m: serde_json::Value = serde_json::from_str(&text).unwrap();
+            m["from"] = json!(a.id);
+            let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+            assert_eq!(s, want, "{set} {}: {v}", c["name"]);
+        }
+    }
+}
+
 #[tokio::test]
 async fn phone_send_is_refused_after_the_workspace_is_deleted() {
     let t = start().await;

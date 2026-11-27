@@ -196,7 +196,8 @@ def test_windows_stop_checks_record_before_taskkill(ws, monkeypatch, matches):
     monkeypatch.setattr(procs, "_run", run)
     assert service.stop(ws) == ("stopped" if matches else "not verified")
     if matches:
-        assert run.call_args.args[0] == ["taskkill", "/PID", "4242", "/T", "/F"]
+        # no /T (#2294): that would also end helpers the service started detached
+        assert run.call_args.args[0] == ["taskkill", "/PID", "4242", "/F"]
     else:
         run.assert_not_called()
 

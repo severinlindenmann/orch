@@ -20,7 +20,7 @@ def _load():
 
 light = _load()
 ADDONS = {"dashboard": 8, "sync": 8, "pull-requests": 2, "factory": 2}
-TEXT_CHECKS = ["banned words", "style rules", "CI time limits", "headless launch", "Windows paths"]
+TEXT_CHECKS = ["banned words", "style rules", "CI time limits", "headless launch", "Windows paths", "contract vectors"]
 
 
 def names(steps):
@@ -65,12 +65,13 @@ def test_the_text_checks_run_their_scripts_and_banned_words_reads_the_group_base
     steps = by_name(light.group_plan([], ADDONS, "abc123"))
     assert steps["banned words"]["cmd"] == "python3 scripts/check_banned_words.py --base abc123"
     for name, script in zip(
-        TEXT_CHECKS[1:],
+        TEXT_CHECKS[1:-1],
         ["check_style", "check_ci_timeouts", "check_headless_launch", "check_windows_paths"],
         strict=True,
     ):
         assert steps[name]["cmd"] == f"python3 scripts/{script}.py"
         assert (ROOT / "scripts" / f"{script}.py").is_file()
+    assert steps["contract vectors"]["cmd"] == "python3 scripts/check_contracts.py --base abc123"
 
 
 def test_the_labels_go_to_banned_words_like_rules_yml_passes_them():

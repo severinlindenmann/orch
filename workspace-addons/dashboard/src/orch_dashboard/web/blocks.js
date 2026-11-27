@@ -106,9 +106,10 @@ const OrchBlocks = (() => {
   }
   function cell(col, v) {
     const td = el('td');
-    if (v == null) { td.textContent = '—'; return td; }
+    // cell-none: no value; a compact row at phone width leaves it out instead of a lone dash
+    if (v == null) { td.className = 'cell-none'; td.textContent = '—'; return td; }
     if (col.type === 'number') { td.className = 'num'; td.textContent = String(v); }
-    else if (col.type === 'duration') { td.className = 'num'; td.textContent = duration(v) || '—'; }
+    else if (col.type === 'duration') { const d = duration(v); td.className = d ? 'num' : 'num cell-none'; td.textContent = d || '—'; }
     else if (col.type === 'date') { const d = parseDate(String(v)); td.textContent = d ? (/T/.test(String(v)) ? dayLabel(d) + ' ' + hm(d) : dayLabel(d)) : '—'; }
     else if (col.type === 'tone') { td.append(toneDot(String(v))); const w = toneTag(String(v)); if (w) td.append(' ', w); }
     else td.textContent = String(v);
@@ -163,7 +164,14 @@ const OrchBlocks = (() => {
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
     // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
+    // D4 (26 Nov): the master's one empty page (UI.pageEmpty): what is missing, one sentence, the first step right there.
     let d;
+    if (typeof window !== 'undefined' && window.UI && window.UI.pageEmpty) {
+      d = window.UI.pageEmpty({title: e.title, text: e.text}); d.classList.add('blk-empty');
+      const x = e.button && shownLink(e.button.to) ? ['button', 'btn primary sm'] : e.link && shownLink(e.link.to) ? ['link', 'btn ghost sm'] : null;
+      if (x) { const a = linked(x[1], e[x[0]].to, [e[x[0]].label]); a.className = x[1]; const step = el('div', 'page-empty-step'); step.append(a); d.append(step); }
+      return d;
+    }
     if (typeof window !== 'undefined' && window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
     else { d = el('div', 'empty blk-empty'); const mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true'); d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text)); }
     for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
@@ -222,7 +230,7 @@ const OrchBlocks = (() => {
       if (a.confirm) b.dataset.confirm = String(a.confirm);
       return actionAttrs(b, a.action, a.label) ? b : null;
     }).filter(Boolean);
-    const expandable = arr(it.detail).length || arr(it.tickets).length || buttons.length;
+    const expandable = arr(it.detail).length || arr(it.tickets).length;
     // A switch says what it turns on: the add-on's short words sit beside it (bug hunt 17 Nov: a bare On/Off).
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
@@ -230,7 +238,11 @@ const OrchBlocks = (() => {
     const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
-    if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
+    if (!expandable) {  // nothing to open: the buttons stay visible at the end of the row (#863)
+      const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row);
+      if (buttons.length) { const acts = el('div', 'row-acts'); acts.append(...buttons); li.append(acts); }
+      return finish();
+    }
     const d = el('details', 'acc grow'); d.dataset.key = key;
     const sum = el('summary', 'li-row'); sum.append(el('span', 'chev'), toneDot(it.tone), main);
     const panel = el('div', 'acc-panel');
@@ -246,7 +258,10 @@ const OrchBlocks = (() => {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
     const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
-    row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
+    if (it.subtitle) { const main = el('div', 'li-main'); main.append(t, el('small', 'li-sub', it.subtitle)); row.append(main); }   // a note under the name (publish rows)
+    else row.append(t);
+    for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
+    for (const c of arr(it.chips).slice(0, 1)) row.append(toneChip(c.tone, String(c.label)));   // e.g. "Ends tomorrow", marked
     const box = el('div', 'compact-actions');
     for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(...openFirst(b)); }
     row.append(box); li.append(row);
@@ -823,7 +838,8 @@ const OrchBlocks = (() => {
         const tab = (label, n, key) => {
           const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
           if (key != null) x.dataset.f = key;
-          x.append(String(label), el('sup', '', String(n)));
+          // the count is its own word for a screen reader ("Checks failed 1", not "Checks failed1")
+          x.append(String(label), el('sup', '', String(n))); x.setAttribute('aria-label', `${label} ${n}`);
           on(x, 'click', () => {
             const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
             now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
@@ -855,6 +871,9 @@ const OrchBlocks = (() => {
     opts = options || {};
     const root = document.createDocumentFragment();
     let stats = null, pair = null, settings = null;
+    // A view that is one empty list is an empty page: the empty page alone, never a box in a box naming the page twice (D4).
+    const only = arr(blocks).filter(b => b && Object.prototype.hasOwnProperty.call(draw, b.type));
+    if (only.length === 1 && only[0].type === 'list' && !arr(only[0].items).length && only[0].empty && !only[0].above) { root.append(emptyState(only[0].empty)); return root; }
     for (const b of arr(blocks)) {
       const f = b && Object.prototype.hasOwnProperty.call(draw, b.type) ? draw[b.type] : null;
       if (!f) continue;

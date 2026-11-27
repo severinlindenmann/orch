@@ -1114,6 +1114,25 @@ def _description_plan(ticket: dict) -> list[str]:
     return []
 
 
+_LAUNCHER: list[str | None] = []  # procs.launcher_problem(), looked at once per process
+
+
+def _launcher_plan() -> list[str]:
+    """Windows, where the orch launcher (orch.exe) is missing or blocked: every orch command of the prompt
+    goes through Python instead (ORCH-2138). Empty everywhere else."""
+    if os.name != "nt":
+        return []
+    if not _LAUNCHER:
+        _LAUNCHER.append(procs.launcher_problem())
+    if not _LAUNCHER[0]:
+        return []
+    cmd = procs.python_command_line()
+    return [
+        f"On this computer the orch command (orch.exe) does not start. Type every orch command as {cmd} "
+        f"instead of orch, for example {cmd} ticket show."
+    ]
+
+
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when"):
         return []
@@ -1168,7 +1187,9 @@ def _plan_first_plan(ticket: dict) -> list[str]:
         f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
         '--option "Change sub-tickets" --recommend "Start work", and stop. Start the steps only after '
         'the answer is "Start work". If the answer is "Change sub-tickets" (or asks for any change), '
-        f'ask one more question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, '
+        f'ask one more question: orch ask {tid} "{PLAN_CHANGE}" --option "<the change you would make>" '
+        '--option "<another change>" --recommend "<the change you would make>" (the person may also '
+        "answer in their own words), change the steps as told, "
         f'then ask "{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
@@ -1376,7 +1397,8 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path, agent: str | None 
             "FIRST tidy this new ticket, directly, do not ask anyone, so the person does not have to "
             "write it: " + tidy_cmd,
         )
-    out[1:1] = _prepare_plan(ticket, root)  # gather first, then the tidy-up fills the ticket (ORCH-740)
+    # gather first, then the tidy-up fills the ticket (ORCH-740)
+    out[1:1] = _launcher_plan() + _prepare_plan(ticket, root)
     out[1:1] = (
         _plan_first_plan(ticket)
         + _prepared_fresh_plan(ticket, root, agent)
@@ -1466,6 +1488,7 @@ def prepare_prompt(ticket: dict, items: list[dict], root: Path) -> str:
         out.append(f"Done when, as the person wrote it (keep it): {_clip(ticket['done_when'], 500)}")
     if items:
         out.append("New since the ticket was saved:\n" + _items_text(items))
+    out[1:1] = _launcher_plan()
     return "\n\n".join(out)[:12000]
 
 
@@ -1561,7 +1584,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
     if not parts and not prepared:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
     parts[:0] = _plan_first_plan(ticket) + prepared
-    parts.extend(_done_when_plan(ticket))
+    parts.extend(_done_when_plan(ticket) + _launcher_plan())
     return "\n\n".join(parts)[:12000]
 
 
@@ -1934,6 +1957,10 @@ def start(
         take_over=take_over,
         busy_text=None if _prepare else text,
         prepare=_prepare,
+        # until the wrapper is spawned this process holds the claim: when it is killed (the dashboard cuts
+        # a slow Start off; on Windows that gives no clean-up) the claim reads dead at once and the next
+        # Start replaces it, instead of looking alive for the whole lease (ORCH-2362)
+        pid=os.getpid(),
     )
     notes += copy_notes
     try:

@@ -30,7 +30,8 @@ env:
 jobs:
   # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit (Windows 20); the full
   # suite takes about 12 min on Ubuntu, 22-40 min on macOS and ~140 min on Windows (ORCH-32), so the slow systems
-  # get more parts (measured 18 Nov: Ubuntu parts 7-9 min, macOS parts 6-9 min).
+  # get more parts (measured 18 Nov: Ubuntu parts 7-9 min, macOS parts 6-9 min). Ubuntu has 3 parts since 25 Nov
+  # (ORCH-1118): with 2 its parts took 6.3-9.4 min and ended every merge queue group last.
   # Each part runs every N-th test by a hash of its name (workspace/tests/ci_parts.py, --part K/N). Windows is
   # split by measured time instead (--part-times, ORCH-1050): by hash, part 12 of 16 got most of the 60-110 s
   # bring-back tests and was killed at 15m0s with every test passed (releases 35 and 38) while part 1 took 3 min.
@@ -57,7 +58,7 @@ jobs:
           # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
           # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
           KNOWN_RED = set()
-          parts = {"ubuntu-latest": 2} if os.environ["LINUX"] == "true" else {}
+          parts = {"ubuntu-latest": 3} if os.environ["LINUX"] == "true" else {}
           # this Mac's own runner takes one job at a time: the macOS suite is ONE part there (-n 6, 45 min limit)
           # instead of 5 parts on GitHub's machines (ORCH-1125)
           mac_runs_on = json.loads(os.environ.get("MAC_RUNS_ON") or '"macos-latest"')

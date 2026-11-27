@@ -162,7 +162,7 @@ def test_a_focus_or_insights_skill_change_starts_no_browser():
     for name in ("focus", "insights"):
         f = f"workspace-addons/{name}/src/orch_{name}/skills/orch-{name}/SKILL.md"
         assert not any("browser" in n or "Chromium" in n for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
-    # A Focus or Insights page change runs its browser smoke as the ci.yml page-smoke job, not here (ORCH-1333).
+    # A Focus or Insights page change runs its browser smoke in the queue group (addons.yml page-smoke, ORCH-1118 q6).
 
 
 def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
@@ -275,9 +275,9 @@ def test_a_changed_click_through_runs_itself_in_a_browser():
     assert not any(n.startswith("dashboard: the") for n in names(light.plan([gone], TEXTS, ADDONS)))
 
 
-def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
-    """ORCH-1333 (owner 21 Nov): the page smoke runs the whole Focus click-through (about 6 minutes); next to the core
-    and dashboard steps it did not fit in the light job, so the pull request runs it as ci.yml page-smoke."""
+def test_a_focus_or_insights_change_loads_their_pages_in_the_queue_group_only():
+    """ORCH-1118 q6 (owner 24 Nov): the page smoke (the whole Focus click-through, about 6 minutes) left the ready pull
+    request; it runs in the queue group (addons.yml page-smoke), neither in the light job nor as a job of ci.yml."""
     for f in (
         "workspace-addons/focus/src/x.py",
         "workspace-addons/insights/web/a.js",
@@ -286,26 +286,29 @@ def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
         steps = names(light.plan([f], TEXTS, ADDONS))
         assert not any("pages load" in n for n in steps), f
         assert "headless Chromium for the page tests" not in steps, f  # no click-through changed: no browser
-        assert light.PAGE_SMOKE.match(f), f
-    cond = _job_if("page-smoke")
-    assert cond == "needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'"
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "run: node e2e/focus_insights_smoke.cjs" in ci and f"playwright@{light.PLAYWRIGHT}" in ci
-    req = ROOT / "workspace-addons" / "pull-requests" / "src" / "orch_pull_requests" / "required_checks.py"
-    rollup = re.search(r'^ROLLUP = "([^"]+)"', req.read_text(encoding="utf-8"), re.M).group(1)  # R4.1: name not here
-    assert "page-smoke" in ci[ci.index(f"\n  {rollup}:"):].split("needs:", 1)[1].split("]", 1)[0]  # roll-up counts it
-    # the path filter names the same places as PAGE_SMOKE, with the workflow's glob rules (* stops at /, ** does not)
-    line = next(x for x in ci.splitlines() if x.strip().startswith("pagesmoke: ["))
-    globs = [
-        re.compile("^" + re.escape(g).replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$")
-        for g in re.findall(r"'([^']+)'", line)
-    ]
-    for f in ("workspace-addons/focus/a.py", "workspace-addons/insights/web/b.js", "e2e/focus_insights_smoke.cjs",
-              "e2e/focus_insights/server.py", "e2e/focus_insights_extra/x.py", "e2e/other.cjs",
-              "workspace-addons/focusx/a.py"):  # fmt: skip
-        assert bool(light.PAGE_SMOKE.match(f)) == any(g.match(f) for g in globs), f
+    assert "\n  page-smoke:\n" not in ci and "focus_insights_smoke.cjs" not in ci
+    addons = (ROOT / ".github" / "workflows" / "addons.yml").read_text(encoding="utf-8")
+    assert "\n  page-smoke:\n" in addons and "node e2e/focus_insights_smoke.cjs" in addons
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     assert "headless Chromium for the page tests" not in names(steps)
+
+
+def test_a_ready_pull_request_runs_the_quick_set_and_keeps_the_r34_checks():
+    """ORCH-1118 q6 (owner 24 Nov): a light pull request runs the e2e smoke and the CLI smoke when it touches their
+    files (R3.4); the heavy jobs run in the queue group only."""
+    for job in ("cli-smoke", "e2e-smoke"):
+        assert "light != 'true'" not in _job_if(job), job
+        assert "github.event_name == 'pull_request'" in _job_if(job), job
+    for job in ("publish", "relay", "transcription"):
+        assert "needs.changes.outputs.light != 'true'" in _job_if(job), job
+    # file, process or path code: Windows in the queue group (and a pull request into main), not on the light one
+    ws = _job_if("workspace")
+    assert "(needs.changes.outputs.oscode == 'true' && needs.changes.outputs.light != 'true')" in ws
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    windows = re.search(r"^      windows: (.+)$", ci, re.MULTILINE).group(1)
+    assert "(needs.changes.outputs.oscode == 'true' && needs.changes.outputs.light != 'true')" in windows
+    assert "orch-queue/" not in windows
 
 
 def test_the_browser_version_is_the_page_jobs_one():

@@ -547,7 +547,9 @@ def test_a_part_with_no_task_is_decided_once(proj, run, new_ticket, facts, on, n
     assert len(_lines(proj, tid)) == before and no_starts == []
 
 
-def test_an_open_pull_request_in_the_queue_starts_no_helper(proj, run, new_ticket, facts, on, no_starts):
+def test_an_open_pull_request_in_the_queue_starts_no_helper(
+    proj, run, new_ticket, facts, on, no_starts, queue_on
+):
     """ORCH-815: the queue merges it or wakes the helper with its reason; sending it back only woke a helper
     that could do nothing but wait."""
     facts["facts"]["state"] = "OPEN"

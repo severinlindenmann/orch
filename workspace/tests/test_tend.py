@@ -198,7 +198,7 @@ def test_waiting_on_something_outside_is_quiet_neither_reminded_nor_restarted(
     assert starts == [] and runs.read(proj, tid) is not None and _history(proj, tid) == []
 
 
-def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, new_ticket, child):
+def test_waiting_on_a_pull_request_in_the_merge_queue_is_not_nudged(proj, run, new_ticket, child, queue_on):
     url = "https://github.com/o/r/pull/7"
     qfile = proj / ".orch" / "addons" / "pull-requests" / "queue.json"
 
@@ -236,10 +236,8 @@ PR_URL = "https://github.com/o/r/pull/9"
 
 
 @pytest.fixture
-def prs_on(monkeypatch):
-    from orch import addons
-
-    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+def prs_on(queue_on):
+    del queue_on["merge_queue"]  # a reference tracker need not provide a queue
 
 
 def _pr_state(proj, tid, status):
@@ -275,13 +273,15 @@ def test_a_closed_pull_request_wakes_its_waiting_ticket_too(proj, run, new_ticke
     assert [a["action"] for a in tend.run(proj)["actions"]] == ["wake"]
 
 
-def test_a_pull_request_wait_is_refused_when_nothing_would_wake_it(proj, run, new_ticket, monkeypatch):
+def test_a_pull_request_wait_is_refused_when_nothing_would_wake_it(
+    proj, run, new_ticket, monkeypatch, queue_manifest
+):
     from orch import addons
 
     tid = new_ticket()
     run("ref", "add", tid, PR_URL)
     code, _, err = run("wait", tid, "--on", f"pr:{PR_URL}")
-    assert code == 2 and "pull-requests add-on" in err  # off: nothing reads the pull request
+    assert code == 2 and "Wait for a time instead" in err and "pull-requests" not in err
     monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
     code, _, err = run("wait", tid, "--on", "pr:https://github.com/o/r/pull/10")
     assert code == 2 and "Link it first" in err  # not linked: the add-on never reads it

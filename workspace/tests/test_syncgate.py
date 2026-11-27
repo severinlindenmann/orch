@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 
 import pytest
 
@@ -835,6 +836,11 @@ def test_gate_lock_backs_off_when_a_break_keeps_failing(proj, monkeypatch):
     _lock_dir(proj, f"{dead.pid} 2020-01-01T00:00:00Z ab 1")
     monkeypatch.setattr(syncgate, "TAKEOVER_WAIT", 0.3)
     monkeypatch.setattr(syncgate, "_break", lambda lk, name: None)  # e.g. Windows: the owner file is open
+    now = [1000.0]  # a fake clock that only sleeping moves: a slow runner cannot use up the window
+    fake = types.SimpleNamespace(
+        monotonic=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s), time=time.time
+    )
+    monkeypatch.setattr(syncgate, "time", fake)
     tries = []
     real_try = syncgate._lock_try
     monkeypatch.setattr(syncgate, "_lock_try", lambda lk, token: tries.append(1) or real_try(lk, token))

@@ -243,7 +243,7 @@
       head.id = hid;
       w.append(head);
       if (v.state === 'loading') { w.append(el('p', 'meta', 'Loading the earlier sessions…')); return w; }
-      if (v.state === 'error') { w.append(el('p', 'meta', 'The earlier sessions could not be loaded.')); return w; }
+      if (v.state === 'error') { w.append(el('p', 'meta', 'The earlier sessions could not be loaded. Try again in a moment.')); return w; }
       const ul = attr(el('ul', 'live-hist-list'), {'aria-labelledby': hid});
       const rows = [];
       v.rows.forEach((r, i) => {

@@ -23,7 +23,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from orch import ghmerge, runs, runwatch
+from orch import ghmerge, mergequeue, runs, runwatch
 
 IDLE_MINUTES = 10
 PERMISSION_MINUTES = 2  # a permission prompt this long with nobody answering it: stuck
@@ -100,19 +100,18 @@ def helper_busy(root: Path, ticket: dict) -> bool:
     return _helper(root, ticket)[0] == "busy"
 
 
-def _left_open(root: Path, tickets_: list[dict]) -> list[tuple[dict, str, str]]:
+def _left_open(
+    root: Path, tickets_: list[dict], queue: mergequeue.Queue | None = None
+) -> list[tuple[dict, str, str]]:
     """(ticket, helper state, pull request) for every ticket in Review with an open pull request, no helper
     at work and none of its pull requests in the merge queue (ORCH-1741: the queue merges it or wakes the
     helper; the person has nothing to do meanwhile)."""
-    from orch import tickets as core
-
+    queue = queue or mergequeue.Queue(root)
     out = []
     for t in tickets_:
         if t.get("status") != "review" or t.get("general") is True:
             continue
-        pulls = [
-            u for u in open_pulls(t) if not core.in_merge_queue(root, [u])
-        ]  # a queued one is the queue's
+        pulls = [u for u in open_pulls(t) if u.lower() not in queue.waiting]
         if not pulls or _open_question(t):  # an open question is the ticket's one card (ORCH-1741)
             continue
         helper, _ = _helper(root, t)
@@ -168,11 +167,11 @@ def _ready(seen) -> bool:
     return isinstance(seen, dict) and seen.get("green") is True and seen.get("state") == "OPEN"
 
 
-def unmerged_ids(root: Path, tickets_: list[dict]) -> set[str]:
+def unmerged_ids(root: Path, tickets_: list[dict], queue: mergequeue.Queue | None = None) -> set[str]:
     """ORCH-1741: the tickets that have the "passed its checks but was not merged" row, from the last look
     only (GitHub is not asked). Their Check card gives way to that row: one card per ticket."""
     pulls = _read(root).get("pulls") or {}
-    return {t["id"] for t, _, url in _left_open(root, tickets_) if _ready(pulls.get(url))}
+    return {t["id"] for t, _, url in _left_open(root, tickets_, queue) if _ready(pulls.get(url))}
 
 
 def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:

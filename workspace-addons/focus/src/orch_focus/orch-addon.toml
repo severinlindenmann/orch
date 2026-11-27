@@ -13,6 +13,7 @@ needs = true                                # orch focus needs --json
 
 [dashboard]
 label = "Live"
+subtitle = "Watch your helpers work and step in when one needs you."
 icon = "target"
 order = 20
 

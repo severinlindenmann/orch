@@ -41,19 +41,11 @@ EVERYWHERE = {
 }
 ALLOW = {
     "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
-    "orch/cli.py": {
-        "dashboard": _MANIFEST,
-        "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
-        "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
-    },
+    "orch/cli.py": {"dashboard": _MANIFEST},
     "orch/selfcheck.py": {"dashboard": _MANIFEST},
     "orch/cli_leave.py": {
         "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
         "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)",
-    },
-    "orch/releasekeeper.py": {
-        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
-        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/whoami.py": {
@@ -66,9 +58,6 @@ ALLOW = {
     "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
-        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
-        "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
-        "of the name)",
     },
     "orch/pagesession.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"dashboard": _GONE, "insights": _GONE},

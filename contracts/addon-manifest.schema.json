@@ -109,6 +109,13 @@
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
     },
     "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
+    "merge_queue": {
+      "type": "object", "required": ["read", "add"], "additionalProperties": false,
+      "properties": {
+        "read": { "$ref": "#/properties/selfcheck/items/properties/args" },
+        "add": { "$ref": "#/properties/selfcheck/items/properties/args" }
+      }
+    },
     "before_start": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> before-start --json` (before-start.schema.json): the core asks it before every helper start which tool, model and account to use, or to wait." },
     "ticket_links": {
       "type": "array", "maxItems": 16,

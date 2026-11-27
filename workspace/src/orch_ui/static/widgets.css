@@ -360,7 +360,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .opt-text{font-size:12px;line-height:16px;color:var(--text-muted)}
 .opt-picked{display:none;position:absolute;right:8px;top:8px;align-items:center;gap:4px;padding:0 8px;border-radius:999px;background:var(--brand);color:var(--on-brand);font-size:12px;line-height:20px;font-weight:600}
 .swipe-opt[aria-pressed=true] .opt-picked{display:inline-flex}
-.swipe-card.nudge{animation:swipe-nudge .36s var(--ease-move)}
+.swipe-card.nudge{animation:swipe-nudge var(--dur-slow) var(--ease-move)}
 @keyframes swipe-nudge{20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(4px)}}
 @media (prefers-reduced-motion:reduce){.swipe-card.nudge{animation:none}}
 /* Overview of all cards in the deck: tiles, waiting first, tap to jump */
@@ -521,24 +521,24 @@ iframe.loading{opacity:0}
 .ic-wrap{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .ic-wrap>svg{display:block}
 .nav-item>.ic-wrap>svg{width:18px;height:18px}
-/* Link tile: a small square with a site or link-type monogram; the brand colours are data per link type. */
-.li{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font:700 12px/1 var(--font-ui);letter-spacing:-.02em;color:#fff;background:var(--surface-3)}
+/* Link tile: a small square with a site or link-type monogram; the brand colours are tokens (--link-*, brand/tokens.json). */
+.li{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font:700 12px/1 var(--font-ui);letter-spacing:-.02em;color:var(--link-ink);background:var(--surface-3)}
 .li.sm{width:16px;height:16px;border-radius:4px;font-size:8px}
 .li .ic-wrap{width:14px;height:14px;display:grid;place-items:center}.li.sm .ic-wrap{width:10px;height:10px}
 .li .ic-wrap svg{width:100%;height:100%}
-.h-github,.h-gitlab{background:#2b3137}.h-confluence{background:#1868db}.h-notion{background:#e8eaed;color:#111}.h-figma{background:#a259ff}
-.h-youtube{background:#e5302a}.h-gdocs,.h-gdrive{background:#2f7cf6}.h-jira{background:#2684ff}.h-linear{background:#5e6ad2}.h-gslides{background:#f4b400;color:#111}
-.h-slack{background:#4a154b}.h-miro{background:#ffd02f;color:#111}.h-gsheets{background:#1e8e3e}.h-loom{background:#625df5}.h-teams{background:#5b5fc7}
-.h-sharepoint{background:#038387}.h-trello{background:#0c66e4}.h-dropbox{background:#0061fe}
+.h-github,.h-gitlab{background:var(--link-github)}.h-confluence{background:var(--link-confluence)}.h-notion{background:var(--link-notion);color:var(--link-ink-dark)}.h-figma{background:var(--link-figma)}
+.h-youtube{background:var(--link-youtube)}.h-gdocs,.h-gdrive{background:var(--link-google)}.h-jira{background:var(--link-jira)}.h-linear{background:var(--link-linear)}.h-gslides{background:var(--link-gslides);color:var(--link-ink-dark)}
+.h-slack{background:var(--link-slack)}.h-miro{background:var(--link-miro);color:var(--link-ink-dark)}.h-gsheets{background:var(--link-gsheets)}.h-loom{background:var(--link-loom)}.h-teams{background:var(--link-teams)}
+.h-sharepoint{background:var(--link-sharepoint)}.h-trello{background:var(--link-trello)}.h-dropbox{background:var(--link-dropbox)}
 .h-link{background:var(--surface-3);color:var(--text-muted)}
-/* WCAG sRGB relative luminance, (Llighter + .05)/(Ldarker + .05):
+/* Phone-mode colours are tokens (--mm-dark-*, --mm-light-*); brand/tests/test_contrast.py checks:
    Dark banner #e8eaed on #164b43 = 8.21:1.
    Dark page #e8eaed / muted #9aa3ad on brightest stop #102925 = 12.76:1 / 6.02:1.
    Light banner #123b35 on #bce9dc = 9.30:1.
    Light page #123b35 / muted #365e56 on darkest stop #e3f5ef = 10.91:1 / 6.42:1.
    Opaque banner/button colours preserve these ratios on hover and in the awake warning. */
-body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:#164b43;--mm-ink:#e8eaed}
-:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:#e3f5ef;--mm-page-end:#f5fbf8;--mm-banner:#bce9dc;--mm-ink:#123b35}
+body.mobile-mode-on{--mm-page-start:var(--mm-dark-page-start);--mm-page-end:var(--bg);--mm-banner:var(--mm-dark-banner);--mm-ink:var(--mm-dark-ink)}
+:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:var(--mm-light-page-start);--mm-page-end:var(--mm-light-page-end);--mm-banner:var(--mm-light-banner);--mm-ink:var(--mm-light-ink)}
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
@@ -665,7 +665,14 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-table.data-table.compact td.cell-actions,.blk-table.data-table.compact td.cell-toggle{order:2}
 .blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle){display:inline;padding:0;color:var(--text-muted);font-size:12px}
 .blk-table.data-table.compact td[data-label]:not(:first-child):not(.cell-toggle):before{content:none}
-.blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle)+td:not(.cell-actions):not(.cell-toggle):before{content:"\00b7"!important;margin:0 var(--s2);color:var(--text-faint)}
+/* a cell with no value is left out; a long text cell gets its own line; a short first cell (a number) shares the name line;
+   the dot sits only between two short cells on one line, never at the start of a line */
+.blk-table.data-table.compact td.cell-none:not(:first-child):not(.cell-actions):not(.cell-toggle){display:none}
+.blk-table.data-table.compact td.cell-long{flex-basis:100%}
+.blk-table.data-table.compact tr td:first-child:has(+td.cell-main){flex-basis:auto;order:-2;margin-right:var(--s2);padding-bottom:0}
+.blk-table.data-table.compact tr td:first-child+td.cell-main:not(.cell-actions):not(.cell-toggle){flex:1 1 0;order:-2;font-size:inherit;color:var(--text);font-weight:500}
+.blk-table.data-table.compact tr:has(>td:first-child+td.cell-main)::before{content:"";flex-basis:100%;order:-1}
+.blk-table.data-table.compact td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none)~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none):not(.cell-long~td):before,.blk-table.data-table.compact td.cell-long~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none)~td:not(:first-child):not(.cell-actions):not(.cell-toggle):not(.cell-main):not(.cell-long):not(.cell-none):before{content:"\00b7"!important;margin:0 var(--s2);color:var(--text-faint)}
 .blk-table.data-table.compact td.cell-actions,.blk-table.data-table.compact td.cell-toggle{margin-top:var(--s2)}}
 
 /* Add-on page layout blocks (contract: addon-view.schema.json "Page layout"): headings with quiet text, two cards side by side,
@@ -1177,6 +1184,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
   .live-stat .pill{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .live-ph[data-compact]>.live-pt{min-width:0}
 }
+/* two panes on the right at 1280 (about 307 px each): state, key, title and three buttons need about 331 px, so More
+   slid under the next pane (queue group of the 27 Nov train, axe target-size). The key waits in the More heading. */
+@container live-pane (max-width:339px){.live-ph .key{display:none}}
 @container live-pane (max-width:639px){.live-term-tools .term-copy-w{display:none}}
 @container live-pane (max-width:479px){.live-term-tools .term-copy{display:none}}  /* a selection still copies with Ctrl+C or Cmd+C */
 .live-ph .key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
@@ -1506,7 +1516,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
-.wall-lines{display:grid;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
+.wall-lines{display:grid;grid-auto-rows:max-content;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;container-type:inline-size}
 .wall-line{display:flex;gap:var(--s2);align-items:center;min-height:var(--touch);padding:var(--s1) var(--s3)}
 .wall-line+.wall-line{border-top:1px solid var(--border)}
 .wall-line:hover{background:var(--surface-2)}
@@ -1519,6 +1529,9 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 .wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
+/* a list beside the open layer (about 260 px): the title takes the whole first line and the buttons go below it,
+   else the title is squeezed to one letter per line over Open ticket (axe target-size, ORCH-1883) */
+@container (max-width:320px){.wall-line{flex-wrap:wrap}.wall-lopen{flex:1 0 100%;flex-wrap:wrap}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
@@ -1661,6 +1674,33 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 /* a row's buttons as one group (.row-acts): on a phone they move under the words instead of squeezing them */
 .row-acts{display:flex;flex:none;align-items:center;gap:var(--s2)}
 @media(max-width:600px){.list-row:has(>.row-acts){flex-wrap:wrap}.list-row>.row-acts{width:100%;justify-content:flex-end}}
+/* List row with visible actions (issue 863): a block list item whose buttons (Edit, Delete) show without opening the row */
+.acc-li>.row-acts{align-self:center;padding:var(--s2) var(--s3)}
+@media(max-width:600px){.acc-li>.row-acts{width:100%;justify-content:flex-end;padding-top:0}}
+/* File card (issue 1025): one .file-tile per file in a .file-grid (thumbnail, name, kind · size · date); the whole card is
+   one .file-preview-link button. List mode: .files-collection[data-view-mode=list]. Loading: .file-tile.skeleton-tile. */
+.file-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s4);padding:var(--s1) 0 20px}
+.file-tile{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);overflow:hidden;transition:border-color var(--dur-fast) var(--ease-move)}
+.file-tile:hover{border-color:var(--border-strong)}
+.file-tile.skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
+.file-tile .file-preview-link{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.file-tile .file-preview-link:hover strong{text-decoration:underline}
+.file-tile .file-preview-link:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.file-thumb{position:relative;height:112px;overflow:hidden;background:var(--bg);display:grid;place-items:center}
+.file-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.file-thumb>pre{margin:0;padding:var(--s3) var(--s4);width:100%;height:100%;overflow:hidden;white-space:pre-wrap;font:12px/1.5 var(--font-mono);color:var(--text-muted)}
+.file-sym{display:grid;justify-items:center;gap:6px;color:var(--text-muted);font-size:12px}
+.tile-copy{display:flex;flex-direction:column;gap:2px;padding:var(--s3) var(--s3) var(--s2);min-width:0}
+.tile-copy strong{overflow-wrap:anywhere}
+.files-collection[data-view-mode=list] .file-grid{grid-template-columns:1fr;gap:0;padding:0 0 var(--s2)}
+.files-collection[data-view-mode=list] .file-tile{display:grid;grid-template-columns:minmax(200px,1fr) minmax(260px,1fr);align-items:center;gap:var(--s4);min-height:64px;border:0;border-bottom:1px solid var(--border);border-radius:0;background:none}
+.files-collection[data-view-mode=list] .file-preview-link{display:flex;align-items:center;gap:var(--s3)}
+.files-collection[data-view-mode=list] .file-thumb{flex:none;width:48px;height:36px;border-radius:6px}
+.files-collection[data-view-mode=list] .file-thumb>pre,.files-collection[data-view-mode=list] .file-thumb .ticket-preview,.files-collection[data-view-mode=list] .file-sym span{display:none}
+.files-collection[data-view-mode=list] .tile-copy{padding:var(--s2) 0}
+@media(min-width:1600px){.file-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.file-thumb{height:132px}}
+@media(max-width:760px){.file-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.files-collection[data-view-mode=list] .file-tile{grid-template-columns:1fr;gap:0}.files-collection[data-view-mode=list] .file-context{padding-left:60px}}
+@media(prefers-reduced-motion:reduce){.file-tile{transition:none}.file-tile.skeleton-tile{animation:none}}
 /* A choice card that fills its grid cell: a two-line .live-opt, pressed when in use (Usage "How work is spread", ORCH-657) */
 .live-opt.tall{align-items:flex-start;height:100%;padding:var(--s4)}
 .live-opt.tall .live-opt-t{gap:var(--s1)}
@@ -2309,6 +2349,16 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;padding:0;overflow:auto;overscroll-behavior:contain}
 .review-ticket-h{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s2) var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--surface)}
 .review-ticket-h h2{flex:1;min-width:0;margin:0;font-size:14px;line-height:20px;font-weight:600;color:var(--text-muted)}
+/* ORCH-2094: the card lines up with the heading and the tabs (the deck's keyboard-ring room sits outside the column),
+   a card has the same 24 px inside every edge (before: 32 above the question, 40 under the footer), and a rail with
+   nothing to show (one card, no Auto Reviewer, nothing the Reviewer did) leaves no empty column; the empty state sits in the card column, and the merge-queue line
+   above All cards keeps the list's inner edge */
+@media (min-width:721px){.review-main .swipe-desk{margin-inline:calc(-1 * var(--s3))}}/* a phone keeps the deck in its column: wider, it pushed the decision bar under the Live bar */
+.review-side>p.meta{padding:var(--s3) var(--s4) 0}
+.swipe-head>.swipe-lead:first-child{margin-top:0}
+.swipe-card>.swipe-foot:not(.empty):last-child{margin-bottom:0;padding-bottom:var(--s5)}
+.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty){display:none}
+.review-layout:not(.with-ticket)>.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty)+.review-main{grid-column:1/-1}
 .review-ticket-b{min-width:0;padding:var(--s4)}
 .review-ticket .ticket-page .ticket-layout,.review-ticket .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}
 .review-ticket .ticket-page .ticket-side,.review-ticket .ticket-page [aria-controls^="ticket-rail-"]{display:none}
@@ -2996,6 +3046,25 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .swipe-done.attn-end .attn-still{margin:0;color:var(--text)}
 .attn-end-acts{flex-wrap:wrap}
 
+/* One look per page state (ORCH dashboard decisions D4-D6, 26 Nov, owner picked A for each).
+   .page-empty  D4: a page with nothing in it yet: a short line naming what is missing, one sentence what will show up,
+                and the first step right there (the page's own input, or one green button) - or no step at all when
+                the helper fills the page. Left-aligned card at the top of the page, the same on every page.
+   .page-notice D5: when something is wrong: ONE notice right under the page name: what happened (bold), what still
+                works, and one green button (Start Factory, Try again). The page keeps its name and what it can show.
+   .settings-btn D6: an add-on's one Settings button (gear + "Settings", outline), first in the page top's buttons.
+                It opens that add-on's part of Settings. UI.pageEmpty, UI.pageNotice and UI.settingsButton build them. */
+.page-empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s2);padding:var(--card-padding)}
+.page-empty>h2{font-size:var(--fs-3);line-height:1.4;font-weight:600;color:var(--text);margin:0}
+.page-empty>p{margin:0;color:var(--text-muted);max-width:var(--reading-width)}
+.page-empty>.page-empty-step{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s3);width:100%;margin-top:var(--s2)}
+.page-empty>.page-empty-step>textarea,.page-empty>.page-empty-step>input{width:100%}
+.page-notice{align-items:center}
+.page-notice>.grow{flex:1 1 240px;margin:0}
+.page-notice strong{color:var(--text);font-weight:600}
+.page-notice>.btn{flex:none}
+.page-header+.page-notice,.page-heading+.page-notice{margin-top:var(--s4)}
+.settings-btn .ic{width:16px;height:16px}
 /* Pick several and change them at once (25 Nov, ORCH-2034; Tickets list). A checkbox per row (.pick-cell, .row-pick:
    32 px target), a picked row tinted (tr.is-picked), and the bar that stays at the foot of the screen while rows are
    picked (.bulk-bar, UI.bulkBar): "3 selected", the actions as menus that open upwards, Clear. aria-busy while saving. */

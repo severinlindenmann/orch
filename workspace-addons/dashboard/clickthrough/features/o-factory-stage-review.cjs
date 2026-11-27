@@ -1,5 +1,5 @@
 // Factory stage review (ORCH-419): an order whose build stage has two built tasks waiting for the person's Looks good.
-// - Factory home lists ONE review card for the stage under "Waits for you", with a picture of each built task
+// - Factory home lists ONE review card for the stage under "Needs you", with a picture of each built task
 //   (the pictures load through the dashboard: no "No picture") and the true merge state ("Merged", although one
 //   task also has a closed pull request that never merged).
 // - `orch factory needs` lists the same review for the command line.

@@ -8,6 +8,10 @@ import time
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from . import poll, service, settings, store
+from . import prread as gh
+
+# D5: the notice when GitHub is not set up or not signed in (no command, nothing about "this computer")
+NOT_CONNECTED = "Pull requests is not connected to GitHub yet. Ask your helper to connect GitHub once, then press Try again."
 
 REPOS_SHOWN = 8  # kept for older callers; the page shows one table of every open pull request
 MOST_ROWS = 100
@@ -130,16 +134,27 @@ def _runs(root) -> dict[str, str] | None:
     }
 
 
+def _failed_what(checks: dict) -> str:
+    """The failed checks as one sentence: 'lint failed.', '2 checks failed: lint and light.' (a bare 'lint, light
+    failed.' read like one name, report r-1127-0539-ws-3)."""
+    names = [_clean(n) for n in (checks.get("failed_names") or []) if _clean(n)]
+    if not names:
+        return "A check failed."
+    failed = checks.get("failed") if isinstance(checks.get("failed"), int) else 0
+    count = max(len(names), failed) if len(names) >= 5 else len(names)  # failed_names keeps at most 5
+    if count == 1:
+        return f"{names[0]} failed."
+    shown = " and ".join(names) if count == 2 else ", ".join(names[:2]) + f" and {count - 2} more"
+    return f"{count} checks failed: {shown}."
+
+
 def _pr_state(r: dict, repair: str = "", has_ticket: bool = True) -> tuple[int, str, str]:
     """(order, state, note) of an open pull request that is not in the merge queue."""
     status, merge, checks = r.get("status"), r.get("merge"), r.get("checks") or {}
     if status == "draft" or merge == "draft":
         return DRAFT, "Draft", "Not checked while it is a draft."
     if status == "checks failed":
-        names = ", ".join((checks.get("failed_names") or [])[:2])
-        what = (
-            f"{names} failed." if names else "A check failed."
-        )  # the check first: the State column says the rest
+        what = _failed_what(checks)  # the check first: the State column says the rest
         return NEEDS, "Checks failed", f"{what} {repair or 'Open the ticket to fix it.'}"
     if status == "conflict" or merge == "conflict":
         if not has_ticket:
@@ -313,7 +328,9 @@ def queue_blocks(root, data: dict, alive: bool, now: float, tz: tzinfo | None = 
         # 1. being checked
         if running:
             n_groups = len({str(r.get("group") or r.get("taken") or r["url"]) for r in running})
-            taken = max((_since(r.get("taken"), now) or 0 for r in running), default=0)
+            # the part of a split group that waits for its turn is not checked yet: its clock does not count
+            checked = [r for r in running if not r.get("split")] or running
+            taken = max((_since(r.get("taken"), now) or 0 for r in checked), default=0)
             mins = taken // 60
             check = {
                 "label": "Being checked",
@@ -374,7 +391,7 @@ def queue_blocks(root, data: dict, alive: bool, now: float, tz: tzinfo | None = 
         if recent:
             whole = sum(1 for g in recent if g["merged"] == g["size"])
             part = sum(1 for g in recent if 0 < g["merged"] < g["size"])
-            done["value"] = f"{whole + part} of {len(recent)} groups"
+            done["value"] = f"{whole + part} of {len(recent)} group" + ("" if len(recent) == 1 else "s")
             waits = [g["wait"] for g in recent if g["wait"]]
             bits = [f"{part} merged in part" if part else "", f"{len(recent) - whole - part} sent back"]
             if waits:
@@ -588,11 +605,13 @@ def build(
         blocks.append(
             {
                 "type": "list",
-                "title": "Pull requests",
+                "title": "Open pull requests",  # the loaded table's title, not the page's own again
+                "meta": "0 open",
                 "items": [],
                 "empty": {
                     "title": "No pull requests yet",
-                    "text": "Link a pull request to a ticket and it shows up here with its checks.",
+                    "text": "Add a pull request link to a ticket and it shows up here with its checks.",
+                    "button": {"label": "Open tickets", "to": "app:tickets"},
                 },
             }
         )
@@ -611,6 +630,13 @@ def build(
         view["notice_tone"] = "warn"
         view["button"] = {"label": "Start reading", "action": {"op": "addon.start"}}
     elif errors:
-        view["notice"] = errors[0]
-        view["notice_tone"] = "bad"
+        # D5 (26 Nov): the page's one notice says what happened and what to do, never a command to type or "this
+        # computer" (the dashboard is used from anywhere); the helper can connect GitHub, Try again reads it anew.
+        if errors[0] in (gh.NO_GH, gh.NOT_SIGNED_IN):
+            view["notice"] = NOT_CONNECTED
+            view["notice_tone"] = "warn"
+        else:
+            view["notice"] = errors[0]
+            view["notice_tone"] = "bad"
+        view["button"] = {"label": "Try again", "action": {"op": "addon.refresh"}}
     return view

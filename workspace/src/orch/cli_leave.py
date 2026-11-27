@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from orch import adapters, addons, harness, history, nextstep, reminder_settings, services, skills
+from orch import adapters, addons, harness, history, nextstep, procs, reminder_settings, services, skills
 from orch.errors import Refused
 
 TOOL = "orch-workspace"  # the uv tool the installers make (install.sh, install.ps1)
@@ -78,15 +78,36 @@ def _skill_linked(root: Path, where: str, name: str) -> bool:
     return (root / where / name / "SKILL.md").is_file()
 
 
-def install_checks(root: Path) -> list[dict]:
-    rows = [
-        _row(
+def _launcher_row() -> dict:
+    """orch on the PATH. On Windows also whether orch.exe starts: a company rule may block it, and orch then
+    still works through Python (ORCH-2138)."""
+    problem = procs.launcher_problem()
+    if problem is None:
+        found = bool(shutil.which("orch"))
+        return _row(
             "orch on the PATH",
-            bool(shutil.which("orch")),
-            "orch is on your PATH." if shutil.which("orch") else "orch is not on your PATH.",
+            found,
+            "orch is on your PATH." if found else "orch is not on your PATH.",
             "Open a new terminal window, or run the install line again.",
         )
-    ]
+    py = procs.python_command_line()
+    fact = (
+        "orch.exe is blocked on this computer (a company rule may block .exe files)."
+        if problem == "blocked"
+        else "orch.exe is not on your PATH."
+    )
+    return _row(
+        "orch on the PATH",
+        False,
+        f"{fact} orch still works through Python: the dashboard, add-ons and helpers do not need orch.exe.",
+        f"Type {py} instead of orch, for example: {py} doctor"
+        if problem == "blocked"
+        else f"Open a new terminal window or run the install line again; until then type {py} for orch.",
+    )
+
+
+def install_checks(root: Path) -> list[dict]:
+    rows = [_launcher_row()]
     if (root / ".git").exists():
         from orch import safegit
 
@@ -164,7 +185,7 @@ def _read_quiet(p: Path) -> str:
 
 def _json_quiet(p: Path):
     try:
-        return json.loads(_read_quiet(p))
+        return json.loads(_read_quiet(p).removeprefix("\ufeff"))  # a BOM from a Windows editor
     except ValueError:
         return None
 

@@ -19,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 HARNESS = Path(".orch") / "harness"
@@ -100,7 +101,7 @@ def write_text(path: Path, text: str, mode: int = 0o644, replace_link: bool = Fa
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        procs.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -345,20 +346,26 @@ def _general_lines_now(root: Path) -> list[str]:
             files = [d / f"{tid}.json" for tid in sorted({*hidden, *unknown})]
         except Exception:  # noqa: BLE001 - no index: every file, as before
             files = sorted(d.glob("t_*.json"))
+        tracked: set[str] | None = None
+        listed = (
+            False  # the tracked tickets are listed once, on the first hidden one (not a git run per file)
+        )
         for f in files:
             stem = f.stem
             if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
                 continue
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
+                data = json.loads(f.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 continue
             if not isinstance(data, dict) or data.get("id") != stem:
                 continue
             if not tickets.is_hidden(data):  # Chat, Manager, sessions without a ticket: this computer's own
                 continue
-            if _tracked(root, f".orch/tickets/{f.name}"):
-                continue  # already committed by the team: ignoring it would change nothing
+            if not listed:
+                tracked, listed = tracked_ticket_paths(root), True
+            if tracked is None or f".orch/tickets/{f.name}".casefold() in tracked:
+                continue  # already committed by the team (or git cannot say): ignoring it would change nothing
             out.append(f"tickets/{stem}.json")
     except OSError:
         return []
@@ -525,12 +532,30 @@ def _ignored(root: Path, rel: str) -> bool:
     raise Refused("git could not say whether private files are ignored here. Nothing was stored.")
 
 
+def _untracked_all(root: Path, rels: list[str]) -> bool:
+    """One git process for several paths: True only when the index definitely holds none of them (an empty
+    listing). False means "ask path by path" (something is tracked, or git failed)."""
+    rc, out, _ = _safegit().run_bytes(["ls-files", "-z", "--", *[f":(icase){r}" for r in rels]], root, 10)
+    return rc == 0 and not out.strip(b"\0")
+
+
+def _ignored_all(root: Path, rels: list[str]) -> bool:
+    """One git process for several paths: True only when git names every one of them as ignored. False means
+    "ask path by path" (at least one is not ignored, or git failed), so the answers and refusals stay the same."""
+    rels = list(dict.fromkeys(rels))
+    rc, out, _ = _safegit().run_bytes(["check-ignore", "--", *rels], root, 10)
+    return rc == 0 and len([ln for ln in out.splitlines() if ln.strip()]) == len(rels)
+
+
+PROBES = (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe")
+
+
 def _probes_ignored(root: Path) -> bool:
     """In a git repo: git itself says the secrets and run folders are ignored (a team .gitignore with a `!` line
     can undo our rules). True outside a git repo (nothing to leak into)."""
     if not _in_git_repo(root):
         return True
-    return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe"))
+    return _ignored_all(root, list(PROBES)) or all(_ignored(root, p) for p in PROBES)
 
 
 def git_visible(root: Path) -> list[str]:
@@ -562,9 +587,10 @@ def git_visible_warning(root: Path) -> str | None:
     )
 
 
-def check_private_path(root: Path, path: Path) -> None:
+def check_private_path(root: Path, path: Path, known: frozenset = frozenset()) -> None:
     """Right before a private write: the file stays under root/.orch with no link on the way, and in a git repo
-    git ignores this exact file and does not track it."""
+    git ignores this exact file and does not track it. `known`: what protect_local(also=this file) already heard
+    from git for this exact path in this write; those questions are not asked twice."""
     base = root / ".orch"
     # Not Path.relative_to alone: Windows paths compare without case, so ".ORCH/..." would pass. The project folder
     # compares as the OS does; the ".orch" part itself must be spelled exactly.
@@ -608,16 +634,19 @@ def check_private_path(root: Path, path: Path) -> None:
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
-    rc, _, _ = _safegit().run_bytes(  # .ORCH/... tracked is this file too (icase)
-        ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
-    )
+    if ("untracked", rel) in known:
+        rc = 1
+    else:
+        rc, _, _ = _safegit().run_bytes(  # .ORCH/... tracked is this file too (icase)
+            ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
+        )
     if rc not in (0, 1):
         raise Refused(
             _refusal_text(
                 root, "git could not say whether private files are tracked here. Nothing was stored."
             )
         )
-    if not _ignored(root, rel) or rc == 0:
+    if (("ignored", rel) not in known and not _ignored(root, rel)) or rc == 0:
         raise Refused(
             f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). "
             "Nothing was stored."
@@ -818,10 +847,15 @@ def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
     return not _tracked(root, rel)
 
 
-def protect_local(root: Path, lines: list[str] | None = None) -> None:
+def protect_local(
+    root: Path, lines: list[str] | None = None, also: str | None = None
+) -> frozenset[tuple[str, str | None]]:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
-    extra root-relative patterns for the exclude block (links, local instruction files)."""
+    extra root-relative patterns for the exclude block (links, local instruction files).
+    `also`: the root-relative path of a private file about to be written. It is asked in the same git processes
+    (one ls-files, one check-ignore instead of six processes per write, #1055 #1325); the answers git gave for it
+    come back as ("untracked", also) / ("ignored", also) for check_private_path. An empty set: ask again there."""
     if lines is None:  # a rewrite keeps every orch-owned exclude line (skill links, local instruction files)
         try:
             from orch import skills
@@ -829,6 +863,12 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
             lines = skills._exclude_lines(root)
         except (Refused, OSError, ValueError, KeyError):
             lines = None
+    known: set[tuple[str, str | None]] = set()
+    try:
+        if also and _in_git_repo(root) and _untracked_all(root, [".orch/.gitignore", also]):
+            known.add(("untracked", also))
+    except Refused:
+        pass  # each question below asks again and refuses as before
     ignore = [*ORCH_IGNORE, *_general_lines(root)]
     text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False
@@ -836,7 +876,7 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
         p = root / ".orch" / ".gitignore"
         if is_link(root / ".orch"):
             raise Refused("link")
-        if _tracked(root, ".orch/.gitignore"):
+        if ("untracked", also) not in known and _tracked(root, ".orch/.gitignore"):
             pass  # the team owns this one: leave it, rely on .git/info/exclude
         else:
             if not (p.is_file() and not is_link(p) and p.read_text(encoding="utf-8") == text):
@@ -850,13 +890,18 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
             ok = True
     except (Refused, OSError, UnicodeDecodeError):
         pass
-    if ok and not _probes_ignored(root):
+    if ok and also and _in_git_repo(root) and _ignored_all(root, [*PROBES, also]):
+        known.add(
+            ("ignored", also)
+        )  # the probes and the file in one process (after the rules above are written)
+    elif ok and not _probes_ignored(root):
         ok = False
     if not ok:
         raise Refused(
             "orch cannot keep its private files out of git here (.orch/.gitignore and .git/info/exclude "
             "could not be written, or a .gitignore of the project makes them visible again). Nothing was stored."
         )
+    return frozenset(known)
 
 
 # ------------------------------------------------------------------ links (or copies) to skill folders

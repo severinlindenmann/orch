@@ -94,7 +94,9 @@ def add_parsers(sub, common) -> None:
     cw.add_argument("--wait", type=int, default=0, metavar="MINUTES", help="wait until fewer than 20 wait")
     g.add_parser("develop-green", parents=[common], help="the last develop commit whose checks all passed")
     dp = g.add_parser("release-deployed", parents=[common], help="write down what production runs")
-    dp.add_argument("spec", metavar="SERVER=COMMIT", help="e.g. relay=58e00713 or relay,publish=<commit>")
+    dp.add_argument(
+        "spec", metavar="SERVER=COMMIT", help="e.g. <server>=58e00713, or two servers: <a>,<b>=<commit>"
+    )
     ex = g.add_parser(
         "release-exception", parents=[common], help="let one check be red in releases, named and dated"
     )

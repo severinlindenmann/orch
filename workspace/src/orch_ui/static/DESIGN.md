@@ -28,6 +28,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `widgets.css` (19 Nov, ORCH-834) | Switch list from the Skills page (draft A): `.switch-table` (on a `.data-table`: a switch or an "Always on" chip in the first cell, name with one quiet line, `td.nowrap` for short words, a row click opens the side panel; on a phone each row stacks), `.list-tools` (the segmented filter and the search above a list) and `.facts` (label and value pairs in a side panel). Gallery: Content, Switch list. |
 | `widgets.css` (20 Nov, ORCH-840) | `.sheet-actions`: Save and Cancel stay in view at the foot of a side panel (`dialog.sheet`) while its form scrolls (Skills page, Edit). Gallery: Content, Switch list. |
 | `widgets.css` (25 Nov, ORCH-2065) | Setting row (`.setting-row`): a switch only where flipping it saves the setting. When the change happens somewhere else (Chat), the row states today's behaviour from the record and its action is a secondary `btn outline sm` that names the destination ("Change in Chat"), never a switch that flips back. Gallery: Setting row. |
+| `widgets.css`, `widgets.js` (26 Nov, dashboard decisions D4-D6, owner picked A) | One look per page state, the same on every dashboard and add-on page: `UI.pageEmpty({title, text, step})` (`.page-empty`): a page with nothing in it yet says what is missing and in one sentence what shows up here, with the first step right there (the page's own input with its green button, or one green button); no step where the helper fills the page. `UI.pageNotice({what, still, action, tone})` (`.page-notice` on `.banner.attn`/`.error`): when something is wrong ONE notice right under the page name: what happened (bold), what still works, one green button (Start Factory, Try again); the page keeps its name and what it can still show; Home says the same sentence once; never a command to type, never "this computer". `UI.settingsButton({href})` (`.settings-btn`): an add-on's one Settings button (gear + Settings, outline), first among the page top's buttons; it opens that add-on's part of Settings (`#settings/addons/<name>`), whose "Back to <page>" returns to where the person came from. Gallery: One look per page state. |
 | `widgets.css` (23 Nov, ORCH-1739) | Add several at once (owner pick A): `.pick-list` / `.pick-row` (real checkboxes, `.pick-why` for one added because another needs it), `.consent-list`, the run's steps `.run-steps` / `.run-step.is-now\|is-done\|is-bad\|is-skip` with `.run-ic`, `.run-sub`, `.run-reason`, `.progress.indeterminate` (no honest percentage), `.elapsed`, `.done-list`, `.banner.slim`, `.dialog-head`, `.link-quiet`, and `dialog.dialog.sheet-phone` (a bottom sheet with sticky actions under 600 px). Built by the dashboard's `pages/addon-add.js`. Gallery: Add several at once. |
 | `widgets.css`, `widgets.js` (25 Nov, ORCH-2034) | Pick several and change them at once: a checkbox per row (`.pick-cell`, `.row-pick`, 32 px target; the header box picks every shown row, indeterminate when some are), the picked row `tr.is-picked`, and `UI.bulkBar({count, busy, actions, clear, label, key})`: the bar that stays at the foot of the screen while rows are picked ("3 selected", the actions as menus that open upwards, Clear; `busy` "Saving 2 of 5…" with a spinner, the actions wait; `data-toast-clear`). Built by the dashboard's `tickets.js` (Status, Priority, Epic). Gallery: Pick several. |
 | `qr.js` | QR code picture for a link (`OrchQR.svg(text)`, byte mode, ECC M, null when too long), used by Share my places (ORCH-1273). |
@@ -38,6 +39,8 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
+| `widgets.css` (#863, #1025, #1901) | List row with visible actions (`.row-acts` at the end of a `.list-row` or a block list `li.acc-li`; gallery `#list-row-actions`); file card `.file-grid` / `.file-tile` with list view and loading cards, moved here from the ticket page (gallery `#file-card`); a `.switch` keeps its 36 × 24 track in a tall row (gallery `#switch-row`). |
+| `tokens.css` (#908) | Link-tile brand colours `--link-*` and the phone-mode page colours `--mm-dark-*` / `--mm-light-*` come from `brand/tokens.json`; `widgets.css` uses only these variables, `brand/tests/test_contrast.py` checks the phone-mode text. |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
 | `demo.html` | Older question-card and proof demo. |
 
@@ -72,7 +75,7 @@ card with the before and after pictures.
 | B Hierarchy | B1 5-second test: what, why, what can I do · B2 exactly one filled button per view, counting the top bar; New ticket outlined · B3 at most 7 facts per card, 5 KPIs, no Details toggles · B4 long text at most 3 lines on level 1, prose at most 76ch · B5 no repeated sentence, counts match everywhere |
 | C Navigation | C1 active nav, crumb, title = nav label · C2 every view, tab and filter has a URL; Back keeps scroll · C3 no dead ends, every state has a next step |
 | D Actions | D1 verb labels that name the outcome, no OK or Submit · D2 costly action: cost and time above it, not filled, not autofocused, a cheaper choice beside it · D3 destructive: Danger style, set apart, Undo over confirm · D4 dialog footer `[tertiary] … [Cancel] [Primary]` · D5 a disabled control says why, next to it |
-| E States | E1 skeleton shaped like the result within 100 ms when a load may pass 1 s, no page spinner · E2 master empty state, one sentence, one button, only after loading · E3 error: what happened, what to do, one button, next to its source · E4 stale, partial or offline keeps the data, "Updated … ago" · E5 0 / 1 / many, plurals, a 200-character title, a long word · E6 missing permission or add-on: hidden, or disabled with the reason |
+| E States | E1 skeleton shaped like the result: its place is held at once, it shows after 300 ms (`.skeleton-page`, `.skeleton-late`), no page spinner, no bare "Loading…" text · E2 master empty state, one sentence, one button, only after loading · E3 error: what happened, what to do, one button, next to its source · E4 stale, partial or offline keeps the data, "Updated … ago" · E5 0 / 1 / many, plurals, a 200-character title, a long word · E6 missing permission or add-on: hidden, or disabled with the reason |
 | F Feedback | F1 response within 0.1 s · F2 1-10 s inline spinner with a label; over 10 s the step, elapsed time and Cancel · F3 toast 5 s, names the object, Undo; error toasts stay · F4 live updates `role=status`, never steal the scroll |
 | G Forms | G1 visible labels, `autocomplete` / `inputmode` · G2 a default chosen, choices before typing · G3 validate on continue, error next to the field plus a summary |
 | H Accessibility (WCAG 2.2 AA) | H1 text 4.5:1, large text 3:1 · H2 control borders and focus 3:1 · H3 everything by keyboard, visual order, no trap, Escape returns focus · H4 focus visible and never under a sticky bar · H5 targets at least 24x24 CSS px (touch 44x44) · H6 name, role and state; axe 0 serious · H7 one h1, ordered headings, landmarks, skip link, unique title · H8 colour never the only signal · H9 320 px and 200% text, no page sideways scroll · H10 reduced motion = no motion |
@@ -124,8 +127,14 @@ the first rows without any extra work.
 - SX-3 Spacing: 4-pt scale; 20 px card padding, 16 px row padding, 24 px between cards, 32 px between sections; the
   shell never shifts (F15) and the sidebar never scrolls at 800 px (F12).
 - SX-4 Page header (UX round 15 Nov): h1 + one muted line (no eyebrow; a date goes into that line), actions right,
-  flush to ONE right edge (`.page-heading` + `.page-heading-actions`); no in-page breadcrumb, no back link, no frame
-  header (Factory, Focus, Sync all break this). Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
+  flush to ONE right edge (`.page-heading` + `.page-heading-actions`); no in-page breadcrumb, no frame header.
+  One top for every page (owner D1 A, 26 Nov, ORCH-2282): `UI.pageTop({title, text, back, settings, actions})` draws it
+  for every page and add-on page; on the right Settings (outline) comes first, the page's one filled button last. A
+  page inside another page (a ticket, New ticket, an add-on's settings, a Factory order) has `← <parent>` above its
+  name (`.page-back`, `UI.pageBack`), the same on the computer and the phone. A switch or setting never sits in the top.
+- Side menu (owner D2 A, 26 Nov, ORCH-2283): Home, Tickets, Review, Chat, Contacts, then Add-ons in one list without
+  pins; `More (n)` / `Fewer` unfolds the rest in place (Lessons too), the page that is open always shows, and
+  `Change this list` (at the end of the unfolded list) shows one switch per add-on, `Done` closes it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
   every page (`.page`, 32 px top). Two widths only: full (default, no max-width) and `.form-width` (`--form-width`,
   1024 px) for a form page such as Settings; both left-aligned. The top bar holds one outlined `New ticket`; the page's
   own main action is the only filled button. Phone mode while on = an outlined chip after the breadcrumb (menu),
@@ -149,7 +158,8 @@ the first rows without any extra work.
   (amber only for "needs you", live colour for Working, green for Done, neutral for To do and Check).
 - SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon, one sentence "what will appear and
   when", one secondary button; never inside a card with a title, never with search/filters above it, never twice on a
-  page (Messages, Factory).
+  page (Messages, Factory). `UI.state({action:{label, href, target}})` draws that button as a link when the next step
+  is another page (gallery `#w-empty-link`); a filter or search that shows nothing offers Show all / Clear search.
 - SX-11 Error state: same shape as SX-10 with the red dot: cause in plain words, the next step, one button that does
   it; technical text behind "Details" (Publish, Can't reach the workspace, sync "secret" error fb9).
 - SX-12 Toasts and notices: toast = bottom right, 5 s, one visible, names the object, Undo where possible; error toast
@@ -161,12 +171,14 @@ the first rows without any extra work.
   the click target, the single action appears on hover/focus and always in the group header; no "…" per row.
 - SX-15 Card: 20 px padding, title 16/24, optional meta right (time only), one action in the footer row; cards hold
   previews or grouped content, never a single sentence (Autopilot off, Finished today, Insights empty).
-- SX-16 Skeletons: every route and every add-on frame shows a skeleton shaped like its final layout within 100 ms
-  (BP-61/62); never text + bars together; "No items" only after loading finished (BP-56).
+- SX-16 Skeletons: every route and every add-on frame holds a skeleton shaped like its final layout within 100 ms
+  (BP-61/62); it fades in only after 300 ms (`.skeleton-page`, `.skeleton-late` in motion.css), so a fast load never
+  flashes grey and a slow one never shows a blank or jumps; never text + bars together (a small region uses skeleton
+  lines with the words for screen readers only); "No items" only after loading finished (BP-56).
 - SX-17 Motion tokens: hover/press 100 ms, open/close 150 ms (QA-09), page change 200 ms, panels 240 ms, enter
   ease-out / exit ease-in (BP-70), reduced-motion = instant; used by: route change, tab switch, dialog, list
   insert/remove (Home answered card), status pill change (one pulse), skeleton → content cross-fade.
-- SX-18 Words: helper / step / result / ticket / schedule / phone / Check (status) / Test results (action) / Looks good
+- SX-18 Words: helper / step / result / ticket / schedule / phone / Review (status, ORCH-2140) / Test results (action, ORCH-2172) / Looks good
   · Send back; the person = chosen name (fb13); "agent", "artifact", "autopilot", "relay", "copy" (worktree), "Exact
   text", "Reference" are banned on level 1 (BP-78, F2, F3).
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
@@ -174,13 +186,13 @@ the first rows without any extra work.
 - Ticket header strip (14 Nov): `.strip` = one status pill (`UI.statusIcon`), the title, one sentence, one main action, then the tabs. No stepper. The helper is just "Helper"; the review state is always "Check" with "Looks good" / "Send back".
 - Working ticket (ORCH-70, owner 16 Nov): `.strip.strip-plain` without a box; `.strip-kicker` above the `t-title`
   (key · helper pill · helper · minutes); one Watch live; Stop and the copy commands in the ⋯ menu; no helper bar.
-- File cards (14 Nov): one `.file-tile` per file (thumbnail, name, kind · size · date). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
+- File cards (14 Nov, master since #1025): one `.file-tile` per file in a `.file-grid` (thumbnail, name, kind · size · date; gallery `#file-card`). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 
 ## Behaviour notes (owner feedback 14 Nov)
 
-- "You: <name>" (kit menu above Settings): pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
-- Sign-in state (ORCH-850): a `.chip` under "You: <name>": "Signed in" (filled), or an outline "View only" (with "A helper opened this page, so you can only look. To make changes, open orch yourself." when a helper started the dashboard). Read from `/api/session-state`, per browser.
+- Person block, look A (`.side-foot.person-row`, ORCH-1880): one row at the foot of the menu: the person (avatar, name, kit menu), then Phone, Settings and Documentation as icons with their words on hover. The menu: pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
+- Sign-in state (ORCH-850): a dot on the person's avatar (`.avatar>.dot`): green (`.dot.ok`) = "Signed in", grey = "View only" (with "A helper opened this page, so you can only look. To make changes, open orch yourself." when a helper started the dashboard). The words are the tooltip, the label and a screen-reader status. Read from `/api/session-state`, per browser.
 - "Send questions to my phone" is shown only when a relay is set up and a phone is paired. The Shared links tab only exists once sharing is set up (the add-on stays in Settings > Add-ons).
 
 ## Reference: the 13 Nov shared visual system
@@ -230,7 +242,7 @@ Computed sRGB contrast, before browser rendering: primary text on the lightest s
 
 ## Shell and navigation
 
-One inverted L: sidebar plus topbar, at most one contextual detail panel (BP-02). Sidebar is 232 px at 1280 and 1920. Below 1280 it becomes a 64 px icon rail. Icons have accessible names and focus labels; nothing is mouse-only. The workspace switcher and ticket views use native disclosures, including a popout on the rail. The phone switch has an accessible full label. On the rail the person switch keeps only its letter and opens its menu beside the rail; "Signed in" is not shown there and any other state is a dot with its words on hover, so the rail never scrolls sideways (ORCH-1636, checked by `ux_checks.cjs`). At short heights the nav can scroll; the page never needs a forced desktop minimum width.
+One inverted L: sidebar plus topbar, at most one contextual detail panel (BP-02). Sidebar is 232 px at 1280 and 1920. Below 1280 it becomes a 64 px icon rail. Icons have accessible names and focus labels; nothing is mouse-only. The workspace switcher and ticket views use native disclosures, including a popout on the rail. The phone switch has an accessible full label. The person block is one row (look A, ORCH-1880); on the rail it stacks: the person keeps only its letter with its sign-in dot and opens its menu beside the rail, then Phone, Settings and Documentation as icons, so the rail never scrolls sideways (ORCH-1636, checked by `ux_checks.cjs`). At short heights the nav can scroll; the page never needs a forced desktop minimum width.
 
 Core links: Home, Tickets, Review, Chat, Contacts (Notes live on Home). Below them the eyebrow "Add-ons": the add-ons the person pinned, then "Show more (n)" that unfolds the rest in place (ORCH-1184, owner picked draft A). Every add-on row has a pin button (`.nav-row` + `.nav-pin`, faint until the row is pointed at or focused, always shown on a phone, filled while pinned); nothing pinned yet = the first six. The open page stays in the menu even when it is not pinned. From 1280 px a button beside the orch name (`.side-toggle`) closes the menu to the 64 px icon rail (`.shell[data-side=rail]`) and opens it again; Show more on the closed rail opens the menu unfolded. Settings is anchored at the bottom. The default menu never scrolls at 1280x800; an unfolded Show more may. This preserves the full route map without eleven undifferentiated top-level destinations (BP-50). Ticket views are chips on the Tickets page (All, Needs me, Working, Done this week, + Save view), not a sidebar group (owner 14 Nov). In the application, the pins, Show more and the closed menu are kept in the browser (`orch.nav.pins`, `orch.nav.more`, `orch.nav.side`); these static pages deliberately do not store anything.
 
@@ -480,6 +492,8 @@ Production targets: local feedback <100 ms; warm route <300 ms; cold data route 
 **Conflict resolved:** the system brief explicitly requests a 150 ms page transition; BP-71 prohibits fading every route. The class and Replay example exist but are opt-in for first entry only. Routine navigation has no page fade. Skeleton-to-content and numbers never animate. A reorder in the real app should use FLIP on the moved item only (120 ms), not animate the entire list.
 
 One focal animation at a time, no input blocked by animation. `prefers-reduced-motion: reduce` disables every transition, pulse, shimmer and transform animation; all controls still change state. No ambient movement at idle. The motion page's separate Replay controls are independent experiments, not an instruction to run every animation together.
+
+Durations come from the `--dur-*` tokens (never above 240 ms for a one-shot; only endless loops such as spinners and shimmer use longer). `interaction.css` carries the one global `prefers-reduced-motion` rule that zeroes every animation and transition duration. Checks: `brand/tests/test_motion_lint.py` (static) and the reduced-motion step of `workspace/src/orch_ui/tests/ux_checks.cjs` (H10, in the browser).
 
 ## Accessibility and interaction contract
 

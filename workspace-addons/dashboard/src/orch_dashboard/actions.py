@@ -369,21 +369,21 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         raise BadRequest("Those files could not be read.")
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
-            raise BadRequest("That file could not be read.")
+            raise BadRequest("That file could not be read. Add it again.")
         if len(f["name"]) > 240 or any(c in f["name"] for c in "\x00\t\r\n"):
             raise BadRequest("That file name is not allowed.")
         if isinstance(f.get("text"), str) and f.get("data") is None:
             try:
                 raw = f["text"].encode("utf-8")
             except UnicodeEncodeError:
-                raise BadRequest("That file could not be read.") from None
+                raise BadRequest("That file could not be read. Add it again.") from None
         elif isinstance(f.get("data"), str) and f.get("text") is None:
             try:
                 raw = base64.b64decode(f["data"], validate=True)
             except ValueError:
-                raise BadRequest("That file could not be read.") from None
+                raise BadRequest("That file could not be read. Add it again.") from None
         else:
-            raise BadRequest("That file could not be read.")
+            raise BadRequest("That file could not be read. Add it again.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
             raise BadRequest(
@@ -1293,7 +1293,7 @@ def addon_review_target(
     if target is None:
         return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
-        raise BadRequest("This can't be confirmed right now. Nothing was changed.")
+        raise BadRequest("This can't be confirmed right now. Nothing was changed; try again in a moment.")
     return target, review
 
 
@@ -1317,7 +1317,7 @@ def _config_permissions(a):
         raise BadRequest("Pick Ask, Auto or Full.")
     if mode == "full" and a.get("confirm") is not True:
         raise BadRequest(
-            "Full needs a Yes first: the agent will never ask."
+            "Full needs a Yes first: the helper will never ask."
         )  # the page sends confirm only after its Yes/No dialog
     if a.get("confirm") not in (None, True, False):
         raise BadRequest("A yes/no value must be true or false.")
@@ -1454,7 +1454,9 @@ def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | 
     try:
         from orch import addonjob
     except ImportError:
-        raise Unavailable("Adding several add-ons at once needs a newer orch.") from None
+        raise Unavailable(
+            "Adding several add-ons at once needs a newer orch. Update orch, or add them one at a time."
+        ) from None
     env = human_env(root, orch_bin)
     forget_static()  # the add-on list changes while the job runs
     try:
@@ -1816,7 +1818,7 @@ def share_file(root: Path, orch_bin: str | None, args, session: bool = False) ->
     """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
     right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
     if not isinstance(args, dict) or set(args) - {"name", "data", "days"}:
-        raise BadRequest("That file could not be read.")
+        raise BadRequest("That file could not be read. Add it again.")
     name = args.get("name")
     if not isinstance(name, str) or not name.strip() or len(name) > 240 or "\x00" in name:
         raise BadRequest("That file name is not allowed.")
@@ -1829,9 +1831,9 @@ def share_file(root: Path, orch_bin: str | None, args, session: bool = False) ->
     try:
         raw = base64.b64decode(args.get("data") or "", validate=True)
     except (ValueError, TypeError):
-        raise BadRequest("That file could not be read.") from None
+        raise BadRequest("That file could not be read. Add it again.") from None
     if not raw:
-        raise BadRequest("That file is empty.")
+        raise BadRequest("That file is empty. Pick a file with something in it.")
     if len(raw) > SHARE_MAX:
         raise BadRequest("That file is over 3 MB. Share bigger files with `orch publish file` in a terminal.")
     if not orch_bin:
@@ -1890,6 +1892,10 @@ def _op_timeout(op, args) -> int:
         return 150
     if op == "checks.approve":  # the approved check runs once at once (checkfiles.TIMEOUT_MAX: 2 minutes)
         return 150
+    if op == "run.start":
+        # a slow computer: the copy step may wait for its lock (worktrees.LOCK_WAIT, 150 s); cutting the start
+        # off sooner kills it half way (ORCH-2362), so it must end by itself first
+        return 180
     return 75 if op == "config.agent.test" else 60
 
 
@@ -1956,6 +1962,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
         return login_input(root, orch_bin, op, args, session)
+    if op == "link.connect":  # the admin's whole text, pasted on the Publish page: on stdin only (RP2)
+        return publish_connect(root, orch_bin, args, session)
     if op in ("person.set", "person.add"):  # "You: <name>": a name only, kept here, nothing runs
         if not isinstance(args, dict):
             raise BadRequest("The arguments must be an object.")
@@ -2009,21 +2017,21 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     if op in ("link.extend", "link.stop") and not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
     if op in MOBILE_REQUIRED_ADDONS and not _addon_is_on(root, orch_bin, MOBILE_REQUIRED_ADDONS[op]):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
-        raise BadRequest("That add-on is not installed.")
+        raise BadRequest("That add-on is not installed. Add it in Settings > Add-ons first.")
     if op == "addon.uninstall":
         row = _addon_row(root, orch_bin, args["name"])
         if row is None or row.get("installed") is False:
-            raise BadRequest("That add-on is not installed.")
+            raise BadRequest("That add-on is not installed. Add it in Settings > Add-ons first.")
     if op == "addon.set" and args.get("on") is False:
         row = _addon_row(root, orch_bin, args["name"])
         if row is not None and row.get("installed") is False:
             raise BadRequest("That add-on is not added yet, so there is nothing to turn off.")
     if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
-        raise BadRequest("That agent is not set up.")
+        raise BadRequest("That helper is not set up. Set it up in Settings > Helper first.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
@@ -2032,7 +2040,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         # phase 1: what the person will confirm; nothing runs (with any orch, a test fake too)
         target, review = addon_review_target(root, orch_bin, argv, args["addon"])
         if review is None:
-            raise BadRequest("This can't be confirmed right now. Nothing was changed.")
+            raise BadRequest("This can't be confirmed right now. Nothing was changed; try again in a moment.")
         return 200, "", {"target": target, "review": review}
     if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
         # phase 2: the click must still match what the page showed
@@ -2062,6 +2070,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
             forget_static()
             return 504, "Still adding it. Check again in a minute.", None
+        if op == "run.start":
+            return 504, "Starting is slow on this computer. Wait a minute, then press Start again.", None
         return 504, "That took too long. Please try again.", None
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
@@ -2156,7 +2166,7 @@ def addon_read(root: Path, orch_bin: str | None, addon, verb) -> tuple[int, str,
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     if not _addon_is_on(root, orch_bin, addon):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     args = {"addon": addon, "verb": verb, "target": addon}
     try:
         r = _run(
@@ -2333,6 +2343,57 @@ def login_input(
         out = None
     if r.returncode == 0:
         return 200, "", out if isinstance(out, dict) else None
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
+
+
+# The Publish page's paste box (ORCH-2170, RP2): the admin's whole text goes on stdin to `orch publish connect
+# --paste`, the same path as the terminal (orch finds the connect line itself). The token is never in an argv, a
+# log line or the answer; the page gets only the name it is connected as.
+PUBLISH_PASTE_MAX = 8192
+
+
+def publish_connect(root: Path, orch_bin: str | None, args, session: bool) -> tuple[int, str, dict | None]:
+    if not isinstance(args, dict):
+        raise BadRequest("The arguments must be an object.")
+    _only(args, ("text",))
+    if not session:
+        raise NeedsPerson(SIGNIN)
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise BadRequest("Paste the text from your admin first.")
+    if len(text) > PUBLISH_PASTE_MAX or "\x00" in text:
+        raise BadRequest("That text is too long. Paste only the text your admin sent you.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if not _addon_is_on(root, orch_bin, "publish"):
+        raise BadRequest("That add-on is not on in this workspace.")
+    try:
+        r = _run(
+            [*argv0(orch_bin), "publish", "connect", "--paste", "--by", actor(root), "--json"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            input=text,
+            encoding="utf-8",
+            timeout=60,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    forget_static()
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0:
+        name = out.get("name") if isinstance(out, dict) else None
+        return 200, "", {"name": name[:80]} if isinstance(name, str) else {}
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")

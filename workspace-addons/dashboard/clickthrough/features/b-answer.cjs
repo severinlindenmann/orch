@@ -15,8 +15,8 @@ module.exports = {
     await page.getByRole('link', { name: /Review walk: choose the song/ }).first().click();
     await page.waitForFunction(() => /^#ticket\//.test(location.hash));
     const hash = await page.evaluate(() => location.hash);
-    await page.locator('summary[aria-label="More ticket actions"]').click();
-    await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Check' }).click());
+    await page.locator('summary[data-key^="ticket-actions-"]').click();
+    await act('ticket.patch', () => page.getByRole('menuitemradio', { name: 'Review', exact: true }).click());
 
     await open('#review');
     await page.getByRole('button', { name: 'Later' }).click();  // the question card comes first; this is the Check card

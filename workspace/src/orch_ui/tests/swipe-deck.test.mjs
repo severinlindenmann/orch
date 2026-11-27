@@ -55,7 +55,7 @@ function deck(items, o = {}, extra = {}) {
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // R4 A (ORCH-2316): Comment first turns on pointing when the card has something to point at; "Whole card" opens the box
 const comment = (host, talkBtn) => { talkBtn.click(); const w = host.querySelector('.swipe-commenting'); if (w) w.querySelectorAll('button').find(b => b.textContent === 'Whole card').click(); return host.querySelector('.swipe-sheet'); };
-const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Check', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
+const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Review', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
 const draft = id => ({id, kind: 'draft', kindLabel: 'Draft', title: 'Home block ' + id, preview: {type: 'doc', heading: 'Words', paras: ['x']}});
 
 test('a Check card: Send back opens the text box (nothing is sent without words); Comment shows too (R4 A, ORCH-2316)', async () => {
@@ -299,7 +299,7 @@ test('the card head: title first, then one quiet line (type · deadline · ticke
   const {host} = deck([check('a', {need: 'Sends Friday 08:00', ticket: 'DT-53', when: 'today 09:40', group: 'Spring', suggest: 'ok'})]);
   const head = host.querySelector('.swipe-head');
   assert.equal(head.children[0].tag, 'h3'); assert.equal(head.children[1].className, 'swipe-meta');
-  assert.deepEqual(head.children[1].children.map(c => c.textContent), ['Check', 'Sends Friday 08:00', 'DT-53']);
+  assert.deepEqual(head.children[1].children.map(c => c.textContent), ['Review', 'Sends Friday 08:00', 'DT-53']);
   assert.doesNotMatch(head.textContent, /09:40|Spring$|Suggested:/);
 });
 test('two options of one choice side by side: Use B is the one filled button (the suggested option)', () => {

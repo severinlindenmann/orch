@@ -66,3 +66,16 @@ test('a compact week has one row per day, folds empty days and puts frequent rep
   assert.deepEqual(rows[0].find('a', 'line').map(a => a.textContent), ['09:00Services', '10:21Flaky tests']);
   assert.equal(rows[1].kids[1].textContent, 'Nothing planned');
 });
+
+test('a cell with no value is marked so a compact row at phone width leaves it out; a tab names its count apart', () => {
+  const cols = [{key: 'pr', label: 'Pull request', type: 'text'}, {key: 'ticket', label: 'Ticket', type: 'text'},
+    {key: 'state', label: 'State', type: 'text'}, {key: 'wait', label: 'In line for', type: 'duration'}];
+  const s = draw({type: 'table', title: 'Open', compact: true, filter: 'state', columns: cols, rows: [
+    {cells: {pr: 'Add CSV export', ticket: null, state: 'Draft', wait: null}},
+    {cells: {pr: 'Round tax', ticket: 'BIL-3', state: 'In line', wait: 120}}]});
+  const cls = tr => tr.kids.map(td => td.className.split(' ').includes('cell-none'));
+  assert.deepEqual(body(s).map(cls), [[false, true, false, true], [false, false, false, false]]);
+  assert.equal(body(s)[0].kids[1].textContent, '—');   // the wide table still shows the dash
+  const tabs = s.all().filter(n => n.attrs.role === 'tab').map(n => n.attrs['aria-label']);
+  assert.deepEqual(tabs, ['All 2', 'Draft 1', 'In line 1']);
+});
