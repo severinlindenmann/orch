@@ -33,6 +33,8 @@ def _ticket(root, tid: str) -> dict:
         t = json.loads((root / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return out
+    if not isinstance(t, dict):  # a ticket file that holds a list or a bare value: the bare id
+        return out
     key, title = t.get("key"), t.get("title")
     if isinstance(key, str) and 1 <= len(key) <= 24 and not _ANGLE.search(key):
         out["key"] = key

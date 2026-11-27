@@ -30,9 +30,9 @@ def test_ticket_label_never_crashes_on_odd_ticket_files(ws):
     (tickets / "t_listed1.json").write_text("[1, 2]", encoding="utf-8")
     (tickets / "t_broken1.json").write_text("{nope", encoding="utf-8")
     (tickets / "t_nokey01.json").write_text(json.dumps({"id": "t_nokey01"}), encoding="utf-8")
-    assert view._ticket_label(ws, "t_abc123") == "DM1-12"
+    assert view._ticket(ws, "t_abc123")["key"] == "DM1-12"
     for tid in ("t_listed1", "t_broken1", "t_nokey01", "t_missing1"):
-        assert view._ticket_label(ws, tid) == tid
+        assert view._ticket(ws, tid) == {"id": tid, "title": tid}
 
 
 def test_view_shows_at_most_50_and_counts_all(cli, ws):

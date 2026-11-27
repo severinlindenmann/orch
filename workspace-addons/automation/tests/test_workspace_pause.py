@@ -5,16 +5,18 @@ import json
 
 import pytest
 from conftest import T, add_ticket, calls, runs_started
+from orch import brake
 from test_inbox import _pickups, relay_on
 from test_loop import new_reports, report_setting
 
-from orch import brake
 from orch_automation import scripts
 from orch_automation.loop import Scheduler
 
 
 def _wake(ws):
-    add_ticket(ws, "t_wake0001", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T07:00:00Z"})
+    add_ticket(
+        ws, "t_wake0001", status="waiting", waiting_on={"kind": "time", "until": "2026-11-04T07:00:00Z"}
+    )
     return "t_wake0001"
 
 
@@ -24,13 +26,17 @@ def _repeat(ws):
 
 
 def _script_repeat(ws):
-    add_ticket(ws, "t_scr00001", ext={"automation": {"recurring": True, "cron": "0 7 * * *", "script": "watch"}})
+    add_ticket(
+        ws, "t_scr00001", ext={"automation": {"recurring": True, "cron": "0 7 * * *", "script": "watch"}}
+    )
     return "t_scr00001"
 
 
 def _group_repeat(ws):
     add_ticket(
-        ws, "t_grp00001", ext={"automation": {"recurring": True, "cron": "0 7 * * *", "group": {"a": "0 7 * * *"}}}
+        ws,
+        "t_grp00001",
+        ext={"automation": {"recurring": True, "cron": "0 7 * * *", "group": {"a": "0 7 * * *"}}},
     )
     return "t_grp00001"
 
@@ -57,7 +63,13 @@ def _chat_text(ws):
 def _relay_start(ws):
     add_ticket(ws, "t_made0001")
     (ws / "done-tickets.json").write_text(json.dumps({"m_1": "t_made0001"}))
-    msg = {"id": "m_1", "type": "start", "from": "ws_a", "allowed": True, "body": {"key": "k", "text": "Do it"}}
+    msg = {
+        "id": "m_1",
+        "type": "start",
+        "from": "ws_a",
+        "allowed": True,
+        "body": {"key": "k", "text": "Do it"},
+    }
     relay_on(ws, [msg])
     return "t_made0001"
 
@@ -102,7 +114,9 @@ def launched(monkeypatch):
 
 
 def _questions(ws):
-    return [q for p in (ws / ".orch/tickets").glob("t_*.json") for q in json.loads(p.read_text())["questions"]]
+    return [
+        q for p in (ws / ".orch/tickets").glob("t_*.json") for q in json.loads(p.read_text())["questions"]
+    ]
 
 
 @pytest.mark.parametrize("setup", PATHS, ids=[p.__name__.strip("_") for p in PATHS])

@@ -161,8 +161,9 @@ def test_view_validates(cli, ws):
     _, empty = jrun(cli, "view")
     validator(VIEW).validate(empty)
     assert empty["blocks"][0]["items"] == [] and empty["blocks"][0]["count"] == 0
-    # R7.2: no dead end
-    assert empty["blocks"][0]["empty"]["link"] == {"label": "Open tickets", "to": "app:tickets"}
+    # D4 (owner, 26 Nov): the helper fills this page, so the empty page is the one sentence, with no step
+    assert empty["blocks"][0]["empty"]["text"].endswith("Nothing to do for you.")
+    assert "link" not in empty["blocks"][0]["empty"]
 
 
 def test_actor_defaults(cli, ws, monkeypatch):
