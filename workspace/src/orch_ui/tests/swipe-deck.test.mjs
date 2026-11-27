@@ -688,3 +688,20 @@ test('ideas: switch off draws the plain list and Looks good, as before', () => {
   assert.ok(host.querySelector('.swipe-preview'));
   assert.match(words(okBtn), /Looks good/);
 });
+
+// ORCH-2185 (Focused review D): the page adds its own rows to More (Ask about this, Watch the helper); a click runs the
+// page's own function with the card. Only behind decisionFirst; off, the card has no such rows.
+test('decision first: o.moreItems adds the page rows to More and a click gets the card', () => {
+  const got = [];
+  const items = it => [{label: 'Ask about this', icon: 'chat', href: '#review?ticket=t_1&tab=chat', key: 'ask', onClick: x => got.push(x.id)}, {label: 'Watch the helper', href: '#review?ticket=t_1&tab=helper'}, null, {label: ''}];
+  const {host} = deck([asked()], {decisionFirst: true, moreItems: items});
+  const rows = host.querySelector('.swipe-more').querySelectorAll('.menu-item');
+  assert.deepEqual(rows.map(words).map(s => s.trim()), ['Mockup', 'Open', 'Ask about this', 'Watch the helper']);
+  const ask = rows[2];
+  assert.equal(ask.href, '#review?ticket=t_1&tab=chat');
+  assert.equal(ask.dataset.key, 'ask');
+  ask.click();
+  assert.deepEqual(got, ['q1']);
+  const off = deck([asked()], {moreItems: items}).host;
+  assert.equal(off.querySelectorAll('.swipe-more-item').length, 0, 'off: no page rows');
+});
