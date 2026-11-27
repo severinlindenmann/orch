@@ -358,6 +358,15 @@ def pytest_sessionfinish(session, exitstatus):
             pass
 
 
+@pytest.fixture(autouse=True)
+def _attended_by_default(monkeypatch):
+    """pytest's stdin is never a terminal: tests speak as the person at a terminal unless they say otherwise;
+    the unattended ones set tickets.attended to False (ORCH-2108)."""
+    from orch import tickets as _tickets
+
+    monkeypatch.setattr(_tickets, "attended", lambda: True)
+
+
 @pytest.fixture
 def proj(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
