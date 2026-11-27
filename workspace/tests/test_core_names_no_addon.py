@@ -2,6 +2,7 @@
 
 import ast
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,12 @@ ADDON_MODULES = {
     for name in ADDONS
     for package in (ROOT / "workspace-addons" / name / "src").iterdir()
     if (package / "__init__.py").is_file()
+}
+DISTRIBUTIONS = {
+    tomllib.loads((ROOT / "workspace-addons" / n / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "name"
+    ]
+    for n in ADDONS
 }
 
 # file (relative to workspace/src) -> {literal: reason / issue}. Everything else must be clean.
@@ -120,7 +127,7 @@ def test_core_imports_no_addon_package():
 
 
 def test_core_has_no_addon_name_literals():
-    names = set(ADDONS) | ADDON_MODULES
+    names = set(ADDONS) | ADDON_MODULES | DISTRIBUTIONS
     bad = []
     for f in CORE:
         rel = f.relative_to(ROOT / "workspace/src").as_posix()
