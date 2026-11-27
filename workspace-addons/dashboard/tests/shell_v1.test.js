@@ -11,10 +11,11 @@ test('sidebar has no Notes link and no Ticket views group', () => {
   assert.doesNotMatch(app, /Ticket views/);
   assert.doesNotMatch(app, /nav-views/);
 });
-test('Contacts replaces "Phone & workspaces" everywhere in the product', () => {
+test('Relay (RP8 B) replaces "Phone & workspaces" and "Contacts" everywhere in the product', () => {
   const toml = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch/builtin/relay/orch-addon.toml'), 'utf8');
-  assert.match(toml, /label = "Contacts"/);
-  assert.match(toml, /title = "Contacts"/);
+  assert.match(toml, /label = "Relay"/);
+  assert.match(toml, /title = "Relay"/);
+  assert.doesNotMatch(web('pages/chat.js'), /'phone-link'\}, 'Contacts'/);
   assert.doesNotMatch(web('pages/chat.js'), /Phone & workspaces/);
 });
 test('the Tickets page shows the views as chips (no save chip since ORCH-236)', () => {
@@ -50,8 +51,8 @@ test('Contacts is a top-level sidebar entry, not in the Add-ons fold-out', () =>
   assert.match(app, /contactsAddon \? navLink\(/);
   assert.match(app, /a\.dashboard && a\.dashboard\.place !== 'settings' && a !== contactsAddon/);
 });
-test('the master empty state is used for Chat earlier, add-on blocks and Insights errors', () => {
-  assert.match(web('pages/chat.js'), /stateNote\('No earlier days yet'/);
+test('the master empty state is used for add-on blocks and Insights errors', () => {
+  // Chat has no Earlier screen any more (ORCH-2171): earlier days come back by scrolling up in the same chat
   assert.match(web('blocks.js'), /window\.UI\.state/);
   assert.match(fs.readFileSync(path.join(__dirname, '../../insights/src/orch_insights/web/insights.js'), 'utf8'), /window\.UI\.state\(\{kind: 'error'/);
 });

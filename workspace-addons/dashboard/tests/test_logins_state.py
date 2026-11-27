@@ -175,7 +175,22 @@ def test_the_pasted_phone_link_line_runs_relay_connect_and_nothing_else():
         "",
         None,
     ):
-        with pytest.raises(BadRequest, match="Copy it again"):
+        with pytest.raises(BadRequest, match="Copy the whole text"):
             build_argv("relay.connect", {"line": bad}, None)
     with pytest.raises(BadRequest):
         build_argv("relay.connect", {"line": "x", "command": "rm"}, None)
+
+
+# RP1: the admin's whole multi-line text may be pasted; orch finds the connect line in it by itself.
+def test_the_admins_whole_text_connects_through_the_line_inside_it():
+    token = "orn_" + "Ab-_9" * 9
+    want = ["relay", "connect", "https://relay.example.org", "--workspace", "ws_abcde12345", "--token", token]
+    text = (
+        "Hi! Connect this workspace to our relay.\n\nRun this line:\n"
+        f"orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}\n\nThanks, Sam"
+    )
+    assert build_argv("relay.connect", {"line": text}, None)[:7] == want
+    other = f"orch publish connect https://x.example.org --workspace ws_abcde12345 --token {token}\n"
+    for bad in ("Hi! Nothing to see here.\n\nThanks", other):
+        with pytest.raises(BadRequest, match="Copy the whole text"):
+            build_argv("relay.connect", {"line": bad}, None)

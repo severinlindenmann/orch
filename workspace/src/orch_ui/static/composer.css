@@ -30,3 +30,25 @@
    composer (actions, hint, staged files) comes back as soon as one of them is there. */
 .attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) :is(.composer-actions,.staged-files,p){display:none}
 .attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) textarea{min-height:var(--s5);height:var(--s5);resize:none;overflow:hidden}
+
+/* layout:'box', the Chat message box (ORCH-2171): words on top, the added files inside the box, one line under them
+   with Attach on the left and the hint and Send on the right. Send is dimmed while there is nothing to send. */
+.composer-box{padding:var(--s2) var(--s3);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r2)}
+.composer-box:focus-within{border-color:var(--brand)}
+.composer-box form{display:grid;gap:var(--s2)}
+.composer-box .composer-field{display:block;width:100%;min-height:44px;max-height:200px;padding:var(--s2) var(--s1);border:0;background:transparent;resize:none;line-height:20px;overflow-y:auto}
+.composer-box .composer-field:focus-visible{outline:0}
+.composer-box .composer-foot{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.composer-box .composer-foot .grow{flex:1}
+.composer-box .composer-foot>.btn{min-height:var(--touch)}
+.composer-box .composer-keys{font-size:var(--fs-meta);white-space:nowrap}
+.composer-box [type=submit][data-state=empty]{background:transparent;border-color:var(--border);color:var(--text-muted)}
+.composer-box .staged-files{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+.composer-box .attachment-tile{flex:none;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:var(--s2);min-width:160px;max-width:min(100%,240px);border-radius:var(--r1);background:var(--surface-2)}
+.composer-box .attachment-tile>img,.composer-box .attachment-kind{grid-row:span 2;width:40px;height:32px;border-radius:var(--r1);object-fit:cover}
+.composer-box .attachment-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
+.composer-box .attachment-tile progress{grid-column:2}
+.composer-box .attachment-tile progress[value="100"]{display:none}
+.composer-box .staged-files:empty,.composer-box .attachment-error:empty,.composer-box [data-delivery]:empty{display:none}
+.composer-box p{margin:0}
+@media(max-width:600px){.composer-box .composer-keys{display:none}}

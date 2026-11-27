@@ -146,6 +146,8 @@ if args == ["record", "settings", "--json"]:
     answer("settings")
 if args == ["tokens", "--days", "30", "--json"]:
     answer("usage")
+if args == ["insights", "week", "--json"]:
+    answer("weekly")
 if args == ["ticket", "list", "--all", "--json"]:
     answer("tickets")
 if plain[:2] == ["github", "retries"] and (folder / "retries.json").exists():

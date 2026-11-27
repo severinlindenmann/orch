@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Phone link'",
+        "'Connection'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -479,6 +479,7 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("terminal-typing.set", {"on": 1})
     assert "Let me type into the plain terminal" in server.TERMINAL_OFF and "is off" in server.TERMINAL_OFF
+    assert "Settings \u2192 People" in server.TERMINAL_OFF  # ORCH-1684: the owner's switch is in People
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
     assert data.load_settings(ws, "orch")["terminal_typing_on"] is False
     # ORCH-1656: answered at once with the Settings values read again, like every switch on that page; a full build
@@ -487,3 +488,16 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
         op for op in actions.OPS if op.endswith(".set") and op.split(".")[0] in ("typing", "terminal-typing")
     ]
     assert switches and all(op in server.SETTINGS_OPS for op in switches)
+
+
+def test_only_the_owner_turns_the_plain_terminal_switch(ws):
+    """ORCH-1684: a plain terminal is a shell with the owner's logins and keys: a token-login browser (never the owner)
+    cannot turn its typing on or off; nothing runs."""
+    from orch_dashboard import actions
+
+    actions.REQUEST_PERSON.set("Lea")
+    try:
+        with pytest.raises(actions.NeedsPerson, match="Only the owner"):
+            actions.run_op(ws, "orch-does-not-exist", "terminal-typing.set", {"on": True}, session=True)
+    finally:
+        actions.REQUEST_PERSON.set(None)
