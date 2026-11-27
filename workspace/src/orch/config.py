@@ -384,7 +384,7 @@ def live_max(root: Path | None) -> int | None:
 
 
 DEFAULT_FOCUS_LIVE_SESSION = True
-# owner pick B a of ORCH-2188 (26 Nov): typing into a helper's screen is on by default; watch only is a setting
+# owner pick B a of ORCH-2188 (26 Nov): typing into a helper's screen is on; watch only is a setting
 DEFAULT_FOCUS_SESSION_TYPING = True
 DEFAULT_FOCUS_TERMINAL_TYPING = (
     False  # the plain terminal is a shell: its own switch, off (owner, ORCH-261 q7)
@@ -469,7 +469,7 @@ def focus_live_session(root: Path | None) -> bool:
 
 def focus_session_typing(root: Path | None) -> bool:
     """On unless the workspace turned it off. A config file that cannot be read, or a value that is not
-    true / false, counts as off: a person who chose watch only never gets typing back through a broken file."""
+    true / false, counts as off: a person who chose watch only never gets typing back by a broken file."""
     if root is None:
         return DEFAULT_FOCUS_SESSION_TYPING
     return file_switch(root, "focus", "session_typing", DEFAULT_FOCUS_SESSION_TYPING) is True
