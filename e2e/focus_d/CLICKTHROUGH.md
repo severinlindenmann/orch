@@ -219,7 +219,7 @@ Do:
 Must be seen:
 
 - Two, three, then four panes sit next to each other with a thin divider between them; panes keep the order they were opened in.
-- Every pane has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and Pin are in More.
+- Every pane has Full screen, Split right, Split down, Pin, Close and More; under 720 px Split and Pin are in More.
 - With four panes Split is not greyed: its menu says four is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
@@ -617,7 +617,7 @@ Do:
 
 Must be seen:
 
-- Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
+- Without results the column beside the chat says "Nothing yet. Pictures, pages and tables show up here."; the strip above the chat (on the right, on a phone) takes no row (ORCH-2314).
 - The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
 - At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
 

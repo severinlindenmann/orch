@@ -1180,6 +1180,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
   .live-ctl [data-fold]{display:none}
   .live-pop [data-fold-item=""]{display:flex}
   .live-term-tools .term-say{display:none}
+  .live-term-tools:has([data-key="term-settings"]:not([hidden])) .term-copy{display:none}  /* typing off: Turn typing on keeps its place; a selection still copies with Ctrl+C or Cmd+C */
 }
 @container live-pane (max-width:599px){
   .live-ph>.live-view{display:none}
