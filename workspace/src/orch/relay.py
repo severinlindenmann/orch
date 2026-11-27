@@ -586,8 +586,8 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     if d.is_symlink():
         raise Refused(".orch/outbox is a link. Not sending.")
     p = d / f"{mid}.json"
-    skills.ensure_gitignore(root)
-    harness.check_private_path(root, p)
+    known = skills.ensure_gitignore(root, f".orch/outbox/{mid}.json")  # two git runs instead of four
+    harness.check_private_path(root, p, known)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(p, flags, 0o600)
     with os.fdopen(fd, "wb") as f:
