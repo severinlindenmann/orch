@@ -296,6 +296,19 @@ test('an empty chat is a first message from your helper with three starters, und
   assert.equal(nodes(welcome, n => n.attrs?.['data-chat-action'] === 'prompt').length, 3);
   assert.doesNotMatch(JSON.stringify(thread), /04:00/);
 });
+test('ORCH-2149: with no helper set up the empty chat offers to set one up, not three starters for a helper that is not there', () => {
+  const c = context();
+  c.ticketNoHelperTool = () => true;
+  const thread = c.chatThread(null), all = JSON.stringify(thread);
+  const welcome = nodes(thread, n => n.attrs?.['data-key'] === 'welcome-no-helper')[0];
+  assert.match(welcome.textContent, /No helper is set up yet/);
+  assert.doesNotMatch(all, /Talk it through with your helper/);
+  assert.equal(nodes(thread, n => n.attrs?.['data-chat-action'] === 'prompt').length, 0);
+  const link = nodes(welcome, n => n.attrs?.['data-key'] === 'chat-setup-helper')[0];
+  assert.equal(link.attrs.href, '#settings/helper'); assert.equal(link.textContent, 'Set up a helper');
+  c.ticketNoHelperTool = () => false;
+  assert.match(JSON.stringify(c.chatThread(null)), /Talk it through with your helper/, 'a helper is set up: the starters');
+});
 test('messages are rows: name and time once, the next one by the same writer within five minutes joins it', () => {
   const c = context(), at = n => new Date(Date.now() - n * 60000).toISOString();
   c.state.chat.messages = [{id:'a', by:'helper', text:'one', at:at(20)}, {id:'b', by:'helper', text:'two', at:at(19)}, {id:'c', by:'helper', text:'three', at:at(5)}];

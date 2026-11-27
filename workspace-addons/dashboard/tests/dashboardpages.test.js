@@ -608,6 +608,8 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.doesNotMatch(style, /#open-agent\{display:none\}/);
   assert.match(web('index.html'), /id="report-problem"[^>]*aria-label="Report a problem"/);
   assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Chat"/);
+  // ORCH-2176: on the Chat page itself the top bar has no Chat button
+  assert.match(source, /getElementById\('open-agent'\)\.hidden = snapshot \|\| r\.kind === 'chat';/);
   // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
   assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
   assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);

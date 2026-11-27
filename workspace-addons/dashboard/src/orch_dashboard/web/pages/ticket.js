@@ -3057,7 +3057,7 @@ async function looksGoodAll(req) {
     if (toast?.querySelector) {
       const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
       undo.addEventListener('click', () => { toast.remove(); for (const t of moved) moveTicket(t.id, 'review', true, {quiet:true}); });
-      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+      toastAction(toast, undo);
     }
     if (moved.length < waiting.length) window.orch.toast((waiting.length - moved.length) + ' could not be saved. Try those again from their tickets.', 'error');
     reply({type:'orch.looksgood.done', moved:moved.length});
