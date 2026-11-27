@@ -122,7 +122,22 @@ def test_security_questions_and_closed_requests_stay_with_the_owner(proj, run, n
         facts["facts"]["state"] = "CLOSED"
     tid = _finished(proj, run, new_ticket)
     if what == "question":
-        assert run("ask", tid, "Which colour?", "--option", "a", "--option", "b", "--by", "agent:x")[0] == 0
+        assert (
+            run(
+                "ask",
+                tid,
+                "Which colour?",
+                "--option",
+                "a",
+                "--option",
+                "b",
+                "--recommend",
+                "a",
+                "--by",
+                "agent:x",
+            )[0]
+            == 0
+        )
     reviewer.run(proj)
     if what == "question":  # asking moved it out of Review: nothing for either Reviewer to do
         assert tickets.load(proj, tid)["status"] != "review"

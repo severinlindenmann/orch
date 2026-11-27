@@ -16,7 +16,7 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser(
         "shared-pages",
         parents=[common],
-        help="show or set: the workspace name and icon on shared file pages (publish)",
+        help="show or set: the workspace name and icon on shared pages",
     )
     x.add_argument("value", nargs="?", choices=("on", "off"), help="on or off; leave out to show")
     x = s.add_parser("set", parents=[common], help="pick the icon and colour")

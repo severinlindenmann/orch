@@ -1299,7 +1299,7 @@ main.addEventListener('click', async event => {
     if (settingsBusy.has('test-' + n)) return;
     agentTests[n] = {ok:false, reason:'Trying…'};
     const result = await settingsSend('config.agent.test', {name:n}, 'test-' + n);
-    agentTests[n] = result.ok && result.state?.test ? result.state.test : {ok:false, reason:result.text || 'Could not try it.'};
+    agentTests[n] = result.ok && result.state?.test ? result.state.test : {ok:false, reason:result.text || 'Could not try it. Try again.'};
     render();
   }
   if (action === 'addon-more') { const n = control.dataset.name; if (addonOpen.has(n)) addonOpen.delete(n); else addonOpen.add(n); render(); }

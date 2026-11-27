@@ -17,6 +17,8 @@ def _ask(run, tid, *extra):
         "Keep",
         "--option",
         "Rename",
+        "--recommend",
+        "Keep",
         *extra,
         "--by",
         "agent:helper",

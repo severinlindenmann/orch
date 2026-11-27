@@ -717,7 +717,7 @@ async function syncSave() {
   syncUi.busy = true; render();
   const result = sameAddr ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);  // how often: unsigned
   syncUi.busy = false;
-  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); render(); return; }
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work. Try again.', 'error'); render(); return; }
   syncUi.draft = null; syncUi.note = '';
   if (!result.answer?.public) window.orch.toast('Saved.', 'ok');
   await syncLoad();
@@ -728,7 +728,7 @@ async function syncNowClick() {
   syncUi.nowBusy = true; syncUi.note = ''; render();
   const result = await syncAct('now', SYNC);
   syncUi.nowBusy = false;
-  if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+  if (!result.ok) window.orch.toast(result.text || 'That did not work. Try again.', 'error');
   else if (result.answer?.still_paused || result.answer?.choose_first) syncUi.note = String(result.answer.text || '');
   await syncLoad();
 }
@@ -765,7 +765,7 @@ function signStep({title, body, here, there, value, done, run}) {
     actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
     const result = await run();
     await window.orch.close(d);
-    window.orch.toast(result?.ok ? 'Confirmed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
+    window.orch.toast(result?.ok ? 'Confirmed. ' + (done || '') : result?.text || 'That did not work. Try again.', result?.ok ? 'ok' : 'error');
   });
   actions.append(sign);
   d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You confirm this as ' + who + '.'), actions].filter(Boolean));
@@ -1616,7 +1616,7 @@ async function addonAct(control) {
       d.append(el('p', '', 'Choose a helper first, then start again.'));
       actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
       d.append(actions); window.orch.open(d);
-    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work. Try again.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
@@ -1658,7 +1658,7 @@ async function addonReview(id, control) {
     locks.add('addon-act');
     const result = await act('addon.act', {...args, value:key});
     locks.delete('addon-act');
-    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Script allowed.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     await loadAddon(id);
   });
 }
@@ -1678,7 +1678,7 @@ async function addonRadio(input) {
   locks.add('addon-act'); group.forEach(n => { n.disabled = true; });
   const result = await act('addon.act', {addon:id, verb:input.dataset.radioVerb, target:input.dataset.radioTarget});
   locks.delete('addon-act');
-  window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
 }
 // RP5: write in a workspace's thread on the Relay page itself (the same message.send path as the Chat page).
@@ -1689,7 +1689,7 @@ async function convSendClick(control) {
   locks.add('addon-act'); control.disabled = true;
   const result = await act('message.send', {workspace:ws, text});
   locks.delete('addon-act'); control.disabled = false;
-  if (result.ok) { OrchBlocks.convSent(ws); if (box) box.value = ''; } else window.orch.toast(result.text || 'That did not work.', 'error');
+  if (result.ok) { OrchBlocks.convSent(ws); if (box) box.value = ''; } else window.orch.toast(result.text || 'That did not work. Try again.', 'error');
   await loadAddon(id);
 }
 // Workspace messages are composed in their persistent Chat thread.
@@ -1873,7 +1873,7 @@ function repeatsDialog(only = null, addonName = null) {
   const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
-    window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
@@ -1915,7 +1915,7 @@ async function repeatSend(d, args, pending, okText) {
   finally { clearTimeout(timer); }
   if (pendingRepeat === mine) pendingRepeat = result.ok ? {...mine, savedAt:Date.now()} : null;
   if (route().kind === 'addon') paintAddon(route().id);
-  window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  window.orch.toast(result.ok ? okText : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
   if (route().kind === 'addon') await loadAddon(route().id);
 }
 // `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
@@ -1983,18 +1983,18 @@ function shareDialog(start = null) {
     create.disabled = true; note.textContent = 'Uploading…';
     if (start) {
       try { const res = await fetch(start.url, {cache:'no-store'}); if (!res.ok) throw new Error('read'); file = new File([await res.blob()], start.name); }
-      catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+      catch (_) { note.textContent = 'That file could not be read. Pick it again.'; create.disabled = false; return; }
     }
     if (file.size > SHARE_MAX) { note.textContent = 'That file is over 3 MB.'; create.disabled = false; return; }
     let data = '';
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       for (let i = 0; i < bytes.length; i += 32768) data += String.fromCharCode(...bytes.subarray(i, i + 32768));
-    } catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+    } catch (_) { note.textContent = 'That file could not be read. Pick it again.'; create.disabled = false; return; }
     const before = new Set((sharedLinks || []).map(l => String(l.id)));
     const out = await act('link.share', {name:file.name, data:btoa(data), days:7});
     create.disabled = false;
-    if (!out.ok) { note.textContent = out.text || 'That did not work.'; return; }
+    if (!out.ok) { note.textContent = out.text || 'That did not work. Try again.'; return; }
     await loadSharedLinks();
     if (shownAddon()) await loadAddon(shownAddon());
     const row = (sharedLinks || []).filter(l => !before.has(String(l.id)) && l.link)[0];
@@ -2034,7 +2034,7 @@ async function sharedLinkAction(control) {
   const send = async () => {
     control.disabled = true;
     const result = stop ? await act('link.stop', {id:link.id}) : await act('link.extend', {id:link.id, days:7});
-    window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work. Try again.', result.ok ? 'ok' : 'error');
     await loadSharedLinks();
     await loadAddon(shownAddon());
     control.disabled = false;

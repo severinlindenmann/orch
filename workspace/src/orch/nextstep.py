@@ -22,6 +22,9 @@ EXEMPT = {
     "ticket artifacts-dir": "its only output is a folder path that scripts capture",
 }
 
+# stdout is the command's product (a handover to paste): its hint goes to stderr
+HINT_TO_STDERR = {"ticket export"}
+
 
 def remember(args, data) -> None:
     """Each command's result, kept for its hint (the printed shapes are not touched)."""
@@ -209,6 +212,10 @@ def _needs(data, args) -> str:
     return "keep working on what does not wait: orch ticket list"
 
 
+def _answer(data, args) -> str:
+    return f"the helper picks the answer up on its next run: orch ticket show {_tid(args)}"  # R2.6
+
+
 def _update(data, args) -> str | None:
     if getattr(args, "project_only", False) or getattr(args, "after_install", False):
         return None  # the installer's own internal runs: nothing for a person or agent to follow
@@ -344,6 +351,9 @@ HINTS = {
     "ticket tree": _on_ticket,
     "ticket list": _list,
     "ticket show": _on_ticket,
+    "ticket export": lambda d, a: (
+        f"paste it into the other AI tool; it carries on with: orch ticket show {_tid(a)}"
+    ),
     "ticket status": _status,
     "ticket edit": _on_ticket,
     "ticket set": _on_ticket,
@@ -405,7 +415,7 @@ HINTS = {
     "check done": _on_ticket,
     "log": _on_ticket,
     "ask": _ask,
-    "answer": "the agent picks the answer up on its next run: orch ticket list",
+    "answer": _answer,
     "ref add": _on_ticket,
     "ref list": _on_ticket,
     "ref rm": _on_ticket,
@@ -417,6 +427,7 @@ HINTS = {
     "needs": _needs,
     "counts": "what waits for you: orch review list",
     "tokens": "keep working: orch ticket list",
+    "changes": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",

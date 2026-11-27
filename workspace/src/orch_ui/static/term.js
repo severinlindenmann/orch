@@ -111,7 +111,7 @@
     ended: 'The helper’s screen has closed.',
     none: 'No helper screen right now.',
     oneshot: 'This helper works one step at a time; it has no live screen.',
-    notmux: 'This computer cannot show the helper’s screen.',
+    notmux: 'The helper’s screen cannot be shown here. The chat view shows what the helper does.',
     nogl: 'This browser cannot draw the terminal. The chat view shows what the helper does.'
   };
   /* the screen's colours from the tokens of the page (xterm needs colour values, so they are read, never written) */

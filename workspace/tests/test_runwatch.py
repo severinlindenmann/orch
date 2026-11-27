@@ -100,7 +100,19 @@ def test_waiting_on_ci_is_not_idle(proj, new_ticket, child):
 
 def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run, child):
     tid = new_ticket()
-    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    run(
+        "ask",
+        tid,
+        "Which colour?",
+        "--option",
+        "red",
+        "--option",
+        "blue",
+        "--recommend",
+        "red",
+        "--by",
+        "agent:helper",
+    )
     rec = _live(proj, tid, "attention", child)
     whats = [w["what"] for w in runwatch.waiting_on(proj, rec, tickets.load(proj, tid), [])]
     assert whats == ["an answer from the person", "the person's OK on the screen"]
@@ -326,7 +338,19 @@ def test_working_helper_with_several_commands_says_each_activity_once():
 
 def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
     tid = new_ticket()
-    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    run(
+        "ask",
+        tid,
+        "Which colour?",
+        "--option",
+        "red",
+        "--option",
+        "blue",
+        "--recommend",
+        "red",
+        "--by",
+        "agent:helper",
+    )
     _live(proj, tid, "idle", child)
     monkeypatch.setattr(runwatch, "_table", lambda: [])
     data = json.loads(run("run", "status", tid, "--json")[1])

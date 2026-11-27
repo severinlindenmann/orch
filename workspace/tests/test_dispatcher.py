@@ -9,6 +9,7 @@ import pytest
 import test_run_wrap
 
 from orch import brake, config, dispatcher, limitstop, runs, runs_live, tend, tickets
+from orch.errors import Refused
 
 NOW = 1_800_000_000.0
 gen = test_run_wrap.gen  # the generic fake agent as the folder's agent (a fixture)
@@ -313,6 +314,22 @@ def test_config_keys(proj, run):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
+def _close(proj, tid, timeout=10):
+    """A person closes the ticket: out of the dispatcher's lanes. The run's claim ends before the wrapper's
+    last write to the ticket, so a save can meet that write: read it again and retry, as a person would."""
+    end = time.monotonic() + timeout
+    while True:
+        t = tickets.load(proj, tid)
+        t["status"] = "done"
+        try:
+            tickets.save(proj, t)
+            return
+        except Refused:
+            if time.monotonic() > end:
+                raise
+            time.sleep(0.05)
+
+
 def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, monkeypatch):
     """ORCH-813: one helper at a time, real starts of the fake agent: high first, then normal, low last."""
     monkeypatch.setattr(runs_live, "available", lambda adapter: False)  # one step at a time, no tmux
@@ -327,8 +344,6 @@ def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, m
         assert [c["ticket"] for c in res["started"]] == [want]
         assert dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))["started"] == []  # the one place is taken
         test_run_wrap._wait(proj, want)
-        t = tickets.load(proj, want)
-        t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
-        tickets.save(proj, t)
+        _close(proj, want)
     started = [ln.split()[1] for ln in test_run_wrap._lines(log, "env")]
     assert started == [high, normal, low]

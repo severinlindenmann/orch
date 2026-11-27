@@ -3,11 +3,11 @@
 function changeUnavailable() {
   const banner = document.getElementById('connection');
   if (banner?.hidden !== false || banner.dataset?.kind === 'slow') return false;  // a slow answer is no failure: changes go on
-  window.orch.toast(banner.dataset?.kind === 'error' ? 'orch had a problem. Your change was not sent.' : "Can't reach orch. Your change was not sent.", 'error');
+  window.orch.toast(banner.dataset?.kind === 'error' ? 'orch had a problem. Your change was not sent; try again in a moment.' : "Can't reach orch. Your change was not sent; try again in a moment.", 'error');
   return true;
 }
 function changeError(result) {
-  if (result.status === 0) return "Can't reach orch. Your change was not sent.";
+  if (result.status === 0) return "Can't reach orch. Your change was not sent; try again in a moment.";
   const text = window.DashHelpers.scrubText(result.text);
   // the page was older than the ticket (a new round started, the work changed): nothing was approved
   if (/changed while you worked|Read it again/i.test(text)) return 'This ticket changed since you opened it. Look at it again, then accept.';
