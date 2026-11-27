@@ -61,6 +61,24 @@ rules, who checks what and the error codes are in `msgsig.md` (vectors: `vectors
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
 | DELETE | `/v1/phones/<ph_id>` | – | `204`. The calling workspace takes itself off that phone's list (ORCH-1162: the owner cut a lost phone or removed its person): the same as the phone dropping it (`DELETE /v1/phone/workspaces/<ws>`) or the admin unticking it, mutes included, and the workspace gets a refresh-hint. Every phone read is filtered by the list at read time, so the phone sees nothing of this workspace any more, old messages included, and can't send to it. It only takes access away: only the admin ticks the workspace again (while the workspace keeps the phone cut, its next refresh takes itself off again: the workspace's cut wins). An unknown phone, a phone without this workspace on its list and a second call all answer `404` (no phone id is confirmed) |
 
+### Receipts between workspaces (ORCH-2348)
+
+No new route, no new field: a receipt is an ordinary `text` message the receiving workspace's orch sends by itself,
+with `body.update.kind = "ack"` and `reply_to` = the id of the message it is about (message.schema.json, unchanged).
+
+- `body.text` is one of the fixed lines `Passed on to <KEY>` (`<KEY>` = the receiver's ticket key, e.g. `ORCH-1194`),
+  `Passed on to Chat`, `Passed on to a ticket` (a ticket without a key) or `Delivered` (it is there and waits for the
+  receiver's person: a `delegate` or `start` that needs an allow). No title, no content of the message goes back.
+- A text about a ticket carries `ticket` (the receiver's own ticket, the sender's rule for every message) and `key`;
+  one that went to Chat carries `body.general: true` and no `ticket`.
+- At most one receipt per message. A receipt is an update: it is never passed on to a ticket and never answered
+  with a receipt.
+- The sender takes a receipt only from the workspace it sent that message to, and only the fixed lines: any other
+  words count as `Delivered` (the text is data, R3.2). An older orch that does not know receipts lists the text as
+  any other update; a sender that hears nothing shows `Sent` as before.
+- A receipt is not an answer. The sender's orch asks its own person once (a ticket question, three options) when a
+  text or file about an open ticket has had no answer from that workspace for 3 days.
+
 ### Signing key (ORCH-1200; signed messages design, ORCH-1027)
 
 Each workspace makes its own Ed25519 key pair on `orch relay connect` (or once on the next relay command of a workspace

@@ -68,6 +68,12 @@ def is_update(type_: str, line: str, kind) -> bool:
     return line.startswith("Taken back:") or re.match(r"\S+ is stuck\. ", line) is not None
 
 
+def _is_receipt(peer, upd) -> bool:
+    """The automatic "Passed on to ..." / "Delivered" text between two workspaces (an ack update)."""
+    kind = upd.get("kind") if isinstance(upd, dict) else upd
+    return kind == "ack" and str(peer).startswith("ws_")
+
+
 def _sent_path(root: Path) -> Path | None:
     """.orch/run/relay/sent.jsonl, or None when .orch, run or relay (or the file) is a link."""
     p = root / ".orch"
@@ -340,12 +346,17 @@ CONV_MESSAGES = 30  # newest messages kept per thread
 def _conversations(root: Path, received: list[dict], sent: list[dict], picked: dict, handled) -> list[dict]:
     """RP5: one conversation per workspace (the people in the relay's list), oldest first. What a message says
     about itself comes from what this workspace already records: still in the outbox is "Not sent yet"; sent
-    is "Sent"; a task they must allow first is "Waiting for <Name>"."""
+    is "Sent"; a task they must allow first is "Waiting for <Name>". ORCH-2348: once the other workspace's
+    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back."""
     d = relay._read_dir(root)
     waiting: dict[str, list[dict]] = {}
     for m in relay.outbox_list(root):
         waiting.setdefault(str(m.get("to")), []).append(m)
     allowed = relay.allows(root)["received"]
+    got = relay.receipts(root)["got"]
+    silent: dict[str, int] = {}
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError):
+        silent = {e["id"]: e["days"] for e in relay.no_answer(root)}
     by_peer: dict[str, list[tuple[str, dict]]] = {}
 
     def add(peer: str, at: str, item: dict) -> None:
@@ -396,6 +407,10 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
             item["state"] = {"label": "Not sent yet", "tone": "warn"}
         elif e["type"] in ("delegate", "start") and not _yes(allowed, pid, e["type"]):
             item["state"] = {"label": plain(f"Waiting for {name}", 40), "tone": "warn"}
+        elif e["id"] in silent:  # ORCH-2348: the person was asked about it on the ticket
+            item["state"] = {"label": f"No answer for {silent[e['id']]} days", "tone": "warn"}
+        elif label := relay.receipt_label(got.get(e["id"])):
+            item["state"] = {"label": label, "tone": "good"}  # what the other workspace's orch said
         else:
             item["state"] = {"label": "Sent", "tone": "good"}
         add(pid, at, item)
@@ -551,6 +566,8 @@ def view(root: Path) -> dict:
         auto = is_update(m["type"], line, upd)
         if not auto and m["from"] in conv_ids:
             continue
+        if _is_receipt(m["from"], upd):
+            continue  # said on the message it is about (ORCH-2348), not once more as an update
         r = row(
             str(m.get("created_at") or ""),
             relay.name_of(root, m["from"]),
@@ -568,6 +585,8 @@ def view(root: Path) -> dict:
         auto = is_update(e["type"], line, e.get("update"))
         if not auto and e["to"] in conv_ids:
             continue
+        if _is_receipt(e["to"], e.get("update")):
+            continue  # the receipt orch gave by itself: nothing a person needs to read
         (updates if auto else rows).append(
             row(
                 str(e.get("at") or ""),

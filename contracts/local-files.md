@@ -59,6 +59,9 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
   config.toml                     NOT committed by default. One config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
   addons.json                     NOT committed by default. {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
   run/                            GITIGNORED, per machine, never committed
+    relay/receipts.json           ORCH-2348: {"given": {<their message>: at}, "got": {<our message>: {state:
+                                  passed_on|delivered, where?, at, from}}, "asked": {"<ticket>/<workspace>":
+                                  {message, question, at}}}; the newest 500 of each
     tickets/<ticket id>.json      the claim of the one agent run on that ticket (run.schema.json); <ticket id>.lock = O_EXCL lock file
     pending/<ticket id>.jsonl     input waiting for a busy run, one line each (run-pending.schema.json)
     logs/<ticket id>-<run>.log    output of a oneshot run
