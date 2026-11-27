@@ -1241,6 +1241,9 @@ def _inbox_line(i: dict, root: Path) -> str:
     if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
         # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
         return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
+    if i["note"] and i.get("auto") and relay.is_peer_status(root, m):
+        # ORCH-2157: a workspace's status note: what it said, and where it was noted
+        return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""

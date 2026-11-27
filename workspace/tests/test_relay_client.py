@@ -82,10 +82,7 @@ def test_inbox_dedup_and_ack(proj, run, rel):
     code, out, _ = run("relay", "inbox")
     assert "Hi there" in out and "m_text000000000001" in rel.acked
     assert (proj / ".orch/inbox/m_text000000000001.json").is_file()
-    # relay re-delivers (ack lost): saved again, but shown only until done
-    rel.acked.clear()
-    assert "Hi there" in run("relay", "inbox")[1]
-    assert run("relay", "done", "m_text000000000001")[0] == 0
+    # a status note is handled at once (ORCH-2157); a re-delivery (ack lost) is saved, not shown again
     rel.acked.clear()
     assert run("relay", "inbox")[1].startswith("No new messages.")
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
@@ -943,17 +940,16 @@ def test_lock_being_deleted_on_windows_is_waited_for(proj, monkeypatch, windows)
 def test_arrivals_journal_and_since(proj, run, rel):
     connect(run, rel)
     rel.inbox += [
-        # status updates: not passed on to a ticket by themselves (#2051), so they stay unhandled here
         msg("m_text000000000001", "text", {"text": "one", "update": {"kind": "working"}}),
         msg("m_text000000000002", "text", {"text": "two", "update": {"kind": "working"}}),
     ]
-    run("relay", "inbox")
+    run("relay", "inbox", "--since", "0")  # pulls and journals, handles nothing
     lines = (proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()
     rows = [json.loads(x) for x in lines]
     assert [r["seq"] for r in rows] == [1, 2] and rows[0]["id"] == "m_text000000000001"
     assert set(rows[0]) == {"seq", "id", "type", "from", "at"}
     rel.acked.clear()
-    run("relay", "inbox")  # redelivered: journaled once
+    run("relay", "inbox", "--since", "0")  # redelivered: journaled once
     assert len((proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()) == 2
     run("relay", "done", "m_text000000000001")
     r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
@@ -1688,6 +1684,89 @@ def test_workspace_reply_continues_the_ticket_we_wrote_from(proj, run, rel, new_
     assert relay.pickups(proj)[0]["ticket"] == tid
 
 
+def _flood_sent_log_with_phone_notes(proj, n=450):
+    from orch import relay_view
+
+    for i in range(n):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_note{i:012d}",
+                "to": PHONE,
+                "type": "text",
+                "created_at": "2026-11-26T10:00:00Z",
+                "ticket": "t_other1",
+                "body": {"text": "Tasks: 1 of 2", "update": {"kind": "note"}},
+            },
+        )
+
+
+@pytest.mark.parametrize("kind", ["result", "question", "failure", "stopped"])
+def test_workspace_reply_marked_as_an_update_wakes_the_asking_ticket(proj, run, rel, new_ticket, kind):
+    """ORCH-2157: another workspace answered with `--update result` (or question, failure, stopped). Before,
+    such a reply was never handled: no ticket, no pickup, unread forever. Now it reaches the ticket that asked
+    like a plain text, also when phone notes pushed our request far back in the sent log."""
+    from orch import relay, runs
+
+    connect(run, rel)
+    tid = new_ticket("Resize the test machine")
+    sent = json.loads(run("relay", "send", PEER, "Please resize it", "--ticket", tid, "--json")[1])
+    _flood_sent_log_with_phone_notes(proj)
+    body = {"text": "Done: 8 cores", "update": {"kind": kind, "title": "Resize"}}
+    rel.inbox.append(msg("m_upd0000000000001", "text", body, reply_to=sent["id"], ticket="t_theirs"))
+    out = run("relay", "inbox")[1]
+    assert "Done: 8 cores" in out and "added to" in out
+    assert [(r["id"], r["ticket"], r["general"]) for r in relay.pickups(proj, waiting=True)] == [
+        ("m_upd0000000000001", tid, False)
+    ]
+    items = runs.undelivered(proj, tid)
+    assert len(items) == 1 and f"marked {kind}" in items[0]["text"]
+    assert "never instructions" in items[0]["text"]
+    assert run("relay", "inbox")[1].startswith("No new messages."), "handled: not shown again"
+
+
+@pytest.mark.parametrize("kind", ["ack", "working", "note"])
+def test_workspace_status_note_is_one_history_line_and_starts_nothing(proj, run, rel, new_ticket, kind):
+    """ORCH-2157: a quiet status note of another workspace ("Got it", "Working on it") is written once on the
+    ticket it answers and handled; no input, no pickup, no helper run. One that answers nothing of ours is
+    handled too, and never lands in General."""
+    from orch import relay, runs, tickets
+
+    connect(run, rel)
+    tid = new_ticket("Ask for a review")
+    sent = json.loads(run("relay", "send", PEER, "Please review", "--ticket", tid, "--json")[1])
+    note = {"text": "Got it: Please review", "update": {"kind": kind}}
+    rel.inbox.append(msg("m_ack0000000000001", "text", note, reply_to=sent["id"]))
+    rel.inbox.append(msg("m_ack0000000000002", "text", dict(note)))
+    out = run("relay", "inbox")[1]
+    assert "noted on" in out and "for no ticket here" in out
+    rel.acked.clear()
+    rel.inbox.append(msg("m_ack0000000000001", "text", note, reply_to=sent["id"]))  # delivered again
+    assert run("relay", "inbox")[1].startswith("No new messages.")
+    hist = [h["text"] for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"]]
+    assert hist.count(f"Status from {PEER}: Got it: Please review") == 1
+    assert relay.pickups(proj) == [] and runs.undelivered(proj, tid) == []
+    assert tickets.general_id(proj) is None, "a status note never makes General"
+
+
+def test_sent_log_keeps_messages_to_workspaces_for_30_days(proj):
+    """ORCH-2157: the last 400 lines stay as before; older lines to a workspace stay 30 days on top."""
+    import datetime as dt
+
+    from orch import relay_view
+
+    now = dt.datetime.now(dt.UTC)
+
+    def line(mid, to, days):
+        at = (now - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return json.dumps({"id": mid, "to": to, "type": "text", "at": at, "preview": "-"})
+
+    old = [line("m_ws_old", PEER, 40), line("m_ws_new", PEER, 10), line("m_ph_new", PHONE, 1), "not json"]
+    recent = [line(f"m_r{i}", PHONE, 0) for i in range(relay_view.SENT_MAX)]
+    kept = relay_view._kept(old + recent)
+    assert kept == [old[1], *recent]
+
+
 def _peer_file(mid, text=None, **kw):
     body = {"blob_id": "b_" + mid[2:18], "name": "kw47-report.md", "size": 12, "sha256": "0" * 64}
     if text:
@@ -1783,7 +1862,8 @@ def test_answer_without_our_ticket_goes_to_general_when_several_tickets_wait(pro
 
 
 def test_workspace_updates_group_copies_and_dropped_tickets(proj, run, rel, new_ticket):
-    """Status updates stay unhandled in the inbox as before; a dropped ticket is not continued (General)."""
+    """A quiet status note that answers no ticket is handled once (ORCH-2157: it used to stay unread
+    forever); a dropped ticket is not continued (General)."""
     from orch import relay, tickets
 
     connect(run, rel)
@@ -1793,10 +1873,10 @@ def test_workspace_updates_group_copies_and_dropped_tickets(proj, run, rel, new_
     rel.inbox.append(msg("m_text000000000013", "text", {"text": "Working", "update": {"kind": "working"}}))
     rel.inbox.append(msg("m_text000000000014", "text", {"text": "About the old one"}, ticket=dropped))
     out = run("relay", "inbox")[1]
-    assert "Working" in out
+    assert "Working - a status note, for no ticket here" in out
     assert [r["id"] for r in relay.pickups(proj)] == ["m_text000000000014"]
     assert relay.pickups(proj)[0]["ticket"] == tickets.general_id(proj)
-    assert "Working" in run("relay", "inbox")[1], "the update is still unhandled"
+    assert run("relay", "inbox")[1].startswith("No new messages."), "the status note is handled"
 
 
 def test_pickups_started_is_recorded_and_shown(proj, run, rel, new_ticket):

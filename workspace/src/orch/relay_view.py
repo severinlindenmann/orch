@@ -16,6 +16,10 @@ from orch.text import at_word, clean_untrusted
 
 SENT_LOG = ("run", "relay", "sent.jsonl")  # under .orch/, which is not tracked by git
 SENT_MAX = 400  # lines kept in the sent log
+# ORCH-2157: phone notes filled the 400 lines within a day, so a late reply from a workspace no longer found
+# the ticket that asked. Lines to a workspace are kept 30 days on top (at most SENT_PEER_MAX of them).
+SENT_PEER_DAYS = 30
+SENT_PEER_MAX = 10000  # a size bound only: far above the messages a workspace sends to others in 30 days
 KINDS = {
     "text": "Message",
     "file": "File",
@@ -100,9 +104,25 @@ def record_sent(root: Path, msg: dict) -> None:
     try:
         have = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
         have.append(json.dumps(entry))
-        net.write_atomic(path, ("\n".join(have[-SENT_MAX:]) + "\n").encode("utf-8"), True)
+        net.write_atomic(path, ("\n".join(_kept(have)) + "\n").encode("utf-8"), True)
     except OSError:
         pass
+
+
+def _kept(lines: list[str]) -> list[str]:
+    """The last SENT_MAX lines, and before them the lines to a workspace from the last SENT_PEER_DAYS days."""
+    older, recent = lines[:-SENT_MAX], lines[-SENT_MAX:]
+    cut = dt.datetime.now(dt.UTC) - dt.timedelta(days=SENT_PEER_DAYS)
+    keep = []
+    for ln in older:
+        try:
+            e = json.loads(ln)
+            at = dt.datetime.fromisoformat(str(e["at"]).replace("Z", "+00:00"))
+        except (ValueError, KeyError, TypeError):
+            continue
+        if str(e.get("to", "")).startswith("ws_") and at.tzinfo is not None and at >= cut:
+            keep.append(ln)
+    return keep[-SENT_PEER_MAX:] + recent
 
 
 def _sent(root: Path) -> list[dict]:
