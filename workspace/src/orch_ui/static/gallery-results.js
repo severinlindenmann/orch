@@ -30,7 +30,6 @@
       diff: '@@ home.css @@\n- .home { min-width: 480px; }\n+ .home { min-width: 0; }\n+ .home .card { overflow-wrap: anywhere; }'},
     {type: 'pr', name: 'Pull request 1318', meta: 'Pull request · draft', status: 'draft', title: 'Phone pages no longer scroll sideways', href: '#result-widgets',
       checks: [{name: 'Tests on Linux', state: 'pass'}, {name: 'Tests on Windows', state: 'pass'}, {name: 'Tests on macOS', state: 'pass'}, {name: 'Page check', state: 'run'}, {name: 'Word check', state: 'fail'}]},
-    {type: 'pr', name: 'Pull request 1322', meta: 'Pull request · conflict', status: 'conflict', title: 'Home shows one question card', href: '#result-widgets'},
     {type: 'archive', name: 'export-november.zip', meta: 'Archive · 14 files', total: 14, download: S + 'sample-print.zip',
       files: [['tickets.csv', '48 KB'], ['files/home-390.png', '212 KB'], ['files/offer-acme.pdf', '1.1 MB'], ['files/release-notes.md', '3 KB']]},
     {type: 'link', name: 'Notes on phone widths', meta: 'wiki.example.com', href: 'https://wiki.example.com/phone-widths'},
@@ -56,6 +55,10 @@
       STATES.forEach(st => row.append(UI.result(shape(it, st), {size: 'sm'})));
       host.append(row);
     });
+    // ORCH-2347: a pull request card says the reference's live state word; a conflict says when its checks start
+    const pr = ITEMS.find(x => x.type === 'pr'), live = document.createElement('div'); live.className = 'result-grid';
+    ['conflict', 'checks failed', 'ready to merge'].forEach(status => live.append(UI.result(Object.assign({}, pr, {status, checks: [], meta: 'Pull request · ' + status}), {size: 'sm'})));
+    host.append(live);
   }
   function start() {
     if (!q('#rw-grid')) return;
