@@ -1044,6 +1044,25 @@ def test_make_ticket_copies_only_the_relevant_exchange(proj):
     assert "Unrelated" not in texts and "Build the fish page" in texts and "Sounds good" in texts
 
 
+def test_make_ticket_for_what_another_workspace_asked(proj):
+    """ORCH-2354 (report r-1127-0657-ws): another workspace asks for the weekly report, the helper drafts it
+    and proposes a ticket. Nobody typed in Chat, and Make ticket said "Nothing new to make a ticket from"
+    on every click. The request starts the exchange; its words stay marked as the other workspace's."""
+    peer = "ws_internal01"
+    chat.record(proj, "old1", "you", "dashboard", "Unrelated earlier question")
+    chat.record(proj, "oldh", WS, "helper", "Unrelated earlier answer")
+    chat.record(proj, "ask1", peer, "workspace", "Please send the report for week 48")
+    chat.record(proj, "h1", WS, "helper", "Drafted it from this week's tickets")
+    _proposal(proj)
+    t = tickets.load(proj, chat.make_ticket(proj, "proposal", by="human:me")["ticket"])
+    said = {h["text"]: h["by"] for h in t["history"]}
+    assert said["Please send the report for week 48"] == f"agent:relay from {peer}"
+    assert "Drafted it from this week's tickets" in said and "Unrelated earlier question" not in said
+    assert not t.get("note"), "the note holds only what the person wrote"
+    again = chat.make_ticket(proj, "proposal", by="human:me")
+    assert again["ticket"] == t["id"], "a second click gives the same ticket"
+
+
 def test_make_ticket_requires_new_person_after_move(proj):
     chat.record(proj, "person", "you", "phone", "First")
     _proposal(proj)
