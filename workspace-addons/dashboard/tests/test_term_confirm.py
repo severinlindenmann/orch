@@ -15,7 +15,15 @@ from orch_dashboard import termsession
 
 from .test_term import Person, call, serve
 
-pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
+
+def _tmux_works() -> bool:
+    # the clock CI job puts a tmux stand-in on PATH that always fails (a real tmux server hangs under libfaketime)
+    if shutil.which("tmux") is None:
+        return False
+    return subprocess.run(["tmux", "-V"], capture_output=True, check=False).returncode == 0
+
+
+pytestmark = pytest.mark.skipif(not _tmux_works(), reason="needs a working tmux")
 
 TID = "t_conf0001"
 FIXTURE = (
