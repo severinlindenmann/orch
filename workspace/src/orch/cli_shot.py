@@ -488,17 +488,30 @@ def shoot(
             except Exception:
                 pass
             _close(pipe.w)
-        if proc is not None:
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()  # only the browser this run started
-                proc.wait(timeout=5)
-        # The read end only after the browser is gone: on Windows a close waits for the reader thread's read.
-        if pipe is not None:
+        gone = proc is None or _end(proc)
+        # The read end only after the browser is gone: on Windows a close waits for the reader thread's read
+        # (a browser that outlives its kill keeps that end; the thread ends with this command).
+        if pipe is not None and (gone or os.name != "nt"):
             _close(pipe.r)
         _remove_profile(profile)
     return done
+
+
+def _end(proc: subprocess.Popen) -> bool:
+    """Wait for the browser this run started to end; kill it when it does not. True once it is gone.
+    A browser slow to go never fails the command: the pictures are made by then (a loaded Windows machine
+    took over 20 s to end Edge after its kill, ORCH-2206)."""
+    try:
+        proc.wait(timeout=15)
+        return True
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.kill()  # only the browser this run started
+        proc.wait(timeout=30)
+        return True
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 
 def _close(fd: int) -> None:

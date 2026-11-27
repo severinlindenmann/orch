@@ -114,6 +114,29 @@ def test_launch_link_only_on_first_width(tmp_path, monkeypatch):
     assert urls == ["http://h/#launch=tok", "http://h/"]
 
 
+def test_a_browser_slow_to_end_never_fails_a_made_picture(tmp_path, monkeypatch):
+    # ORCH-2206: on a loaded Windows machine Edge outlived its wait and its kill; the picture was made by then.
+    class Stuck:
+        killed = 0
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("browser", timeout)
+
+        def kill(self):
+            self.killed += 1
+
+    proc = Stuck()
+    closed = []
+    monkeypatch.setattr(cli_shot, "find_browser", lambda: "/b")
+    monkeypatch.setattr(cli_shot, "_launch", lambda cmd: (proc, FakePipe()))
+    monkeypatch.setattr(cli_shot, "_close", closed.append)
+    out = cli_shot.shoot("http://h/", [390], tmp_path, "n", None, 1)
+    assert out[0].read_bytes() == b"png"
+    assert proc.killed == 1
+    # the write end is closed; on Windows the read end is left to a browser that is still there
+    assert len(closed) == (1 if os.name == "nt" else 2)
+
+
 def _hanging_browser(monkeypatch, hangs):
     """A browser whose first `hangs` page loads never answer (a slow CI machine, ORCH-796)."""
     pipes = fake_browser(monkeypatch)
