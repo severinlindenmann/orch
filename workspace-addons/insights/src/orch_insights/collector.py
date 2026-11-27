@@ -18,9 +18,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .collect_execjson import _hash, _hide, _now, _one_line, detail_path
-from .record import RecordInvalid
-from .record_files import workspace_files
+from orch.collect_execjson import _hash, _hide, _now, _one_line, detail_path
+from orch.record import RecordInvalid
+from orch.record_files import workspace_files
 
 # Tools whose input names the file or folder they touch (activity.md, Files).
 _FILE_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
@@ -56,7 +56,7 @@ def _valid_id(value: Any) -> bool:
 
 
 def _used(kind: str, name: str, source: str, action: str | None = None) -> dict:
-    return dict(kind=kind, name=_name(name), action=action, source=source, version=None)
+    return {"kind": kind, "name": _name(name), "action": action, "source": source, "version": None}
 
 
 def _result_text(content: Any) -> str:
@@ -168,7 +168,7 @@ def hook_line(raw: dict) -> dict | None:
     inp = raw.get("tool_input")
     inp = inp if isinstance(inp, dict) else {}
     used, text = describe_tool(name, inp)
-    line = dict(kind="step", id=tid, used=used, text=_one_line(text), outcome=None)
+    line = {"kind": "step", "id": tid, "used": used, "text": _one_line(text), "outcome": None}
     session = raw.get("session_id")
     if isinstance(session, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", session):
         line["session"] = session
@@ -176,13 +176,13 @@ def hook_line(raw: dict) -> dict | None:
     if paths is not None:
         line["files"] = paths
     if event == "PostToolUse":
-        line["outcome"] = dict(ok=None, error=None, ms=None)
+        line["outcome"] = {"ok": None, "error": None, "ms": None}
         line["payload"] = {"input": hook_input(inp), "output": hook_output(raw.get("tool_response"))}
     elif event == "PostToolUseFailure":
         # a fixed code only (record.HOOK_ERRORS): the tool's error text is the agent's word, it goes to the
         # detail (hidden and cut like any output), never to the line
         error = "interrupted" if raw.get("is_interrupt") is True else "tool_failed"
-        line["outcome"] = dict(ok=False, error=error, ms=None)
+        line["outcome"] = {"ok": False, "error": error, "ms": None}
         line["payload"] = {"input": hook_input(inp), "output": hook_output(raw.get("error"))}
     return line
 
@@ -260,23 +260,23 @@ class StreamJsonMapper:
 
     def _emit(self, at: str, **fields: Any) -> dict:
         self.seq += 1
-        event = dict(
-            v=1,
-            id=f"{self.run}:{self.seq}",
-            seq=self.seq,
-            run=self.run,
-            session=self.session,
-            agent="main",
-            parent=None,
-            at=at,
-            ticket=self.ticket,
-            harness=self.harness,
-            via="log",
-            used=None,
-            outcome=None,
-            detail=None,
-            coverage="full",
-        )
+        event = {
+            "v": 1,
+            "id": f"{self.run}:{self.seq}",
+            "seq": self.seq,
+            "run": self.run,
+            "session": self.session,
+            "agent": "main",
+            "parent": None,
+            "at": at,
+            "ticket": self.ticket,
+            "harness": self.harness,
+            "via": "log",
+            "used": None,
+            "outcome": None,
+            "detail": None,
+            "coverage": "full",
+        }
         event.update(fields)
         if event["kind"] == "step":
             event["coverage"] = "partial" if self._partial else "full"
@@ -390,12 +390,19 @@ class StreamJsonMapper:
             text = inp.get("description") or inp.get("prompt") or "Helper"
         else:
             used, text = describe_tool(name, inp)
-        fields = dict(id=original, kind=kind, used=used, agent=agent, parent=parent, text=_one_line(text))
+        fields = {
+            "id": original,
+            "kind": kind,
+            "used": used,
+            "agent": agent,
+            "parent": parent,
+            "text": _one_line(text),
+        }
         if kind == "step" and name in _FILE_TOOLS:
             files = workspace_files(tool_paths(name, inp), self.workspace)
             if files:
                 fields["files"] = files
-        self._pending[original] = dict(fields=fields, final=final, input=inp, timestamp=stamp)
+        self._pending[original] = {"fields": fields, "final": final, "input": inp, "timestamp": stamp}
         return [(self._emit(at, **fields), None)]
 
     def _finish(self, block: dict, at: str, stamp: datetime | None) -> list:
@@ -416,7 +423,7 @@ class StreamJsonMapper:
         ok = not block.get("is_error", False)
         error = next((line for line in text.splitlines() if line.strip()), "Failed")
         fields.update(
-            outcome=dict(ok=ok, error=None if ok else _one_line(error, 300), ms=ms),
+            outcome={"ok": ok, "error": None if ok else _one_line(error, 300), "ms": ms},
             detail=self._detail(fields["kind"], pending["final"]),
         )
         return [(self._emit(at, **fields), {"input": pending["input"], "output": content})]
@@ -438,7 +445,7 @@ class StreamJsonMapper:
             {"ok": 0, "warning": 0.8, "limited": 1.0}[status],
         )
         used = min(1, max(0, used))
-        data = dict(used=used, status=status)
+        data = {"used": used, "status": status}
         if window is not None:
             data["window"] = window
         text = {
@@ -474,7 +481,7 @@ class StreamJsonMapper:
                     kind="denial",
                     text=f"Not allowed: {name}",
                     used=_used("tool", name, "builtin"),
-                    outcome=dict(ok=False, error="Not allowed by this workspace", ms=None),
+                    outcome={"ok": False, "error": "Not allowed by this workspace", "ms": None},
                 )
             )
         usage = message.get("usage")
@@ -494,7 +501,7 @@ class StreamJsonMapper:
                     **self._stable(tag, "usage"),
                     kind="usage",
                     text=f"Tokens: {ti} in, {to} out",
-                    data=dict(tokens_in=ti, tokens_out=to, used=0),
+                    data={"tokens_in": ti, "tokens_out": to, "used": 0},
                 )
             )
         state = "failed" if message.get("is_error") else "idle"
@@ -556,13 +563,13 @@ def collect(lines: Iterable[str | bytes], writer: Any, ctx: dict) -> dict:
             # the hook's started line of that call was there and said the same (the log line replaced it). A
             # hint only: the agent can send such a line itself (record_hook), so hooks_missing is not proof
             hooked += started and bool(stored.get("replaced_hook"))
-    return dict(
-        written=written,
-        deduped=deduped,
-        invalid=invalid,
-        tool_calls=calls,
-        hook_seen=hooked,
-        bad_lines=mapper.bad_lines,
-        orphans=mapper.orphans,
-        ignored=mapper.ignored,
-    )
+    return {
+        "written": written,
+        "deduped": deduped,
+        "invalid": invalid,
+        "tool_calls": calls,
+        "hook_seen": hooked,
+        "bad_lines": mapper.bad_lines,
+        "orphans": mapper.orphans,
+        "ignored": mapper.ignored,
+    }

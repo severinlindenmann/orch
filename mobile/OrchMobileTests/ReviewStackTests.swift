@@ -288,6 +288,67 @@ final class ReviewVerdictOutboxTests: XCTestCase {
             XCTAssertEqual($0 as? Outbox.VerdictProblem, .alreadySent)
         }
     }
+    // ORCH-2126: once the POST may have reached the relay, Change and Undo must not claim to replace it.
+    func testNoChangeWhileTheAnswerReplyIsPending() async throws {
+        let (box, _) = outbox(); let q = MockReviewStack.questions[0]; let relay = MockRelay(latency: .zero)
+        let no = ReviewVerdict(verdict: .no, digest: q.message.body.digest!)
+        try box.enqueueAnswer(question: q, answer: "Send it", verdict: ok(q))
+        await relay.setHoldAnswers(true)
+        let flushing = Task { await box.flush(using: relay) }
+        while await relay.heldAnswerCount == 0 { await Task.yield() }
+        XCTAssertNil(box.items[0].sentMessageId)
+        XCTAssertFalse(box.items[0].canChangeVerdict)              // hides Change, disables Undo
+        XCTAssertThrowsError(try box.changeVerdict(question: q, answer: "No", verdict: no)) { XCTAssertEqual($0 as? Outbox.VerdictProblem, .alreadySent) }
+        await relay.releaseAnswers()
+        _ = await flushing.value
+        XCTAssertNotNil(box.items[0].sentMessageId); XCTAssertEqual(box.items[0].verdict, ok(q))
+        let verdicts = await relay.verdicts
+        XCTAssertEqual(verdicts.map(\.verdict), [ok(q)])
+    }
+    func testLostReplyKeepsTheAnswerAndRetriesItUnchangedAfterARelaunch() async throws {
+        let (box, dir) = outbox(); let q = MockReviewStack.questions[0]; let relay = MockRelay(latency: .zero)
+        let item = try box.enqueueAnswer(question: q, answer: "Send it", verdict: ok(q))
+        await relay.setLoseNextAnswerReply()                        // stored by the relay, reply lost
+        let lost = await box.flush(using: relay)
+        XCTAssertEqual(lost, [.offline])
+        XCTAssertNil(box.items[0].sentMessageId); XCTAssertFalse(box.items[0].canChangeVerdict)
+        XCTAssertThrowsError(try box.changeVerdict(question: q, answer: "No", verdict: ReviewVerdict(verdict: .no, digest: q.message.body.digest!))) {
+            XCTAssertEqual($0 as? Outbox.VerdictProblem, .alreadySent)
+        }
+        let again = Outbox(directory: dir, phone: "ph_iphone0001")  // a relaunch
+        XCTAssertFalse(again.items[0].canChangeVerdict)
+        let events = await again.flush(using: relay)
+        XCTAssertEqual(events, [.answered(clientId: item.clientId, questionMessageId: q.id, answer: "Send it")])
+        let sent = await relay.answerRequests
+        XCTAssertEqual(sent.count, 2); XCTAssertEqual(sent[1], sent[0]); XCTAssertEqual(sent[1].clientId, item.clientId)
+        let verdicts = await relay.verdicts
+        XCTAssertEqual(verdicts.count, 1)
+        XCTAssertNotNil(again.items[0].sentMessageId)
+    }
+    func testLostReplyIsClosedByTheWorkspaceResultAfterARelaunch() async throws {
+        let (box, dir) = outbox(); let q = MockReviewStack.questions[0]; let relay = MockRelay(latency: .zero)
+        try box.enqueueAnswer(question: q, answer: "Send it", verdict: ok(q))
+        await relay.setLoseNextAnswerReply()
+        _ = await box.flush(using: relay)
+        let again = Outbox(directory: dir, phone: "ph_iphone0001")
+        let msg = PhoneMessage(message: TextMessage(id: "m_res1", from: q.message.from, to: "ph_iphone0001", type: "text", createdAt: "2999-01-01T00:00:00Z", ticket: nil,
+                                                    body: TextBody(text: "Got it", reviewResult: ReviewResult(result: "applied", summary: "Send it")), replyTo: q.id), workspaceName: "P")
+        again.reconcile(with: [msg])
+        XCTAssertTrue(again.items.isEmpty)
+    }
+    func testRefusedOrUnreachedAnswerStaysChangeable() async throws {
+        let (box, _) = outbox(); let q = cardQ("m_notonrelay01", draft); let relay = MockRelay(latency: .zero)
+        try box.enqueueAnswer(question: q, answer: "Send it", verdict: ok(q))
+        let events = await box.flush(using: relay)                  // 404: the relay refused it, nothing stored
+        XCTAssertEqual(events.count, 1); XCTAssertNotNil(box.items[0].failure)
+        XCTAssertTrue(box.items[0].canChangeVerdict)
+        XCTAssertTrue(Outbox.neverStored(URLError(.notConnectedToInternet)))
+        XCTAssertTrue(Outbox.neverStored(RelayError.api(status: 422, code: "invalid", message: "x")))
+        for maybe: Error in [URLError(.networkConnectionLost), URLError(.timedOut), RelayError.api(status: 408, code: "x", message: "x"),
+                             RelayError.api(status: 503, code: "x", message: "x"), RelayError.network("x")] {
+            XCTAssertFalse(Outbox.neverStored(maybe), "\(maybe)")
+        }
+    }
     func testInvalidVerdictsAreNotQueued() throws {
         let (box, _) = outbox(); let q = try question("card-choice"); let digest = q.message.body.digest!
         for bad in [ReviewVerdict(verdict: .ok, picked: "Z", digest: digest),                                            // not an option

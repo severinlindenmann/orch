@@ -12,6 +12,13 @@ runs:
       shell: bash
       run: |
         set -eu
+        # Debian's git 2.47 gives other merge results than GitHub's (ORCH-1932): setup.sh installs the one below.
+        want=2.56.1
+        have=$(git --version | cut -d' ' -f3)
+        if [ "$(printf '%s\n' "$want" "$have" | sort -V | head -1)" != "$want" ]; then
+          echo "::error::This runner has git $have; the tests need $want or newer. Run scripts/edge-runner/setup.sh on it again."
+          exit 1
+        fi
         # The runner user's real home itself (account database), as on GitHub's machines: orch trusts an ORCH_HOME
         # only under it, and a test workspace only under its .orch-test, where the e2e and Services runs put theirs
         # ($HOME/.orch-test). runner-loop.sh makes that home fresh before every job.
