@@ -68,7 +68,7 @@ Do:
 Must be seen:
 
 - Bands in this order: Pinned, Needs you and working, In line, Idle and no session.
-- One summary line on top, with the number of sessions and of helper places in use.
+- One summary line on top, with the number of sessions and of helpers working.
 - Each tile says in one plain sentence what its helper does.
 - A working tile adds its newest last line by itself.
 

@@ -1607,6 +1607,10 @@
    "blocks": [
     {
      "empty": {
+      "button": {
+       "label": "Open tickets",
+       "to": "app:tickets"
+      },
       "text": "A pull request put in the merge queue shows here with the group it is checked in.",
       "title": "Nothing in the merge queue"
      },
