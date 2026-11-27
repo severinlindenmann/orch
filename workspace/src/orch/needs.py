@@ -269,8 +269,16 @@ def _write_cache(root: Path, name: str, rows: list[dict]) -> None:
         pass
 
 
+# Set for an add-on's `needs --json` child: an `orch needs` under it asks no add-on again (ORCH-2372).
+INSIDE = "ORCH_NEEDS_INSIDE"
+
+
 def _argv(m: dict) -> list[str]:
-    return [sys.executable, "-P", "-m", m["run"], "needs", "--json"]
+    """The add-on's own `needs --json`. One built into orch (run = "orch") is `orch <name> needs --json`:
+    without its name this was plain `orch needs --json`, which asked the same add-on again, and so on without
+    end, each in its own process group, so stopping the first never stopped the rest (ORCH-2372)."""
+    own = [str(m["name"])] if m["run"] == "orch" and m.get("name") else []
+    return [sys.executable, "-P", "-m", m["run"], *own, "needs", "--json"]
 
 
 def _parse(name: str, out: str) -> list[dict] | None:
@@ -301,6 +309,7 @@ class _Pull(threading.Thread):
         env = {
             **os.environ,
             "ORCH_ADDON": self.name_,
+            INSIDE: "1",
             "ORCH_ROOT": str(self.root),
             "ORCH_BIN": addons.orch_bin(),
             "PYTHONIOENCODING": "utf-8",  # read as UTF-8 below, whatever the system's code page
@@ -526,7 +535,9 @@ def _option_labels(q: dict) -> list[str]:
 def needs(root: Path) -> list[dict]:
     start = time.monotonic()
     pulls: dict[str, _Pull | list[dict]] = {}
-    for name, m in sorted(addons.active_manifests(root).items()):
+    # asked by an add-on's own needs command: the core rows only, never the add-ons once more
+    asked = {} if os.environ.get(INSIDE) else addons.active_manifests(root)
+    for name, m in sorted(asked.items()):
         if m.get("needs"):
             # late last time: its saved answer now, never a wait for (and a stop of) a child that comes late
             saved = _read_cache(root, name) if _late_mark(root, name).is_file() else None
