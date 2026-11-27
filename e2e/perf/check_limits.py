@@ -9,7 +9,8 @@ ORCH_HOME_STRICT=1, PW_DIR the folder holding node_modules/playwright. <base> mu
 (limits.json):
 - `orch ticket list` and `orch needs`: median of 3 runs after one warm-up run (the warm-up builds the ticket index,
   as the first command of a day does once);
-- every dashboard page (first load included): time until usable;
+- every dashboard page (first load included): time until usable, the middle of 3 measurements, each on a freshly
+  started dashboard and a fresh browser (ORCH-2370: one slow load on a busy runner is not the page's time);
 - an idle minute on Home: bytes over the wire.
 Prints a table, adds it to the GitHub job summary when there is one, writes <base>/out/limits.json and exits 1 when
 a limit is passed (each one named with its number and limit). A miss is measured once more and the better number
@@ -27,6 +28,7 @@ import argparse
 import json
 import os
 import shutil
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -41,6 +43,7 @@ PAGES_ADDONS = ("dashboard", "focus", "factory", "insights")
 REGRESSION = 1.3
 FLOOR_SECONDS = 0.2
 FLOOR_BYTES = 20 * 1024
+DASH_SAMPLES = 3
 
 
 def turn_on(ws: Path, orch: str) -> None:
@@ -129,6 +132,31 @@ def better(cmds: dict[str, float], dash: dict | None, cmds2: dict[str, float], d
     return out, {**dash, "rows": rows}
 
 
+def middle(runs: list[dict]) -> dict:
+    """One dashboard measurement out of several: per page the row with the middle time of the runs that loaded
+    it (the lower one of an even count); a page no run loaded keeps its first failure. The idle minute and
+    everything else come from the first run, the only one that waits an idle minute."""
+    by_page = [{r["page"]: r for r in run.get("rows", [])} for run in runs]
+    rows = []
+    for r in runs[0].get("rows", []):
+        if not _idle(r):
+            got = [o for o in (run.get(r["page"]) for run in by_page) if o and not o.get("err") and o.get("ms") is not None]
+            if got:
+                mid = statistics.median_low(o["ms"] for o in got)
+                r = next(o for o in got if o["ms"] == mid)
+        rows.append(r)
+    return {**runs[0], "rows": rows}
+
+
+def dash_pages(ws: Path, orch: str, idle: int, out: Path) -> dict:
+    """The dashboard measured DASH_SAMPLES times, each on a fresh start; the idle minute only the first time."""
+    runs = [baseline.dash(ws, orch, idle if i == 0 else 0, out.with_name(f"{out.stem}-sample{i + 1}.json"))
+            for i in range(DASH_SAMPLES)]  # fmt: skip
+    got = middle(runs)
+    out.write_text(json.dumps(got, indent=1))
+    return got
+
+
 def _develop(path: str | None) -> dict | None:
     """develop's numbers for --against, or None (not asked for, or no readable file)."""
     if path is None:
@@ -194,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         turn_on(ws, orch)
         cmds = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands.json")
-        dash = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash.json")
+        dash = None if "dash" in a.skip else dash_pages(ws, orch, a.idle, out / "dash.json")
         develop = _develop(a.against)
         if a.against is None:
             missed = check(lim, cmds, dash)[1]
@@ -203,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         if missed:
             print(f"{len(missed)} missed: measuring once more, the better number counts.", flush=True)
             cmds2 = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands-2.json")
-            dash2 = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash-2.json")
+            dash2 = None if "dash" in a.skip else dash_pages(ws, orch, a.idle, out / "dash-2.json")
             cmds, dash = better(cmds, dash, cmds2, dash2)
     finally:
         baseline.stand_in_end(stand_in)

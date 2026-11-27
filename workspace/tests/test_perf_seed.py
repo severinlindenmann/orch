@@ -211,6 +211,48 @@ def test_a_miss_is_measured_again_and_the_better_number_counts():
     assert mod.better({"needs": 1.0}, None, {"needs": 2.0}, None) == ({"needs": 1.0}, None)
 
 
+def test_a_page_time_is_the_middle_of_three_fresh_loads(tmp_path, monkeypatch):
+    """ORCH-2370: First load was one sample, 1.02 s in one run and 3.12 s in the next on a slow CI runner. Every
+    page is measured three times on a freshly started dashboard and the middle time counts: one slow load does
+    not turn the check red, a page that is slow every time still does. The idle minute is waited for once."""
+    mod = _limits_module()
+
+    def run(first, home, review, focus, idle=None):
+        rows = [("First load", first), ("Home", home), ("Review", review), ("Focus", focus)]
+        got = [{"page": p, "ms": ms} if ms else {"page": p, "ms": None, "err": "Timeout"} for p, ms in rows]
+        return {
+            "rows": got + ([{"page": "Idle Home 60 s", "ms": None, "enc": idle}] if idle else []),
+            "errors": [],
+        }
+
+    runs = [run(3120, 900, None, 2500, idle=9000), run(1020, 700, 1400, 2400), run(1100, 2900, 1200, None)]
+    got = mod.middle(runs)
+    assert [(r["page"], r.get("ms")) for r in got["rows"]] == [
+        ("First load", 1100),
+        ("Home", 900),
+        ("Review", 1200),  # of the two that loaded, the lower one
+        ("Focus", 2400),
+        ("Idle Home 60 s", None),
+    ]
+    assert got["errors"] == []
+    lim = json.loads((SEED.parent / "limits.json").read_text(encoding="utf-8"))
+    fast = {"ticket list": 0.4, "needs": 0.5}
+    assert mod.check(lim, fast, got)[1] == ["Focus was usable after 2.4 s (limit 2.0 s)"]
+    never = [{"rows": [{"page": "Home", "ms": None, "err": "Timeout"}]}] * 3
+    assert mod.middle(never)["rows"] == [{"page": "Home", "ms": None, "err": "Timeout"}]
+
+    idles: list[int] = []
+
+    def fake_dash(ws, orch, idle, out):
+        idles.append(idle)
+        return runs[len(idles) - 1]
+
+    monkeypatch.setattr(mod.baseline, "dash", fake_dash)
+    out = tmp_path / "dash.json"
+    assert mod.dash_pages(tmp_path, "orch", 60, out) == got
+    assert idles == [60, 0, 0] and json.loads(out.read_text()) == got
+
+
 def test_against_develop_fails_only_on_more_than_30_percent_slower():
     """The merge queue's verdict (ORCH-1609, R8.3): never the absolute limit, only >30% (and above the noise
     floor) worse than develop; a page that fails on develop too never fails the group."""
