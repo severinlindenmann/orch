@@ -516,6 +516,8 @@ function render(arrived = new Set()) {
   const active = document.activeElement;
   const activeKey = nodeKey(active);
   const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'docs' ? 'Documentation' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  // ORCH-2176 (messenger draft, option A): the top bar's Chat button is not on the Chat page, which is the chat already
+  document.getElementById('open-agent').hidden = snapshot || r.kind === 'chat';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -977,6 +979,16 @@ document.addEventListener('keydown', e => {
   const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
   if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
 });
+// ORCH-2149 (7): the room a dashboard-drawn page keeps for its scrollbar (0 where scrollbars lie over the page), for
+// the top bar of a framed add-on page. Read from the page itself with the gutter on: a scrolling box does not tell
+// (a browser may draw its own bars over the content and still keep the page's gutter).
+try {
+  const html = document.documentElement, was = html.style.scrollbarGutter;
+  html.style.scrollbarGutter = 'stable';
+  const room = Math.max(0, Math.round(window.innerWidth - html.getBoundingClientRect().width));
+  html.style.scrollbarGutter = was;
+  html.style.setProperty('--scrollbar-w', room + 'px');
+} catch (_) { /* no layout (a test page): the top bar keeps its own padding */ }
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;

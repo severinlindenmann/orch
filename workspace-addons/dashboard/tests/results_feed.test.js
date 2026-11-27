@@ -189,6 +189,14 @@ test('a file or pull request cited by two steps belongs to both steps', () => {
   const [it] = F.resultsItems(t, null);
   assert.deepEqual(it.steps, ['c1', 'c2']);
 });
+test('ORCH-2347: a pull request result takes the live state of its reference, also when the addresses differ in their tail', () => {
+  const pr = 'https://github.com/o/r/pull/2984';
+  const t = {id: 't_abcdef', refs: [{kind: 'github-pr', url: pr, title: 'Atomic writes', status: 'conflict'}],
+    checklist: [{id: 'c1', evidence: [{type: 'pr', ref: pr + '/files'}]}]};
+  const items = F.resultsItems(t, null);
+  assert.equal(items.length, 1, 'one pull request, one card');
+  assert.equal(items[0].status, 'conflict'); assert.equal(items[0].meta, 'Pull request · conflict'); assert.equal(items[0].title, 'Atomic writes');
+});
 test('ORCH-1836: owner shows the person\'s name for the computer login; time reads as hours', () => {
   const H = require(path.join(WEB, 'helpers.js'));
   assert.equal(H.ownerName('lume', {who: 'Severin', login: 'lume'}), 'Severin');

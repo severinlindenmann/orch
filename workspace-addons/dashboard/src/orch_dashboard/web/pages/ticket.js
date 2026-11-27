@@ -1940,6 +1940,9 @@ function ticketStripModel(t, run, fresh) {
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
   if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press ' + ticketStartWord(t) + ' to begin now.');
+  // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
+  // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
+  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m('Your helper begins when you press ' + ticketStartWord(t) + '.'), word:'Not started'};
   if (fresh) return m('Not started. Your helper begins when you press ' + ticketStartWord(t) + '.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
@@ -3068,7 +3071,7 @@ async function looksGoodAll(req) {
     if (toast?.querySelector) {
       const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
       undo.addEventListener('click', () => { toast.remove(); for (const t of moved) moveTicket(t.id, 'review', true, {quiet:true}); });
-      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+      toastAction(toast, undo);
     }
     if (moved.length < waiting.length) window.orch.toast((waiting.length - moved.length) + ' could not be saved. Try those again from their tickets.', 'error');
     reply({type:'orch.looksgood.done', moved:moved.length});
