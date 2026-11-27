@@ -211,6 +211,15 @@ def test_encoded_link_keys_and_app_view_tokens_never_land_in_a_ticket(proj, run,
     assert leaks == []
 
 
+def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, pub):
+    """ORCH-2167: 'Next: describe this workspace' only while it has no description."""
+    pub.me["description"] = "Shares the weekly reports"
+    code, out, _ = connect(run, pub)
+    assert code == 0 and "Next: share a file: orch publish file <path>" in out and "describe this" not in out
+    pub.me["description"] = ""
+    assert "Next: describe this workspace: orch publish profile" in connect(run, pub)[1]
+
+
 def test_link_strip_leaves_other_text_alone():
     """The strip is narrow: a short `#k=`, a plain percent sign and words with `apv_` stay as written."""
     from orch import tickets

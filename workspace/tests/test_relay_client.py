@@ -1880,6 +1880,19 @@ def _allow_ticket_of(run):
     return next(t for t in _tickets(run) if t.get("ext", {}).get("relay", {}).get("allow_message"))
 
 
+def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, rel):
+    """ORCH-2167: 'Next: describe this workspace' only while it has no description. With the admin's
+    description (or an own one waiting for the admin) the next step is to write to a contact."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    rel.me["description"] = "Writes the weekly reports"
+    code, out, _ = connect(run, rel)
+    assert code == 0 and 'Next: orch relay send "Reports" "<text>"' in out and "describe this workspace" not in out
+    rel.me.update(description="", pending={"description": "Reports team", "tags": None, "at": "2026-11-04T13:05:00Z"})
+    assert "describe this workspace" not in connect(run, rel)[1]
+    rel.me.update(description="  ", pending=None)
+    assert "Next: describe this workspace: orch relay profile" in connect(run, rel)[1]
+
+
 def test_allow_ticket_keeps_the_senders_name_for_home(proj, run, rel):
     """ORCH-2167: Home says who asked for a task another workspace sent. The ticket keeps that workspace's name
     as a label (never its raw id); with no name known it keeps none and Home says 'Another workspace'."""
