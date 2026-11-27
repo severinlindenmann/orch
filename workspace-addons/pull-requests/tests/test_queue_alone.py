@@ -323,3 +323,40 @@ def test_only_a_persons_merge_on_this_very_commit_lets_the_queue_merge_it(ws, he
     r, _ = make(ws, gh, FakeGit(), ask=lambda root, t, u: asked.append(u) or "ORCH-9")
     r.run()
     assert not gh.reviews and not gh.merged and asked == [url(1)]  # a new card for the person, as before
+
+
+def _two_cards(ws, n, head, first, second):
+    """One ticket with two answered Merge cards of pull request n at commit head: (decision, answered_at) each."""
+    from orch import tickets
+
+    t = tickets.load(ws, tickets.create(ws, "CI change", by="human:p")["id"])
+    t["questions"] = [
+        {
+            "id": qid, "text": "Merge the CI change?", "answer": "x", "answered_by": "human:severin",
+            "answered_at": at, "decision": {"action": action}, "action": {"merge": url(n), "head": head},
+            "card": {"kind": "link", "open": url(n), "ok_label": "Merge"},
+        }
+        for qid, (action, at) in (("q9", first), ("q10", second))
+    ]  # fmt: skip
+    tickets.save(ws, t)
+    return t["id"]
+
+
+def test_a_later_send_back_on_the_same_pull_request_ends_an_earlier_merge(ws):
+    """Security review of the 27 Nov train: the person said Merge, then sent the same commit back on a newer
+    card. The queue's own review and merge must not go by the older answer."""
+    tid = _two_cards(
+        ws, 1, f"{1:040d}", ("approve", "2026-11-27T08:00:00Z"), ("send_back", "2026-11-27T09:00:00Z")
+    )
+    assert runner.approved_merges(ws) == {}
+    add(ws, 1, ticket=tid)
+    gh = SaidGitHub({1: {"files": [".github/workflows/ci.yml"]}})
+    r, _ = make(ws, gh, FakeGit(), ask=lambda *a: "ORCH-9")
+    r.run()
+    assert not gh.reviews and not gh.merged and states(ws) == {1: "out"}
+
+
+def test_a_merge_said_after_an_earlier_send_back_still_counts(ws):
+    _two_cards(ws, 1, f"{1:040d}", ("send_back", "2026-11-27T08:00:00Z"), ("approve", "2026-11-27T09:00:00Z"))
+    said = runner.approved_merges(ws)[runner.pr_key(url(1))]
+    assert said["head"] == f"{1:040d}" and said["card"].endswith("q10")

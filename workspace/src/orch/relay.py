@@ -507,6 +507,17 @@ def _directory(root: Path) -> list[dict]:
     return [*d.get("workspaces", []), *d.get("phones", [])]
 
 
+def shown_names(root: Path) -> list[str]:
+    """The names in workspaces.json as orch prints them: the relay sent them, so they are data (R3.2). Control
+    and invisible characters go, line breaks become a space, each is cut to 60 characters."""
+    out = []
+    for w in _directory(root):
+        name = " ".join(clean_untrusted(str(w.get("name") or ""), 60).split())
+        if name:
+            out.append(name)
+    return out
+
+
 def resolve(root: Path, target: str) -> str:
     """ws_/ph_ id, 'phones', or a workspace or phone name from workspaces.json."""
     if re.fullmatch(r"ws_[a-z0-9]{10}|phones|ph_[a-z0-9]{10}", target):
@@ -526,7 +537,7 @@ def resolve(root: Path, target: str) -> str:
             raise Refused(
                 f"{count} {label} are called {target}: {', '.join(h['id'] for h in hits)}. Send to the id."
             )
-    names = [w["name"] for w in _directory(root) if w.get("name")]
+    names = shown_names(root)
     known = " You can message: " + ", ".join(names) + "." if names else ""
     raise Refused(
         f"{target} is not in your list yet: your admin chooses who you can write to on the relay admin page."

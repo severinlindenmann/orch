@@ -882,7 +882,7 @@ def _run_relay(args, root: Path, out) -> None:
             try:
                 who = relay.whoami_quick(root)
                 st["reachable"] = True
-                names = [w["name"] for w in relay._directory(root) if w.get("name")]
+                names = relay.shown_names(root)
                 st["can_write_to"] = names
                 me = who.get("name") if isinstance(who, dict) else None
                 text = f"Connected to {_host(st['url'])}" + (f" as {me}." if me else ".")

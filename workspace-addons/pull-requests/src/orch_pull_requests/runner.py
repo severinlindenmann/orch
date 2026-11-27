@@ -1814,12 +1814,14 @@ def pr_key(url: str) -> str | None:
 
 
 def approved_merges(root: Path) -> dict[str, dict] | None:
-    """{pull request key: {"card": "<ticket key> <question>", "head", "by"}} for every Merge card a person
+    """{pull request key: {card, head, by}} for every pull request whose Merge card a person on this machine
     answered Merge that did not merge it (ORCH-1118: their own pull request, which GitHub wants another login to
-    approve): the queue may merge exactly that commit. None when the tickets cannot be read."""
+    approve): the queue may merge exactly that commit. The newest answer on a pull request's Merge cards decides:
+    a later "send back" (or any other answer) on a card of the same pull request ends an earlier Merge. None when
+    the tickets cannot be read."""
     from orch import history, review, tickets
 
-    out = {}
+    newest: dict[str, tuple[str, dict | None]] = {}
     try:
         rows = tickets.list_all(root)
     except Exception:  # noqa: BLE001 - unreadable tickets: nothing counts as said
@@ -1827,20 +1829,26 @@ def approved_merges(root: Path) -> dict[str, dict] | None:
     for raw in rows:
         t = history.shown_ticket(root, raw)  # answered_by: as proven on this machine
         for q in t.get("questions") or []:
-            if not isinstance(q, dict) or q.get("answer") is None or tickets.taken_back_text(q):
+            if not isinstance(q, dict) or q.get("answer") is None:
                 continue
             u = review.merge_url(q)
             k = pr_key(u) if u else None
+            if not k:
+                continue
             by = str(q.get("answered_by") or "")
             head = (q.get("action") or {}).get("head") if isinstance(q.get("action"), dict) else None
+            said = None
             if (
-                k
+                not tickets.taken_back_text(q)
                 and by.startswith("human:")
                 and (q.get("decision") or {}).get("action") == "approve"
                 and head
             ):
-                out[k] = {"card": f"{t.get('key') or t.get('id')} {q.get('id')}", "head": str(head), "by": by}
-    return out
+                said = {"card": f"{t.get('key') or t.get('id')} {q.get('id')}", "head": str(head), "by": by}
+            at = str(q.get("answered_at") or "")
+            if k not in newest or at >= newest[k][0]:
+                newest[k] = (at, said)
+    return {k: said for k, (_, said) in newest.items() if said}
 
 
 def merge_cards(root: Path) -> dict[str, str] | None:
