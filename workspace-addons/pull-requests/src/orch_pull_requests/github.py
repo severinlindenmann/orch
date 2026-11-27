@@ -61,13 +61,13 @@ class GitHub:
         return frozenset(x["name"] for x in got["failed"]) if got else frozenset()
 
     def own_checks(self, url: str) -> dict | None:
-        """The pull request's own checks as the queue picks it (ORCH-1377): {"failed": [{name, link}],
-        "pending": [name]}; None when GitHub did not answer. gh exits 8 while some still run: still read.
+        """The pull request's own checks as the queue picks it (ORCH-1377): {"failed": [{name, link, state}],
+        "pending": [name], "cancelled": [{name, link}]}; None when GitHub did not answer. gh exits 8 while some still run: still read.
         Only the checks that count (prstate.current, the page's rule too): a check of an older run of a workflow
         whose newer run still goes is pending, never failed (#2411)."""
         from . import prstate
 
-        got = self._run("pr", "checks", url, "--json", "name,bucket,link,workflow,startedAt")
+        got = self._run("pr", "checks", url, "--json", "name,bucket,link,workflow,startedAt,state")
         try:
             rows = json.loads(got.stdout or "")
         except ValueError:
@@ -85,11 +85,20 @@ class GitHub:
         bucket = [("pending" if x.get("replaced") else x["row"].get("bucket"), x["row"]) for x in rows]
         return {
             "failed": [
-                {"name": str(r.get("name") or ""), "link": str(r.get("link") or "")}
+                {
+                    "name": str(r.get("name") or ""),
+                    "link": str(r.get("link") or ""),
+                    "state": str(r.get("state") or "").upper(),
+                }
                 for b, r in bucket
                 if b == "fail"
             ],
             "pending": [str(r.get("name") or "") for b, r in bucket if b == "pending"],
+            "cancelled": [
+                {"name": str(r.get("name") or ""), "link": str(r.get("link") or "")}
+                for b, r in bucket
+                if b == "cancel"
+            ],
         }
 
     def first_failure(self, link: str) -> str:

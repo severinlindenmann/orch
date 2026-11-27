@@ -12,7 +12,7 @@ Every merge into develop goes through the merge queue: it checks pull requests o
 (several together on one group branch), the checks run once, and all of them are merged together on green. One alone
 whose own checks are green is merged directly when develop changed none of its files; otherwise it runs as a group of
 one. Its own checks still running: it waits in line and holds up nobody; red: the queue runs them again once, then
-it leaves naming the failed check and test. A red group is split by what failed (the pull requests that change the
+it leaves naming the failed check and test (only cancelled: it keeps waiting instead). A red group is split by what failed (the pull requests that change the
 failing test or what it imports are checked first; else in halves) and tried again, so the good ones still get
 merged. No
 merge by hand, no merge ahead of the queue. No AI call: a program does the waiting and merging.
