@@ -4,7 +4,7 @@ import re
 import shutil
 from pathlib import Path
 
-from orch import adapters, addons, cli_leave, diag, procs
+from orch import adapters, addons, cli_leave, diag, diag_collect, procs
 
 ROOT = Path(__file__).resolve().parents[2]
 FETCH = re.compile(r"\.(dmg|msi|pkg)\b|setup\.exe|Companion|Invoke-WebRequest|Start-BitsTransfer", re.I)
@@ -36,6 +36,9 @@ def test_doctor_does_not_mind_a_missing_companion(proj, run, monkeypatch):
     )
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")
     monkeypatch.setattr(procs, "launcher_problem", lambda: None)  # the faked orch works (ORCH-2138)
+    monkeypatch.setattr(cli_leave, "_uv_fails", lambda uv: None)  # the faked uv runs
+    plenty = type("U", (), {"free": 10**11, "total": 10**12})()  # never the real (maybe full) disk
+    monkeypatch.setattr(diag_collect.shutil, "disk_usage", lambda p: plenty)
     assert run("init")[0] == 0
     code, out, _ = run("doctor")
     assert code == 0 and "Nothing wrong." in out
