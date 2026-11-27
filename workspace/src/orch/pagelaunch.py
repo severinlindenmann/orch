@@ -61,7 +61,7 @@ def printable_launch_url(root: Path, server: str, base_url: str) -> str:
     in as the person); a test install in a test folder may (the Playwright lane). Single use, PRINTED_LIFE."""
     from orch import tickets
 
-    if tickets.agent_tool() is not None and not is_test_workspace(root):
+    if tickets._helper_tool() is not None and not is_test_workspace(root):
         raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
     why: list = []
     token = write_launch_token(root, server, life=PRINTED_LIFE, why=why)  # the ONE writer (below), single use

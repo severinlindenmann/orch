@@ -23,6 +23,7 @@ from orch import chat_groups as cg
 from orch import relay, runs, tickets
 
 host, grp, member = tcg.host, tcg.grp, tcg.member  # the same fixtures as the group chat tests
+group_run = tcg.group_run
 
 
 def _pending(proj, tid):
@@ -321,7 +322,7 @@ def test_ask_to_add_refuses_a_member_already_in_the_chat(proj, run, rel, chat):
 def test_the_reviewer_never_answers_an_ask_to_add_card(proj, run, rel, chat):
     q = cg.ask_to_add(proj, chat, BANK, "agent:claude")
     qq = next(x for x in tickets.load(proj, chat)["questions"] if x["id"] == q["question"])
-    run("config", "set", "workflow.reviewer_answers", "on")
+    assert run("config", "set", "workflow.reviewer_answers", "on", "--by", "human:test")[0] == 0
     with pytest.raises(Exception, match="waits for the owner|no recommended"):
         tickets.answer_for_owner(proj, chat, qq["id"], tickets.question_digest(qq), "routine")
 
