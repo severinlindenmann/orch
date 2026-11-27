@@ -34,7 +34,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
     x = a.add_parser("uninstall", parents=[common], help="uninstall an add-on")
     x.add_argument("name")
-    x = a.add_parser("list", parents=[common])
+    x = a.add_parser("list", parents=[common], help="the add-ons and whether each is on here")
     x.add_argument("--catalog", action="store_true", help=argparse.SUPPRESS)  # installation choices
     x = a.add_parser("check", parents=[common], help="check an add-on against the add-on contract")
     x.add_argument(

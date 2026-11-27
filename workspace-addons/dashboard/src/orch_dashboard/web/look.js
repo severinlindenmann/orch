@@ -328,7 +328,7 @@
     busy = true; repaint();
     const r = await window.orchAct(op, args);
     busy = false;
-    if (!r.ok) { status = r.text || 'That did not work.'; statusTone = 'bad'; window.orch?.toast(status, 'error'); }
+    if (!r.ok) { status = r.text || 'That did not work. Try again.'; statusTone = 'bad'; window.orch?.toast(status, 'error'); }
     repaint();
     return r;
   }
