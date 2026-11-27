@@ -2006,6 +2006,55 @@ def stop_hidden(root: Path) -> list[str]:
     return done
 
 
+def stop_all(root: Path) -> list[str]:
+    """`orch uninstall` (ORCH-2299): end everything orch started for this workspace: every helper session
+    and run (the hidden Chat helper's and the Manager's too) and the sessions' own background program.
+    Nothing waiting in line is started in its place. The run this command runs inside is never stopped from
+    within. Returns the names of what was stopped (a ticket's key, or "Chat"); never raises."""
+    names: list[str] = []
+    inside = False
+    for rec in records(root):
+        tid = rec.get("ticket")
+        try:
+            if not isinstance(tid, str):
+                continue
+            if _inside_run(rec) or os.environ.get("ORCH_TICKET") == tid:
+                inside = True
+                continue
+            was = runs.state(rec)
+            with runs.locked(root, tid):
+                cur = runs.read(root, tid)
+                if not cur or cur["run"] != rec["run"]:
+                    continue
+                cur["stop_requested"] = tickets.now()
+                runs._write(root, cur)
+            _close(root, cur, interrupt=True)
+            if was != "dead":
+                names.append(_session_name(root, tid))
+        except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+            continue
+    if inside or shutil.which("tmux") is None:
+        return names
+    with contextlib.suppress(Exception):  # sessions without a run record, then the program that held them
+        left = tmux(root, "list-sessions", "-F", "#{session_name}")
+        if left.returncode == 0:
+            for sid in left.stdout.split():
+                name = _session_name(root, sid) if re.fullmatch(r"t_[a-z0-9]+", sid) else "a helper"
+                if name not in names:
+                    names.append(name)
+            tmux(root, "kill-server")
+    return names
+
+
+def _session_name(root: Path, tid: str) -> str:
+    with contextlib.suppress(Exception):
+        if tickets.is_general(root, tid):
+            return "Chat"
+        if tickets.is_manager(root, tid):
+            return "the Manager"
+    return ref(root, tid)
+
+
 def _inside_run(rec: dict) -> bool:
     """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
     stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET

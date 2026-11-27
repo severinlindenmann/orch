@@ -481,6 +481,14 @@ def uninstall(root: Path) -> dict:
         raise Refused("orch is not set up in this folder, so there is nothing to remove.")
     removed: list[str] = []
     harness.check_harness(root)
+    # 0. everything orch started here (ORCH-2299): helper sessions and runs, then the helpers' separate copies
+    from orch import runs_live, worktrees
+
+    stopped = runs_live.stop_all(root)
+    for name in stopped:
+        removed.append(f"Stopped the helper session of {name}")
+    copies = worktrees.leave(root)
+    removed += copies["removed"]
     # 1. background services, then every add-on, newest first
     try:
         for row in services.stop(root):
@@ -549,11 +557,18 @@ def uninstall(root: Path) -> dict:
         if (root / place).parent != root:
             _rmdir_if_empty((root / place).parent)
     kept = [k for k in KEPT if (root / k).exists()]
-    return {"removed": removed, "kept": kept}
+    return {"removed": removed, "kept": kept, "stopped": stopped, "left": copies["kept"]}
 
 
 def _uninstall_text(root: Path, res: dict) -> str:
     out = ["Removed:", *[f"  {r}" for r in res["removed"]]] if res["removed"] else ["Nothing to remove."]
+    if res.get("left"):  # ORCH-2299: what stays outside .orch is named, with the command that removes it
+        out.append("Still there, because it holds work that is not in your project:")
+        for k in res["left"]:
+            where = f" ({k['path']})" if k.get("path") else ""
+            out.append(f"  {k['why'][0].upper()}{k['why'][1:]}{where}.")
+            if k.get("command"):
+                out.append(f"    To remove it, in this folder: {k['command']}")
     out.append(
         f"Kept your tickets and settings in {root / '.orch'}. "
         f"To uninstall orch itself: uv tool uninstall {TOOL}"
