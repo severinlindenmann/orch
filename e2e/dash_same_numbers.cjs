@@ -247,7 +247,9 @@ test('same numbers: every page shows the same count, date and state for the same
         const main = document.querySelector('main');
         const due = [...main.querySelectorAll('*')].find(e => e.children.length === 0 && /^Due$/.test((e.innerText || '').trim()));
         // the first word line; a ticket with a live helper starts with its number ("PIL-2 · Working · ...")
-        const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
+        // '← Tickets' above the name (one top for every page, ORCH-2282) is the way back, not the ticket's state
+        const back = (main.querySelector('.page-back')?.innerText || '').trim();
+        const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && x !== back && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
         return {state: first, due: due ? (due.nextElementSibling || due.parentElement.nextElementSibling || {innerText: ''}).innerText.trim() : ''};
       });
       await page.screenshot({path: path.join(OUT, 'ticket-' + key + '.png')});

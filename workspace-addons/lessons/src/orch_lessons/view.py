@@ -70,7 +70,7 @@ def build(root) -> dict:
         "items": items,
         "empty": {
             "title": "No lessons yet",
-            "text": "Your helper adds a lesson when it learns something the next helper should know.",
+            "text": "Your helper adds a lesson when it learns something the next helper should know. Nothing to do for you.",
         },
     }
     view = {

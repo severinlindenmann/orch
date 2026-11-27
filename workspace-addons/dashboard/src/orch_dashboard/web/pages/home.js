@@ -627,7 +627,9 @@ function backgroundBanner() {
   const names = stoppedServices().map(s => { const a = addons().find(x => x.name === s.addon); const n = a?.dashboard?.label || s.addon; return n.charAt(0).toUpperCase() + n.slice(1); });
   if (!names.length) return null;
   const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0];
-  return h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, list + (names.length > 1 ? ' are' : ' is') + ' not running. Press Start so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start'));
+  // D5 (26 Nov): the same sentence as the add-on's own page, said once on Home (outline: Home keeps one filled button)
+  const start = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, names.length > 1 ? 'Start them' : 'Start ' + names[0]);
+  return pageNotice({what:list + (names.length > 1 ? ' have stopped.' : ' has stopped.'), still:(names.length > 1 ? 'Their' : 'Its') + ' work waits. Your tickets and everything else still work.', action:start, dataKey:'background'});
 }
 // After an automatic update (Settings > About & updates): the new version and what changed, or a plain note that it
 // failed and orch stays on the old version. "Got it" clears it.
@@ -853,10 +855,13 @@ function home() {
       h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')))});
   const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
   if (!anyNeeds && !working.length && !helpers.length) {
-    return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
-      h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
+    // D4 (26 Nov): the master's one empty page: what is missing, one sentence, the first step right there
+    const step = typeof newButton === 'function' ? newButton() : null;
+    return fragment(head, banner, logins.stopped.length ? null : window.UI?.pageEmpty ? window.UI.pageEmpty({title:'All clear', text:'Questions and results to check show up here.', step, dataKey:'empty'})
+      : h('section', {className:'card page-empty', 'data-key':'empty'}, h('h2', {}, 'All clear'), h('p', {}, 'Questions and results to check show up here.'), step),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
-      card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)), changedCard);
+      // D4: a workspace where nothing finished yet is the empty page alone (no "Finished · Nothing finished yet" card)
+      finished.length || all.some(t => t.status === 'done') ? card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)) : null, changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));

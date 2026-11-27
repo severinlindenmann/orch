@@ -2457,22 +2457,23 @@ def test_view_not_connected_says_so(proj, run):
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
     assert code == 0 and "not connected" in v["notice"]
-    assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
-    assert v["blocks"][0]["empty"]["title"] == "Not connected"
+    # D5: one notice, its one button is the header link the dashboard draws in it (RP8: Relay)
+    assert v["header"] == {"link": {"label": "Connect Relay", "to": "app:settings/phone"}}
+    assert v["blocks"][0]["empty"]["title"] == "No messages yet"
+    assert "button" not in v["blocks"][0]["empty"]
     assert v["notice"].startswith("Relay is not connected")
 
 
 def test_view_not_connected_says_relay_and_names_the_settings_tab(proj, run):
-    """RP8: the page says Relay, never Contacts or Phone link, and its button opens the Relay settings."""
+    """RP8: the page says Relay, never Contacts or Phone link; its one button (D5) opens Relay settings."""
     from conftest import turn_on
 
     turn_on(proj, "relay")
     v = json.loads(run("relay", "view", "--json")[1])
-    words = [v["notice"]] + [str(b.get("empty", {})) for b in v["blocks"]]
+    words = [v["notice"], str(v["header"])] + [str(b.get("empty", {})) for b in v["blocks"]]
     assert v["notice"].startswith("Relay ")
     assert not any("Contacts" in w or "Phone link" in w for w in words), words
-    button = v["blocks"][0]["empty"]["button"]
-    assert button == {"label": "Open Relay settings", "to": "app:settings/phone"}
+    assert v["header"]["link"] == {"label": "Connect Relay", "to": "app:settings/phone"}
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):

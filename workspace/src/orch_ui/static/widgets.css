@@ -2922,6 +2922,25 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .swipe-done.attn-end .attn-still{margin:0;color:var(--text)}
 .attn-end-acts{flex-wrap:wrap}
 
+/* One look per page state (ORCH dashboard decisions D4-D6, 26 Nov, owner picked A for each).
+   .page-empty  D4: a page with nothing in it yet: a short line naming what is missing, one sentence what will show up,
+                and the first step right there (the page's own input, or one green button) - or no step at all when
+                the helper fills the page. Left-aligned card at the top of the page, the same on every page.
+   .page-notice D5: when something is wrong: ONE notice right under the page name: what happened (bold), what still
+                works, and one green button (Start Factory, Try again). The page keeps its name and what it can show.
+   .settings-btn D6: an add-on's one Settings button (gear + "Settings", outline), first in the page top's buttons.
+                It opens that add-on's part of Settings. UI.pageEmpty, UI.pageNotice and UI.settingsButton build them. */
+.page-empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s2);padding:var(--card-padding)}
+.page-empty>h2{font-size:var(--fs-3);line-height:1.4;font-weight:600;color:var(--text);margin:0}
+.page-empty>p{margin:0;color:var(--text-muted);max-width:var(--reading-width)}
+.page-empty>.page-empty-step{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s3);width:100%;margin-top:var(--s2)}
+.page-empty>.page-empty-step>textarea,.page-empty>.page-empty-step>input{width:100%}
+.page-notice{align-items:center}
+.page-notice>.grow{flex:1 1 240px;margin:0}
+.page-notice strong{color:var(--text);font-weight:600}
+.page-notice>.btn{flex:none}
+.page-header+.page-notice,.page-heading+.page-notice{margin-top:var(--s4)}
+.settings-btn .ic{width:16px;height:16px}
 /* Pick several and change them at once (25 Nov, ORCH-2034; Tickets list). A checkbox per row (.pick-cell, .row-pick:
    32 px target), a picked row tinted (tr.is-picked), and the bar that stays at the foot of the screen while rows are
    picked (.bulk-bar, UI.bulkBar): "3 selected", the actions as menus that open upwards, Clear. aria-busy while saving. */

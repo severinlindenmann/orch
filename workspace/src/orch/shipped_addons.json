@@ -396,7 +396,7 @@
   "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Projects",
+   "label": "Factory",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -465,7 +465,7 @@
       "self"
      ]
     },
-    "title": "Projects"
+    "title": "Factory"
    }
   ],
   "gitignore": [],
@@ -473,7 +473,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Projects",
+   "label": "Open Factory",
    "path": "/"
   },
   "recommended": false,
@@ -630,7 +630,8 @@
   "dashboard": {
    "icon": "target",
    "label": "Live",
-   "order": 20
+   "order": 20,
+   "subtitle": "Watch your helpers work and step in when one needs you."
   },
   "description": "Every helper session live: watch them work, answer their questions, send them a message.",
   "docs": "docs.json",
@@ -830,7 +831,8 @@
    "icon": "book",
    "label": "Lessons",
    "order": 50,
-   "place": "settings"
+   "place": "settings",
+   "subtitle": "What helpers learned here, in one list."
   },
   "description": "Helpers remember what they learned here; you see, edit or delete it in one list.",
   "docs": "docs.json",

@@ -292,7 +292,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{lastCards=cards;const all=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
   if(round&&!dfNow())round=null;lastItems=all;const items=round?all.filter(i=>round.ids.has(i.id)):all;drawAttn(all);
-  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.',...(typeof o.empty==='function'?o.empty()||{}:{})}));waitCount(0);if(o.onChange)o.onChange(null);return}
+  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren((UI.pageEmpty||(e=>UI.state({kind:'empty',...e})))({title:'Nothing waits for you',text:'New cards appear here when a helper needs you.',...(typeof o.empty==='function'?o.empty()||{}:{})}));waitCount(0);if(o.onChange)o.onChange(null);return}
   if(!items.length)return;/* everything answered here: keep the summary */
   const df=dfNow(),dfFlip=df!==dfDrawn;/* ORCH-2182: the switch changed (or the settings came after the first draw): draw again */
   if(deck){const have=deck.items.filter(i=>!deck.answers[i.id]).map(sig).sort().join('|');if(!force&&!dfFlip&&have===items.map(sig).sort().join('|'))return;

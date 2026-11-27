@@ -8,6 +8,10 @@ import time
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from . import poll, service, settings, store
+from . import prread as gh
+
+# D5: the notice when GitHub is not set up or not signed in (no command, nothing about "this computer")
+NOT_CONNECTED = "Pull requests is not connected to GitHub yet. Ask your helper to connect GitHub once, then press Try again."
 
 REPOS_SHOWN = 8  # kept for older callers; the page shows one table of every open pull request
 MOST_ROWS = 100
@@ -624,6 +628,13 @@ def build(
         view["notice_tone"] = "warn"
         view["button"] = {"label": "Start reading", "action": {"op": "addon.start"}}
     elif errors:
-        view["notice"] = errors[0]
-        view["notice_tone"] = "bad"
+        # D5 (26 Nov): the page's one notice says what happened and what to do, never a command to type or "this
+        # computer" (the dashboard is used from anywhere); the helper can connect GitHub, Try again reads it anew.
+        if errors[0] in (gh.NO_GH, gh.NOT_SIGNED_IN):
+            view["notice"] = NOT_CONNECTED
+            view["notice_tone"] = "warn"
+        else:
+            view["notice"] = errors[0]
+            view["notice_tone"] = "bad"
+        view["button"] = {"label": "Try again", "action": {"op": "addon.refresh"}}
     return view

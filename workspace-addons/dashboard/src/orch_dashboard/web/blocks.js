@@ -163,7 +163,14 @@ const OrchBlocks = (() => {
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
     // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
+    // D4 (26 Nov): the master's one empty page (UI.pageEmpty): what is missing, one sentence, the first step right there.
     let d;
+    if (typeof window !== 'undefined' && window.UI && window.UI.pageEmpty) {
+      d = window.UI.pageEmpty({title: e.title, text: e.text}); d.classList.add('blk-empty');
+      const x = e.button && shownLink(e.button.to) ? ['button', 'btn primary sm'] : e.link && shownLink(e.link.to) ? ['link', 'btn ghost sm'] : null;
+      if (x) { const a = linked(x[1], e[x[0]].to, [e[x[0]].label]); a.className = x[1]; const step = el('div', 'page-empty-step'); step.append(a); d.append(step); }
+      return d;
+    }
     if (typeof window !== 'undefined' && window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
     else { d = el('div', 'empty blk-empty'); const mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true'); d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text)); }
     for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
@@ -855,6 +862,9 @@ const OrchBlocks = (() => {
     opts = options || {};
     const root = document.createDocumentFragment();
     let stats = null, pair = null, settings = null;
+    // A view that is one empty list is an empty page: the empty page alone, never a box in a box naming the page twice (D4).
+    const only = arr(blocks).filter(b => b && Object.prototype.hasOwnProperty.call(draw, b.type));
+    if (only.length === 1 && only[0].type === 'list' && !arr(only[0].items).length && only[0].empty && !only[0].above) { root.append(emptyState(only[0].empty)); return root; }
     for (const b of arr(blocks)) {
       const f = b && Object.prototype.hasOwnProperty.call(draw, b.type) ? draw[b.type] : null;
       if (!f) continue;

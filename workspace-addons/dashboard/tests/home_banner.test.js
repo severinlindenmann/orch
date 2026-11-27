@@ -11,6 +11,7 @@ function page(services, snapshot = false) {
   const c = vm.createContext({
     state: {services}, snapshot, h: el, array: v => Array.isArray(v) ? v : [],
     addons: () => [{name: 'sync', dashboard: {label: 'Sync'}}, {name: 'automation'}],
+    pageNotice: ({what, still, action, dataKey}) => el('div', {className: 'banner page-notice attn', 'data-key': dataKey}, el('p', {className: 'grow'}, el('strong', {}, what), ' ' + still), action),
   });
   vm.runInContext(part + '\nthis.banner = backgroundBanner;', c);
   return c.banner();
@@ -23,9 +24,13 @@ test('owner feedback 14 Nov: a service that is off on purpose (Sync off) shows n
 
 test('the banner names what is not running and offers Start', () => {
   const b = page([{addon: 'sync', running: false}, {addon: 'automation', running: false}, {addon: 'dashboard', running: true}]);
-  assert.match(text(b), /^Sync and Automation are not running\./);
+  // D5: the same sentence as the add-on's own page, in the one notice
+  assert.match(text(b), /^Sync and Automation have stopped\. Their work waits\. Your tickets and everything else still work\./);
   assert.equal(b.kids.at(-1).props['data-action'], 'start');
-  assert.match(text(page([{addon: 'automation', running: false}])), /^Automation is not running\./);
+  assert.equal(text(b.kids.at(-1)), 'Start them');
+  const one = page([{addon: 'automation', running: false}]);
+  assert.match(text(one), /^Automation has stopped\. Its work waits\./);
+  assert.equal(text(one.kids.at(-1)), 'Start Automation');
 });
 
 test('a shared read-only copy has no Start button', () => {

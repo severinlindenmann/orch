@@ -309,7 +309,8 @@ function liveWallBody() {
   if (view === 'wait') return h('div', {className:'wall-tiles', 'data-key':'wall-wait', 'aria-busy':'true'},
     h('p', {className:'sr-only', role:'status'}, 'Loading the sessions…'), [1, 2, 3].map(() => h('div', {className:'skeleton sk-card', 'aria-hidden':'true'})));
   if (view === 'error') return liveWallNote('wall-error', 'The sessions did not load', 'orch did not answer just now. It tries again by itself.', 'error', 'Try again', 'data-wall-retry');
-  if (view === 'empty') return liveWallNote('wall-empty', 'No sessions yet', 'A session shows here as soon as a helper starts work on a ticket.', 'empty');
+  if (view === 'empty') return window.UI?.pageEmpty ? window.UI.pageEmpty({title:'No sessions yet', text:'A session shows here as soon as a helper starts work on a ticket.', dataKey:'wall-empty'})
+    : liveWallNote('wall-empty', 'No sessions yet', 'A session shows here as soon as a helper starts work on a ticket.', 'empty');
   if (view === 'nomatch') return liveWallNote('wall-nomatch', 'No session matches “' + ui.f.trim() + '”', 'Try another word, or show all sessions again.', 'empty', 'Clear filter', 'data-wall-clear');
   return h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
     // with a filter, a band without a match is left out: its "nothing here" line would not be true (ORCH-2045)

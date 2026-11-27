@@ -228,7 +228,7 @@ const browseTitle = r => { const t = typeof ticketOf === 'function' ? ticketOf(r
 const browseToday = sec => new Date(sec * 1000).toDateString() === new Date().toDateString();
 const browseClock = sec => (window.UI?.clock ? window.UI.clock(new Date(sec * 1000)) : '');
 function browserListPage(a) {
-  const doc = browseList.doc, head = heading(addonTitle(a), a?.dashboard?.subtitle || '', {});
+  const doc = browseList.doc, head = heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:typeof addonSettingsHref === 'function' ? addonSettingsHref(a?.name) : null});
   const page = (...body) => fragment(head, h('div', {className:'stack', 'data-browse-page':'', 'data-key':'browse-page'}, ...body));
   if (!doc && browseList.failed) return page(stateNote('The browsers did not load', 'The dashboard could not read them just now. It tries again on its own.', 'error',
     {label:'Try again', onClick:() => { browseList.failed = false; render(); browseListLoad(); }}));
@@ -244,7 +244,8 @@ function browserListPage(a) {
   if (ended.length) body.push(h('section', {className:'card pad stack', 'data-key':'browse-ended'}, h('h2', {}, 'Ended today', h('span', {className:'muted'}, ' · ' + ended.length)),
     h('div', {className:'stack'}, ended.map(r => h('p', {'data-key':'browse-ended-' + r.ticket},
       h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r)), h('span', {className:'meta'}, ' · ended at ' + browseClock(r.ended)))))));
-  if (!body.length) body.push(stateNote('No helper is using a browser right now', 'When a helper opens a web page for a ticket, you can watch it here.'));
+  if (!body.length) body.push(window.UI?.pageEmpty ? window.UI.pageEmpty({title:'No helper is using a browser right now', text:'When a helper opens a web page for a ticket, you can watch it here.', dataKey:'browse-empty'})
+    : stateNote('No helper is using a browser right now', 'When a helper opens a web page for a ticket, you can watch it here.'));
   return page(body);
 }
 

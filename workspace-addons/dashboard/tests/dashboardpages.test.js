@@ -611,7 +611,7 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   // the open phone menu is the whole screen, with room for the bottom bar after its last row; any page change closes it
   assert.match(phoneBlock, /\.shell:has\(>\.sidebar\[data-open=true\]\)>div>\.page\{display:none\}/);
   assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
-  assert.match(source, /addEventListener\('hashchange', async \(\) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
+  assert.match(source, /addEventListener\('hashchange', async (?:\(\)|event) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
   assert.match(source, /closest\?\.\('#tabbar a'\)\) setMenu\(false\)/);
   // the icon rail scrolls its list only when it does not fit above the foot
   assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
