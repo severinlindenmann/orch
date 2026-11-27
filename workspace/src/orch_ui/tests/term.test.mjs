@@ -507,3 +507,28 @@ test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings
   assert.equal(a.hidden, true);
   assert.equal(byKey(live().ui.el, 'term-settings'), null);  // no address given: no link
 });
+
+test('ORCH-1695: no screen is one line and one next step: the bar does not say it again, the box shrinks', () => {
+  const steps = [];
+  const ui = T({label: 'ORCH-4', next: {text: 'Show the chat', attrs: {'data-live-view': 'chat'}, run: s => steps.push(s)}});
+  ui.end('none');
+  const bar = byClass(ui.el, 'term-bar'), go = byKey(ui.el, 'term-next');
+  const note = ui.el.find(n => n.tag === 'p' && String(n.className).includes('term-state'));
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, T.WORDS.none);
+  assert.equal(bar.hidden, true, 'the same line is not said twice');
+  assert.equal(ui.el.dataset.note, '');
+  assert.equal(go.hidden, false);
+  assert.equal(go.textContent, 'Show the chat');
+  assert.equal(go.getAttribute('data-live-view'), 'chat');
+  go.click();
+  assert.deepEqual(steps, ['none']);
+  ui.hello({typing_allowed: true}); ui.screen(SCREEN);
+  assert.equal(bar.hidden, false);
+  assert.equal(go.hidden, true);
+  assert.equal(ui.el.dataset.note, undefined);
+  const plain = T({label: 'Plain terminal', plain: true});
+  plain.end('none');
+  assert.equal(plain.el.find(n => n.tag === 'p' && String(n.className).includes('term-state')).textContent, 'This terminal is not running right now.');
+  assert.equal(byKey(plain.el, 'term-next'), null, 'no next step given: no button');
+});

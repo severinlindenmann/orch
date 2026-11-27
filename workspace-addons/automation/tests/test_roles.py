@@ -165,7 +165,7 @@ def test_file_open_state_opened_unopened_unknown(ws):
     roles.result(ws, t["id"], "x", "ok", files=["old.png", "new.png", "seen.png"])
     tot = roles.totals(ws, t, {})
     assert tot["files"] == {"opened": 1, "unopened": 1, "unknown": 1}
-    assert view.files_words(tot) == "1 unopened, 1 unknown"
+    assert view.files_words(tot) == "1 not opened, 1 unknown"
 
 
 def test_grouped_scripts_count_per_script(ws):

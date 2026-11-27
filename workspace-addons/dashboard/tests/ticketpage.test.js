@@ -713,8 +713,8 @@ test('the ticket keeps saying that the plan was asked for first (ORCH-248)', () 
   assert.match(say(c.ticketPlanFirstLine({id:'t_1', status:'active', plan_first:true, questions:[{text:'Plan ready: steps', answer:'Yes'}]}, false)), /You have approved it/);
 });
 test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
-  const start = source.indexOf('const PREPARE_STATES'), end = source.indexOf('\nconst taskTitle', start);
-  const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
+  const start = source.indexOf('function ticketPaused'), end = source.indexOf('\nconst taskTitle', start);
+  const ctx = {questions:() => [], time:x => x, clean:x => x, array:v => Array.isArray(v) ? v : [], window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
   vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
   const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};
   assert.match(ctx.ticketStripModel(asked, null, true).sentence, /^Sent back\./);

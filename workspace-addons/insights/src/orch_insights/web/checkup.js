@@ -72,7 +72,9 @@
     // 4 times" above "Times helpers worked 5"); the line says only what the check found
     const bits = [];
     if (last.found !== null) bits.push(plural(last.found, 'proposal'));
-    return [`Last health check: ${when(last.at)}`, ...bits].join(' · ');
+    // ORCH-1694: only Run a health check writes this time (a weekly run does not), so beside a weekly switch that is
+    // off it reads as that switch's run; say whose run it was
+    return [`Last health check (run by hand): ${when(last.at)}`, ...bits].join(' · ');
   }
 
   function weeklySwitch() {
@@ -92,7 +94,7 @@
     const section = node('div', undefined, 'card-h card-h-split');
     const title = node('div', undefined, 'grow');
     title.append(node('h2', 'Health check'), node('p', lastLine(), 'meta'));
-    const run = node('button', view.running ? 'Checking…' : 'Run a health check', 'btn primary');
+    const run = node('button', view.running ? 'Checking…' : 'Run a health check', 'btn');  // starts a paid helper: not the page's main action (ORCH-1694)
     run.type = 'button';
     run.disabled = busy || view.running;
     run.addEventListener('click', () => click('Starting…', () => act('checkup.start', {}), result => {

@@ -17,19 +17,19 @@ function node(tag) {
     }};
 }
 
-async function run(status) {
+async function run(status, body = null) {
   const ids = {};
   const document = {
     documentElement: {dataset: {prefix: ''}},
     getElementById: id => ids[id] || (ids[id] = node(id)),
     createElement: node,
   };
-  const fetch = async () => ({ok: false, status, json: async () => { throw new Error('not json'); }});
+  const fetch = async () => body ? {ok: true, status: 200, json: async () => body} : {ok: false, status, json: async () => { throw new Error('not json'); }};
   const ctx = vm.createContext({document, fetch, addEventListener() {}, location: {pathname: '/', hash: ''},
     AbortSignal: {timeout: () => undefined}, Node: Object, window: {}, decodeURIComponent});
   vm.runInContext(SRC, ctx);
   await new Promise(r => setTimeout(r, 20));
-  return ids.view.text;
+  return body ? ids : ids.view.text;
 }
 
 for (const status of [401, 403]) {
@@ -45,4 +45,17 @@ test('a server error keeps the reload error', async () => {
   const text = await run(500);
   assert.match(text, /can’t be shown right now/);
   assert.match(text, /Reload the page/);
+});
+
+// ORCH-1697: "Add a part" showed twice on Home (the heading's link and the tile)
+const texts = n => typeof n === 'string' ? [n] : [n.textContent, ...n.children.flatMap(texts)];
+test('home with parts says Add a part once: the tile, not the heading link too', async () => {
+  const ids = await run(200, {parts: [{part: 'notes', label: 'Notes', glance: 'x'}], needs_you: [], activity: [], ways: []});
+  assert.equal(texts(ids.view).filter(t => t === 'Add a part').length, 1, 'the tile is the one Add a part');
+  assert.equal(ids['add-link'].hidden, true);
+});
+test('home with nothing added keeps the heading link: the first-note card points to it', async () => {
+  const ids = await run(200, {parts: [], needs_you: [], activity: [], ways: []});
+  assert.equal(ids['add-link'].hidden, false);
+  assert.ok(!texts(ids.view).includes('Add a part'));
 });

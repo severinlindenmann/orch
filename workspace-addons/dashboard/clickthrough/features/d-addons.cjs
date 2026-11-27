@@ -15,6 +15,6 @@ module.exports = {
     await act('addon.set', () => sw().click());
     await reload();
     must((await sw().innerText()).trim() === 'Off', 'Publish is not off after a reload');
-    must((await text()).includes('Installed add-ons'), 'the add-ons list is missing');
+    must(await page.locator('#settings-panel-addons h2', {hasText:/^Add-ons$/}).count() > 0, 'the add-ons list is missing');
   },
 };
