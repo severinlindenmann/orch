@@ -3,8 +3,14 @@ crash, and `orch ticket list` / `orch needs` answer the same as reading every fi
 
 import json
 import os
+import time
 
 from orch import history, needs, reads, ticketindex, tickets
+
+# File times move in kernel ticks: 4 ms on a Linux kernel with HZ=250 and no fine-grained times
+# (before 6.13), as on the CI edge runners. A test that changes a file and expects a new time
+# waits one tick first; a person's hand edit never comes within milliseconds of orch's own write.
+_TICK = 0.05
 
 
 def _new(run, title, *extra):
@@ -186,6 +192,7 @@ def test_in_place_edit_with_time_set_back_is_seen(proj, run):
     st = p.stat()
     t = json.loads(p.read_text(encoding="utf-8"))
     t["title"] = "Invoice export"[::-1]
+    time.sleep(_TICK)  # so the change time can move
     with open(p, "r+", encoding="utf-8") as f:  # same file, same size
         f.write(json.dumps(t, indent=2, ensure_ascii=False) + "\n")
         f.truncate()
@@ -416,6 +423,7 @@ def test_hidden_chat_ticket_stays_out_of_git_through_the_index(proj, run):
     run("init")
     _new(run, "Invoice export")
     assert harness._general_lines(proj) == []
+    time.sleep(_TICK)  # so the folder's time can move
     gid = tickets.ensure_general(proj, "human:test")
     assert harness._general_lines(proj) == [f"tickets/{gid}.json"]
     assert f"tickets/{gid}.json" in (proj / ".orch" / ".gitignore").read_text(encoding="utf-8")
