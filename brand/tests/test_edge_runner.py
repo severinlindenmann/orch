@@ -552,3 +552,9 @@ def test_the_job_home_git_check(tmp_path, have, ok):
     env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
     r = subprocess.run(["bash", "-c", "set -eu\n" + textwrap.dedent(check)], env=env, capture_output=True, text=True)
     assert (r.returncode == 0) is ok, r.stdout + r.stderr
+
+
+def test_loop_counts_only_rounds_without_a_job_as_failed():
+    """A short job is a good round: only a runner that ended fast without a job backs off (ORCH-1932)."""
+    text = (ROOT / "scripts" / "edge-runner" / "runner-loop.sh").read_text()
+    assert '[ -z "$job0" ] && [ $(( $(date +%s) - t0 )) -lt 60 ]' in text
