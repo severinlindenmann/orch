@@ -32,7 +32,13 @@ PR = "https://github.com/acme/app/pull/12"
             {},
             "choice",
         ),
-        ({"kind": "draft", "preview": {"type": "compare"}}, {}, "before_after"),
+        ({"kind": "draft", "preview": {"type": "compare", "before": {"type": "img"}}}, {}, "before_after"),
+        # ORCH-2316: old and new wording side by side is Changed words, not Before and after
+        (
+            {"kind": "draft", "preview": {"type": "compare", "before": {"type": "doc"}, "after": {}}},
+            {},
+            "changed_words",
+        ),
         ({"kind": "draft", "preview": {"type": "img"}}, {}, "pictures"),
         ({"kind": "draft", "preview": {"type": "doc", "paras": ["x"]}}, {}, "document"),
         ({"kind": "draft", "preview": {"type": "doc", "diff": [["-", "a"]]}}, {}, "changed_words"),
@@ -275,3 +281,12 @@ def test_propose_mode_skips_the_second_look(proj, run, monkeypatch):
         lookreview, "tend", lambda *a, **k: pytest.fail("the second look accepts: off in propose")
     )
     assert reviewer.run(proj)["second_look"] == []
+
+
+def test_list_groups_use_the_approved_draft_words_and_run_it_sits_with_try_it_yourself():
+    """ORCH-2316 (R2 A, draft r2-a): Holds up work now, Put it live, Try it yourself, Look at the result."""
+    assert list(cardkinds.LANES.values())[:4] == [
+        "Holds up work now", "Put it live", "Try it yourself", "Look at the result"]  # fmt: skip
+    assert cardkinds.look({"kind": "run", "run": {"class": "orch"}})["lane"] == "help"
+    assert cardkinds.look({"kind": "run", "run": {"class": "login"}})["lane"] == "help"
+    assert cardkinds.look({"kind": "run", "run": {"class": "orch"}})["name"] == "Run it"

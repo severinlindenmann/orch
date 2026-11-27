@@ -697,3 +697,15 @@ test('ORCH-2184: 5 cards or fewer, or the switch off: no tiles, the deck as toda
   assert.equal(off.attn().hidden, true);
   assert.equal(off.decks.at(-1).items.length, 7);
 });
+
+test('ORCH-2316: the groups use the draft words, a card keeps its kind and the open parts of a result', () => {
+  const {UI} = load();
+  assert.equal(Object.values(UI.review.LANES).slice(0, 4).join('|'), 'Holds up work now|Put it live|Try it yourself|Look at the result');
+  const live = UI.review.mapCard(card('l', {card: {kind: 'link', title: 'Release', ok_label: 'Merge'}, card_kind: {family: 'click', kind: 'put_live', name: 'Put it live', lane: 'click'}}), fakeApi([[]]), NOW);
+  assert.equal(live.cardKind, 'put_live'); assert.equal(live.laneName, 'Put it live');
+  const run = UI.review.mapCard(card('r', {card: {kind: 'run', title: 'Sign in'}}), fakeApi([[]]), NOW);
+  assert.equal(run.lane, 'help', 'a plain run card sits with Try it yourself');
+  const res = UI.review.mapCard(card('c', {card: {kind: 'check', title: 'x', blocked: 'open', open_parts: [{asked: 'Three widths', got: 'two'}, {asked: 5}]}}), fakeApi([[]]), NOW);
+  assert.equal(JSON.stringify(res.openParts), JSON.stringify([{asked: 'Three widths', got: 'two'}]));
+  assert.equal(UI.review.laneOf({card_kind: {name: 'Question', kind: 'question', lane: 'holds_up'}}), 'holds_up');
+});
