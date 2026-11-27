@@ -61,7 +61,7 @@ def test_quarantine_runs_the_clock_suites_and_only_the_quarantined_click_through
 
 
 def test_the_runner_and_the_release_keeper_know_the_quarantine():
-    for name in ("a-board-families.cjs", "f-sync-page.cjs", "q-automation-repeats.cjs"):
+    for name in ("a-board-families.cjs", "f-sync-page.cjs", "q-automation-repeats.cjs", "p-looks-good-cases.cjs", "s-role-page.cjs"):
         assert f"'{name}': 'ORCH-" in RUNNER, name
     keeper = (ROOT / "workspace" / "src" / "orch" / "releasekeeper.py").read_text()
     assert 'QUARANTINE_WORKFLOW = "quarantine"' in keeper and 'QUARANTINE_FILE = "quarantine.yml"' in keeper

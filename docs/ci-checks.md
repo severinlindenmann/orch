@@ -144,8 +144,9 @@ late or did not come (ORCH-454).
 ## Quarantine (ORCH-2363)
 
 Owner, 27 Nov: the merge queue was red 756 of 840 minutes because of flaky checks, so they left every required set
-until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and three click-throughs
-(`a-board-families`, `f-sync-page`, `q-automation-repeats`: `QUARANTINED` in
+until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and five click-throughs
+(`a-board-families`, `f-sync-page`, `q-automation-repeats`, and since the 27 Nov train `p-looks-good-cases` and
+`s-role-page`, which time out when their lane is slow late in a run, ORCH-2372: `QUARANTINED` in
 `workspace-addons/dashboard/clickthrough/run.cjs`, each with the ticket that fixes it). `ci.yml` no longer calls
 `clock.yml`, and a default click-through run (pull request, queue group, develop, release) leaves the quarantined
 ones out; `--only <name>` still runs one (the light job does so for a click-through a pull request changes).

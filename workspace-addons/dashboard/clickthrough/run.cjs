@@ -489,6 +489,10 @@ const QUARANTINED = {
   'a-board-families.cjs': 'ORCH-2153',
   'f-sync-page.cjs': 'ORCH-2363',
   'q-automation-repeats.cjs': 'ORCH-2363',
+  // the two that time out when their lane is slow late in a run (45 s and 30 s alone, over 180 s there): they failed
+  // their first try in nearly every run on develop too and, with one more, stopped every second try (group #3416)
+  'p-looks-good-cases.cjs': 'ORCH-2372',
+  's-role-page.cjs': 'ORCH-2372',
 };
 /** No second try starts after this long, and every second try must end by RUN_END_MS (the CI job stops at 15
  *  minutes, its setup takes about one): a second try gets only the time that is left, so a slow first round (run

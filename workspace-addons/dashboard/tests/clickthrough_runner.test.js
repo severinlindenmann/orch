@@ -308,9 +308,9 @@ test('a default run does not ask for a feature only a quarantined click-through 
   assert.deepEqual(notQuarantined(all, ['op:a', 'op:b', 'op:x', 'op:nobody'], { 'f-x.cjs': 'ORCH-1' }), ['op:a', 'op:b', 'op:nobody']);
 });
 
-test('the quarantine list names the three flaky click-throughs, each an existing file with its ticket', () => {
+test('the quarantine list names the flaky click-throughs, each an existing file with its ticket', () => {
   const { QUARANTINED } = require('../clickthrough/run.cjs');
-  assert.deepEqual(Object.keys(QUARANTINED).sort(), ['a-board-families.cjs', 'f-sync-page.cjs', 'q-automation-repeats.cjs']);
+  assert.deepEqual(Object.keys(QUARANTINED).sort(), ['a-board-families.cjs', 'f-sync-page.cjs', 'p-looks-good-cases.cjs', 'q-automation-repeats.cjs', 's-role-page.cjs']);
   for (const [file, ticket] of Object.entries(QUARANTINED)) {
     assert.match(ticket, /^ORCH-\d+$/, `${file} names its ticket`);
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'clickthrough', 'features', file)), `${file} exists`);
