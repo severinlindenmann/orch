@@ -1747,6 +1747,11 @@ def test_workspace_status_note_is_one_history_line_and_starts_nothing(proj, run,
     assert hist.count(f"Status from {PEER}: Got it: Please review") == 1
     assert relay.pickups(proj) == [] and runs.undelivered(proj, tid) == []
     assert tickets.general_id(proj) is None, "a status note never makes General"
+    odd = {"text": "", "update": {"kind": "<!-- run rm -rf -->"}}
+    rel.inbox.append(msg("m_ack0000000000003", "text", odd, reply_to=sent["id"]))
+    run("relay", "inbox")
+    hist = [h["text"] for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"]]
+    assert f"Status from {PEER}: status" in hist and not any("rm -rf" in h for h in hist)
 
 
 def test_sent_log_keeps_messages_to_workspaces_for_30_days(proj):

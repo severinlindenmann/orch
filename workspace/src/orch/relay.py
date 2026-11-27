@@ -3873,7 +3873,9 @@ def _note_peer_status(root: Path, msg: dict) -> tuple[str, str | None]:
         return "a status note, for no ticket here", None
     tid = hit[0]
     said = " ".join(clean_untrusted(str(msg["body"].get("text") or ""), 400).split())[:200]
-    line = f"Status from {who}: {said}" if said else f"Status from {who}: {_update_kind(msg['body'])}"
+    kind = _update_kind(msg["body"])
+    label = kind if kind in ("ack", "working", "note") else "status"  # a known word only, never their text
+    line = f"Status from {who}: {said}" if said else f"Status from {who}: {label}"
 
     def op(t):
         r = t.setdefault("ext", {}).setdefault("relay", {})
