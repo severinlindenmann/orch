@@ -12,11 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from orch import history, review, ticketindex, tickets
 from orch.errors import Refused
+
+_EXT_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}")  # an add-on name as `ticket list --ext` is asked here
 
 
 class NotHere(LookupError):
@@ -158,6 +161,14 @@ def answer(root: Path, argv: list[str]):
         return _plain(root, ticket_rows(root, all_=True))
     if a == ["ticket", "list"]:
         return _plain(root, ticket_rows(root))
+    if (
+        a[:2] == ["ticket", "list"]
+        and a[-2:-1] == ["--ext"]
+        and a[2:-2] in ([], ["--all"])
+        and _EXT_NAME.fullmatch(a[-1])
+    ):  # an add-on's own tickets (Factory's page and watcher): at 10,000 tickets about 800, several MB
+        # through the read worker's pipe and parsed twice took about a second (ORCH-2288)
+        return _plain(root, ticket_rows(root, all_=a[2:-2] == ["--all"], ext=a[-1]))
     if a[:2] == ["ticket", "show"] and len(a) == 3 and tickets._ID_RE.fullmatch(a[2]):
         from orch.cli import visible
 
