@@ -43,8 +43,8 @@ module.exports = {
     await act('ticket.model', () => page.getByLabel('Helper strength').first().selectOption('opus'));
     await add('kind');
     await act('ticket.kind', () => page.getByLabel('Kind', { exact: true }).first().selectOption('small_bug'));
-    await act('ticket.patch', () => pick(() => page.getByLabel('More ticket actions').click({ timeout: 5000 }),
-      page.getByRole('menuitem', { name: 'Working' }), 'More ticket actions > Working'));
+    await act('ticket.patch', () => pick(() => page.locator('summary[data-key^="ticket-actions-"]').click({ timeout: 5000 }),
+      page.getByRole('menuitemradio', { name: 'Working', exact: true }), 'Actions > Move to > Working'));
 
     await add('links');   // + Add opens the reference dialog
     const ref = page.locator('dialog[open]');
