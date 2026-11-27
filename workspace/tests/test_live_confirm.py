@@ -176,3 +176,27 @@ def test_dash_lines_inside_a_boxed_dialog_or_in_the_wrong_place_are_unclear():
     # newer look: the second line must close the command right before the hook line, not sit inside it
     moved = OWNER_SCREEN.replace(' "import json,sys;', " " + "╌" * 40 + '\n "import json,sys;', 1)
     assert runs_live.confirm_prompt(moved)["unclear"] is True
+
+
+def _long(screen: str, first_row: str, rows: int = 71) -> str:
+    """The screen with the command grown to `rows` more rows, so the dialog is taller than the rows read."""
+    assert first_row in screen
+    return screen.replace(first_row, first_row + "".join(f"\n echo padding {n};" for n in range(rows)), 1)
+
+
+def test_a_command_longer_than_the_rows_read_is_unclear_never_a_blind_allow():
+    # ORCH-2352: the title and the top border are above the rows read; the hook line is still among them.
+    # Before, this gave command None, reason None and unclear False: Allow once with nothing to read.
+    assert runs_live.CONFIRM_TAIL < 71
+    p = runs_live.confirm_prompt(_long(OWNER_SCREEN, "\n S=/private/tmp/claude-502/"))
+    assert p is not None and p["question"] == "Do you want to proceed?"
+    assert p["unclear"] is True and p["command"] is None and p["reason"] is None
+    # the same without a hook: a boxed permission prompt whose top is out of the rows read
+    p = runs_live.confirm_prompt(_long(PERMISSION, "│   gh pr merge 105 --squash"))
+    assert p is not None and p["unclear"] is True and p["command"] is None
+    # a dialog without a title that is seen whole is still answered (a file edit names its file)
+    edit = PERMISSION.replace("│ Bash command", "│ Edit file").replace(
+        "Do you want to proceed?", "Edit a.py?"
+    )
+    p = runs_live.confirm_prompt(edit)
+    assert p is not None and p["unclear"] is False and p["command"] is None and p["yes"] == "1"
