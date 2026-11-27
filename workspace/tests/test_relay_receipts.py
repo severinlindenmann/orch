@@ -300,11 +300,11 @@ def test_a_late_answer_tells_the_helper_to_take_the_question_back(proj, run, rel
     (q,) = _no_answer_questions(proj, tid)
     assert q.get("answer") is None  # still the person's or the helper's to settle
     queued = runs._pending_read(proj, tid)[-1]["text"]
-    line = f'orch ask {tid} --take-back {q["id"]} "Reports answered"'
+    line = f'orch ask {tid} --take-back {q["id"]} "The answer came"'
     assert line in queued
-    assert run("ask", tid, "--take-back", q["id"], "Reports answered", "--by", "agent:claude")[0] == 0
+    assert run("ask", tid, "--take-back", q["id"], "The answer came", "--by", "agent:claude")[0] == 0
     (q,) = _no_answer_questions(proj, tid)
-    assert q["taken_back"]["reason"] == "Reports answered" and relay.no_answer(proj) == []
+    assert q["taken_back"]["reason"] == "The answer came" and relay.no_answer(proj) == []
 
 
 def test_a_message_still_in_the_outbox_is_not_a_missing_answer(proj, run, rel, new_ticket, monkeypatch):

@@ -4090,7 +4090,8 @@ def _route_peer_text(root: Path, msg: dict) -> tuple[str, str]:
         # done from a received message (a rule test guards that): the helper is told the line.
         text += (
             f"\nYour person was asked about the missing answer ({qid}). It no longer matters: "
-            f'orch ask {tid} --take-back {qid} "{who} answered"'
+            # a fixed reason: no name or word from outside ever stands in a line a helper may run
+            f'orch ask {tid} --take-back {qid} "The answer came"'
         )
     if general:
         text += (
