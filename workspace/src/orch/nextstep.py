@@ -128,6 +128,8 @@ def _run_status(data, args) -> str:
         return f'send it a message if it needs one: orch run send {n} "<text>"'
     if d.get("state") == "maybe-stale":
         return f"orch run start {n} --take-over"
+    if place := d.get("line"):  # ORCH-2296: a start that waits in line; another start is refused the same way
+        return "see the line: orch run list" if place.get("watched") else "start the line: orch run tend"
     return f"orch run start {n}"
 
 

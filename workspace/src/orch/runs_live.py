@@ -2295,10 +2295,11 @@ def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
     return min(asked)
 
 
-def waiting_line(root: Path) -> list[tuple[str, str]]:
+def waiting_line(root: Path, closed: list[str] | None = None) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
     low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
-    then the oldest first. [(ticket id, priority)]"""
+    then the oldest first. [(ticket id, priority)]. A Done or Dropped ticket is never in it; `closed`
+    collects those."""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -2306,6 +2307,11 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if runs.read(root, tid):
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if items and _status(root, tid) in ("done", "dropped"):
+            # ORCH-2295: a closed ticket never starts by itself (ORCH-247), so it holds no place in line
+            if closed is not None:
+                closed.append(tid)
+            continue
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
@@ -2322,10 +2328,31 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
+def leave_line(root: Path, tid: str) -> bool:
+    """Take the ticket out of the line for a free helper place (ORCH-2295): its queued start is removed, so
+    nothing starts it by itself. A person's own waiting messages stay. True when it stood in line."""
+    with runs.locked(root, tid):
+        items = runs._pending_read(root, tid)
+        keep = [i for i in items if i.get("delivered_at") or i.get("via") != "slots"]
+        if len(keep) == len(items):
+            return False
+        runs._pending_write(root, tid, keep)
+        rec = runs.read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            runs._write(root, rec)
+        return True
+
+
 def start_waiting(root: Path) -> list[str]:
     """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
     started: list[str] = []
-    for tid, _ in waiting_line(root):
+    closed: list[str] = []
+    line = waiting_line(root, closed)
+    for tid in closed:  # a place an older orch left for a ticket that is Done: it goes (ORCH-2295)
+        with contextlib.suppress(Exception):
+            leave_line(root, tid)
+    for tid, _ in line:
         if _full(root) or _held(root):
             break
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
