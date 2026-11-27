@@ -114,8 +114,9 @@ while :; do
     if [ $((now - t0)) -gt "$MAX" ]; then log "round longer than ${MAX}s; stopping it"; break; fi
     sleep 2
   done
-  # a runner that ends at once, again and again (no network, sign-up removed on GitHub): wait longer each time
-  if [ $(( $(date +%s) - t0 )) -lt 60 ]; then fails=$((fails + 1)); else fails=0; fi
+  # a runner that ends at once without taking a job, again and again (no network, sign-up removed on GitHub): wait
+  # longer each time. A short job is a good round (it used to keep the runner offline for minutes between jobs).
+  if [ -z "$job0" ] && [ $(( $(date +%s) - t0 )) -lt 60 ]; then fails=$((fails + 1)); else fails=0; fi
   if [ "$fails" -gt 0 ]; then
     w=$((fails * 30)); [ "$w" -gt 600 ] && w=600
     log "the runner ended within a minute ($fails time(s) in a row); next start in ${w}s"; sleep "$w"
