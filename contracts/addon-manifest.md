@@ -306,6 +306,9 @@ front matter is `description: "{{description}}"`, built from `description.toml` 
 and `[[online.part]] when = [facts], text`; the parts whose facts are all true are joined into
 "<lead> Use when you need to: a, b, or c. <not_for>" (150-500 characters, must contain "Use when" and "Not for"). An
 optional `[offline] text` is used while the fact `connected` is false. `description.toml` is not copied to the project.
+A skill can declare its own boolean tags in the same file: for example, `[service_facts]` with
+`webhooks = "relay"` makes `webhooks` true when the workspace has a relay connection. The only service
+values are `"relay"` and `"publish"`; each checks the saved connection locally, without contacting the service.
 Core renders it (`skillrender`) when an add-on is added or removed and when the relay or publish connection changes;
 it writes only on change and prints "Skills updated; they apply from the next agent session." A skill with no
 `{{` is copied as is. Every skill has the parts "When to use", "Recipes", "Rules"; the AGENTS block is a heading plus at
