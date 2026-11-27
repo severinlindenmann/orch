@@ -11,6 +11,9 @@ const showWs = value => String(value ?? '').replace(/\bws_[a-zA-Z0-9]{4,}\b/g, i
 const TAG_HEAD = /^(?:\s*\[[^\]\n]{1,24}\]\s*)+/, TAG_TAIL = /(?:\s*\[(?:\d{4,}|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{8}T?\d{0,6}Z?)\])+\s*$/;
 const cleanIds = value => showWs(value).replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
 const clean = value => { const text = cleanIds(value); return text.replace(TAG_HEAD, '').replace(TAG_TAIL, '').trim() || text; };
+// One text node of a page cleaned like clean(), keeping one space where it had one at either end: a title split
+// around a ticket number ('ORCH-1098' + ' team chat draft') must not lose its space (report r-1127-0539-ws-3).
+const cleanTextNode = data => { const c = clean(data), lead = /^\s/.test(data) ? ' ' : '', tail = /\s$/.test(data) ? ' ' : ''; return c ? lead + c + tail : lead || tail; };
 // The tags clean() hides, in order ("[R] ... [0722]" -> "[R] [0722]"); shown muted after the title only when two visible
 // tickets would otherwise look identical.
 const hiddenTags = value => { const text = cleanIds(value), head = text.match(TAG_HEAD), tail = text.replace(TAG_HEAD, '').match(TAG_TAIL); return [head && head[0], tail && tail[0]].filter(Boolean).map(x => x.trim().replace(/\]\s*\[/g, '] [')).join(' '); };
