@@ -18,6 +18,16 @@ sys.path.insert(0, str(CONTRACTS.parent / "workspace" / "src"))
 
 
 @pytest.fixture(autouse=True)
+def _fresh_counts():
+    """Every test reads its own counts: the few seconds one answer is kept (ORCH-2288) never cross tests."""
+    from orch_insights import server
+
+    server.forget_counts()
+    yield
+    server.forget_counts()
+
+
+@pytest.fixture(autouse=True)
 def test_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
