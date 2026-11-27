@@ -153,10 +153,11 @@ test('the Focus button word: Answer, Watch, Open, In line, Start; none on a fini
 test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
   const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
   const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
-  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working header (Watch in Focus)');
-  // with no helper there is one start button; Focus opens from the ⋯ menu (ORCH-1466)
-  assert.match(ticket, /function ticketFocusMenuItem[^]*?liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)/);
-  assert.match(ticket, /'menu-pop', role:'menu'\}, ticketFocusMenuItem\(t, run\)/);
+  const ticketBar = ticket.slice(ticket.indexOf('function ticketBar('), ticket.indexOf('const ticketHelperLive ='));
+  assert.equal((ticketBar.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working bar uses the shared Watch button');
+  // Owner draft A (ORCH-2179): Live opens first in the bar; it never adds a second start (ORCH-1466).
+  assert.match(ticketBar, /liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)[^]*?window\.LiveLayer\.open\(t\.id, true\)/);
+  assert.match(ticketBar, /const cells = \[first, \.\.\.main, chat, menu\]/);
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');

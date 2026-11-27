@@ -1605,7 +1605,7 @@ GENERAL_REFUSED = (
 )  # finish, reopen, Working; waiting and ready stay
 
 
-DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
+DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's review"
 
 
 PREPARE_NO_STATUS = (
@@ -1636,7 +1636,7 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool 
         if by.startswith("agent:"):
             _check_not_too_early(root, ticket)
             _check_can_finish(ticket, root)
-            add_history(ticket, by, f"{by} finished the work and sent it to Check: {DRAFT_TO_CHECK}")
+            add_history(ticket, by, f"{by} finished the work and sent it to Review: {DRAFT_TO_CHECK}")
             return "review", by
         ownerpick.refuse_ticket(ticket, person)
     if status in ("done", "review") and by.startswith("agent:") and ticket["status"] != status:
@@ -1646,7 +1646,7 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool 
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket, root)
         if not config.agents_may_finish(root):
-            add_history(ticket, by, f"{by} finished the work and sent it to Check")
+            add_history(ticket, by, f"{by} finished the work and sent it to Review")
             return "review", by
     return status, by
 

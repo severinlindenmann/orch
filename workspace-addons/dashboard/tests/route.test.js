@@ -149,7 +149,7 @@ test('one needs-you count: every reader calls needsYouTotal', () => {
 
 test('shared words: status, steps and the updated time', () => {
   const H = require('../src/orch_dashboard/web/helpers.js');
-  assert.deepEqual(['open', 'ready', 'active', 'waiting', 'review', 'done'].map(s => H.statusWord(s)), ['Backlog', 'To do', 'Working', 'Needs you', 'Check', 'Done']);
+  assert.deepEqual(['open', 'ready', 'active', 'waiting', 'review', 'done'].map(s => H.statusWord(s)), ['Backlog', 'To do', 'Working', 'Needs you', 'Review', 'Done']);
   assert.equal(H.stepsText(2, 5), '2 of 5 tasks'); assert.equal(H.stepsText(1, 1), '1 of 1 task');
   const now = Date.parse('2024-01-01T12:00:00Z');
   assert.equal(H.updatedText(now - 20000, now), 'Updated just now');

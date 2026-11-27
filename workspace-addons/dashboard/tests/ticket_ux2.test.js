@@ -100,8 +100,8 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start') && /Continue/.test(body) && !/Start helper/.test(body))  // ORCH-475: the one Start button says Continue;
-  // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
-  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start-pick'), 'the start sits in a cost pick');
+  // ORCH-415 (UX D2): a start is outlined, never filled; its cost is one line under the title (ORCH-2155)
+  assert.ok(nodes(all.find(n => n.attrs['data-key'] === 'ticket-actions')).find(n => n.attrs['data-key'] === 'ticket-start'), 'the start sits in the bar (ORCH-2155)');
   assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-start-cost')), /paid helper time|estimate about|used so far/);
   assert.ok(!all.some(n => /\bprimary\b/.test(n.attrs.className || '') && /Continue|Start helper/.test(text(n))), 'no filled start');
   assert.equal(all.filter(n => n.tag === 'h2' && /What (was|you) asked/.test(text(n))).length, 1, 'one heading for the ask');
@@ -316,7 +316,7 @@ test('ORCH-1716: the Needs you button counts tickets like its group, even when o
   const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
   assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
   assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
-  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
+  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Review 1 result');
 });
 test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});

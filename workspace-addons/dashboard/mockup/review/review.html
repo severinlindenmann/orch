@@ -93,7 +93,7 @@ function drawTicket(){if(!tp||!deck)return;const it=deck.items[deck.index]||deck
  const head=e('div','review-ticket-h'),full=e('a','btn ghost sm','Open full page'),close=e('a','btn ghost icon sm');full.href='../ticket/ticket.html';close.href='review.html';close.setAttribute('aria-label','Close ticket');close.title='Close';close.innerHTML=icon('x',16);head.append(e('h2',null,'Ticket'),full,close);
  const b=e('div','review-ticket-b stack'),top=e('p','meta');top.append(e('span','key',it.ticket||''),' · ',e('span','pill needs',it.kindLabel||'Check'));
  const steps=e('section','card');const sh=e('div','card-h');sh.append(e('h2',null,'Checklist'));steps.append(sh);
- [['Write the change',true],['Run the tests',true],['Check the result with you',false]].forEach(([t,d])=>{const r=e('div','card-row');r.append(e('span','meta',d?'✓':'○'),e('div','grow',t));steps.append(r)});
+ [['Write the change',true],['Run the tests',true],['Review the result with you',false]].forEach(([t,d])=>{const r=e('div','card-row');r.append(e('span','meta',d?'✓':'○'),e('div','grow',t));steps.append(r)});
  const hand=e('section','card pad stack');hand.append(e('h3',null,'Handover'),e('p',null,it.why||'The helper finished the work and waits for your check.'));
  const acts=e('div','row'),ok=e('button','btn primary sm','Looks good'),back=e('button','btn outline sm','Send back');ok.type=back.type='button';acts.append(ok,back);
  b.append(top,e('h3',null,it.ticketTitle||it.title),acts,steps,hand,e('p','meta','Updated 10 min ago'));tpanel.replaceChildren(head,b)}

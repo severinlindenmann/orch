@@ -160,7 +160,7 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1, 'a running helper is named in the header line (ORCH-70)');
   assert.equal(p.count('agent-bar'), 0, 'no second helper bar under the header');
   await p.poll(state(ticket({status:'review', work}), {rev:'c', runs:{}}));
-  assert.ok(p.text().includes('Check'), 'the status chip follows the ticket');
+  assert.ok(p.text().includes('Review'), 'the status chip follows the ticket');
   assert.equal(p.count('agent-bar'), 0, 'no agent bar in Review');
   await p.poll(state(ticket({status:'active'}), {rev:'d', runs:{t_x:{running:true, claim:{agent:'claude', mode:'run'}, shared_folder:{line:'"Other" is also changing this folder.'}}}}));
   assert.equal(p.count('work-copy'), 0, 'the copy line goes when the ticket no longer has one');
@@ -168,7 +168,7 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1);
 });
 
-test('a working ticket: one header line, no old Watch live, Stop and the commands in the menu (ORCH-70, report r-1116-1748)', async () => {
+test('a working ticket: one header line, no old Watch live, Stop in the bar, the commands in Actions (ORCH-70, ORCH-2155)', async () => {
   const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}],
     runs:{t_x:{running:true, age_seconds:3120, claim:{agent:'claude', mode:'live'}}}};
   const p = page(state(ticket({status:'active', key:'ORCH-56'}), live));
@@ -179,10 +179,13 @@ test('a working ticket: one header line, no old Watch live, Stop and the command
   assert.equal(p.count('agent-bar'), 0, 'no helper bar');
   assert.equal(p.count('live-session'), 0, 'no Live session card');
   assert.equal(p.count('watch-live') + p.count('live-open'), 0, 'no link to an old Focus page: the header\'s Focus button (pages/live-layer.js) opens the session');
-  const menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
-  assert.ok(menu && menu.querySelector('[data-key="ticket-stop"]'), 'Stop sits in the menu');
+  // ORCH-2155 (draft A): Stop takes Continue's place in the bar; the two commands sit last in Actions under For developers
+  const bar = p.main.querySelector('[data-key="ticket-actions"]'), menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
+  assert.ok(bar, 'the bar under the title');
+  assert.equal(bar.querySelector('[data-key="ticket-stop"]')?.parentNode, bar, 'Stop sits in the bar');
   assert.equal(p.count('ticket-stop'), 1, 'Stop once');
-  assert.ok(menu.querySelector('[data-key="live-copy-watch"]') && menu.querySelector('[data-key="live-copy-take"]'), 'the two commands too');
+  const dev = menu.querySelector('[aria-label="For developers"]');
+  assert.ok(dev.querySelector('[data-key="live-copy-watch"]') && dev.querySelector('[data-key="live-copy-take"]'), 'the two commands in Actions');
   // ORCH-581: an empty Owner is no row at all (it waits in + Add), with or without a helper
   assert.equal(p.count('prop-owner-t_x'), 0, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
@@ -223,7 +226,8 @@ test('below 1100 px: one Properties button opens the same rail as a sheet (ORCH-
   const p = page(state(ticket({done_when:'It is booked'})));
   await tick(); await tick();
   const button = node(p, 'props-open-t_x'), rail = node(p, 'ticket-rail-t_x');
-  assert.ok(button && /narrow-only/.test(button.className), 'a Properties button for small screens');
+  assert.ok(button && /narrow-only/.test(button.className), 'Properties for small screens (in Actions, ORCH-2155)');
+  assert.ok(button.closest('[data-key="ticket-menu-t_x"]'), 'it sits in the Actions menu');
   assert.equal(button.getAttribute('aria-controls'), 'ticket-rail-t_x');
   assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.match(button.textContent, /Properties1/, 'it counts what the rail holds besides owner and due');

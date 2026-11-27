@@ -2205,13 +2205,7 @@ function railScrim(t) {
   scrim.onclick = () => railToggle(t, false);
   return scrim;
 }
-// Narrow screens only: Properties (with how many things it holds) and the owner / due line under the title.
-function railButton(t) {
-  if (snapshot) return null;
-  const n = railCount(t, window.DashHelpers.parentOf(tickets(), t)), open = railOpen.id === t.id;
-  return ticketButton(['Properties', n ? h('span', {className:'chip'}, String(n)) : null], 'ghost sm narrow-only', e => railToggle(t, !open, e?.currentTarget),
-    {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
-}
+// Narrow screens only: the owner / due line under the title (Properties itself opens from Actions, ORCH-2155).
 function railFacts(t) {
   const parts = [hasValue(t, 'owner') ? 'Owner ' + window.DashHelpers.ownerName(t.owner, state) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
   return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
@@ -2277,40 +2271,45 @@ function ticketFocusTalk(tid) {
   host.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
   host.querySelector('textarea, input, button')?.focus({preventScroll:true});
 }
-// The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
+// ORCH-2155 (owner chose draft A "Bar + one Actions menu", 25 Nov): one header in every state, on one left edge. A line
+// above the title (key, kind, the state word that opens Move to), the title, one sentence, then one bar on one grid:
+// Open in Live first, the state's own action (Continue, Stop, Reopen, Answer, Mark Done), Ticket chat, and one Actions
+// menu that holds every other ticket action (Move to, Copy link, Make a copy, Add a sub-ticket, Repeat…). No "⋯".
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
-  const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
+  const m = ticketStripModel(t, run, fresh), main = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
   if (kidsDone) { m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.'; delete m.prepare; }
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
   if (quiet) m.sentence = (/^(Updated |No helper is working on it)/.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: Quiet since replaces Updated (and the no-helper line, ORCH-415)
+  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
+  let filled = false, cost = null;
   if (!snapshot) {
     // Reopen puts it back in To do (ORCH-235): Working is only shown while a helper runs
     // ORCH-2140: Looks good / Send back sit under the Result card (W4) and a question is answered in its card (W3),
     // never a second time up here
-    if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
-    else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
+    if (t.status === 'done') main.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
+    else if (kidsDone) { filled = true; main.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'})); }
     // ORCH-255: a start is on the page in every state while no helper runs. ORCH-475: it is the one Start button (pages/start.js):
     // Continue when an earlier session can be reopened, else Start helper; the caret opens the Start choice. Never filled (ORCH-415).
-    // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
-    // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
+    // Its cost is a line under the title; next to Reopen or Mark Done it is the plain Start button.
     // While Prepare runs (ORCH-742) Start still shows: the prepare run is not the work.
     // ORCH-2140 W2: with no helper tool set up, the Two ways card below replaces a Start that cannot work; a result to
     // review goes on with Send back (W4), not with a second start
-    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review' && !(fresh && ticketNoHelperTool())) actions.push(ticketStartPick(t, actions.length > 0));
-    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
-    const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
-    if (chatBtn) actions.push(chatBtn);
-    actions.push(railButton(t));
-    if (menu) actions.push(menu);
+    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review' && !(fresh && ticketNoHelperTool())) {
+      const plain = main.length > 0, start = ticketStartPick(t);
+      if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+    }
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
-  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
-  // the same unboxed header as while a helper runs (mockup ticket-idle): number and state above the title
-  const pill = m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word);
+  const pill = m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : ticketStatePill(t, m, icon);
+  const head = [window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), pill].flat().filter(x => x && typeof x !== 'string')
+    .flatMap((x, i) => i ? [h('span', {'aria-hidden':'true'}, '·'), x] : [x]);  // 'ORCH-7 · Epic · To do'
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      h('div', {className:'grow ticket-strip-text'}, ticketBack(), stripKicker(t, pill, [], 'ticket-line'), h('h1', {className:'t-title title-clamp'}, inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
-      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(),
+        h('div', {className:'t-meta strip-kicker', 'data-key':'ticket-state-line'}, head),
+        h('h1', {className:'t-title title-clamp'}, inlineField(t, 'title')),
+        h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), cost, railFacts(t),
+        ticketBar(t, run, main, menu, filled))),
     tabs);
 }
 // The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
@@ -2338,27 +2337,46 @@ function ticketTwoWays(t) {
         h('div', {className:'row'}, h('a', {className:'btn primary sm', href:'#settings/helper', 'data-key':'two-ways-setup'}, 'Set up a helper'))),
       h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'You already work with an AI tool')), h('p', {className:'muted'}, 'Open your AI tool in this workspace’s folder and paste this line:'), copy)));
 }
-// ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
-// cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
-function ticketStartPick(t, compact = false) {
-  // ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
-  // not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test)
+// The state word above the title opens the same Move to list as Actions (a second way in, draft A). Read only in a snapshot.
+function ticketStatePill(t, m, icon) {
+  const key = 'status-' + t.status + '-' + m.pill;
+  if (snapshot) return h('span', {className:'pill status-change ' + m.pill, 'data-key':key}, icon, m.word);
+  return h('details', {className:'menu ticket-pill-menu', 'data-key':'ticket-pill-menu-' + t.id},
+    h('summary', {className:'pill status-change ' + m.pill, 'data-key':key, 'aria-haspopup':'menu', title:'Move this ticket'}, icon, m.word, iconEl('chevron-down')),
+    h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, h('p', {className:'eyebrow'}, 'Move to'), ticketMoveItems(t, 'pill-move-')));
+}
+// The cost of the start, one quiet line under the sentence (ORCH-415), read with the start button.
+function ticketStartCost(t) {
+  const m = modelChoice(t);
+  return h('p', {className:'t-meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : ''));
+}
+// ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
+// not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test).
+// One start button (owner, ORCH-1466): the cheaper model is picked in the caret's Start choice (Fresh start: Model).
+function ticketStartPick(t) {
   const host = startHost(t, 'ticket-start', {started:x => { if (typeof liveFocusOn === 'function' && liveFocusOn() && window.LiveLayer?.open) window.LiveLayer.open(x.id, true); }});
-  if (compact || !host) return host;
-  const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
-  return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
-    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
-    h('div', {className:'row'}, host));
+  host?.querySelector?.('[data-start="main"]')?.setAttribute('aria-describedby', 'start-cost-' + t.id);  // the cost line under the title
+  return host;
 }
-// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
-// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
-function ticketFocusMenuItem(t, run) {
-  if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
-  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
+// The bar under the title: equal buttons on one grid (4 across on a computer, 2 per row on a phone). Open in Live comes
+// first and is the one filled button unless the state's own action is (Answer, Mark Done).
+function ticketBar(t, run, main, menu, filled) {
+  if (snapshot) return null;
+  const live = ticketHelperLive(t, run);
+  let first = null;
+  if (live) {
+    first = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+    if (first) { first.className = 'btn primary sm'; first.prepend?.(iconEl('target')); }  // the one filled button while a helper runs
+  } else if (typeof liveFocusButton === 'function' && liveFocusButton(t)) {
+    // owner, ORCH-1466: never a second start; this only opens the ticket's pane in the live layer
+    first = ticketButton([iconEl('target'), 'Open in ' + liveLayerName()], (filled ? 'outline' : 'primary') + ' sm', () => window.LiveLayer.open(t.id, true), {'data-key':'ticket-open-layer'});
+  }
+  const chat = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;
+  const cells = [first, ...main, chat, menu].filter(Boolean);
+  return cells.length ? h('div', {className:'btn-bar ticket-bar', role:'group', 'aria-label':'Ticket actions', 'data-key':'ticket-actions'}, cells) : null;
 }
-// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
-// ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
-// bar and no Live session card below it; the box goes, so the page reads calmer.
+// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the line above the title holds key, the ORCH-61 state word,
+// the helper and minutes. The bar: Watch live, Stop, Ticket chat, Actions. No helper bar and no Live session card.
 const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length && !ticketPreparing(t);
 function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
@@ -2369,28 +2387,31 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
-  const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs
-  const actions = [focusBtn, typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
+  const idle = ['idle', 'stuck'].includes(helper.state);
+  const stop = ticketButton([iconEl('stop'), idle ? 'Stop idle helper' : 'Stop'], 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'});
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, ticketBack(), kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
-        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
-      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t),
+        ticketBar(t, run, [stop], menu, false))),
     tabs);
 }
-// The ⋯ menu items for a running helper: Stop first, then the two terminal commands (Watch is read only, Take over types).
+// "For developers", last in Actions while a helper runs: the two terminal commands (Watch is read only, Take over types).
 function ticketHelperMenuItems(t, run) {
-  if (!ticketHelperLive(t, run)) return null;
-  const helper = window.DashHelpers.helperState(run, t), idle = helper && ['idle', 'stuck'].includes(helper.state);
+  if (!ticketHelperLive(t, run) || run?.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
-  const copy = (label, command, k) => ticketButton([iconEl('copy'), label], 'menu-item', async () => {
+  const copy = (label, command, k) => ticketMenuItem('copy', label, async () => {
     try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
-  }, {role:'menuitem', title:command, 'data-key':'live-copy-' + k});
-  return [ticketButton(idle ? 'Stop idle helper' : 'Stop', 'menu-item', () => act('run.stop', {ticket:t.id}), {role:'menuitem', 'data-key':'ticket-stop'}),
-    run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
-    run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
+  }, 'live-copy-' + k, {title:command});
+  return h('div', {className:'ticket-actions-dev', role:'group', 'aria-label':'For developers'}, h('p', {className:'eyebrow'}, 'For developers'),
+    copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'), copy('Copy take-over command', 'orch run attach ' + ref, 'take'));
+}
+// One row of a ticket menu: icon, words left aligned; the click closes the menu first.
+function ticketMenuItem(icon, label, click, key, attrs = {}, after = null) {
+  const node = h('button', {type:'button', className:'menu-item', role:'menuitem', 'data-key':key, ...attrs}, iconEl(icon), h('span', {className:'grow'}, label), after);
+  node.onclick = e => { e?.currentTarget?.closest?.('details')?.removeAttribute('open'); return click(e); };
+  return node;
 }
 // ORCH-248: "Show me the plan first" stays visible on the ticket after it was made (the plan card only shows while the plan waits).
 function ticketPlanFirstLine(t, planShown) {
@@ -2399,10 +2420,66 @@ function ticketPlanFirstLine(t, planShown) {
   return h('p', {className:'meta ticket-plan-first', 'data-key':'plan-first-' + t.id}, planned ? 'You asked to see the plan first. You have approved it.' : 'You asked to see the plan first. The helper waits for your OK before work starts.');
 }
 // ORCH-235: the ticket page offers the same places as the board and the list (Waiting asks for a date and a reason,
-// Superseded for the ticket that replaces it); the lane the ticket is in now is left out.
-function ticketMoveItems(t) {
+// Superseded for the ticket that replaces it, so both end in "…"). The lane it is in now is ticked (draft A).
+function ticketMoveItems(t, prefix = 'ticket-move-') {
   const here = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0);
-  return MOVE_CHOICES.filter(([lane]) => lane !== here).map(([lane, label]) => ticketButton(label, 'menu-item', () => moveToLane(t.id, lane), {role:'menuitem', 'data-key':'ticket-move-' + lane}));
+  return MOVE_CHOICES.map(([lane, label]) => {
+    const on = lane === here;
+    const node = h('button', {type:'button', className:'menu-item', role:'menuitemradio', 'aria-checked':String(on), 'data-key':prefix + lane},
+      h('span', {className:'menu-tick', 'aria-hidden':'true'}, on ? iconEl('check') : null), h('span', {className:'grow'}, label + (['blocked', 'superseded'].includes(lane) ? '…' : '')));
+    node.onclick = e => { e?.currentTarget?.closest?.('details')?.removeAttribute('open'); return on ? undefined : moveToLane(t.id, lane); };
+    return node;
+  });
+}
+// The one Actions menu (draft A): "Move to" and "This ticket" side by side; "For developers" under them while a helper runs.
+function ticketActionsMenu(t, run) {
+  if (snapshot) return null;
+  const all = tickets(), parent = window.DashHelpers.parentOf(all, t), kids = window.DashHelpers.childrenOf(all, t);
+  const role = typeof roleOf === 'function' && roleOf(t);
+  const n = railCount(t, parent);
+  const mine = [
+    ticketMenuItem('link', 'Copy link', () => ticketCopyLink(t), 'ticket-copy-link'),
+    ticketMenuItem('copy', 'Make a copy', () => ticketMakeCopy(t), 'ticket-make-copy'),
+    // a step itself gets no steps of its own, as the Sub-tickets card (ticketParts)
+    !role && (!parent || kids.length) ? ticketMenuItem('plus', t.epic || t.release ? 'Add a ticket' : 'Add a sub-ticket', () => ticketAddStep(t), 'ticket-add-sub') : null,
+    repeatsAddon() && !role ? ticketMenuItem('refresh', 'Repeat…', () => repeatsDialog(t.id, repeatsAddon()), 'ticket-repeat') : null,
+    // small screens: the Properties sheet opens from here, so the bar keeps its four buttons
+    // (Esc or Close gives the keyboard back to the Actions button, the item itself is folded away by then)
+    ticketMenuItem('cards', 'Properties', e => railToggle(t, railOpen.id !== t.id, e?.currentTarget?.closest?.('details')?.querySelector('summary')), 'props-open-' + t.id,
+      {className:'menu-item narrow-only', 'aria-haspopup':'dialog', 'aria-expanded':String(railOpen.id === t.id), 'aria-controls':'ticket-rail-' + t.id}, n ? h('span', {className:'chip'}, String(n)) : null)].filter(Boolean);
+  return h('details', {className:'menu ticket-actions', 'data-key':'ticket-menu-' + t.id},
+    h('summary', {className:'btn outline sm', 'aria-haspopup':'menu', 'data-key':'ticket-actions-' + t.id}, 'Actions', iconEl('chevron-down')),
+    h('div', {className:'menu-pop menu-pop-wide ticket-actions-pop', role:'menu', 'aria-label':'Ticket actions'},
+      h('div', {className:'grid-2'},
+        h('div', {role:'group', 'aria-label':'Move to'}, h('p', {className:'eyebrow'}, 'Move to'), ticketMoveItems(t)),
+        h('div', {role:'group', 'aria-label':'This ticket'}, h('p', {className:'eyebrow'}, 'This ticket'), mine)),
+      ticketHelperMenuItems(t, run)));
+}
+// Copy link: the address of this ticket's page, as the browser shows it (works from any computer that signs in).
+async function ticketCopyLink(t) {
+  const url = new URL(href(t.id), location.href).href;
+  try { await navigator.clipboard.writeText(url); window.orch.toast('Link copied', 'ok'); }
+  catch (_) { window.orch.toast('Could not copy. Copy the address from the address bar.', 'error'); }
+}
+// Make a copy: a new ticket in Backlog with the same title (+ "(copy)"), note, Done when, owner, due, Part of and the
+// task texts (all open). Questions, files, history and helper sessions stay with the original. Then the copy opens.
+async function ticketMakeCopy(t) {
+  const src = ticketOf(t.id) || t, parent = window.DashHelpers.parentOf(tickets(), src);
+  const args = {title:(clean(src.title) || 'Ticket') .slice(0, 190) + ' (copy)'};
+  for (const k of ['note', 'done_when', 'owner']) if (src[k] != null && String(src[k]).trim()) args[k] = String(src[k]);
+  if (typeof src.due === 'string' && /^\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?$/.test(src.due)) args.due = src.due.replace('T', ' ');
+  if (parent) args.parent = parent.id;
+  const made = await act('ticket.new', args);
+  if (!made.ok) { window.orch.toast(changeError(made), 'error'); return; }
+  const id = made.state?.created?.id;
+  if (!id) { window.orch.toast('The copy was made. Find it in Backlog.', 'ok'); return; }
+  const failed = [];
+  for (const c of array(src.checklist)) {
+    const text = String(c?.text || '').trim();
+    if (text && !(await act('check.add', {ticket:id, text})).ok) failed.push(text);
+  }
+  window.orch.toast(failed.length ? 'The copy was made. Not copied: ' + failed.length + (failed.length === 1 ? ' task.' : ' tasks.') : 'Copy made', failed.length ? 'error' : 'ok');
+  location.hash = href(id);
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
@@ -2419,9 +2496,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
-  const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, ticketFocusMenuItem(t, run), ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
-      repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+  const menuFor = () => ticketActionsMenu(t, run);
   // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
   if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
   const menu = menuFor();

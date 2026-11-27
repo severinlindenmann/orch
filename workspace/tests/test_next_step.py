@@ -81,7 +81,9 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
     assert "orch check done" in seen[1] and "orch check done" in seen[2]  # after check add
     assert "orch check done" in seen[3]  # one task is still open
     assert "orch ticket summary" in seen[4]  # all tasks done, no summary yet
-    assert re.search(r"orch ticket status \S+ done", seen[5])  # summary written
+    # summary written: hand it to the person (ORCH-2140: a helper's Done is never accepted, so it is never the
+    # hint)
+    assert re.search(r"hand it to the person: orch ticket status \S+ review", seen[5])
 
 
 def test_review_ticket_next_step_names_a_list_that_holds_it(proj, run):
@@ -111,7 +113,9 @@ def test_lines_a_person_reads_name_the_key_not_the_id(proj, run):
     run("ask", key, "Which one?", "--option", "a", "--option", "b", "--recommend", "a")
     _, out, _ = run("needs")
     assert f"  {key}  " in out and tid not in out
-    assert _last(out) == f"Next: answer it: orch answer {key} q1 a"
+    # ORCH-2140: the row says how to answer; the Next line never fills in the person's answer
+    assert f'you answer: orch answer {key} q1 "<your choice>"' in out
+    assert _last(out) == "Next: this one waits for a person, not for a helper."
 
 
 def test_json_shape_is_unchanged(proj, run):
@@ -232,6 +236,32 @@ def test_refusals_say_what_to_do_next(proj, run, monkeypatch, argv, hint):
     code, out, err = run(*[a.replace("{t}", t).replace("{q}", q).replace("{a}", a) for a in argv])
     assert code != 0
     assert hint in out + err
+
+
+def test_needs_lists_every_thing_counts_counts(proj, run):
+    """ORCH-2140: `orch counts` said 2 things need you, `orch needs` listed 1 (the result to review was
+    missing)."""
+    run("init", "--yes")
+    q = json.loads(run("ticket", "new", "Supplier", "--json")[1])["key"]
+    r = json.loads(run("ticket", "new", "Newsletter", "--json")[1])["key"]
+    json.loads(run("ticket", "new", "Thank-you mail", "--json")[1])
+    run("ask", q, "Which day?", "--option", "Tuesday", "--option", "Thursday", "--recommend", "Tuesday")
+    run("check", "add", r, "Draft the text")
+    run("check", "done", r, "c1", "--note", "180 words")
+    _, out, _ = run("ticket", "summary", r, "December newsletter drafted.")
+    assert _last(out) == f"Next: hand it to the person: orch ticket status {r} review"
+    _, out, _ = run("ticket", "status", r, "review", "--by", "agent:claude")
+    assert "orch review list" in _last(out) and "mark" not in _last(out).lower()
+    _, out, _ = run("counts")
+    assert "Needs you: 2 (1 question, 1 result to review)" in out
+    assert "In progress: 0 (no helper running right now)" in out and "Not started: 1" in out
+    assert _last(out) == "Next: see the 2 things: orch review list"
+    _, out, _ = run("needs")
+    assert out.startswith("Needs you (2)")
+    assert f"{r}  " in out and "Result to review: December newsletter drafted." in out
+    assert f"looks good: orch ticket status {r} done" in out
+    assert f'send back: orch ticket changes {r} "<what should change>"' in out
+    assert _last(out) == "Next: these 2 wait for a person, not for a helper."
 
 
 def test_run_config_agents_are_in_help_all_and_run_help_names_no_internal_command(proj, capsys):

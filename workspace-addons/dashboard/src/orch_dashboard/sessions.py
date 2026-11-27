@@ -184,8 +184,8 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         # marks the helper "you" only on its next look at the screen (30-60 s later): the tile follows the question
         status, word = "needs-you", "Needs you"
     if status in ("idle", "closed") and ticket.get("status") == "review":
-        # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
-        word = "Check"
+        # ORCH-674: a quiet session whose result waits for the person reads Review, as its ticket does everywhere else
+        word = "Review"
     elif (
         status == "closed"
         and ticket.get("status") == "waiting"

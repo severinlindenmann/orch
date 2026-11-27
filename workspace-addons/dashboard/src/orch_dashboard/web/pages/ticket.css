@@ -191,6 +191,13 @@
 .ticket-page .ticket-strip .ticket-strip-actions .menu{flex:none;position:relative}
 .ticket-page .ticket-strip .ticket-strip-actions .menu>summary{width:32px;min-width:32px;padding:0;justify-content:center}
 @media(max-width:760px){.ticket-page .ticket-strip h1.title-clamp .ed-title,.ticket-page .ticket-strip h1.title-clamp .ed{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}}  /* phone: three lines then an ellipsis; wider, the whole title shows beside the buttons (a-ticket-header-fit) */
+/* ORCH-2155 (draft A): the bar under the title (master .btn-bar), the state word that opens Move to, the Actions menu */
+.ticket-page .ticket-strip .ticket-bar{margin-top:12px}
+.ticket-page .ticket-strip .strip-kicker .ticket-pill-menu>summary.pill{cursor:pointer;min-height:0;gap:4px}
+.ticket-page .ticket-strip .ticket-pill-menu>.menu-pop{left:0;right:auto;min-width:208px}
+.ticket-page .ticket-strip .ticket-actions-pop{min-width:min(380px,calc(100vw - 32px))}
+.ticket-page .ticket-strip .ticket-actions-dev{display:grid;border-top:1px solid var(--border);padding-top:4px}
+.ticket-page .ticket-strip:not(.strip-plain) h1 .ed-title,.ticket-page .ticket-strip:not(.strip-plain) h1 .ed{padding-left:0;margin-left:0;border-color:transparent;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .ticket-page .ticket-strip .ticket-strip-text{min-width:0;flex:1 1 360px}  /* the title keeps 360 px; the buttons wrap under it (report r-1122-0538) */
 .ticket-page .ticket-strip .ticket-strip-actions details.menu{border:0;background:none;box-shadow:none;width:auto;min-width:0;padding:0;margin:0}
 

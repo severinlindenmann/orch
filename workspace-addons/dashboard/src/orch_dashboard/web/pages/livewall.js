@@ -273,7 +273,7 @@ function liveWallNeeds() {
   try { n = needsToday(); } catch (e) { return []; }
   const ids = [...array(n.askedItems).map(i => i.ticket), ...array(n.review).map(t => t.id), ...array(n.failed).map(([t]) => t.id)];
   return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
-    word:t.status === 'review' ? 'Check' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
+    word:t.status === 'review' ? 'Review' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
 }
 // One of the master's states (kit UI.state via stateNote) under the filter; its button is caught by the click below.
 function liveWallNote(key, title, text, kind, label, attr) {

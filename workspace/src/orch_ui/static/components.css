@@ -394,6 +394,19 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 /* A menu that holds a short form (a title, choices, one action): wide enough for one-line choices, never past the screen. */
 .menu-pop.menu-pop-wide{min-width:320px;max-width:min(380px,calc(100vw - 32px));padding:8px;gap:8px}
 .menu-pop-wide .grid-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
+/* A menu of choices in groups side by side (ORCH-2155, the ticket's Actions): each group an eyebrow and its rows, left aligned. */
+.menu-pop-wide .grid-2>[role=group]{display:grid;align-content:start}
+/* A ticked choice in a menu (menuitemradio): the tick column keeps every word on one edge, ticked or not. */
+.menu-tick{display:inline-flex;width:16px;flex:none;justify-content:center;color:var(--brand)}
+/* Action bar (ORCH-2155): equal buttons on one grid under a title, 4 across on a computer, 2 per row on a phone. A
+   details.menu or a Start button in it is one cell and fills it. */
+.btn-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2);max-width:824px}
+.btn-bar>*{min-width:0}
+.btn-bar>.btn,.btn-bar>details.menu>summary.btn,.btn-bar>.start-host,.btn-bar>.start-host>.start-split{width:100%}
+.btn-bar>.start-host{display:flex}
+.btn-bar>.btn,.btn-bar>details.menu>summary.btn{justify-content:center}
+.btn-bar .start-split>.btn:first-child{flex:1;min-width:0;justify-content:center}
+@media(max-width:720px){.btn-bar{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* Start button (ORCH-475): one click starts the usual way (Continue, or Start with no earlier session); the caret opens the
    Start choice (.live-start from widgets.css). While it starts both halves are disabled and the main half says Starting… */
 .start-split{display:inline-flex;align-items:stretch;position:relative}

@@ -51,7 +51,7 @@ function deck(items, o = {}, extra = {}) {
   return {d, host, decided, toasts, viewed, noBtn, talkBtn, okBtn, undoBtn, note};
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
-const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Check', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
+const check = (id, extra = {}) => ({id, kind: 'check', kindLabel: 'Review', title: 'Spring catalogue ' + id, okLabel: 'Looks good', preview: {type: 'doc', heading: 'What was done', paras: ['In short: done.']}, ...extra});
 const draft = id => ({id, kind: 'draft', kindLabel: 'Draft', title: 'Home block ' + id, preview: {type: 'doc', heading: 'Words', paras: ['x']}});
 
 test('a Check card: Send back opens the text box (nothing is sent without words), no second Comment button', async () => {
@@ -295,7 +295,7 @@ test('the card head: title first, then one quiet line (type · deadline · ticke
   const {host} = deck([check('a', {need: 'Sends Friday 08:00', ticket: 'DT-53', when: 'today 09:40', group: 'Spring', suggest: 'ok'})]);
   const head = host.querySelector('.swipe-head');
   assert.equal(head.children[0].tag, 'h3'); assert.equal(head.children[1].className, 'swipe-meta');
-  assert.deepEqual(head.children[1].children.map(c => c.textContent), ['Check', 'Sends Friday 08:00', 'DT-53']);
+  assert.deepEqual(head.children[1].children.map(c => c.textContent), ['Review', 'Sends Friday 08:00', 'DT-53']);
   assert.doesNotMatch(head.textContent, /09:40|Spring$|Suggested:/);
 });
 test('two options of one choice side by side: Use B is the one filled button (the suggested option)', () => {

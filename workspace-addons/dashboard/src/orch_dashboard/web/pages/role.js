@@ -269,7 +269,7 @@ function roleHeader(t, run, data, openQs, menu, tabs) {
     running ? ticketButton('Stop this run', 'ghost sm', () => act('run.stop', {ticket:t.id}), {'data-key':'role-stop'}) : null,
     !running && !paused ? ticketButton('Run now', 'outline sm', () => roleAct(t, 'run'), {'data-key':'role-run-now'}) : null,
     paused ? ticketButton('Turn on', 'primary sm', () => roleAct(t, 'on'), {'data-key':'role-turn-on'}) : !running ? ticketButton('Pause', 'ghost sm', () => roleAct(t, 'off'), {'data-key':'role-pause'}) : null,
-    railButton(t), menu].filter(Boolean);
+    menu].filter(Boolean);  // Properties on small screens: in Actions (ORCH-2155)
   return h('section', {className:'strip strip-plain ticket-strip ticket-heading', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, kicker.flatMap((x, i) => i ? [dot(), x] : [x])),
