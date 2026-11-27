@@ -102,6 +102,8 @@ elif args[:2] == ["ext", "unset"]:
     t.get("ext", {{}}).pop(args[3], None); note(t, "Unset ext"); save(t); print("{{}}")
 elif args[:2] == ["run", "start"]:
     tid = args[2]
+    if (root / ".orch" / "run" / "paused.json").exists() and not (by or "").startswith("human:"):  # like core (R8.6)
+        print(json.dumps({{"error": "Automation is paused in this workspace. Turn it back on with: orch resume."}})); sys.exit(2)
     if (root / "noagent").exists():
         print(json.dumps({{"error": "No agent found; set one later: orch config set workspace.agent <name>"}})); sys.exit(2)
     if (root / ("busy-" + tid)).exists():

@@ -7,7 +7,7 @@ import time
 import pytest
 import test_run_wrap
 
-from orch import brake, runs, runs_live, tickets
+from orch import brake, devexpert, dispatcher, releasekeeper, runs, runs_live, tickets
 from orch.errors import Refused
 
 gen = test_run_wrap.gen
@@ -51,7 +51,18 @@ def test_resume_clears_the_flag(proj, run):
     assert "paused" not in run("status")[1]
 
 
-@pytest.mark.parametrize("by", ["agent:automation", "agent:factory"])
+# every identity orch's own automation starts a helper as (the add-ons start through `orch run start --by`)
+AUTOMATIC = [
+    runs_live.AUTOMATION_BY,  # automation add-on, tend, renew, autoreview, pull-requests checks
+    "agent:factory",
+    dispatcher.BY,
+    devexpert.BY,
+    releasekeeper.BY,  # also the security review and its one call (secreview.BY)
+    tickets.REVIEWER,  # Reviewer, second look, Away-mode answers
+]
+
+
+@pytest.mark.parametrize("by", AUTOMATIC)
 def test_paused_refuses_automatic_starts(proj, by):
     tid = _new(proj)
     brake.pause(proj, "human:t")
@@ -85,6 +96,53 @@ def test_restart_after_give_up_does_not_start_while_paused(proj, monkeypatch):
     assert runs_live.restart_after_give_up(proj, tid, "fake") is None
     assert calls == []
     assert not any("started again" in h["text"] for h in tickets.load(proj, tid)["history"])
+    brake.resume(proj)
+    runs_live.restart_after_give_up(proj, tid, "fake")
+    assert calls == [(proj, tid, runs_live.AUTOMATION_BY)]
+
+
+def test_an_add_on_start_through_the_cli_is_refused_while_paused_and_goes_after_resume(proj, run, gen, one_step):
+    """Every add-on (automation, factory, pull requests, insights) starts a helper with `orch run start --by`."""
+    gen("--silent 0.2")
+    tid = _new(proj)
+    brake.pause(proj, "human:t")
+    code, out, err = run("run", "start", tid, "--by", "agent:factory")
+    assert code != 0 and "orch resume" in out + err
+    assert runs.read(proj, tid) is None
+    run("resume")
+    code, out, err = run("run", "start", tid, "--by", "agent:factory")
+    assert code == 0, out + err
+    _wait(proj, tid)
+
+
+def test_an_automatic_start_waiting_in_line_stays_there_while_paused(proj, gen, one_step, monkeypatch):
+    """The line starts the next ticket whenever a helper ends; a paused workspace keeps an automatic start in
+    line (not dropped), and it goes once automation is on again."""
+    gen("--silent 0.2")
+    tid = _new(proj)
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="": None)
+    real = runs.start
+    monkeypatch.setattr(runs, "start", lambda root, t, by, **kw: real(root, t, by, **{**kw, "mode": None}))
+    runs_live._queue_for_slot(proj, tid, runs_live.AUTOMATION_BY, "Automation asked for another run.")
+    brake.pause(proj, "human:t")
+    assert runs_live.start_waiting(proj) == []
+    assert runs.read(proj, tid) is None and [t for t, _ in runs_live.waiting_line(proj)] == [tid]
+    brake.resume(proj)
+    assert runs_live.start_waiting(proj) == [tid]
+    _wait(proj, tid)
+
+
+def test_the_cap_holds_through_the_cli_and_a_pause_does_not_reset_it(proj, run):
+    tid = _new(proj)
+    for _ in range(brake.CAP_PER_DAY):
+        brake.check_start(proj, tid, runs_live.AUTOMATION_BY)
+    brake.pause(proj, "human:t")
+    brake.resume(proj)
+    code, out, err = run("run", "start", tid, "--by", runs_live.AUTOMATION_BY)
+    assert code != 0 and f"ran {brake.CAP_PER_DAY} times on its own today" in out + err
+    assert runs.read(proj, tid) is None
+    brake.check_start(proj, tid, "human:t")  # a person's own start is never capped
 
 
 def test_cap_refuses_the_21st_automatic_start_with_one_history_line(proj):

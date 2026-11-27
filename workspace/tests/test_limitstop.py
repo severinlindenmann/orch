@@ -252,6 +252,20 @@ def test_after_the_reset_a_stopped_ticket_with_no_run_starts_again(proj, new_tic
     assert [s[0] for s in starts] == [tid]
 
 
+def test_a_paused_workspace_keeps_the_usage_limit_restart_until_resume(proj, new_ticket, starts):
+    """R8.6: the start after the reset is automation; while paused it is kept, not used up."""
+    from orch import brake
+
+    tid = new_ticket()
+    limitstop.note(proj, tid, {"until": time.time() - 3 * 60})
+    brake.pause(proj, "human:t")
+    assert tend.run(proj)["paused"] is True
+    assert starts == [] and tid in limitstop.read(proj)["tickets"]
+    brake.resume(proj)
+    tend.run(proj)
+    assert [s[0] for s in starts] == [tid]
+
+
 def test_nothing_starts_before_the_reset_plus_grace(proj, new_ticket, starts):
     tid = new_ticket()
     limitstop.note(proj, tid, {"until": time.time() - 30})  # reset passed only half a minute ago

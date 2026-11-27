@@ -171,7 +171,7 @@ def test_the_helper_limit_caps_the_target(proj, calm, monkeypatch):
 
 def test_a_busy_computer_paused_automation_or_a_limit_stop_holds_new_starts(proj, calm, monkeypatch, starts):
     _on(proj, 3)
-    _ticket(proj, "Ready one", "ready")
+    ready = _ticket(proj, "Ready one", "ready")
     monkeypatch.setattr(dispatcher, "_load", lambda: (11.0, 8))
     res = dispatcher.run(proj, now=NOW)
     assert "busy" in res["held"] and starts == []
@@ -183,9 +183,12 @@ def test_a_busy_computer_paused_automation_or_a_limit_stop_holds_new_starts(proj
     monkeypatch.setattr(limitstop, "held_words", lambda root: "the usage limit is reached until 18:00")
     assert "usage limit" in dispatcher.run(proj, now=NOW)["held"]
     monkeypatch.setattr(limitstop, "held_words", lambda root: None)
-    monkeypatch.setattr(brake, "paused", lambda root: {"by": "human:x"})
+    brake.pause(proj, "human:x")
     assert dispatcher.run(proj, now=NOW)["held"] == "automation is paused"
     assert starts == []
+    brake.resume(proj)  # R8.6: on again, the next pass starts the waiting work
+    dispatcher.run(proj, now=NOW)
+    assert starts == [(ready, dispatcher.BY)]
 
 
 # ---------------------------------------------------------------- the line
