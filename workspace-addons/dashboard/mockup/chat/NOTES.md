@@ -42,3 +42,17 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ### ORCH-2095 polish
 - The helper row shows "H" (Helper), the same letter as on its messages in the product.
 - Product now matches the mockup here: one page heading, thread title at 20 px, times for today as a plain clock (11:56).
+
+
+## Caught up with the messenger (ORCH-2176, 28 Nov)
+
+- `chat.html`: now the Chat page as the product draws it since ORCH-2171 (messenger, option A of lane chat-messenger):
+  the list beside the conversation, rows grouped by writer under a day line, the ticket card with its facts shown, the
+  message box with Attach and Send. It is the page's own markup with the master and the dashboard sheets and no
+  scripts, taken from the running dashboard on sample data, so it cannot drift from the product's look. The old
+  simple helper chat with the Preview pill is gone (the product no longer has it).
+- The top bar has no Chat button on this page (ORCH-2176, the draft's own point). The phone bar keeps More lit on
+  Chat, as the accepted draft shows it (`proposals/chat-messenger/shots-build/after-chat-390.png`).
+- `chat-no-helper.html`: the empty chat when no helper tool is set up (ORCH-2149): "No helper is set up yet" with
+  Set up a helper, and "Not set up yet" under the name, instead of three starters for a helper that is not there.
+- `chat-relay.html` is unchanged (the earlier draft of the list with other workspaces).

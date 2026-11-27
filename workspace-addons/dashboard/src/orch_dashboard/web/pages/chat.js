@@ -176,6 +176,8 @@ function chatNewChatRows(onPick) {
 function chatPresence() {
   const blocked = chatHelperBlocked();
   if (blocked) return {state:'stopped', text:'Stopped · ' + blocked.replace(/\.$/, ''), action:'fix'};
+  // ORCH-2149 (2): no helper tool set up is not "Ready to answer"; the way on is the button in the conversation
+  if (typeof ticketNoHelperTool === 'function' && ticketNoHelperTool()) return {state:'off', text:'Not set up yet'};
   if (array(state?.services).some(x => x && x.running === false)) return {state:'off', text:'Not running', action:'start'};
   let rows = [];
   try { rows = array(window.DashHelpers?.helperRows?.(tickets(), state?.runs)).filter(r => r.state === 'working' && !r.finished); } catch { rows = []; }

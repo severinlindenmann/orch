@@ -306,6 +306,7 @@ test('ORCH-2149: with no helper set up the empty chat offers to set one up, not 
   assert.equal(nodes(thread, n => n.attrs?.['data-chat-action'] === 'prompt').length, 0);
   const link = nodes(welcome, n => n.attrs?.['data-key'] === 'chat-setup-helper')[0];
   assert.equal(link.attrs.href, '#settings/helper'); assert.equal(link.textContent, 'Set up a helper');
+  assert.deepEqual({...c.chatPresence()}, {state:'off', text:'Not set up yet'}, 'the header does not say Ready to answer');
   c.ticketNoHelperTool = () => false;
   assert.match(JSON.stringify(c.chatThread(null)), /Talk it through with your helper/, 'a helper is set up: the starters');
 });
