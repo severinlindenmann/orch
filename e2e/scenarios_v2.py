@@ -80,8 +80,14 @@ class W:
         return self
 
     def person(self, *args, ok=True, env=None, input=None):
-        """A person's action (answer, ticket done, relay connect ...): a plain CLI action, no --by."""
-        return self.o(*args, ok=ok, by=None, env=env, input=input)
+        """A person's action (answer, ticket done, relay connect ...): no --by, at a terminal (an unattended
+        caller is a helper, ORCH-2108). With `input` the text goes on stdin instead (no terminal)."""
+        if input is not None:
+            return self.o(*args, ok=ok, by=None, env=env, input=input)
+        rc, out, err = self.e.at_terminal(["orch", *args], cwd=self.root, env={**self.env, **(env or {})})
+        if ok and rc != 0:
+            raise Fail(f"orch {' '.join(args)[:70]} (as the person) exit {rc}: {(err or out).strip()[-240:]}")
+        return rc, out, err
 
     def add_agent(self, name: str, command: str, interactive: str | None = None):
         """`orch config agent add` and `config set workspace.agent` are a person's actions with no test-human proof:

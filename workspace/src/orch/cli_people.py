@@ -90,7 +90,7 @@ def dispatch(args, root: Path) -> bool:
         return False
     cmd = getattr(args, "people_cmd", None) or "list"
     expect = getattr(args, "expect", None)
-    by = getattr(args, "by", None)  # who acts: only the owner changes the list (people._guard, ORCH-1486)
+    by = tickets.acting_by(args)
     if cmd == "list":
         v = people.view(root)
         _out(args, v, _list_text(v))

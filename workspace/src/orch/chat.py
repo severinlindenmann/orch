@@ -1001,8 +1001,8 @@ def can_of(flags) -> dict:
     }
 
 
-def contacts(root: Path) -> list[dict]:
-    _dm_person()
+def contacts(root: Path, by: str | None = None) -> list[dict]:
+    _dm_person(by)
     return _contacts_list(root)
 
 
@@ -1070,8 +1070,8 @@ def _dm_summary(root: Path, ws: str) -> tuple[int, str]:
     return value
 
 
-def _dm_contact(root: Path, ws: str) -> dict:
-    contact = next((c for c in contacts(root) if c["ws"] == ws), None)
+def _dm_contact(root: Path, ws: str, by: str | None = None) -> dict:
+    contact = next((c for c in contacts(root, by) if c["ws"] == ws), None)
     if contact is None:
         raise Refused(f"You may not message {relay.clean_untrusted(str(ws), 100)}.")
     return contact
@@ -1158,7 +1158,7 @@ def dm_send(
 ) -> dict:
     if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
-    contact = _dm_contact(root, ws)
+    contact = _dm_contact(root, ws, by)
     if not contact["can"]["chat"]:
         raise Refused(f"You may not message {contact['name']}.")
     text = text.strip() if isinstance(text, str) else ""
@@ -1205,15 +1205,15 @@ def dm_send(
     return entry
 
 
-def dm_read(root: Path, ws: str) -> dict:
-    contact = _dm_contact(root, ws)
+def dm_read(root: Path, ws: str, by: str | None = None) -> dict:
+    contact = _dm_contact(root, ws, by)
     data = _dm_read(root, ws)
     return {**contact, "messages": data["messages"][-500:]}
 
 
-def dm_thread(root: Path, ws: str) -> dict:
+def dm_thread(root: Path, ws: str, by: str | None = None) -> dict:
     """Compatibility name for a pure stored-thread read."""
-    return dm_read(root, ws)
+    return dm_read(root, ws, by)
 
 
 def _dm_inbox(root: Path):
@@ -1246,17 +1246,17 @@ def _dm_inbox(root: Path):
 
 def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
     _dm_person(by)
-    contact = _dm_contact(root, ws)
+    contact = _dm_contact(root, ws, by)
     _dm_sync_contacts(root, [contact])
-    return dm_read(root, ws)
+    return dm_read(root, ws, by)
 
 
 def dm_sync_all(root: Path, by: str | None = None) -> list[dict]:
     """Import all contacts with one bounded inbox scan."""
     _dm_person(by)
-    peers = contacts(root)
+    peers = contacts(root, by)
     _dm_sync_contacts(root, peers)
-    return contacts(root)
+    return contacts(root, by)
 
 
 def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:

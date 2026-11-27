@@ -1659,8 +1659,6 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
         "logins.check",
     ):  # read-only answers: nothing changes, so no --by
         return [*words, "--json"]
-    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
-        return [*words, *flags, "--json"]
     return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 

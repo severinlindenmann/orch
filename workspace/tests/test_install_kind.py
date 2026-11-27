@@ -229,6 +229,14 @@ def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run):
     assert code == 2 and "Only a person" in (out + err)
 
 
+def test_start_refuses_print_launch_url_inside_an_orch_run(proj, monkeypatch, run):
+    """A helper whose tool orch does not recognise is still a helper inside a run (ORCH-2108)."""
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
+    monkeypatch.setenv("ORCH_RUN", "r_test")
+    code, out, err = run("start", "--no-open", "--print-launch-url")
+    assert code == 2 and "Only a person" in (out + err)
+
+
 # ---------------------------------------------------------------- folder add-ons, tool env guard, json
 
 
