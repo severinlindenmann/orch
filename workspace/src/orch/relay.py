@@ -3455,6 +3455,7 @@ def apply_allow_answers(root: Path) -> list[str]:
             notes.append(label)
     for mid in denied:  # outside relay.lock
         _group_denied(root, mid)
+        _tell_declined(root, mid)
     return notes
 
 
@@ -3711,10 +3712,12 @@ _PASSED_ON = re.compile(r"Passed on to (Chat|a ticket|[A-Z0-9]{2,4}-[1-9][0-9]{0
 
 def receipts(root: Path) -> dict:
     """{given: {<their message>: at}, got: {<our message>: {state, where, at}},
-    asked: {<ticket>/<workspace>: {message, question, at}}}."""
+    asked: {<ticket>/<workspace>: {message, question, at}}, declined: {<their task>: at}}."""
     data = net.read_json(root.joinpath(".orch", *RECEIPTS), {})
     data = data if isinstance(data, dict) else {}
-    return {k: data[k] if isinstance(data.get(k), dict) else {} for k in ("given", "got", "asked")}
+    return {
+        k: data[k] if isinstance(data.get(k), dict) else {} for k in ("given", "got", "asked", "declined")
+    }
 
 
 def _receipts_edit(root: Path, fn) -> None:
@@ -3735,7 +3738,42 @@ def receipt_label(rec) -> str | None:
     if rec.get("state") == "passed_on":
         where = str(rec.get("where") or "")
         return f"Passed on to {where}" if _PASSED_ON.fullmatch(f"Passed on to {where}") else "Passed on"
-    return "Delivered" if rec.get("state") == "delivered" else None
+    return {"delivered": "Delivered", "declined": DECLINED}.get(rec.get("state"))
+
+
+DECLINED = "Declined"  # relay-api.md "Receipts between workspaces": the one fixed line for a declined task
+
+
+def _tell_declined(root: Path, mid: str) -> None:
+    """ORCH-2189 (RP4 A): the person here pressed Decline on a workspace's 1:1 task. The sender hears it once,
+    in one fixed line (no reason, no name); before, its page said "Waiting for <Name>" for ever. A group's
+    task has its own note (chat_groups.denied). Never fails the Decline itself."""
+    first: list[str] = []
+
+    def mark(data):
+        if mid not in data["declined"]:
+            data["declined"][mid] = tickets.now()
+            first.append(mid)
+
+    try:
+        msg = load_message(root, mid)
+        frm = msg.get("from")
+        if msg.get("type") not in ("delegate", "start") or msg_group(msg):
+            return
+        if not (isinstance(frm, str) and frm.startswith("ws_")):
+            return
+        with locked(root):
+            _receipts_edit(root, mark)
+        if not first:
+            return
+        from orch import chat
+
+        body = {"text": DECLINED, "update": {"kind": "ack"}, "general": True, "day": chat.day_key(root)}
+        _message(root, frm, "text", body, None, mid)
+    except Refused:
+        pass  # a one-way pair, or the message is gone: nothing to tell, nothing wrong
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        log_send_failure(root, "the note that a task was declined", e)
 
 
 def _give_receipt(root: Path, msg: dict, tid: str | None, general: bool, passed: bool) -> None:
@@ -3801,17 +3839,21 @@ def _receipt_for(root: Path, m: dict) -> dict | None:
 def _apply_receipt(root: Path, m: dict, e: dict) -> str:
     """Under relay.lock: keep what the other workspace says happened to our message and say it once on the
     ticket the message was about. Its words are data (R3.2): only the fixed forms are taken, else Delivered.
-    Passed on is never turned back into Delivered."""
+    Passed on and Declined are never turned back into Delivered."""
     text = " ".join(clean_untrusted(str(m["body"].get("text") or ""), 80).split())
     hit = _PASSED_ON.fullmatch(text)
-    rec = {"state": "passed_on" if hit else "delivered", "at": tickets.now(), "from": m["from"]}
+    # Declined counts only for a task we handed over (ORCH-2189); for anything else it is just Delivered
+    declined = text == DECLINED and e.get("type") in ("delegate", "start")
+    state = "passed_on" if hit else "declined" if declined else "delivered"
+    rec = {"state": state, "at": tickets.now(), "from": m["from"]}
     if hit:
         rec["where"] = hit.group(1)
     changed = []
 
     def keep(data):
         old = data["got"].get(e["id"])
-        if isinstance(old, dict) and old.get("state") in ("passed_on", rec["state"]):
+        # passed on and declined are final; Delivered never comes back over either
+        if isinstance(old, dict) and old.get("state") in ("passed_on", "declined", rec["state"]):
             return
         data["got"][e["id"]] = rec
         changed.append(1)

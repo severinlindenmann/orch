@@ -377,7 +377,8 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
     """RP5: one conversation per workspace (the people in the relay's list), oldest first. What a message says
     about itself comes from what this workspace already records: still in the outbox is "Not sent yet"; sent
     is "Sent"; a task they must allow first is "Waiting for <Name>". ORCH-2348: once the other workspace's
-    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back."""
+    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back;
+    "Declined" when their person declined a task (ORCH-2189)."""
     d = relay._read_dir(root)
     waiting: dict[str, list[dict]] = {}
     for m in relay.outbox_list(root):
@@ -435,6 +436,8 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
         unsent = any(w.get("id") == e["id"] for w in waiting.get(pid, []))
         if unsent:
             item["state"] = {"label": "Not sent yet", "tone": "warn"}
+        elif (got.get(e["id"]) or {}).get("state") == "declined":  # ORCH-2189: their person said no
+            item["state"] = {"label": relay.DECLINED, "tone": "warn"}
         elif e["type"] in ("delegate", "start") and not _yes(allowed, pid, e["type"]):
             item["state"] = {"label": plain(f"Waiting for {name}", 40), "tone": "warn"}
         elif e["id"] in silent:  # ORCH-2348: the person was asked about it on the ticket
