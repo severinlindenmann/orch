@@ -18,6 +18,9 @@ on:
         description: "the Linux parts (off only on a push to develop that a green queue group proved: only the Windows parts run then, ORCH-1107)"
         type: boolean
         default: true
+      checks:
+        type: string
+        default: '"ubuntu-latest"'
 env:
   # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
   # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
@@ -44,6 +47,7 @@ jobs:
           WINDOWS: ${{ inputs.windows }}
           MAC_RUNS_ON: ${{ inputs.mac_runs_on }}
           LINUX: ${{ inputs.linux }}
+          CHECKS: ${{ inputs.checks }}
         run: |
           python3 - <<'PY2'
           import json, os
@@ -58,6 +62,7 @@ jobs:
           # instead of 5 parts on GitHub's machines (ORCH-1125)
           mac_runs_on = json.loads(os.environ.get("MAC_RUNS_ON") or '"macos-latest"')
           own_mac = mac_runs_on != "macos-latest"
+          linux_runs_on = json.loads(os.environ.get("CHECKS") or '"ubuntu-latest"')
           if os.environ["FULL"] == "true":
               parts["macos-latest"] = 1 if own_mac else 5
           if os.environ["WINDOWS"] == "true":
@@ -65,10 +70,12 @@ jobs:
           LIMIT = {"windows-latest": 20}  # minutes per part; 15 elsewhere (the Time used step reads it too)
           if own_mac:
               LIMIT["macos-latest"] = 45  # the one macOS part on this Mac's own runner
+          if linux_runs_on != "ubuntu-latest":
+              LIMIT["ubuntu-latest"] = 30  # two workers per shard on the shared ARM host
           rows = [
               {
                   "os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED,
-                  "runs_on": mac_runs_on if o == "macos-latest" else o,
+                  "runs_on": {"macos-latest": mac_runs_on, "ubuntu-latest": linux_runs_on}.get(o, o),
                   "workers": "6" if (o == "macos-latest" and own_mac) else "auto",
                   "limit": LIMIT.get(o, 15),
               }
@@ -84,6 +91,9 @@ jobs:
     name: test (${{ matrix.os }}, ${{ matrix.part }}/${{ matrix.parts }})
     strategy:
       fail-fast: false
+      # Sprint PRs share hosted slots with the merge queue. Keep every part, but don't start 20 at once.
+      # 256 is GitHub's matrix size limit, so other runs retain their normal parallelism.
+      max-parallel: ${{ github.event_name == 'pull_request' && github.base_ref == 'develop' && startsWith(github.head_ref, 'copilot/') && 2 || 256 }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runs_on }}
     # One part: under its limit (15 minutes, Windows 20, 45 for the one macOS part on this Mac's own runner) set-up
@@ -100,9 +110,10 @@ jobs:
         run: echo "PART_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+        if: runner.os == 'macOS'
+      - uses: ./.github/actions/edge-job-home
+        if: runner.os == 'Linux'
+      - uses: ./.github/actions/setup-uv
       # Windows: orch's safe git runs the python of the virtual environment as its `true` and refuses a python
       # inside the project folder, so every git test failed. Keep the environment outside the project (ORCH-32).
       - name: Virtual environment outside the project (Windows)
@@ -142,6 +153,9 @@ jobs:
         run: |
           uv build --wheel -o "$RUNNER_TEMP/dist"
           uv tool install --reinstall "$RUNNER_TEMP"/dist/orch_workspace-*.whl
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ] && [ "$RUNNER_OS" = Linux ]; then
+            export PATH="$(uv tool dir --bin):$PATH"
+          fi
           d="$RUNNER_TEMP/smoke"; mkdir -p "$d"; cd "$d"
           ORCH_AGENT=claude orch init  # no agent is installed on the runner; this one links its skills folder
           orch ticket new "smoke" --json

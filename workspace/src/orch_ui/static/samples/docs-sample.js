@@ -1895,6 +1895,10 @@ window.DOCS_SAMPLE = {
       "the read-only page"
      ],
      [
+      "orch insights week",
+      "the last 7 days: done, stuck, time to done"
+     ],
+     [
       "orch insights checkup start",
       "run the weekly check-up now"
      ]

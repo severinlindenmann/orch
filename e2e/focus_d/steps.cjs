@@ -328,7 +328,7 @@ async function paneData(page, dash) {
   const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
     lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
   if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
-  if (!/^Claude Code · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
+  if (!/^Claude Code · Sonnet · open \d+ min · stays open while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
   const link = `${body} [data-key="live-open-ticket"]`;
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());

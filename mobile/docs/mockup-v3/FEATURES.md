@@ -3,12 +3,12 @@
 ## 1. Screens today (exact visible labels)
 **Onboarding**: orch logo. "Let's get connected." / "Bring your workspaces along with an invitation."
 - Buttons "Scan QR code" (primary, camera sheet), "Paste link" (uses clipboard if it holds orch://, else sheet).
-  Hint "You get an invitation from orch on your computer." + disclosure "Get an invitation" (3 steps). DEBUG builds only: "Try a demo".
+  Hint "Ask the person who set up orch for you to send an invitation." + disclosure "If you are the admin" (3 steps: relay admin page, Add phone, scan or send the link). The same help sits in Add workspace. DEBUG builds only: "Try a demo".
 - Paste sheet: "Paste link", field "Invitation link" placeholder "orch://pair?…", "Continue", "Close". Errors:
-  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
+  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
 - QR sheet: camera viewfinder; problems: "orch can't use the camera. Allow it in Settings, or paste the link instead." (+ "Open Settings") / "The camera is blocked on this phone. Paste the link instead." / "This device has no camera. Paste the link instead." / "The camera didn't start. Close and try again, or paste the link instead."; "Paste link", "Close".
 - Found: card "Your invitation is ready" / "You were invited to connect this phone." / disclosure "Connection details". Buttons "Connect this phone" → "Connecting this phone…", "Use a different link".
-- Errors: "This invitation has expired or was already used. Create a new one in orch on your computer." (button "Use a new invitation") / "Can't reach the server. Check your connection, then tap Connect this phone again."
+- Errors: "This invitation has expired or was already used. Ask the person who invited you for a new one." (button "Use a new invitation"; Add workspace shows the same text, and "This invitation is not valid. Ask the person who invited you for a new one." for an unknown code) / "Can't reach the server. Check your connection, then tap Connect this phone again."
 
 **Notify step**: "You're connected." / "N workspaces are ready." Card "Know when you're needed." / "Get notified when your work needs an answer." + workspace names. "Allow notifications" / "Not now".
 

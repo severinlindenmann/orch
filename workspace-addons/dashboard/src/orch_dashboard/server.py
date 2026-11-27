@@ -295,7 +295,7 @@ FILE_STAMP_MAX = 64
 
 TERMINAL_OFF = (
     "Typing into the plain terminal is off. "
-    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+    "The owner turns on 'Let me type into the plain terminal' in Settings \u2192 People."
 )
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
@@ -802,16 +802,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             return hit[1]
         port = None
-        if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
+        pages = {a["name"] for a in load_addons(self.root, self.orch_bin) if a.get("page")}
+        if name in pages:
+            now = time.monotonic()
             for svc in load_services(self.root, self.orch_bin):
                 m = LOCAL.fullmatch(str(svc.get("url") or ""))
                 if (
-                    svc.get("addon") == name
-                    and svc.get("running") is True
+                    svc.get("running") is True
                     and m
                     and 0 < int(m.group(1)) < 65536
+                    and svc.get("addon") in pages
                 ):
-                    port = int(m.group(1))
+                    if svc["addon"] == name:
+                        port = int(m.group(1))
+                    elif stamp is not None:
+                        # the same look found the other pages' ports: the next page opened does not ask orch
+                        # again (ORCH-2288: about a second per add-on on a first open)
+                        _PORTS[(str(self.root), svc["addon"])] = (now, int(m.group(1)), stamp)
         _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 

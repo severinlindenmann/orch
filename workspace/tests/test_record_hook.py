@@ -826,7 +826,7 @@ def run_lines(root, run):
 
 
 @pytest.fixture
-def tool_run(live, monkeypatch):
+def tool_run(live, monkeypatch, collect_claude):
     monkeypatch.setenv("ORCH_AGENT", "claude")  # what the wrapper sets for its agent (runs.wrap)
     return live
 
@@ -924,8 +924,10 @@ def test_the_generic_path_keeps_only_a_claimed_failure_with_a_fixed_code(live, s
 
 
 @pytest.mark.parametrize("interrupt", [False, True])
-def test_a_hook_failure_and_the_logs_failure_agree_the_logs_line_replaces_it(tool_run, interrupt):
-    from orch import cli_record, collect_claude
+def test_a_hook_failure_and_the_logs_failure_agree_the_logs_line_replaces_it(
+    tool_run, interrupt, collect_claude
+):
+    from orch import cli_record
 
     root, run, tid = tool_run
     record_hook.hook(root, tool_hook("PreToolUse"))
@@ -950,10 +952,10 @@ def test_a_hook_failure_and_the_logs_failure_agree_the_logs_line_replaces_it(too
 
 
 @pytest.mark.parametrize("hook_first", [True, False])
-def test_the_logs_success_wins_over_a_hook_failure_in_both_orders(tool_run, hook_first):
+def test_the_logs_success_wins_over_a_hook_failure_in_both_orders(tool_run, hook_first, collect_claude):
     """A claimed failure the log contradicts: hook first, both are kept and the log line carries `conflict`
     (counts believe it); log first, the late hook end is dropped."""
-    from orch import cli_record, collect_claude
+    from orch import cli_record
 
     root, run, tid = tool_run
     ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
@@ -970,10 +972,10 @@ def test_the_logs_success_wins_over_a_hook_failure_in_both_orders(tool_run, hook
         assert [u["result"] for u in cli_record.run_model(run, order)["uses"]] == ["ok"]
 
 
-def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(tool_run):
+def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(tool_run, collect_claude):
     """The hook lines come first (as the call happens); the log's lines of that call replace them, started and
     finished alike (N1: a hook line is the agent's word): how the call really ended, its time, its detail."""
-    from orch import cli_record, collect_claude
+    from orch import cli_record
 
     root, run, tid = tool_run
     record_hook.hook(root, tool_hook("PreToolUse"))
@@ -1000,9 +1002,7 @@ def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(to
     assert record_hook.hook(root, tool_hook("PreToolUse")) is None  # and a late started line
 
 
-def test_a_denied_call_is_a_started_step_and_the_logs_denial(tool_run):
-    from orch import collect_claude
-
+def test_a_denied_call_is_a_started_step_and_the_logs_denial(tool_run, collect_claude):
     root, run, tid = tool_run
     bash = {"command": "rm -rf build"}
     record_hook.hook(root, tool_hook("PreToolUse", tid="toolu_denied", name="Bash", inp=bash))
@@ -1082,7 +1082,7 @@ def test_the_hook_command_takes_the_tools_payload_on_stdin(tool_run, monkeypatch
 
 
 @pytest.mark.skipif(os.name == "nt", reason="no process-tree proof on Windows yet (TODO W2b 1.7: VM proof)")
-def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(tool_run, subprocess_home):
+def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(subprocess_home, tool_run):
     """The exact line from the run's settings, run by a shell below this run's process as the tool runs it: it
     passes the run check and stops only at the writer (a child has no registered hider and no keys here)."""
     import subprocess
@@ -1092,7 +1092,7 @@ def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(too
     root, run, _ = tool_run
     cmd = adapters.reminder_doc("claude", root)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     r = subprocess.run(
-        cmd, shell=True, cwd=root, input=tool_hook("PreToolUse"), capture_output=True, text=True, timeout=60,
+        cmd, shell=True, cwd=root, input=line(), capture_output=True, text=True, timeout=60,
         env={**os.environ, "ORCH_ROOT": str(root)},
     )  # fmt: skip
     assert r.returncode == 0 and r.stderr == "orch: Recording is off until key hiding is ready.\n"
@@ -1123,6 +1123,45 @@ def _fake_agent(tmp_path, root):
         f"sys.stdout.write(open({str(out)!r}).read())\n"
     )
     return [sys.executable, str(script)], seen
+
+
+def test_fake_helper_before_during_and_after_collector_install(proj, install_collector, monkeypatch):
+    from orch import adapters, addons, config
+
+    argv, seen = _fake_agent(proj, proj)
+    config.add_agent(proj, "plain", " ".join(f'"{arg}"' for arg in argv), None, "generic", approve=True)
+    monkeypatch.setattr(runs, "_on_term", lambda *a: None)
+
+    def turn(name, command):
+        tid = tickets.create(proj, "Fake helper", "human:t")["id"]
+        run = runs.claim(proj, tid, "agent:x", name, pid=os.getpid())["run"]
+        monkeypatch.setenv("ORCH_AGENT", name)
+        record_hook.hook(proj, line(id="generic-step"), environ={"ORCH_RUN": run, "ORCH_TICKET": tid})
+        assert runs.wrap(proj, run, tid, name, command) == 0
+        assert json.loads(seen.read_text())["ORCH_RUN"] == run
+        return run, events(proj, run)
+
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        assert adapters.collector("claude") is adapters.live_collector("claude") is None
+        for phase in ("bare", "active", "removed"):
+            if phase == "active":
+                install_collector(proj)
+            elif phase == "removed":
+                addons._save_registry([])
+                assert adapters.collector("claude", proj) is None  # still listed, package removed
+                addons.remove(proj, "insights")
+            active = phase == "active"
+            assert (adapters.collector("claude", proj) is not None) == active
+            assert (adapters.live_collector("claude", proj) is not None) == active
+            _, plain = turn("plain", adapters.render("plain", "fresh", "oneshot", {"prompt": "work"}, proj))
+            assert [e["id"] for e in plain] == ["generic-step"]
+            run, rows = turn("claude", argv)
+            if active:
+                assert [e["id"] for e in rows if e["kind"] == "step"] == ["generic-step", TOOL_ID, TOOL_ID]
+                saved_run, saved = run, rows
+            else:
+                assert [e["id"] for e in rows] == ["generic-step"]
+        assert events(proj, saved_run) == saved
 
 
 @pytest.mark.skipif(
@@ -1158,7 +1197,9 @@ def test_the_wrapper_records_the_agents_stream_its_lines_replace_the_hooks(tool_
     assert set(env) == before | {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "ORCH_ROOT"}  # nothing new to forge
 
 
-def test_the_wrapper_records_nothing_while_key_hiding_is_not_ready(proj, tmp_path, monkeypatch):
+def test_the_wrapper_records_nothing_while_key_hiding_is_not_ready(
+    proj, tmp_path, monkeypatch, collect_claude
+):
     from orch import run_record
 
     t = tickets.create(proj, "No hider", "human:t")
@@ -1302,10 +1343,10 @@ def test_the_lost_trace_keeps_only_a_plain_type_name(tool_run):
     ]
 
 
-def test_a_forged_hook_success_never_hides_the_logs_failure(tool_run):
+def test_a_forged_hook_success_never_hides_the_logs_failure(tool_run, collect_claude):
     """H1: the agent can send any line to `orch record hook` (it is inside the run's process tree) and can
     read its real tool-call ids from its transcript. A forged success never suppresses the log's failure."""
-    from orch import cli_record, collect_claude
+    from orch import cli_record
 
     root, run, tid = tool_run
     forged = line(
@@ -1331,11 +1372,11 @@ def test_a_forged_hook_success_never_hides_the_logs_failure(tool_run):
     assert record_hook.hook(root, forged) is None  # sent again after the log: dropped
 
 
-def test_a_forged_started_line_never_hides_what_the_call_did(tool_run):
+def test_a_forged_started_line_never_hides_what_the_call_did(tool_run, collect_claude):
     """N1: the agent sends a started line for its real tool-call id naming another tool, text and files (a
     Bash `rm -rf build/` as "Read notes.txt"). Both lines are kept, the log's with `conflict`; readers
     believe it."""
-    from orch import cli_record, collect_claude
+    from orch import cli_record
 
     root, run, tid = tool_run
     record_hook.hook(root, line(id=TOOL_ID, used=READ, text="Read notes.txt", files=["notes.txt"]))
@@ -1375,12 +1416,12 @@ def test_run_model_reports_the_logs_result_on_a_conflict(tool_run):
 
 
 @pytest.mark.parametrize("forged_pre", [True, False])
-def test_a_forged_hook_end_never_beats_the_logs_started_line(tool_run, forged_pre):
+def test_a_forged_hook_end_never_beats_the_logs_started_line(tool_run, forged_pre, collect_claude):
     """N1a: the call never finishes in the log (an interrupted turn). The agent sends a provisional end (and
     maybe a started line) naming another tool, text and files. The log's started line carries `conflict`
     (a hook end is compared with it too), counts believe it (result unknown), and a hook end sent after it
     is dropped."""
-    from orch import cli_record, collect_claude
+    from orch import cli_record
 
     root, run, tid = tool_run
     forged = dict(id=TOOL_ID, used=READ, text="Read notes.txt", files=["notes.txt"])
@@ -1437,12 +1478,10 @@ def test_one_bad_spooled_entry_never_stops_the_runs_record(tool_run, monkeypatch
     assert '"target":"folder"' in alerts and '"reason":"swapped"' in alerts
 
 
-def test_the_logs_detail_replaces_the_hooks_atomically(tool_run, monkeypatch):
+def test_the_logs_detail_replaces_the_hooks_atomically(tool_run, monkeypatch, collect_claude):
     """N5: the log's detail is written to a temporary file and renamed over the hook's. Up to the rename the
     hook's file is untouched (never half-written); a failed rename is no crash: the log line is detail_lost,
     the hook's orphaned payload goes (N5 rule), and no temporary file stays behind."""
-    from orch import collect_claude
-
     root, run, tid = tool_run
     record_hook.hook(root, tool_hook("PreToolUse"))
     post = record_hook.hook(root, tool_hook("PostToolUse"))
@@ -1465,9 +1504,7 @@ def test_the_logs_detail_replaces_the_hooks_atomically(tool_run, monkeypatch):
     assert not path.exists() and not [p for p in path.parent.iterdir() if p.name.startswith("tmp_")]
 
 
-def test_a_provisional_hook_end_after_the_logs_failure_is_dropped(tool_run):
-    from orch import collect_claude
-
+def test_a_provisional_hook_end_after_the_logs_failure_is_dropped(tool_run, collect_claude):
     root, run, tid = tool_run
     ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
     failed = dict(type="tool_result", tool_use_id=TOOL_ID, content="Exit code 2", is_error=True)
@@ -1495,9 +1532,7 @@ def test_an_edit_hook_keeps_no_copy_of_the_whole_file(tool_run):
     assert b"originalFile" not in blob and b"WHOLE FILE BEFORE" not in blob and b"structuredPatch" not in blob
 
 
-def test_a_big_read_result_is_cut_and_other_results_are_text():
-    from orch import collect_claude
-
+def test_a_big_read_result_is_cut_and_other_results_are_text(collect_claude):
     big = {"type": "text", "file": {"filePath": "a.txt", "content": "x" * 100_000, "numLines": 1}}
     out = collect_claude.hook_output(big)
     assert out["file"]["filePath"] == "a.txt" and out["file"]["numLines"] == 1
@@ -1518,8 +1553,8 @@ def test_a_description_that_is_not_text_is_still_one_line(tool_run):
     assert "\n" not in record_hook.hook(root, nested)["text"]
 
 
-def test_the_collectors_hook_events_are_the_wired_ones():
-    from orch import adapters, collect_claude
+def test_the_collectors_hook_events_are_the_wired_ones(collect_claude):
+    from orch import adapters
 
     assert set(collect_claude.HOOK_EVENTS) == set(adapters.load("claude")["record_hooks"])
 
@@ -1547,9 +1582,7 @@ def test_tool_calls_without_any_hook_line_leave_a_trace(tool_run, tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
-def test_the_settings_check_never_blocks_on_a_fifo(tmp_path):
-    from orch import collect_claude
-
+def test_the_settings_check_never_blocks_on_a_fifo(tmp_path, collect_claude):
     (tmp_path / ".claude").mkdir()
     os.mkfifo(tmp_path / ".claude" / "settings.local.json")
     (tmp_path / ".claude" / "settings.json").write_text("not json")
@@ -1601,11 +1634,9 @@ def test_a_turn_spooled_behind_a_busy_lock_never_shares_ids_with_the_next(tool_r
     assert not list((root / ".orch/record/pending" / run).glob("*.json"))
 
 
-def test_a_log_end_without_its_own_detail_removes_the_hooks(tool_run):
+def test_a_log_end_without_its_own_detail_removes_the_hooks(tool_run, collect_claude):
     """N5: the log's detail is lost (too large): the hook's provisional payload must not stay behind with no
     line the reader keeps pointing at it."""
-    from orch import collect_claude
-
     root, run, tid = tool_run
     record_hook.hook(root, tool_hook("PreToolUse"))
     post = record_hook.hook(root, tool_hook("PostToolUse"))
@@ -1619,10 +1650,8 @@ def test_a_log_end_without_its_own_detail_removes_the_hooks(tool_run):
     assert not hook_detail.exists()
 
 
-def test_a_hooks_tool_input_is_cut_too():
+def test_a_hooks_tool_input_is_cut_too(collect_claude):
     """N7: a Write or MultiEdit input holds whole files; the hook's detail keeps each text cut."""
-    from orch import collect_claude
-
     big = {"file_path": "a.txt", "content": "x" * 100_000, "edits": [{"old_string": "a"}] * 300, "n": 3}
     line_ = collect_claude.hook_line(
         {"hook_event_name": "PostToolUse", "tool_use_id": "toolu_w", "tool_name": "Write", "tool_input": big}
@@ -1857,7 +1886,7 @@ def test_the_installed_orch_script_never_fails_a_hook(tmp_path, case):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="no process-tree proof on Windows yet (TODO W2b 1.7: VM proof)")
-def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tmp_path, monkeypatch):
+def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tmp_path, install_collector):
     """T2: the installed `orch` script, as the wiring runs it, really writes. A tool's Pre- and PostToolUse
     payloads from inside a live run land in the run record: exit 0, nothing on stdout, nothing on stderr (not
     the guard's "nothing was recorded"). The other console tests pass whether the hook records or not. A child
@@ -1883,6 +1912,7 @@ def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tm
         env = _hook_env(
             ORCH_ROOT=str(root), ORCH_RUN=rec["run"], ORCH_TICKET=t["id"], ORCH_AGENT="claude",
             HOME=str(home), USERPROFILE=str(home),
+            PYTHONPATH=install_collector(root),
         )  # fmt: skip
         inp = {"file_path": "notes.txt", "note": SECRET}
         for event in ("PreToolUse", "PostToolUse"):
@@ -2102,10 +2132,8 @@ def test_shown_is_fast_on_a_long_run():
     assert sum(bool(e.get("conflict")) for e in kept) == 2 * len(range(0, 2500, 3))
 
 
-def test_hooks_disabled_reads_the_config_dir_the_run_names(tmp_path, monkeypatch):
+def test_hooks_disabled_reads_the_config_dir_the_run_names(tmp_path, monkeypatch, collect_claude):
     """#548: with the config-dir variable set, its settings.json counts and ~/.claude does not."""
-    from orch import collect_claude
-
     home, work, prof = tmp_path / "home", tmp_path / "work", tmp_path / "prof"
     for d in (home / ".claude", work, prof):
         d.mkdir(parents=True)

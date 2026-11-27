@@ -16,13 +16,19 @@ struct ReceiptView: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) { stamp; recovery }
-                VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
-            }
-            if case .queued = receipt, let note {
-                Text(note).foregroundStyle(tint).accessibilityIdentifier("receipt-wait")
+            if case .failed(let why) = receipt {
+                stamp
+                // Read once through "Not sent" above, so VoiceOver skips the visible copy.
+                Text(why).foregroundStyle(tint).multilineTextAlignment(.trailing)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true).accessibilityIdentifier("receipt-why")
+                recovery
+            } else {
+                stamp
+                if case .queued = receipt, let note {
+                    Text(note).foregroundStyle(tint).accessibilityIdentifier("receipt-wait")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .themeFont(inline ? 12 : 13).foregroundStyle(tint)
@@ -45,8 +51,8 @@ struct ReceiptView: View {
                     checks
                         .foregroundStyle(Theme.brand).accessibilityElement(children: .ignore)
                         .accessibilityLabel("Delivered").accessibilityIdentifier("receipt-started")
-                case .failed(let message):
-                    Text("Not sent").foregroundStyle(Theme.danger).accessibilityHint(message)
+                case .failed(let why):
+                    Text("Not sent").foregroundStyle(Theme.danger).accessibilityLabel(NotSentNote.spoken(why))
                         .accessibilityIdentifier("receipt-failed")
                 }
             }.id(receiptKey).transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 3)))

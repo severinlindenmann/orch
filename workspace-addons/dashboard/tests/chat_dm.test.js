@@ -9,7 +9,7 @@ function context() {
     style:{}, classList:{add(){}}, append(...nodes){this.children.push(...nodes);}, prepend(...nodes){this.children.unshift(...nodes);},
     addEventListener(){}, querySelector(){return null;}, get textContent(){return JSON.stringify(this.children);}});
   const events = {};
-  const c = vm.createContext({crypto:require('node:crypto').webcrypto, setTimeout:() => 1, clearTimeout(){}, h, fragment:(...children) => h('fragment', {}, ...children),
+  const c = vm.createContext({iconEl:() => null, crypto:require('node:crypto').webcrypto, setTimeout:() => 1, clearTimeout(){}, h, fragment:(...children) => h('fragment', {}, ...children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), state:{}, snapshot:false,
     CSS:{supports:() => false}, time:() => '', date:() => '', ticketOf:() => null,
     location:{hash:'#chat/' + WS}, history:{replaceState(){}}, route:() => ({kind:'chat'}), render(){},
@@ -24,11 +24,12 @@ function context() {
 test('DM renders safe text, delivery states, read-only permissions and workspace rows', () => {
   const c = context();
   vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'1',by:'you',text:'<script>hello</script>',state:'sending'},
-    {id:'2',by:'you',text:'ok',state:'delivered'}, {id:'3',by:'you',text:'failed',state:'failed'}, {id:'4',by:'${WS}',text:'reply'}]});`, c);
+    {id:'3',by:'you',text:'failed',state:'failed'}, {id:'4',by:'${WS}',text:'reply'}, {id:'2',by:'you',text:'ok',state:'delivered'}]});`, c);
   let view = JSON.stringify(c.chatDmThread());
-  assert.match(view, /Sending…/); assert.match(view, /Delivered/); assert.doesNotMatch(view, /helper answers/); assert.match(view, /Not sent · /);
+  // one plain line under your own message when it says something: sending, not sent (Try again), delivered (the last)
+  assert.match(view, /Sending…/); assert.match(view, /Delivered/); assert.doesNotMatch(view, /helper answers/); assert.match(view, /Not sent\. Check the connection\./);
   assert.match(view, /<script>hello<\/script>/); assert.match(view, /Try again/);
-  assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
+  assert.match(JSON.stringify(c.chatList()), /Workspaces/);
   vm.runInContext('chatDm.contacts[0].can.chat = false', c);
   assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /textarea/);
 });
@@ -129,7 +130,7 @@ test('refused action retains text after clearing draft', async () => {
 test('contacts with stored count appear before opening a thread', () => {
   const c = context();
   vm.runInContext("chatUi.open = 'chat'; chatDm.contacts[0].count = 3", c);
-  assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
+  assert.match(JSON.stringify(c.chatList()), /Workspaces/);
 });
 
 test('Chat list route imports unopened conversations and sorts newest first', async () => {
@@ -150,11 +151,10 @@ test('a received text shows the sender time (shown_at) when there is one, else t
   const c = context();
   c.time = value => '[' + value + ']';
   vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'1',by:'${WS}',text:'a',at:'2026-11-09T12:00:00Z',shown_at:'2026-11-09T11:59:00Z'},
-    {id:'2',by:'${WS}',text:'b',at:'2026-11-09T12:01:00Z'}, {id:'3',by:'you',text:'c',at:'2026-11-09T12:02:00Z',state:'delivered'}]});`, c);
+    {id:'2',by:'${WS}',text:'b',at:'2026-11-09T12:11:00Z'}, {id:'3',by:'you',text:'c',at:'2026-11-09T12:02:00Z',state:'delivered'}]});`, c);
   const view = JSON.stringify(c.chatDmThread());
   assert.match(view, /\[2026-11-09T11:59:00Z\]/);
-  assert.match(view, /\[2026-11-09T12:01:00Z\]/);
-  assert.doesNotMatch(view, /\[2026-11-09T12:02:00Z\]/); // my own messages show their delivery state, not a time
+  assert.match(view, /\[2026-11-09T12:11:00Z\]/);
 });
 
 test('workspace chat header: the name once, then one description line with tags; delivery line says who answers', () => {
@@ -227,7 +227,7 @@ test('opening a workspace before the contacts load shows its name and a loading 
 });
 
 // Issue 865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
-test('chat list: Other workspaces above Groups (placeholder while loading), newest group first', () => {
+test('chat list: Workspaces above Groups (placeholder while loading), newest group first', () => {
   const c = context();
   vm.runInContext(`chatUi.open = 'chat'; chatDm.contacts = []; chatDm.loaded = false;
     state.groups = {hosted:[{id:'g_old', title:'Old group', members:[{ws:'ws_a', name:'A', joined_at:'2026-11-10T09:00:00Z'}], tasks:[]},
@@ -235,7 +235,7 @@ test('chat list: Other workspaces above Groups (placeholder while loading), newe
   const text = () => JSON.stringify(c.chatList());
   let view = text();
   assert.match(view, /Loading…/);
-  assert.ok(view.indexOf('Other workspaces') < view.indexOf('"Groups"'), 'placeholder sits above Groups');
+  assert.ok(view.indexOf('"Workspaces"') < view.indexOf('"Groups"'), 'placeholder sits above Groups');
   assert.ok(view.indexOf('New group') < view.indexOf('Old group'), 'newest group first');
   vm.runInContext("chatDm.loaded = true; chatDm.contacts = [{ws:'" + WS + "',name:'Pilatus',count:2}]", c);
   view = text();

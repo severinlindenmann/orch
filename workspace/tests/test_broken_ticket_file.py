@@ -41,7 +41,7 @@ def test_list_names_the_broken_file(broken, run, text):
     assert code == 0
     assert "Good one" in out and "Broken one" not in out
     assert f".orch/tickets/{tid}.json is broken" in out and FIX in out
-    assert "git" not in out  # ORCH-2111: .orch/ is never committed, git has nothing to restore
+    assert "git" not in out.replace(tid, "")  # ORCH-2111: .orch/ is never committed (ids may hold "git")
     assert p.read_bytes() == before  # never repaired or rewritten
 
 
@@ -69,7 +69,7 @@ def test_show_by_key_finds_the_broken_file_that_names_it(broken, run):
     code, _, err = run("ticket", "show", key.lower())
     assert code != 0
     assert f"Ticket {key} can't be read" in err and f"{tid}.json is broken" in err and FIX in err
-    assert "git" not in err
+    assert "git" not in err.replace(tid, "")  # a random ticket id may hold "git" (t_evbgit)
 
 
 def test_show_by_key_of_an_empty_file_names_the_broken_files(broken, run):
