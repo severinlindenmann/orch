@@ -101,8 +101,11 @@ def test_restart_after_give_up_does_not_start_while_paused(proj, monkeypatch):
     assert calls == [(proj, tid, runs_live.AUTOMATION_BY)]
 
 
-def test_an_add_on_start_through_the_cli_is_refused_while_paused_and_goes_after_resume(proj, run, gen, one_step):
-    """Every add-on (automation, factory, pull requests, insights) starts a helper with `orch run start --by`."""
+def test_an_add_on_start_through_the_cli_is_refused_while_paused_and_goes_after_resume(
+    proj, run, gen, one_step
+):
+    """Every add-on (automation, factory, pull requests, insights) starts a helper with
+    `orch run start --by`."""
     gen("--silent 0.2")
     tid = _new(proj)
     brake.pause(proj, "human:t")
