@@ -202,7 +202,9 @@ def call_json(
     try:
         return status, json.loads(raw)
     except ValueError:
-        raise Refused("The server sent something that is not JSON.") from None
+        raise Refused(
+            "The server sent an answer orch cannot read. Try again in a moment; if it stays, run: orch doctor"
+        ) from None
 
 
 def items(resp):

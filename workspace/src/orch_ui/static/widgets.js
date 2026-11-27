@@ -50,7 +50,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
  const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
   if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
   setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
-  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'orch did not answer. Try again in a moment.'};setSt('failed',back?'[data-act="run"]':null)})};
  const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
   p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
  const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
@@ -81,7 +81,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
    g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
   if((st==='running'&&!inTerm)||st==='done'||st==='failed')body.push(term());
   if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
-  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
+  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work. Try again.'));e.setAttribute('role','alert');body.push(e);}
   if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
   if(cls!=='copy'&&!inTerm&&(r.changes||r.undo)){const dl=el('dl','run-facts');if(r.changes)fact(dl,'Changes',r.changes);if(r.undo)fact(dl,'Undo',null,r.undo);body.push(dl)}
   if(st!=='done'&&st!=='left'&&st!=='confirm'){const n=btn('outline sm run-leave',noLabel,leave);n.dataset.act='no';if(busy)n.disabled=true;body.push(n)}

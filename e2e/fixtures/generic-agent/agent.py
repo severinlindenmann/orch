@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fake agent that is just a command line: the generic adapter's test double.
 
-    agent.py [--silent N | --interactive | --reply TEXT] [prompt ...]
+    agent.py [--silent N | --interactive | --reply TEXT] [--show] [prompt ...]
 
 Default (one-shot): reads the prompt (arguments, or stdin when there are none), finds the ticket id in
 $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item with `orch`, then exits.
@@ -11,6 +11,8 @@ at start and after each line, which is how a generic agent says "idle". A notice
 --silent N: sleeps N seconds without any orch call (a quiet agent must keep its claim).
 --reply TEXT: one-shot, but its last output line is a JSON result with TEXT as the final reply (a reply that may
 ask the person something, ORCH-1760).
+--show: one-shot, but first reads the ticket as a person reads it (`orch ticket show <id>`, plain text) and
+logs that text as one "show: ..." line (R2.6: a new answer is printed first).
 
 $ORCH_CMD names the orch command (default: orch). $ORCH_TEST_AGENT_LOG (or $GENERIC_AGENT_LOG), when set, gets one line per prompt or
 input line ("prompt: ..." / "input: ...") so tests can count what arrived.
@@ -48,7 +50,9 @@ def ticket_of(text: str) -> str | None:
     return m.group(0) if m else None
 
 
-def do_work(tid: str) -> None:
+def do_work(tid: str, show: bool = False) -> None:
+    if show:
+        log("show", orch("ticket", "show", tid).stdout)
     r = orch("ticket", "show", tid, "--json")
     if r.returncode != 0:
         return
@@ -61,6 +65,7 @@ def do_work(tid: str) -> None:
 
 def main(argv: list[str]) -> int:
     interactive = "--interactive" in argv
+    show = "--show" in argv
     silent = None
     reply = None
     rest = []
@@ -70,7 +75,7 @@ def main(argv: list[str]) -> int:
             silent = float(next(it))
         elif a == "--reply":
             reply = next(it)
-        elif a != "--interactive":
+        elif a not in ("--interactive", "--show"):
             rest.append(a)
     prompt = " ".join(rest)
     log_env()
@@ -102,7 +107,7 @@ def main(argv: list[str]) -> int:
     log("prompt", prompt)
     tid = ticket_of(prompt)
     if tid:
-        do_work(tid)
+        do_work(tid, show)
     print(json.dumps({"type": "result", "result": reply}) if reply is not None else "done")
     return 0
 

@@ -240,7 +240,7 @@ def c1(e):
     check(w.load(tid)["status"] == "done", "the parent was not closed (warning only)")
     # needs: nothing, then a question, then nothing again
     check("Nothing needs you" in w.o("needs")[1], "needs not empty")
-    w.o("ask", kid, "Which order?", "--option", "A", "--option", "B")
+    w.o("ask", kid, "Which order?", "--option", "A", "--option", "B", "--recommend", "A")
     rows = w.j("needs")
     check(len(rows) == 1 and rows[0]["source"] == "core" and rows[0]["kind"] == "question" and rows[0]["ticket"] == kid, f"needs rows {rows}")
     qid = w.load(kid)["questions"][0]["id"]
@@ -483,7 +483,7 @@ def n1(e):
     rc, out, err = w.sh(["orch", "addon", "add", str(addon), "--yes"], timeout=600)
     check(rc == 0, f"addon add: {(err or out)[-300:]}")
     tid = w.ticket("Needs a person")
-    w.o("ask", tid, "Go ahead?", "--option", "Yes", "--option", "No")
+    w.o("ask", tid, "Go ahead?", "--option", "Yes", "--option", "No", "--recommend", "Yes")
     row = {"id": "needs-addon:r1", "source": "needs-addon", "kind": "needs-addon:thing", "ticket": None, "title": "Fixture",
            "text": "Look at this", "tone": "warn", "since": "2026-11-05T08:00:00Z"}
     (w.root / "rows.json").write_text(json.dumps([row]))

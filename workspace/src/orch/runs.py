@@ -1168,7 +1168,9 @@ def _plan_first_plan(ticket: dict) -> list[str]:
         f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
         '--option "Change sub-tickets" --recommend "Start work", and stop. Start the steps only after '
         'the answer is "Start work". If the answer is "Change sub-tickets" (or asks for any change), '
-        f'ask one more question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, '
+        f'ask one more question: orch ask {tid} "{PLAN_CHANGE}" --option "<the change you would make>" '
+        '--option "<another change>" --recommend "<the change you would make>" (the person may also '
+        "answer in their own words), change the steps as told, "
         f'then ask "{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 

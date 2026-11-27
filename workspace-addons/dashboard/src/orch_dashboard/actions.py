@@ -369,21 +369,21 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         raise BadRequest("Those files could not be read.")
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
-            raise BadRequest("That file could not be read.")
+            raise BadRequest("That file could not be read. Add it again.")
         if len(f["name"]) > 240 or any(c in f["name"] for c in "\x00\t\r\n"):
             raise BadRequest("That file name is not allowed.")
         if isinstance(f.get("text"), str) and f.get("data") is None:
             try:
                 raw = f["text"].encode("utf-8")
             except UnicodeEncodeError:
-                raise BadRequest("That file could not be read.") from None
+                raise BadRequest("That file could not be read. Add it again.") from None
         elif isinstance(f.get("data"), str) and f.get("text") is None:
             try:
                 raw = base64.b64decode(f["data"], validate=True)
             except ValueError:
-                raise BadRequest("That file could not be read.") from None
+                raise BadRequest("That file could not be read. Add it again.") from None
         else:
-            raise BadRequest("That file could not be read.")
+            raise BadRequest("That file could not be read. Add it again.")
         ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
         if ext not in ATTACH_EXT:
             raise BadRequest(
@@ -1293,7 +1293,7 @@ def addon_review_target(
     if target is None:
         return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
-        raise BadRequest("This can't be confirmed right now. Nothing was changed.")
+        raise BadRequest("This can't be confirmed right now. Nothing was changed; try again in a moment.")
     return target, review
 
 
@@ -1317,7 +1317,7 @@ def _config_permissions(a):
         raise BadRequest("Pick Ask, Auto or Full.")
     if mode == "full" and a.get("confirm") is not True:
         raise BadRequest(
-            "Full needs a Yes first: the agent will never ask."
+            "Full needs a Yes first: the helper will never ask."
         )  # the page sends confirm only after its Yes/No dialog
     if a.get("confirm") not in (None, True, False):
         raise BadRequest("A yes/no value must be true or false.")
@@ -1454,7 +1454,9 @@ def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | 
     try:
         from orch import addonjob
     except ImportError:
-        raise Unavailable("Adding several add-ons at once needs a newer orch.") from None
+        raise Unavailable(
+            "Adding several add-ons at once needs a newer orch. Update orch, or add them one at a time."
+        ) from None
     env = human_env(root, orch_bin)
     forget_static()  # the add-on list changes while the job runs
     try:
@@ -1818,7 +1820,7 @@ def share_file(root: Path, orch_bin: str | None, args, session: bool = False) ->
     """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
     right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
     if not isinstance(args, dict) or set(args) - {"name", "data", "days"}:
-        raise BadRequest("That file could not be read.")
+        raise BadRequest("That file could not be read. Add it again.")
     name = args.get("name")
     if not isinstance(name, str) or not name.strip() or len(name) > 240 or "\x00" in name:
         raise BadRequest("That file name is not allowed.")
@@ -1831,9 +1833,9 @@ def share_file(root: Path, orch_bin: str | None, args, session: bool = False) ->
     try:
         raw = base64.b64decode(args.get("data") or "", validate=True)
     except (ValueError, TypeError):
-        raise BadRequest("That file could not be read.") from None
+        raise BadRequest("That file could not be read. Add it again.") from None
     if not raw:
-        raise BadRequest("That file is empty.")
+        raise BadRequest("That file is empty. Pick a file with something in it.")
     if len(raw) > SHARE_MAX:
         raise BadRequest("That file is over 3 MB. Share bigger files with `orch publish file` in a terminal.")
     if not orch_bin:
@@ -2011,21 +2013,21 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     if op in ("link.extend", "link.stop") and not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
     if op in MOBILE_REQUIRED_ADDONS and not _addon_is_on(root, orch_bin, MOBILE_REQUIRED_ADDONS[op]):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     if op in ("addon.act", "ticket.field") and not _addon_is_on(root, orch_bin, args["addon"]):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
-        raise BadRequest("That add-on is not installed.")
+        raise BadRequest("That add-on is not installed. Add it in Settings > Add-ons first.")
     if op == "addon.uninstall":
         row = _addon_row(root, orch_bin, args["name"])
         if row is None or row.get("installed") is False:
-            raise BadRequest("That add-on is not installed.")
+            raise BadRequest("That add-on is not installed. Add it in Settings > Add-ons first.")
     if op == "addon.set" and args.get("on") is False:
         row = _addon_row(root, orch_bin, args["name"])
         if row is not None and row.get("installed") is False:
             raise BadRequest("That add-on is not added yet, so there is nothing to turn off.")
     if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
-        raise BadRequest("That agent is not set up.")
+        raise BadRequest("That helper is not set up. Set it up in Settings > Helper first.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
@@ -2034,7 +2036,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         # phase 1: what the person will confirm; nothing runs (with any orch, a test fake too)
         target, review = addon_review_target(root, orch_bin, argv, args["addon"])
         if review is None:
-            raise BadRequest("This can't be confirmed right now. Nothing was changed.")
+            raise BadRequest("This can't be confirmed right now. Nothing was changed; try again in a moment.")
         return 200, "", {"target": target, "review": review}
     if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
         # phase 2: the click must still match what the page showed
@@ -2158,7 +2160,7 @@ def addon_read(root: Path, orch_bin: str | None, addon, verb) -> tuple[int, str,
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     if not _addon_is_on(root, orch_bin, addon):
-        raise BadRequest("That add-on is not on in this workspace.")
+        raise BadRequest("That add-on is not on in this workspace. Turn it on in Settings > Add-ons first.")
     args = {"addon": addon, "verb": verb, "target": addon}
     try:
         r = _run(

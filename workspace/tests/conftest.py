@@ -380,9 +380,19 @@ def proj(tmp_path, monkeypatch):
     monkeypatch.setattr(winfinish, "needed", lambda: False)
     # An answer starts the asking agent again (fb9). Only the tests that set up a fake agent let that happen
     # (fixture `auto_resume`); anywhere else it would start the real agent tool found on this machine.
-    from orch import runs_live
+    from orch import runs_live, tickets
 
     monkeypatch.setattr(runs_live, "resume_after_answer", lambda *a, **k: None)
+    # An answer command hands that start to a detached `orch run _resume` (runs_live.resume_soon); tests run
+    # it in-process, through the (stubbed) resume_after_answer above. test_cli_review.py checks the detached
+    # path.
+    monkeypatch.setattr(
+        runs_live,
+        "resume_soon",
+        lambda root, tid, qid, by: runs_live.resume_after_answer(
+            root, tid, next(x for x in tickets.load(root, tid)["questions"] if x["id"] == qid), by
+        ),
+    )
     # `orch needs` may start a detached look at a ticket's pull request (stuck.py): never the real GitHub
     monkeypatch.setenv("ORCH_NO_PULL_LOOK", "1")
     monkeypatch.setenv("ORCH_NO_HEALTH_CHECK", "1")  # never the real tool logins (test_health.py checks it)

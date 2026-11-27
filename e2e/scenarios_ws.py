@@ -167,7 +167,7 @@ def w5t(e):
     """Take a question back (G3): it leaves `orch needs`, the ticket stops waiting, an answer afterwards is refused."""
     ws = e.ws("Pilatus")
     t = e.orchj(ws, "ticket", "new", "W5T question")["id"]
-    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", by="agent:claude-code")
+    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", "--recommend", "S", by="agent:claude-code")
     check(any(r["ticket"] == t for r in e.orchj(ws, "needs")), "the question must be in needs")
     e.orch(ws, "ask", t, "--take-back", "q1", "no longer needed", by="agent:claude-code")
     d = tload(ws, t)

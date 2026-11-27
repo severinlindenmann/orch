@@ -386,7 +386,7 @@ def r15(e):
     e.orch("Pilatus", "relay", "send", ph[0], "yes, I can answer your phone")
     e.orch("Pilatus", "relay", "send", "R15 iPhone", "by name too")
     t = e.orchj("Pilatus", "ticket", "new", "R15 phone question")["id"]
-    e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
+    e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--recommend", "yes", "--phone")
     got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
     # ask --phone also sends the ticket snapshot as a quiet note (mobile chat, V2-M1)
     check(got[:4] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone"]

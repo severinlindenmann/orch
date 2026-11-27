@@ -143,7 +143,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
     )
-    x.add_argument("--phone", action="store_true", help="also send the list to your phones (relay)")
+    x.add_argument("--phone", action="store_true", help=argparse.SUPPRESS)  # relay add-on, see its skill
 
 
 def _ticket(root: Path, args) -> dict:
@@ -720,7 +720,7 @@ def _answer(args, root: Path) -> None:
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
-        runs_live.pass_answer(root, tid, entry, who)
+        runs_live.pass_answer(root, tid, entry, who, wait=False)
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
 
 
@@ -746,8 +746,8 @@ def _run(args, root: Path) -> None:
 
         with contextlib.suppress(Refused, KeyError):
             q = next(x for x in tickets.load(root, t["id"])["questions"] if x["id"] == args.key)
-            runs_live.pass_answer(root, t["id"], {"id": args.key, "answer": q.get("answer"),
-                                                  "decision": q.get("decision")}, who)  # fmt: skip
+            entry = {"id": args.key, "answer": q.get("answer"), "decision": q.get("decision")}
+            runs_live.pass_answer(root, t["id"], entry, who, wait=False)
     words = res.get("error") or res["output"][-300:]
     _out(args, res, ("Ran it: " if res["ok"] else "It did not work: ") + words)
     if not res["ok"]:
