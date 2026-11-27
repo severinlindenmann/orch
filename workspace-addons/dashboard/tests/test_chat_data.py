@@ -313,6 +313,7 @@ def test_person_chat_reads_run_without_agent_variables(ws, monkeypatch):
         ["chat", "thread", "ws_abcdefghij", "--json"],
     ):
         assert data._run_orch("/bin/orch", args, ws, 5.0) == []
+        assert seen[-1][0][-2:] == ["--by", actions.actor(ws)]
         env = seen[-1][1]
         assert "ORCH_AGENT" not in env and "CLAUDECODE" not in env and env["ORCH_ROOT"] == str(ws)
     # every other read keeps the environment as it is (only the person-only reads change)

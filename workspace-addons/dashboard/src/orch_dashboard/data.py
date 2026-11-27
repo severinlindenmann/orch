@@ -238,6 +238,7 @@ def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
         env = _person_environ(env)
         if env is None:
             return None
+        args = [*args, "--by", _me(root)]
     got = _by_worker(orch_bin, args, root, timeout, env)
     if got is not _MISS:
         return got
