@@ -70,7 +70,8 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
         "source": "core",
         "kind": "copies:bring-back",
         "ticket": tid,
-        "title": _clip(f"Your work from {title} is on its own branch", 200),
+        # plain words (ORCH-2298, R7.1): where the work is, never a git word
+        "title": _clip(f"The finished work from {title} is not in your project folder yet", 200),
         "text": "Bring it back into your project?",
         "reason": reason,
         "tone": "needs-you",

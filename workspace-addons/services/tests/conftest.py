@@ -78,6 +78,7 @@ class FakeDriver:
         self.run_counts: dict[
             str, int
         ] = {}  # sid -> starts so far (launchd `runs`); none = the tool cannot say
+        self.exit_codes: dict[str, int] = {}  # sid -> exit code of the last run (launchd `last exit code`)
         self.start_polls = 0  # a slow start: status says "starting" this many times, then running
         self.start_dies = False  # a job that never comes up and is not launching either
 
@@ -126,6 +127,9 @@ class FakeDriver:
 
     def runs(self, spec):
         return self.run_counts.get(spec.sid)
+
+    def last_exit(self, spec):
+        return self.exit_codes.get(spec.sid)  # none = the tool cannot say how it ended
 
     def uninstall(self, spec):
         self.calls.append(("uninstall", spec.sid))

@@ -3178,3 +3178,49 @@ def test_work_branches_lists_the_tickets_with_a_branch_in_one_call(done_copy):
         worktrees.review_tip(root, tid, set()) is None
     )  # not in the set, no copy registered... or registered
     assert worktrees.review_tip(root, "t_nothere", {tid}) is None
+
+
+def test_copy_approve_with_an_idle_helper_in_the_folder_names_it_and_the_next_step(
+    done_copy, run, monkeypatch
+):
+    """ORCH-2298: an idle helper of ANOTHER ticket sits in the project folder. `orch copy approve` printed
+    only 'an agent is still working in your folder' with exit 0; then, after orch had brought the work back
+    by itself, a second try ended in a git error although the work was there."""
+    from orch import needs, runs
+
+    root, tid, copy = done_copy
+    other = root.tids[1]
+    key = tickets.load(root, other)["key"]
+    with monkeypatch.context() as m:  # the other ticket's helper: alive (idle), in the project folder
+        real_read = runs.read
+        runs._atomic(runs.record_path(root, other), "{}")
+        m.setattr(runs, "read", lambda r, t: {"ticket": t} if t == other else real_read(r, t))
+        m.setattr(runs, "state", lambda r: "alive")
+        m.setattr(runs, "workdir_for", lambda *a: root)
+        assert finish(root, tid)["reason_code"] == "agent-folder"
+        code, out, err = run("copy", "approve", tid)
+        said = out + err
+        assert code == 2, said
+        assert f"Not brought back yet: the helper on {key} still has a session open" in said
+        assert f"orch run stop {key}. Then: orch copy approve {tid}" in said
+        assert not (root / "code.py").read_text() == "print(2)\n"
+        row = next(r for r in needs.core_rows(root) if r["kind"] == "copies:bring-back")
+        assert "branch" not in row["title"] + row["text"]
+        assert row["title"].endswith("is not in your project folder yet")
+    runs.record_path(root, other).unlink()
+    worktrees.sweep(root)  # the helper is gone: orch brings the reviewed work back by itself
+    assert (root / "code.py").read_text() == "print(2)\n"
+    code, out, err = run("copy", "approve", tid)
+    assert code == 0, out + err
+    assert "Already brought back" in out and "git could not" not in out + err
+
+
+def test_copy_approve_says_brought_back_when_it_did(done_copy, run):
+    root, tid, copy = done_copy
+    (copy / ".gitignore").write_text("something\n")
+    assert finish(root, tid)["state"] == "waiting"
+    code, out, err = run("copy", "approve", tid)
+    assert code == 0, out + err
+    key = tickets.load(root, tid)["key"]
+    assert out.splitlines()[0] == f"Brought back: the work from {key} is in your project folder."
+    assert (root / ".gitignore").read_text() == "something\n"

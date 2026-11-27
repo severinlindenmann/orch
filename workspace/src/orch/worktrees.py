@@ -1740,6 +1740,43 @@ def change_counts(root: Path, tip: str) -> tuple[int, int] | None:
         return None
 
 
+def helpers_in_folder(root: Path, top: Path | None = None) -> list[str]:
+    """The tickets whose helper session is open in the project folder itself (working or idle), oldest id
+    first: a bring-back waits for them. The same folder however it is spelled (a link in the workspace
+    path, case on Windows)."""
+    here = {_real(root)} | ({_real(top)} if top is not None else set())
+    out = []
+    for record in sorted((runs.run_dir(root) / "tickets").glob("t_*.json")):
+        rec = runs.read(root, record.stem)
+        if (
+            rec
+            and runs.state(rec) in ("alive", "maybe-stale")
+            and _real(runs.workdir_for(root, rec, record.stem)) in here
+        ):
+            out.append(record.stem)
+    return out
+
+
+def already_back(root: Path, ticket: str) -> bool:
+    """True when this ticket's work was brought back already (ORCH-2298: orch did it by itself between two
+    tries) and nothing of it waits: the ticket says merged and its copy's own line of work is gone. Read
+    only; anything unclear is False."""
+    try:
+        if not _TID.fullmatch(ticket):
+            return False
+        back = (tickets.load(root, ticket).get("work") or {}).get("bring_back") or {}
+        if back.get("state") != "merged":
+            return False
+        with _scoped(root):
+            top = _top_of(root)
+            if top is None:
+                return False
+            ref = f"refs/heads/orch/{ticket}"
+            return _git(["show-ref", "--verify", "--quiet", ref], top, read_only=True)[0] == 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
     target, tip, paths = approval_view(root, ticket)
     return target, tip, len(paths)
@@ -2711,15 +2748,8 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             if (top / path).exists():
                 return wait("a merge or another git operation is in progress in your folder")
         # The same folder however it is spelled (a link in the workspace path, case on Windows).
-        here = {_real(root), _real(top)}
-        for record in (runs.run_dir(root) / "tickets").glob("t_*.json"):
-            rec = runs.read(root, record.stem)
-            if (
-                rec
-                and runs.state(rec) in ("alive", "maybe-stale")
-                and _real(runs.workdir_for(root, rec, record.stem)) in here
-            ):
-                return wait("an agent is still working in your folder")
+        if helpers_in_folder(root, top):
+            return wait("an agent is still working in your folder")
         # A repository setting can change what `git merge` does (branch.<b>.mergeOptions: --squash,
         # --no-commit, -s ours). It is not something orch can switch off here: refuse it.
         name = origin.removeprefix("refs/heads/")
@@ -4188,6 +4218,144 @@ def orphaned(root: Path) -> list[dict]:
         if n:
             out.append({"ws8": ent.name, "copies": n})
     return out
+
+
+def _nothing_in_it(top: Path, want: Path, ticket: str) -> bool:
+    """The copy holds nothing the project does not have: it is this project's copy on its own line of work,
+    no file in it is changed, new or ignored, and every commit of that line is in the project's current
+    commit. Anything git cannot say is False."""
+    ref = f"refs/heads/orch/{ticket}"
+    if _is_link(want) or not want.is_dir() or not _is_our_worktree(top, want):
+        return False
+    if not _git_has_worktree(top, want, f"orch/{ticket}"):
+        return False
+    rc, changed, _ = _git(
+        ["status", "--porcelain", "--untracked-files=all", "--ignored"], want, read_only=True
+    )
+    if rc != 0 or changed:
+        return False
+    return _git(["merge-base", "--is-ancestor", ref, "HEAD"], top, read_only=True)[0] == 0
+
+
+def leave(root: Path) -> dict:
+    """`orch uninstall` (ORCH-2299, R8.5): take back the helpers' separate copies and their orch/<ticket>
+    lines of work. A closed ticket's copy goes the usual way (remove: nothing lost). A copy that holds
+    nothing (_nothing_in_it) goes with git's own safe commands (no force: git refuses when anything would be
+    lost). Everything else stays and is listed with the command that removes it.
+    {"removed": [names], "kept": [{"ticket", "path", "why", "command"}]}; never raises."""
+    out: dict = {"removed": [], "kept": []}
+    try:
+        tids = list(registry(root))
+    except Exception:  # noqa: BLE001
+        tids = []
+    if not tids:  # nothing of orch's in git either: touch nothing (no lock file in a folder already left)
+        with contextlib.suppress(Exception), _scoped(root):
+            top = _top_of(root)
+            listed = ["for-each-ref", "--format=%(refname)", "refs/heads/orch/"]
+            if top is None or not _git(listed, top, read_only=True, filters=False)[1].strip():
+                return out
+    for tid in tids:
+        with contextlib.suppress(Exception):
+            remove(root, tid)  # closed and brought back (or dropped): the regular way
+    try:
+        with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+            top = _top_of(root)
+            reg = registry(root)
+            for tid in tids:
+                want = _want(root, tid)
+                name = _leave_name(root, tid)
+                if tid not in reg:
+                    if want is None or not os.path.lexists(want):
+                        out["removed"].append(f"The separate copy of {name}")
+                    continue
+                paths = reg[tid].get("paths") or []
+                where = str(want) if want is not None and not _is_multi(paths) else None
+                if where is None and paths:
+                    where = str(Path(paths[0]["path"]).parent)
+                gone = False
+                if top is not None and want is not None and not _is_multi(paths):
+                    with contextlib.suppress(Exception):
+                        if not os.path.lexists(want) or _nothing_in_it(top, want, tid):
+                            if os.path.lexists(want):
+                                _git(["worktree", "remove", "--", str(want)], top)
+                            _git(["worktree", "prune"], top, filters=False)
+                            gone = not os.path.lexists(want)
+                            if gone:
+                                _drop_entry(root, tid, [])
+                                _git(["branch", "-d", "--", f"orch/{tid}"], top, filters=False)
+                if gone:
+                    out["removed"].append(f"The separate copy of {name} (nothing was in it)")
+                    continue
+                # one git project: git's own command; a copy of several projects has one per project, so
+                # none is printed (the folder is named and the person decides)
+                one = where and not _is_multi(paths)
+                command = f'git worktree remove --force "{where}"' if one else ""
+                out["kept"].append(
+                    {
+                        "ticket": tid,
+                        "path": where,
+                        "why": f"the separate copy of {name} holds work that is not in your project",
+                        "command": command,
+                    }
+                )
+            if top is not None:  # lines of work without a copy: gone when merged, else listed
+                rc, refs, _ = _git(
+                    ["for-each-ref", "--format=%(refname)", "refs/heads/orch/"],
+                    top,
+                    read_only=True,
+                    filters=False,
+                )
+                copies = {k["ticket"] for k in out["kept"]}
+                for name in refs.split() if rc == 0 else []:
+                    branch = name.removeprefix("refs/heads/")
+                    tid = branch.removeprefix("orch/")
+                    if not _TID.fullmatch(tid):
+                        continue
+                    if tid not in copies:
+                        _git(["branch", "-d", "--", branch], top, filters=False)
+                    still = _git(
+                        ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                        top,
+                        read_only=True,
+                        filters=False,
+                    )[0]
+                    if still != 0:
+                        continue
+                    drop = f"git branch -D {branch}"
+                    mine = next((k for k in out["kept"] if k["ticket"] == tid), None)
+                    if mine is not None:
+                        mine["command"] = (mine["command"] + " ; " if mine["command"] else "") + drop
+                    else:
+                        out["kept"].append(
+                            {
+                                "ticket": tid,
+                                "path": None,
+                                "why": f"the helper's work on {_leave_name(root, tid)} is saved in your "
+                                f"project's git history as {branch} and is not in your project",
+                                "command": drop,
+                            }
+                        )
+    except Exception:  # noqa: BLE001 - leaving never fails on the copies; what is there stays
+        pass
+    with contextlib.suppress(Exception):
+        d = copies_dir(root)
+        if d is not None and not out["kept"] and d.is_dir() and not _is_link(d):
+            left = [e.name for e in os.scandir(d)]
+            if all(n in (".owner", ".trash") for n in left) and not any((d / ".trash").glob("*")):
+                (d / ".owner").unlink(missing_ok=True)
+                with contextlib.suppress(OSError):
+                    (d / ".trash").rmdir()
+                d.rmdir()
+                with contextlib.suppress(OSError):
+                    d.parent.rmdir()  # only when no other workspace has copies there
+    return out
+
+
+def _leave_name(root: Path, tid: str) -> str:
+    try:
+        return tickets.load(root, tid).get("key") or tid
+    except Exception:  # noqa: BLE001
+        return tid
 
 
 def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:

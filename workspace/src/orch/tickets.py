@@ -828,6 +828,10 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
             runs_live.stop_closed(root, tid, by)
         except Exception:  # noqa: BLE001
             pass
+        try:  # ORCH-2295: a start that waited in line for it is no longer wanted, whoever closed it
+            runs_live.leave_line(root, tid)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from orch import worktrees  # worktrees imports tickets
 
