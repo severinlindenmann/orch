@@ -74,10 +74,14 @@ function liveWallCounts(sessions) {
 // The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
 // `total` is the one number of things waiting on the person (the Review badge, as the live bar reads it, ORCH-464);
 // the wall never says less than it or than the sessions that ask (ORCH-674).
-function liveWallSummary(sessions, total) {
+// ORCH-2149 (8): `tiles` is how many tiles the Needs you band shows. Two things on one ticket (two questions, a
+// question and a result) are one tile, so "5 need you" stood over 4 tiles while Review listed 5 cards: the line then
+// says both, "5 need you on 4 tickets".
+function liveWallSummary(sessions, total, tiles) {
   const c = liveWallCounts(sessions), out = [];
   c['needs-you'] = Math.max(Number(total) || 0, c['needs-you']);
-  out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you')} : {s:'', text:'Nobody needs you'});
+  const on = Number.isInteger(tiles) && tiles > 0 && tiles < c['needs-you'] ? ' on ' + tiles + (tiles === 1 ? ' ticket' : ' tickets') : '';
+  out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you') + on} : {s:'', text:'Nobody needs you'});
   if (c.working) out.push({s:'working', text:c.working + ' working'});
   if (c['in-line']) out.push({s:'in-line', text:c['in-line'] + ' in line'});
   if (c.idle) out.push({s:'idle', text:c.idle + ' idle'});
@@ -293,7 +297,8 @@ function liveWallHead() {
   // the header and the session total count the sessions (the header never says less than the needs-you number)
   const ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
   return h('div', {className:'wall-sum', 'data-key':'wall-sum'},
-    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
+    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0,
+      ready ? liveWallWithNeeds(sessions, liveWallNeeds()).filter(liveWallAsks).length : null).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
     // no "0 sessions" while the list is still being read
     ready ? h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,
