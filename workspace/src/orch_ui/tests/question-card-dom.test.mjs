@@ -64,7 +64,8 @@ test('a focus:permission question never sends in one tap, even when the caller a
 });
 
 // ORCH-2140 W3: on the ticket page the question shows once; the card adds no Needs you line or second title.
-test('plain: no meta line, the title is for screen readers only, the suggested option is the filled button', () => {
+// ORCH-2388: its choices are the answer tiles Home shows (one look), Suggested on its tile, a written answer under them.
+test('plain: no meta line, the title is for screen readers only, the choices are answer tiles with Suggested on its tile', () => {
   const w = {};
   globalThis.window = w;
   delete require.cache[require.resolve('../static/question-card-state.js')];
@@ -80,10 +81,18 @@ test('plain: no meta line, the title is for screen readers only, the suggested o
   assert.equal(h3.className, 'sr-only');
   assert.equal(h3.textContent, 'Your answer');
   assert.equal(host.all(n => n.tag === 'p' && n.className === 'muted').length, 0);
-  const options = host.all(n => n.tag === 'button' && /qoption/.test(n.className));
-  assert.deepEqual(options.map(n => n.className), ['btn qoption primary', 'btn qoption']);
+  const options = host.all(n => n.tag === 'button' && /answer-option/.test(n.className));
+  assert.deepEqual(options.map(n => n.className), ['answer-option suggested', 'answer-option']);
+  const words = n => (n.textContent || '') + (n.children || []).map(words).join('');
+  assert.deepEqual(options.map(words), ['TuesdaySuggested', 'Thursday']);
+  assert.equal(host.all(n => n.tag === 'button' && /qoption/.test(n.className)).length, 0, 'no second look');
+  assert.equal(host.all(n => n.className === 'suggested-label').length, 0);
+  const own = host.all(n => n.tag === 'button' && /answer-own/.test(n.className));
+  assert.deepEqual(own.map(n => [n.textContent, n.className]), [['Write your own…', 'btn ghost sm answer-own']]);
+  assert.equal(host.all(n => n.className === 'answer-options')[0].children.includes(own[0]), false, 'under the tiles, not one of them');
   const other = new Node_('div'); other.ownerDocument = doc;
   w.QuestionCard.mount(other, question, {storage, send: async () => ({status: 200})});
   assert.equal(other.all(n => n.className === 'row qmeta').length, 1);
   assert.equal(other.all(n => n.tag === 'h3')[0].textContent, 'Which day?');
+  assert.deepEqual(other.all(n => n.tag === 'button' && /qoption/.test(n.className)).map(n => n.className), ['btn qoption suggested', 'btn qoption']);
 });

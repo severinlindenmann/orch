@@ -56,7 +56,7 @@ test('every greyed choice says why in one plain sentence', () => {
   assert.equal(S.why('fresh', {running: true}), 'A helper is already working on this ticket.');
   assert.equal(S.why('reopen', {running: true}), 'Stop the helper to reopen an earlier session.');
   assert.match(S.why('main', {inLine: true}), /waits in line/);
-  assert.equal(S.why('fresh', {tools: S.tools([])}), 'No helper tool is set up on this computer.');
+  assert.equal(S.why('fresh', {tools: S.tools([])}), 'No helper tool is set up yet.');
   assert.equal(S.why('model', {tool: {models: false}}), 'This tool uses its own model.');
   const away = S.sessionRow({id: 's', reopenable: false}, new Date());
   assert.equal(S.why('reopen', {row: away}), 'On another computer, so it cannot be reopened here.');

@@ -1434,6 +1434,32 @@ def _dialog_rows(pane: str) -> list[str]:
     return rows
 
 
+def _real_top(raw: list[str], qrow: int) -> int | None:
+    """The row of the dialog's own top border among the rows read, or None when it was not read (ORCH-2383).
+    Text inside a dialog never starts in the first column: the tool indents every row of it (title, the
+    command and its wrapped rows, a hook's words), or draws a side bar before it. So, going up from the
+    question, the first filled row that is not inside is where the dialog starts, and it has to be the border
+    the tool draws there. A command that imitates a border or a title stays inside, and a dialog taller than
+    the rows read has no top among them. With no such column to go by (a question in the first column, no
+    box), the top cannot be told from the command's own text: None."""
+    q = raw[qrow]
+    boxed = q.lstrip()[:1] in _SIDES
+    if not boxed and not q[:1].isspace():
+        return None
+    for i in range(qrow - 1, -1, -1):
+        r = raw[i]
+        if not r.strip():
+            continue
+        if boxed:
+            if r.lstrip()[:1] in _SIDES:
+                continue
+            return i if r.lstrip()[:1] in "\u256d\u250c" else None
+        if r[:1].isspace():
+            continue
+        return i if len(r) >= 20 and " " not in r and _SEPARATOR.fullmatch(r) else None
+    return None
+
+
 def _unwrap(lines: list[str]) -> str:
     """Rows of a block as written: a row cut at the full width (a long word) goes on without a break, so a
     long path is copied whole; any other row ends a line as on the screen."""
@@ -1452,7 +1478,12 @@ def confirm_prompt(pane: str) -> dict | None:
     "<digit>", command: <the call as shown, or None>, reason: <the hook's words, or None>, unclear: <True when
     the dialog could not be read with certainty: show no command and offer no answer>, digest}. yes is
     the plain "Yes" (once, never "Yes, and don't ask again"), no the first option that starts with "No"."""
-    rows = _dialog_rows(pane)[-CONFIRM_TAIL:]
+    whole = _dialog_rows(pane)
+    rows = whole[-CONFIRM_TAIL:]
+    # the same rows with their first column kept (what is inside the dialog is indented or behind a side bar)
+    raw = [ln.rstrip() for ln in _ANSI.sub("", pane).replace("\r", "").split("\n")][: len(whole)][
+        -CONFIRM_TAIL:
+    ]
     filled = [i for i, r in enumerate(rows) if r.strip()]
     opts: list[tuple[int, str, str, bool]] = []  # (row, digit, label, selected)
     for i in reversed(filled[-12:]):
@@ -1478,18 +1509,19 @@ def confirm_prompt(pane: str) -> dict | None:
     if yes is None or no is None:
         return None
     # The command is the helper's own text and could imitate the dialog's rows (a "Bash command" line, a line
-    # of dashes, a "Hook ... requires confirmation" line). The dialog must be bounded (its top border in the
-    # rows read) and hold exactly one title, at most one hook line and 0 or 2 separators; anything else is
-    # unclear: no command is shown and no answer is offered (the card sends the person to the terminal).
-    tops = [i for i in above if _SEPARATOR.fullmatch(rows[i].strip()) and len(rows[i].strip()) >= 20]
-    heads = [i for i in above if _TOOL_HEAD.match(rows[i].strip())]
-    hooks = [i for i in above if _HOOK_HEAD.match(rows[i].strip())]
+    # of dashes, a "Hook ... requires confirmation" line). An answer is offered only when the whole dialog was
+    # read from its real top border (_real_top: never a row of the command, ORCH-2383) and it holds at most
+    # one title, at most one hook line and 0 or 2 separators. Anything else is unclear: no command is shown
+    # and no answer is offered (the card sends the person to the terminal). So a command that wraps over more
+    # rows than are read (ORCH-2352), with or without a title of its own near its end, is never answered blind
+    top = _real_top(raw, qrow)
+    inside = [i for i in above if top is not None and i > top]
+    tops = [] if top is None else [top]
+    heads = [i for i in inside if _TOOL_HEAD.match(rows[i].strip())]
+    hooks = [i for i in inside if _HOOK_HEAD.match(rows[i].strip())]
     command = reason = None
-    unclear = len(heads) > 1 or len(hooks) > 1 or (bool(heads) and not any(t < heads[0] for t in tops))
-    # ORCH-2352: a command that wraps over more rows than are read pushes the title and the top border out of
-    # them. With no title there is no command to show, so an answer is offered only when the dialog is still
-    # bounded and no hook asked: a hook's confirm is never answered blind.
-    unclear = unclear or (not heads and (bool(hooks) or not tops))
+    # with no title there is no command to show: a hook's confirm is then never answered blind
+    unclear = top is None or len(heads) > 1 or len(hooks) > 1 or (not heads and bool(hooks))
     if heads and not unclear:
         head = heads[0]
         hook = hooks[0] if hooks and hooks[0] > head else None

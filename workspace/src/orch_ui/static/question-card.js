@@ -27,7 +27,8 @@
     meta.append(badge, make('span', 'muted', question.key || ('Ticket ' + question.ticket)));
     if (question.since) meta.append(make('span', 'faint', question.since));
     /* opts.plain (ORCH-2140 W3): the page already shows the question once above the card, so the card drops its
-       Needs you line and repeated title (kept for screen readers) and the suggested option is the filled button. */
+       Needs you line and repeated title (kept for screen readers). Its choices are the answer tiles (.answer-option,
+       ORCH-2388): the one look of a question's choices, the same as on Home, with Suggested marked on its tile. */
     const plain = opts.plain === true;
     const title = make('h3', plain ? 'sr-only' : '', plain ? 'Your answer' : question.title);
     title.id = 'qcard-title-' + (++serial);
@@ -40,9 +41,19 @@
     el.replaceChildren(card);
     let phase, undoButton, draft = '';
     function choices() {
-      const options = make('div', 'qoptions');
+      const options = make('div', plain ? 'answer-options' : 'qoptions');
       [...(question.options || [])].sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested)).forEach(option => {
-        const node = button('', 'btn qoption' + (option.suggested ? (plain ? ' primary' : ' suggested') : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
+        const pick = () => choose(option.text, {immediate: question.oneTap === true && question.kind == null});
+        if (plain) {
+          const tile = button('', 'answer-option' + (option.suggested ? ' suggested' : ''), pick);
+          const words = make('span', '');
+          words.append(make('strong', '', option.text));
+          if (option.suggested) words.append(make('span', 'badge', 'Suggested'));
+          tile.append(words);
+          options.append(tile);
+          return;
+        }
+        const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), pick);
         node.append(make('span', '', option.text));
         const row = make('span', 'qopt');
         row.append(node);
@@ -71,7 +82,7 @@
       footer.append(counter, send);
       editor.append(label, input, footer);
       editor.addEventListener('submit', event => { event.preventDefault(); choose(input.value); });
-      const other = button('Something else...', 'btn quiet', () => {
+      const other = button(plain ? 'Write your own…' : 'Something else...', plain ? 'btn ghost sm answer-own' : 'btn quiet', () => {
         editor.hidden = !editor.hidden;
         other.setAttribute('aria-expanded', String(!editor.hidden));
         if (!editor.hidden) input.focus();
@@ -79,8 +90,8 @@
       editor.id = input.id + '-editor';
       other.setAttribute('aria-controls', editor.id);
       other.setAttribute('aria-expanded', 'false');
-      options.append(other);
-      controls.append(options, editor, err);
+      if (plain) controls.append(options, other, editor, err);  // under the tiles, as on Home
+      else { options.append(other); controls.append(options, editor, err); }
       function choose(answer, options) {
         const result = state.choose(answer, options);
         if (!result.ok) { err.textContent = result.error; input.setAttribute('aria-invalid', 'true'); }
