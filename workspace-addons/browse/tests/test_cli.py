@@ -506,3 +506,12 @@ def test_no_command_reaches_the_persons_own_browser(ws, capsys, monkeypatch):
     monkeypatch.setenv("ORCH_TICKET", paths.OWN_RUN)
     code, out = run(capsys, "look")
     assert code == 2 and "person's own browser" in out
+    for spelled in (" T_SELF ", "t_Self"):  # however it is written
+        code, out = run(capsys, "look", "--ticket", spelled)
+        assert code == 2 and "person's own browser" in out
+    core = types.ModuleType("orch")  # and whatever a reference resolves to in the core
+    core.tickets = types.SimpleNamespace(resolve=lambda root, ref: paths.OWN_RUN, agent_tool=lambda: None)
+    monkeypatch.setitem(sys.modules, "orch", core)
+    monkeypatch.delenv("ORCH_TICKET")
+    code, out = run(capsys, "look", "--ticket", "ORCH-1")
+    assert code == 2 and "person's own browser" in out

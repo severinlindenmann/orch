@@ -76,23 +76,32 @@ def _root() -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+def _not_own(tid: str) -> str:
+    """The browser a person opened for themselves (paths.OWN_RUN) is not a ticket's: no command takes it, however
+    the name is written and whatever a ticket reference resolves to."""
+    if str(tid).strip().lower() == paths.OWN_RUN:
+        raise Refused("That is the person's own browser, not a ticket's. Use your ticket's browser.")
+    return tid
+
+
 def _ticket(root: Path, ref: str | None) -> str:
     ref = ref or os.environ.get("ORCH_TICKET")
     if not ref:
         raise Refused("Which ticket? Add --ticket <id> (inside a helper run the ticket is known).")
-    if ref.strip() == paths.OWN_RUN:  # the browser a person opened for themselves is not a ticket's
-        raise Refused("That is the person's own browser, not a ticket's. Use your ticket's browser.")
+    ref = _not_own(ref).strip()
     try:
         from orch import tickets
 
-        return tickets.resolve(root, ref.strip())
+        return _not_own(tickets.resolve(root, ref))
     except ImportError:
         pass
+    except Refused:
+        raise
     except Exception as e:  # noqa: BLE001 - the core's refusal already says what to do
         raise Refused(str(e)) from None
     if not (root / ".orch" / "tickets" / f"{ref}.json").exists():
         raise Refused(f"No ticket {ref} here.")
-    return ref
+    return _not_own(ref)
 
 
 def _in_helper() -> bool:
