@@ -908,6 +908,15 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done'];
 const foldedGroups = new Set(), searchFolds = new Set();
 let foldSeen = false;
+// O-13 (ORCH-2438): a click on a group line reads what is folded NOW. The page keeps the button of the last draw
+// (reconcile, by data-key) with the click it got then, so a click that remembered "open" from its own draw folded the
+// group again and again: a closed group never opened. While a search is typed the folds are that search's own.
+const groupFolds = () => String(ticketSearch).trim() ? searchFolds : foldedGroups;
+function toggleGroup(status) {
+  const folds = groupFolds();
+  if (folds.has(status)) folds.delete(status); else folds.add(status);
+  render();
+}
 // The group's main action for all its tickets: "Answer all 2" opens the first question, "Check 3 results" the first result.
 function groupAction(status, group, folded = foldedGroups.has(status)) {
   if (snapshot || folded) return null;
@@ -936,7 +945,7 @@ function ticketTable(visible) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups, folded = folds.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, folded ? '› ' : '⌄ '), group.title + ' ', h('span', {className:'meta'}, releaseCount(group)));
-    toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
+    toggle.addEventListener('click', () => toggleGroup(status));
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle, folded ? null : releaseOpen(group)))));
     if (folded) continue;
     const roots = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0), cap = capOf('list-' + status);
@@ -951,7 +960,7 @@ function ticketTable(visible) {
     const folds = String(ticketSearch).trim() ? searchFolds : foldedGroups;
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, (folded ? '› ' : '⌄ ') + icon + ' '), group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
-    toggle.addEventListener('click', () => { if (folded) folds.delete(status); else folds.add(status); render(); });
+    toggle.addEventListener('click', () => toggleGroup(status));
     body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
     if (folded) continue;
     const cap = capOf('list-' + status), fetchMore = status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null;
@@ -1134,7 +1143,7 @@ function phoneList(visible) {
     const shownRows = rows.filter(row => row.depth <= 1), all = phoneMore.has(status), cut = shownRows.slice(0, all ? capOf('phone-' + status) : PHONE_ROWS);
     const fetchMore = !isRel && status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null, total = isRel ? group.tickets.length : groupCount(status, group.tickets.length);
     const sec = window.UI.shortGroup({key:'short-' + status, title:isRel ? group.title + ' · ' + releaseCount(group) : group.title, icon:isRel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:total, folded,
-      onToggle:() => { if (folded) folds.delete(status); else folds.add(status); render(); },
+      onToggle:() => toggleGroup(status),
       rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
         fact:[window.DashHelpers.kindWord(row.ticket), shortFact(row.ticket, isRel ? {...row, parentMissing:false} : row)].filter(Boolean).join(' · '), side:shortSide(row.ticket, row, isRel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
       more:!all && (cut.length < shownRows.length || fetchMore) ? {label:Math.max(shownRows.length - cut.length, total - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
