@@ -1003,14 +1003,17 @@ def soon(root: Path, now: float | None = None) -> bool:
                 return False
         except OSError:
             pass
-        mark.parent.mkdir(parents=True, exist_ok=True)
-        mark.touch()
-        os.utime(mark, (now, now))
         from orch import procs
 
+        if procs.bg_depth() >= 1:  # inside background work: it never starts more (ORCH-2407)
+            return False
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.touch()  # also when the start is skipped below: asked again after ASK_EVERY, not at once
+        os.utime(mark, (now, now))
         log = runs.run_dir(Path(root)) / "doctor-pass.log"
         with open(log, "ab") as out:
-            subprocess.Popen(
+            started = procs.background_start(
+                Path(root),
                 procs.orch_python_argv("doctor", "pass", "--json"),
                 cwd=Path(os.path.realpath(tempfile.gettempdir())),
                 env={**os.environ, "ORCH_ROOT": str(root)},
@@ -1019,7 +1022,7 @@ def soon(root: Path, now: float | None = None) -> bool:
                 stderr=out,
                 start_new_session=os.name != "nt",
             )
-        return True
+        return started
     except Exception:  # noqa: BLE001  a check that cannot start never holds up a page or the loop
         return False
 

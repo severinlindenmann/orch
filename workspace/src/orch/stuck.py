@@ -148,7 +148,8 @@ def _spawn_look(root: Path) -> None:
     from orch import procs
 
     env = {**os.environ, "ORCH_ROOT": str(root)}
-    subprocess.Popen(
+    procs.background_start(  # False = not now (busy, budget used up): the next needs starts the look
+        root,
         procs.orch_python_argv("needs", "--look-at-pulls"),
         cwd=Path(os.path.realpath(tempfile.gettempdir())),
         env=env,
