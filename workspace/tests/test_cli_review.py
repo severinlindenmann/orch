@@ -191,6 +191,51 @@ def test_card_reads_the_path_artifacts_dir_prints(tk, run):
     assert json.loads(out)["card"]["preview"]["options"][0]["preview"]["paras"] == ["Option A."]
 
 
+def test_card_reads_every_spelling_of_the_tickets_own_file(tk, run):
+    """ORCH-2364 (report r-1127-0932-t_wbj2b5): the path `orch ticket artifacts` prints, the full path on
+    this computer and the bare name all mean artifacts/<name>, for a text and for a picture."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "x.md").write_text("Draft text.\n")
+    (folder / "shot.png").write_bytes(b"\x89PNG\r\n\x1a\n1")
+    (root / "docs").mkdir()
+    (root / "docs" / "y.md").write_text("In the workspace.\n")
+    printed = run("ticket", "artifacts", tid)[1]
+    assert f".orch/tickets/{tid}/artifacts/x.md" in printed
+    texts = (f".orch/tickets/{tid}/artifacts/x.md", str(folder / "x.md"), "x.md", "artifacts/x.md")
+    for n, src in enumerate(texts):  # a new title each time: the same question twice is one question
+        code, out, err = _add(run, tid, "--draft", f"Intro {n}", "--file", src, "--then", "x")
+        assert code == 0, src + out + err
+        q = json.loads(out)
+        assert q["id"] == f"q{n + 1}" and q["card"]["preview"]["paras"] == ["Draft text."], src
+    shots = (f".orch/tickets/{tid}/artifacts/shot.png", str(folder / "shot.png"), "shot.png")
+    for n, src in enumerate(shots):
+        code, out, err = _add(run, tid, "--draft", f"Shot {n}", "--file", src, "--then", "x")
+        assert code == 0, src + out + err
+        q = json.loads(out)
+        assert q["id"] == f"q{len(texts) + n + 1}" and q["card"]["preview"]["type"] == "img", src
+    code, out, err = _add(run, tid, "--draft", "Doc", "--file", str(root / "docs" / "y.md"), "--then", "x")
+    assert code == 0 and json.loads(out)["card"]["preview"]["paras"] == ["In the workspace."], out + err
+    # a file of the same name in the workspace folder is the one a bare name means, as before
+    (root / "x.md").write_text("Workspace file.\n")
+    code, out, err = _add(run, tid, "--draft", "Again", "--file", "x.md", "--then", "x")
+    assert code == 0 and json.loads(out)["card"]["preview"]["paras"] == ["Workspace file."], out + err
+
+
+def test_card_file_refusals_name_the_form_that_works(tk, run, tmp_path_factory):
+    """ORCH-2364: a path outside the workspace, another ticket's file and a missing picture are refused with
+    artifacts/<name> in the sentence."""
+    root, tid = tk
+    outside = tmp_path_factory.mktemp("outside") / "x.md"
+    outside.write_text("Not ours.\n")
+    other = root / ".orch" / "tickets" / "t_other1" / "artifacts"
+    for src in (str(outside), str(other / "x.md"), "nope.png", str(root / ".orch" / "secrets" / "k.md")):
+        code, out, _ = _add(run, tid, "--draft", "T", "--file", src, "--then", "x")
+        assert code == 2 and "artifacts/<name>" in json.loads(out)["error"], src + out
+    assert tickets.load(root, tid)["questions"] == []
+
+
 @pytest.mark.parametrize(
     "src, says",
     [

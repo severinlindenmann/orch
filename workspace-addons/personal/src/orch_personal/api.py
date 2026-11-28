@@ -42,7 +42,7 @@ def need_person(who: Who, what: str, run: str | None = None) -> None:
     """Refused for a helper. `run`: the command the person can run with one click from a run card
     ([[run_card]] in orch-addon.toml), named in the next step."""
     if who.helper:
-        how = f' --run "{run}"' if run else ""
+        how = f' --run "{run}"' if run else " --option yes --option no --recommend yes"
         raise Refused(f'Only the person can {what}. Ask them on your ticket: orch ask <ticket> "..."{how}')
 
 
