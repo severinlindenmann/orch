@@ -106,3 +106,8 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   answers to pick (R2.4), with the next step; it was a hint since 25 Nov. Ideas to sort, cards and an add-on's own
   question (`--kind`) are not touched. A person's own question without answers keeps the hint: Factory's question to
   another workspace is asked by a person's click and answered in free words.
+- 2026-11-28 (ORCH-2407, owner: orch never overloads its computer): every background start of orch's own goes through
+  `procs.background_start`: at most `workspace.background_max` (default 4) at once per workspace, none while the
+  1-minute load per processor core is over `workspace.background_load` (default 1.5; Windows has no load, there only
+  the count), and a background process (`ORCH_BG_DEPTH` set) never starts another one. A skipped start is not an
+  error; a later command starts it. A start a person asked for is counted, never skipped. `orch doctor` names both.
