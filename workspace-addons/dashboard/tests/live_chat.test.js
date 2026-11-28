@@ -208,3 +208,16 @@ test('without a readable conversation the chat is the ticket summary', () => {
   }
   assert.equal(C.liveTalkReal({available: true, turns: [{w: 'h', text: 'a', at: '2026-11-19T14:10:00Z'}]}), true);
 });
+
+test('O-19: a helper\'s long chat line keeps its whole text and its own short line; a person\'s line is as before', () => {
+  const long = '## Findings\n' + Array.from({length: 8}, (_, i) => '- finding ' + i + ' with a few more words').join('\n');
+  const t = {id: 't_1', checklist: [], questions: [], history: [
+    {at: '2026-11-19T14:00:00Z', by: 'agent:claude', text: long, chat_message: true, summary: 'Eight findings, two matter.'},
+    {at: '2026-11-19T14:01:00Z', by: 'agent:claude', text: 'Short answer.', chat_message: true, summary: 'never shown'},
+    {at: '2026-11-19T14:02:00Z', by: 'human:lume', text: long, chat_message: true}]};
+  const rows = plain(C.liveChatModel(t, 'human:lume', []));
+  assert.equal(rows[0].full, long); assert.equal(rows[0].summary, 'Eight findings, two matter.');
+  assert.ok(!('full' in rows[1]) && !('summary' in rows[1]));
+  assert.ok(!('full' in rows[2]), 'what a person wrote is never made short');
+  assert.match(source, /chatBody\(r\.full, \{helper:true, summary:r\.summary/);
+});
