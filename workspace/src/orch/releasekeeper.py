@@ -108,9 +108,7 @@ REQUIRED_FALLBACK = ["gate"]
 # to a release branch, never required. Its checks never count for a release pull request; a red nightly run
 # opens one "later" ticket (quarantine_red).
 QUARANTINE_WORKFLOW = "quarantine"
-QUARANTINE_FILE = (
-    ghmerge.QUARANTINE_FILE
-)  # the Merge click and `orch review tend-releases` tell it by this file
+QUARANTINE_FILE = ghmerge.QUARANTINE_FILE  # the Merge click tells its checks by this file as well
 QUARANTINE_WORDS = "Quarantined CI checks are red (later)"
 # A job GitHub stopped at its timeout-minutes (the check run's annotation) whose log has no failed test runs
 # once more per release before the release is blocked or closed (ORCH-1050).
