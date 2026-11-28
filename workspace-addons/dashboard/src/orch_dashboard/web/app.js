@@ -494,6 +494,21 @@ globalThis.addEventListener?.('message', e => {
   if ((e.origin !== location.origin && !chan) || e.data?.orch !== 'needs-count' || !state) return;
   if (e.source && e.source === needsCountFrame()) postNeedsCount(needsYouTotal());
 });
+// Touch sizes follow the window, never the frame (W-001, W-006): a framed add-on page beside the Focus panel is narrower
+// than a phone, but the window is a wide one with a mouse. The dashboard tells each frame whether the window is wide
+// (kit/frame.js marks its page, the kit's 44 px touch rules stand down there): when the frame asks, when it has
+// loaded, and when the window crosses the phone width. A yes or no only, to this page's own frames.
+const windowWide = () => !!globalThis.matchMedia?.('(min-width: 721px)').matches;
+function postWindowWide(win) {
+  try { win?.postMessage({type:'orch.window', wide:windowWide()}, '*'); } catch (_) { /* the page was left */ }  // the frame's origin is opaque (sandboxed)
+}
+const embedFrames = () => [...(globalThis.document?.querySelectorAll?.('iframe.embed') || [])];
+globalThis.addEventListener?.('message', e => {
+  if (e.data?.orch !== 'frame-window' || !e.source) return;
+  if (embedFrames().some(f => f.contentWindow === e.source)) postWindowWide(e.source);
+});
+globalThis.document?.addEventListener?.('load', e => { if (e.target?.matches?.('iframe.embed')) postWindowWide(e.target.contentWindow); }, true);
+globalThis.matchMedia?.('(min-width: 721px)').addEventListener?.('change', () => embedFrames().forEach(f => postWindowWide(f.contentWindow)));
 // An add-on page moved inside itself (ORCH-241): the address follows it without a history entry of its own (the
 // frame's move made one, so Back goes back inside the frame) and without drawing the page again.
 function followAddress(hash) {

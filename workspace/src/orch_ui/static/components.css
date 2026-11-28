@@ -564,10 +564,14 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar .side-foot{margin:0}
 .sidebar[data-open=true] .side-foot.person-row{display:flex}
 .sidebar .side-foot.person-row .phone-toggle{width:44px;min-height:44px}
-.btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
-.btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
+/* Touch sizes (44 px) follow the window, never the frame (W-001, W-006; owner 28 Nov: bigger touch buttons follow finger
+   or mouse, never the width). A framed add-on page beside the Focus panel is narrower than 720 px in a wide window: it
+   takes its narrow layout, but keeps the desktop control sizes. The dashboard tells the frame (kit/frame.js sets
+   html[data-window=wide]); :where() adds no weight, so every rule here cascades exactly as before. */
+:where(html:not([data-window=wide])) .btn,:where(html:not([data-window=wide])) .btn.sm,:where(html:not([data-window=wide])) .btn.xs,:where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs,:where(html:not([data-window=wide])) .tabs button,:where(html:not([data-window=wide])) .tabs a,:where(html:not([data-window=wide])) .nav-item,:where(html:not([data-window=wide])) summary,:where(html:not([data-window=wide])) .menu-item{min-height:44px}
+:where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs{width:44px}
 .nav-row>.nav-pin{width:44px;height:44px;right:4px}
-.page-back{min-height:44px;margin:-10px 0 -6px}
+:where(html:not([data-window=wide])) .page-back{min-height:44px;margin:-10px 0 -6px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
 /* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
@@ -579,8 +583,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .file-row>.file-actions{flex:1 0 100%}
 .card-row>.chip{margin-left:24px}
 .toasts{left:16px;right:16px;width:auto}
-.input{font-size:16px;min-height:44px}
-.switch:before{content:"";position:absolute;inset:-12px -4px}
+:where(html:not([data-window=wide])) .input{font-size:16px;min-height:44px}
+:where(html:not([data-window=wide])) .switch:before{content:"";position:absolute;inset:-12px -4px}
 dialog.sheet{width:100%}
 }
 @media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.page-heading-actions{margin-left:0;width:100%;flex-wrap:wrap}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
