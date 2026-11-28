@@ -363,6 +363,8 @@ def doctor(root: Path) -> dict:
     late = doctorpass.overdue_row(root)  # once, after the run checks (it sat inside their loop: ORCH-104)
     if late:
         rows.append(late)
+    if (root / ".orch").is_dir():
+        rows.append(_row("background work", True, procs.power_words(root)))  # ORCH-2407: the limits, in words
     from orch import macfolders
 
     try:

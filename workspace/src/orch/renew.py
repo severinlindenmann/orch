@@ -346,8 +346,10 @@ def start(root: Path, name: str, by: str | None = None) -> dict:
         fd = hand_over(env, TOKEN_ENV, token)  # not in the environment: a pipe the worker inherits
         extra = {"pass_fds": (fd,)} if fd is not None else {}
         try:
-            subprocess.Popen(
+            started = procs.background_start(  # a person pressed Renew: counted, never held back
+                root,
                 procs.orch_python_argv("logins", "renew", name, "--worker"),
+                person=True,
                 cwd=Path(os.path.realpath(tempfile.gettempdir())),
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -358,6 +360,8 @@ def start(root: Path, name: str, by: str | None = None) -> dict:
         finally:
             if fd is not None:
                 os.close(fd)
+        if not started:  # only from inside orch's own background work, which never starts more (ORCH-2407)
+            raise Refused("The sign-in could not start from here. Press Renew again in a moment.")
     return _status(root, name)
 
 
