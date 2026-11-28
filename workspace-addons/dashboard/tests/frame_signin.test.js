@@ -28,11 +28,12 @@ test('a pass goes only to the add-on page itself', () => {
 // kit/frame.js in a fake sandboxed frame: takes the passes out of the address, sends the pass only as a header to
 // this server, the file pass only in this add-on's addresses, and its per-frame code with every message.
 function frameEnv(hash, state = null) {
-  const posts = [], fetched = [], replaced = [], listeners = {};
+  const posts = [], asks = [], fetched = [], replaced = [], listeners = {};
   const loc = {protocol:'http:', host:'127.0.0.1:8420', pathname:'/addon/focus/t/t_abcdef', search:'', hash, href:'http://127.0.0.1:8420/addon/focus/t/t_abcdef' + hash};
   const win = {
     top:{}, origin:'null', location:loc,
-    parent:{postMessage:(m, o) => posts.push([m, o])},
+    // the one ask every framed page sends first (W-006, is the window wide?) carries no pass and no code; it has its own test in frame_at.test.js
+    parent:{postMessage:(m, o) => { if (m?.orch !== 'frame-window') posts.push([m, o]); else asks.push([m, o]); }},
     history:{state, replaceState:(s, _t, url) => { win.history.state = s; replaced.push(url); loc.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }},
     fetch:(input, init) => { fetched.push([String(input), init]); return Promise.resolve({status:200}); },
     addEventListener:() => {},

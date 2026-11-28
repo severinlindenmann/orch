@@ -10,11 +10,12 @@ const C1 = 'ab'.repeat(16), P1 = 'p'.repeat(43), F1 = 'f'.repeat(43);
 
 // kit/frame.js in a fake sandboxed frame (the same shape as frame_signin.test.js), with window events.
 function frameEnv(hash, pathname = '/addon/factory/') {
-  const posts = [], winListeners = {};
+  const posts = [], asks = [], winListeners = {};
   const loc = {protocol:'http:', host:'127.0.0.1:8420', pathname, search:'', hash, href:'http://127.0.0.1:8420' + pathname + hash};
   const win = {
     top:{}, origin:'null', location:loc,
-    parent:{postMessage:(m, o) => posts.push([m, o])},
+    // the one ask every framed page sends first (W-006, is the window wide?) carries no pass and no code; it has its own test in frame_at.test.js
+    parent:{postMessage:(m, o) => { if (m?.orch !== 'frame-window') posts.push([m, o]); else asks.push([m, o]); }},
     history:{state:null, replaceState:(s, _t, url) => { win.history.state = s; loc.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }},
     fetch:() => Promise.resolve({status:200}),
     addEventListener:(n, f) => { winListeners[n] = f; },
@@ -25,7 +26,7 @@ function frameEnv(hash, pathname = '/addon/factory/') {
   new Function('window', 'self', 'location', 'history', 'document', 'URL', 'Headers', 'Request', read('../../../workspace/src/orch_ui/static/frame.js'))
     (win, win, loc, win.history, win.document, URL, Headers, undefined);
   const go = h => { loc.hash = h; (winListeners.hashchange || (() => {}))(); };
-  return {posts, go, loc, winListeners};
+  return {posts, asks, go, loc, winListeners, win};
 }
 
 test('frame.js tells the dashboard about a move inside its own page, with its code', () => {
@@ -142,4 +143,28 @@ test('frame-at is refused without the code, from another window, for another pag
   env.send({orch:'frame-at', path:'/addon/factory/', hash:'x'.repeat(201), chan:C1});
   assert.deepEqual(env.followed, []);
   assert.equal(env.loc.hash, '#addon/factory');
+});
+
+// W-001, W-006 (owner, 28 Nov): touch sizes follow the window, never the frame. A framed add-on page beside the Focus
+// panel is narrower than a phone in a wide window; the dashboard says the window is wide and the kit's 44 px rules stand down.
+test('a framed page asks whether the window is wide and takes only its parent\'s word for it', () => {
+  const env = frameEnv('#orch-frame=' + P1 + '&orch-file=' + F1 + '&orch-chan=' + C1);
+  assert.deepEqual(env.asks, [[{orch:'frame-window'}, 'http://127.0.0.1:8420']], 'asked once at the start, no pass and no code in it');
+  const marks = {};
+  env.win.document.documentElement = {setAttribute:(k, v) => { marks[k] = v; }, removeAttribute:k => { delete marks[k]; }};
+  const hear = env.winListeners.message;
+  hear({source:{}, data:{type:'orch.window', wide:true}});
+  assert.deepEqual(marks, {}, 'another window is not believed');
+  hear({source:env.win.parent, data:{type:'orch.window', wide:true}});
+  assert.deepEqual(marks, {'data-window':'wide'});
+  hear({source:env.win.parent, data:{type:'orch.window', wide:false}});
+  assert.deepEqual(marks, {}, 'a window at phone width: the touch sizes are back');
+  // the dashboard answers only its own add-on frames, with a yes or no
+  const app = read('../src/orch_dashboard/web/app.js');
+  assert.match(app, /if \(e\.data\?\.orch !== 'frame-window' \|\| !e\.source\) return;\n  if \(embedFrames\(\)\.some\(f => f\.contentWindow === e\.source\)\) postWindowWide\(e\.source\);/);
+  assert.match(app, /win\?\.postMessage\(\{type:'orch\.window', wide:windowWide\(\)\}, '\*'\)/);
+  // the kit's touch rules stand down for that mark, with no added weight
+  const kit = read('../../../workspace/src/orch_ui/static/components.css');
+  assert.match(kit, /:where\(html:not\(\[data-window=wide\]\)\) \.btn,:where\(html:not\(\[data-window=wide\]\)\) \.btn\.sm,[^{]*\{min-height:44px\}/);
+  assert.match(kit, /:where\(html:not\(\[data-window=wide\]\)\) \.input\{font-size:16px;min-height:44px\}/);
 });

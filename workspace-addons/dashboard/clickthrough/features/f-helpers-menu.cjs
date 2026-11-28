@@ -1,5 +1,5 @@
 // The live bar's one Helpers menu (ORCH-2198, owner pick J b): the bar holds no chips or counts, only Helpers and New.
-// The menu groups the sessions as Needs you, Working and Quiet with their counts, each row opens its pane (the
+// The menu has two labelled groups with their counts, Working helpers (each with its state) and Needs you (W-049), each row opens its pane (the
 // Manager too: before, its chip did nothing), and the menu opens fully inside the window with the bar at the bottom
 // and with the bar at the top (full screen; before, the list opened above the bar, off the screen). The page's state
 // is told the live-session add-on and the Preview switch are on; no helper can run here, so the sessions answer is the
@@ -58,8 +58,11 @@ module.exports = {
     await openMenu();
     const heads = await menu.locator('.lbar-gh').evaluateAll(els => els.map(e => e.innerText.replace(/\s+/g, ' ').trim().toLowerCase()));
     // Needs you counts the workspace's one needs-you number (ORCH-1643): click-throughs before this one may have left
-    // questions, so it is at least this session; Working and Quiet are the sessions alone
-    must(/^needs you [1-9]\d*\|working 1\|quiet 1$/.test(heads.join('|')), `the groups read "${heads.join(' | ')}"`);
+    // questions, so it is at least this session; Working helpers are the sessions alone
+    // W-049: two labelled groups, the helpers first (the working one and the idle Manager, each with its state)
+    must(/^working helpers 2\|needs you [1-9]\d*$/.test(heads.join('|')), `the groups read "${heads.join(' | ')}"`);
+    const states = await menu.locator('.lbar-row[data-lbar-open] .lbar-rn .meta').allInnerTexts();
+    must(states.join('|').replace(/\s+/g, ' ') === ' · Working| · Idle' || states.map(x => x.trim()).join('|') === '· Working|· Idle', `the helper rows say their state: "${states.join('|')}"`);
     await inside('at the bottom');
     await shot('helpers-bottom', page.locator('#live-bar'));
 
