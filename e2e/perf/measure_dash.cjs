@@ -37,7 +37,7 @@ const PAGES = [
 ];
 
 function meter(cdp) {
-  const m = { enc: 0, dec: 0, reqs: 0, byPath: {}, reads: [] };
+  const m = { enc: 0, dec: 0, reqs: 0, byPath: {}, reads: [], all: [] };
   const urls = new Map(), began = new Map();
   cdp.on('Network.requestWillBeSent', e => { urls.set(e.requestId, e.request.url); began.set(e.requestId, Date.now()); m.reqs++; });
   cdp.on('Network.dataReceived', e => { m.dec += e.dataLength; });
@@ -48,6 +48,7 @@ function meter(cdp) {
     m.byPath[p] = (m.byPath[p] || 0) + e.encodedDataLength;
     // when each read and page began and ended, so a slow page shows what it waited for (ORCH-2288)
     if (/^\/(api|addon)\//.test(p)) m.reads.push([p, began.get(e.requestId), Date.now()]);
+    m.all.push([p, began.get(e.requestId), Date.now()]);  // the files too: a first load fetches every one (ORCH-2391)
   });
   cdp.on('Network.webSocketFrameReceived', e => { m.enc += (e.response.payloadData || '').length; m.dec += (e.response.payloadData || '').length; });
   // an event stream never finishes loading, so loadingFinished never counts it: count each message as it arrives
@@ -116,7 +117,11 @@ async function heapMb(cdp) {
     await page.waitForFunction(() => !location.hash.includes('launch='), null, { timeout: LIMIT_MS });
     await usable(page, false);
   } catch (e) { firstErr = String(e.message || e).split('\n')[0]; }
-  rows.push({ page: 'First load', ms: firstErr ? null : Date.now() - t0, err: firstErr, ...diff(s0, snap(m)), heapMb: await heapMb(cdp) });
+  // every request of the first load with when it began and ended (ms from the start), files included: the row
+  // sat at its limit with nothing to show what it waited for (ORCH-2391)
+  const firstMs = firstErr ? null : Date.now() - t0;
+  const firstReads = m.all.filter(r => r[1] >= t0).map(([p, a, b]) => [p, a - t0, b - t0]);
+  rows.push({ page: 'First load', ms: firstMs, err: firstErr, ...diff(s0, snap(m)), reads: firstReads, heapMb: await heapMb(cdp) });
   if (firstErr) {  // the state is still being built: wait for it once more, so the other pages measure a built state
     try { await usable(page, false); } catch (_) { /* the pages below report their own time */ }
   }

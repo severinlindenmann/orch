@@ -11,7 +11,8 @@ ORCH_HOME_STRICT=1, PW_DIR the folder holding node_modules/playwright. <base> mu
   as the first command of a day does once);
 - every dashboard page (first load included): time until usable, the middle of 3 measurements, each on a new
   browser with a new sign-in link, the dashboard left running between them (ORCH-2370: one slow load on a busy
-  runner is not the page's time);
+  runner is not the page's time). Every row keeps its per-request times (`reads` in out/limits.json; First load
+  with every file it fetched, ORCH-2391), and a row over its limit names the requests it waited for last;
 - an idle minute on Home: bytes over the wire.
 Prints a table, adds it to the GitHub job summary when there is one, writes <base>/out/limits.json and exits 1 when
 a limit is passed (each one named with its number and limit). A miss is measured once more and the better number
@@ -91,8 +92,23 @@ def check(lim: dict, cmds: dict[str, float], dash: dict | None) -> tuple[list[st
             shown = "fails" if r.get("err") else f"{ms / 1000:.1f} s"
             lines.append(f"| {r['page']}: usable after | {shown} | {limit:.1f} s |")
             if r.get("err") or ms is None or ms > limit * 1000:
-                bad.append(f"{r['page']} was usable after {shown} (limit {limit} s){': ' + r['err'] if r.get('err') else ''}")
+                why = f": {r['err']}" if r.get("err") else slowest(r)
+                bad.append(f"{r['page']} was usable after {shown} (limit {limit} s){why}")
     return lines, bad
+
+
+def slowest(row: dict, n: int = 3) -> str:
+    """What a slow page waited for: its requests that ended last before it was usable, each with when it began
+    and ended (seconds from the start of the load), from the row's per-request times (ORCH-2391: First load sat
+    at its limit with nothing to show why). "" for a row without them."""
+    ms = row.get("ms")
+    reads = [r for r in row.get("reads") or [] if len(r) == 3 and r[0] and not str(r[0]).startswith("event ")]
+    if ms is not None:
+        reads = [r for r in reads if r[2] <= ms] or reads
+    last = sorted(reads, key=lambda r: r[2], reverse=True)[:n]
+    if not last:
+        return ""
+    return "; waited for " + ", ".join(f"{p} {a / 1000:.2f}-{b / 1000:.2f} s" for p, a, b in last)
 
 
 def _numbers(cmds: dict[str, float], dash: dict | None) -> dict[str, tuple[float | None, str]]:
