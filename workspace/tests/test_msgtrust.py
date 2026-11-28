@@ -450,8 +450,8 @@ def test_a_swapped_key_is_held_again(ws, run, rel, person):
     rel.inbox.append(m)
     inbox(run)
     assert m["id"] not in handled_ids(ws)
-    assert [h["why"] for h in msgtrust.held(ws)] == ["new_key"]
-    assert next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)["state"] == "new_key"
+    assert [h["why"] for h in msgtrust.held(ws)] == ["changed"]
+    assert next(c for c in msgtrust.contacts(ws) if c["id"] == PEER)["state"] == "changed"
 
 
 def test_withdraw_holds_again(ws, run, rel, person):

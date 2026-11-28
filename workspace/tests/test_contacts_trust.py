@@ -71,7 +71,8 @@ def test_accept_refuses_a_name_that_is_not_one_plain_line(ws, person, bad):
     assert next(r for r in trust(ws)["items"] if r["id"] == PEER)["state"] == "not_accepted"
 
 
-def test_new_key_shows_the_old_fingerprint(ws, rel, person):
+def test_a_key_change_shows_changed_with_the_old_fingerprint(ws, run, rel, person):
+    """ORCH-2154: every key change reads Changed (like the phone), the accepted key beside the new one."""
     msgtrust.accept(ws, PEER, "human:tester", "cli", FP)
     from test_msgtrust import _dir_entry
 
@@ -80,7 +81,10 @@ def test_new_key_shows_the_old_fingerprint(ws, rel, person):
 
     relay.refresh(ws)
     r = next(r for r in trust(ws)["items"] if r["id"] == PEER)
-    assert r["state"] == "new_key" and r["old_fingerprint"] == FP and r["fingerprint"] != FP
+    assert r["state"] == "changed" and r["old_fingerprint"] == FP and r["fingerprint"] != FP
+    code, txt, _ = run("relay", "contacts")
+    line = next(x for x in txt.splitlines() if r["fingerprint"] in x)
+    assert code == 0 and line.endswith("Changed") and "without the old one" not in txt
 
 
 def test_dashboard_grant_lets_a_person_accept_without_a_terminal(ws, run, monkeypatch):

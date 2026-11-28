@@ -192,8 +192,8 @@ def r19(e):
     check(c["state"] == "not_valid" and c["fingerprint"] == fp["SigA"] and c.get("refused") == len(want), f"c4 Not valid: {c}")
 
     # c4 a changed key: B's key change (signed by its old key) approved on the relay; A shows the new key with the
-    # accepted one beside it and no longer counts it as accepted (the relay's yes is no Accept). Today the workspace
-    # says new_key for every key change; `changed` (vouched by the old key) is the contract's word for this case.
+    # accepted one beside it and no longer counts it as accepted (the relay's yes is no Accept): Changed, like the
+    # phone (ORCH-2154: every key change reads Changed; the workspace never gets the old key's statement).
     rot = run_py("SigB", _R19_ROTATE)
     r = http("POST", e.rel.url + "/v1/me/signing-key/change", {"X-Orch-Workspace": b, "Authorization": f"Bearer {tok['SigB']}"}, rot["body"])
     check(r.status == 202 and (r.json() or {}).get("kind") == "signed", f"key change request: {r}")
@@ -201,6 +201,6 @@ def r19(e):
     check(r.status == 200, f"admin approve key change: {r}")
     e.orch("SigA", "relay", "refresh")
     c = row("SigA", b)
-    check(c["state"] in ("new_key", "changed") and c["fingerprint"] == rot["fingerprint"]
+    check(c["state"] == "changed" and c["fingerprint"] == rot["fingerprint"]
           and c.get("old_fingerprint") == fp["SigB"], f"c4 changed key: {c}")
     return "paired workspaces trusted from the first message (RP3 A); relay and workspace refuse wrong/missing/changed; Contacts states"
