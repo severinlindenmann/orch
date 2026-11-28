@@ -1,5 +1,5 @@
 /* The shared file viewer: one wide dialog for every kind of ticket file (picture, PDF, web page, table, spreadsheet,
-   note, code, text or log, sound, video, archive). × Close, Esc and a click outside close it; ← → move between the
+   note, code, text or log, sound, video, archive). × Close and Esc close it (a click beside it does nothing, O-02); ← → move between the
    files of the list; Open in new tab, Download and Copy link are always there. Text is only ever added with
    textContent, a web page only inside a sandboxed frame. */
 (() => {
@@ -394,7 +394,7 @@
     const prev = btn('← Prev', 'outline sm', () => go(index - 1)), next = btn('Next →', 'outline sm', () => go(index + 1));
     right.append(prev, next); actions.append(left, right);
     // Full screen: the same dialog fills the window. The button says what it does; Esc leaves full screen first,
-    // and × Close, Esc (when not full screen) and a click outside still close the viewer.
+    // and × Close, Esc (when not full screen) still close the viewer.
     const fs = btn('Full screen', 'outline sm fv-fs', () => setFull(!d.classList.contains('fs')), {'aria-pressed': 'false'});
     head.append(fs);
     const setFull = on => {
@@ -420,7 +420,7 @@
     document.body.append(d);
 
     const go = i => { if (i >= 0 && i < files.length && i !== index) { index = i; draw(); } };
-    // × Close, Esc, a click outside, the focus trap and the focus going back to the opener come from the one shared
+    // × Close, Esc, the focus trap and the focus going back to the opener come from the one shared
     // close lifecycle (kit/overlay.js, ORCH-2060); the viewer only tidies up once that has settled.
     function close(restore = true) {
       if (done) return;

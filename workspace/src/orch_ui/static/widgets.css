@@ -554,9 +554,7 @@ body.mobile-mode-on{--mm-page-start:var(--mm-dark-page-start);--mm-page-end:var(
 .report-check{display:flex;gap:8px;align-items:flex-start}
 .report-check .chip{flex:none}
 .report-sub{margin-top:8px}
-dialog.report-dialog{display:grid;gap:12px;width:min(520px,calc(100% - 32px))}
-dialog.report-dialog:not([open]){display:none}
-dialog.report-dialog .actions{margin-top:12px}
+dialog.report-dialog{width:min(520px,calc(100% - 32px))}
 /* Reference list (15 Nov, linked work): one dense 32 px row per link. [16px tool mark] [key + title, one line, ellipsis]
    [state slot: 6px dot + sentence-case word]. Only the title shrinks; key and state never do. Full text (tool, key, title,
    state) in the native title tooltip and aria-label. Underline on hover only. Add row is a quiet row in the same list.
@@ -1104,9 +1102,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
    pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
    a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
-.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
-.live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
-.live-dock[data-mode=right]{right:var(--live-w)}
+.live-dock{position:fixed;left:var(--sidebar-width);right:var(--frame-gutter,0px);bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
+.live-dock[data-mode=side]{left:auto;right:var(--frame-gutter,0px);top:50%;bottom:auto;transform:translateY(-50%)}
+.live-dock[data-mode=right]{right:calc(var(--live-w) + var(--frame-gutter,0px))}
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
 .live-bar{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s3);border-top:1px solid var(--border-strong);background:var(--sidebar)}
 .live-dock[data-mode=full] .live-bar{border-top:0;border-bottom:1px solid var(--border)}
@@ -1127,7 +1125,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pop.live-sample{position:relative;right:auto;bottom:auto;z-index:auto;box-shadow:none;animation:none}
 .live-panel{position:relative;display:flex;min-width:0;min-height:0;border-top:1px solid var(--border-strong);background:var(--surface)}
 .live-panel[data-mode=bottom]{height:var(--live-h);animation:live-up var(--dur-slow) var(--ease-enter)}
-.live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:0;bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
+.live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:var(--frame-gutter,0px);bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
 .live-pane{display:flex;flex:var(--f,1) 1 0;flex-direction:column;min-width:0;min-height:0;container:live-pane/inline-size}
 .live-panel[data-mode=right]{flex-direction:column}
@@ -1355,14 +1353,20 @@ button.live-pt:hover{color:var(--brand)}
 .live-dock[data-still] .live-panel,.live-dock[data-still] .live-edge{animation:none}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
-body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* W-005: --frame-gutter is the scrollbar room the shell keeps on a framed add-on page (dashboard style.css), 0 elsewhere:
+   the bar, the right panel and its divider sit on the same px on every page */
+body[data-live-layer=right] .shell-body{padding-right:calc(var(--live-padr,0px) + var(--frame-gutter,0px))}
 /* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
    bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
 @media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
-   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695):
-   the bar drops its "Updated" time and goes onto a second row when they do not fit beside the page name */
-body[data-live-narrow] .topbar{flex-wrap:wrap}
+   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695).
+   W-004 (owner, 28 Nov): the bar never wraps there, so the page title sits at the same height on every page. "Updated
+   just now" goes first, then the page name shortens with "…"; the buttons keep their words and their size. */
+body[data-live-narrow] .topbar{flex-wrap:nowrap}
+body[data-live-narrow] .topbar>*{flex-shrink:0}
+body[data-live-narrow] .topbar>.breadcrumb{flex:0 1 auto;min-width:0;flex-wrap:nowrap;height:auto}
+body[data-live-narrow] .topbar .breadcrumb>#crumb{display:block;height:auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body[data-live-narrow] .topbar #updated{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 /* ORCH-2202 (owner pick I a): the ticket page beside Focus goes to one column: Properties under Progress, in the page
@@ -1370,6 +1374,19 @@ body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .ticket-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .ticket-layout>.rail-sheet{position:static;max-height:none;overflow:visible;padding:var(--s4) 0 0;border-left:0;border-top:1px solid var(--border)}
 body[data-live-rail] .live-dock{--live-w:clamp(320px,calc(100vw - var(--sidebar-width) - 600px),760px)}
+/* W-001 (owner, 28 Nov): beside the Focus panel the page area is under 900 px in a wide window (body[data-live-narrow],
+   set by the shell). Chat then takes its narrow layout, as on a small window: the list or the conversation, "‹ Chats"
+   goes back, the starters one under the other, so the message box and Send keep their whole width. The same rules as
+   the 899 px block of the dashboard's pages/chat.css (whose own rules all start with .chat-page), without its phone
+   height (the window is tall, the bar below is --live-pad). */
+body[data-live-narrow] .chat-page,body[data-live-narrow] .chat-page.chat-with-side{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .chat-page.chat-with-side>.pane-side{display:none}
+body[data-live-narrow] .chat-page.chat-list-open .chat-main{display:none}
+body[data-live-narrow] .chat-page.chat-thread-open .chat-list{display:none}
+body[data-live-narrow] .chat-page .chat-list{border-right:0}
+body[data-live-narrow] .chat-page .chat-back{display:inline-flex;border:0;background:transparent;padding:0 8px 0 0}
+body[data-live-narrow] .chat-page .chat-head-top{flex-wrap:nowrap}
+body[data-live-narrow] .chat-page .chat-prompts{grid-template-columns:1fr}
 body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */
@@ -1424,12 +1441,12 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .doc-risk{display:inline-block;margin-left:8px;padding:0 6px;border-radius:999px;border:1px solid currentColor;font-family:var(--font-sans,inherit);font-size:11px;white-space:nowrap}
 .doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
 /* ---- Live bar (draft D, ORCH-337; ORCH-2198): one calm row under every page: the page's name, one Helpers menu
-   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) lists the sessions in groups (.lbar-gh:
-   Needs you, Working, Quiet, with counts); each row opens its pane. It opens on the side of the bar with room
+   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) has two labelled groups (.lbar-gh, with
+   counts; W-049): Working helpers (each with its state) and Needs you; each row opens its pane. It opens on the side of the bar with room
    (data-at=above|below, set by the page), so it stays inside the window with the bar at the bottom or the top (full
    screen). It never wraps: data-fold 3 and up shows New as an icon. Fixed under the page beside the side bar; at phone
    width above the tab bar (--lbar-bottom, set by the page). .lbar-sample shows it inline in the gallery. ---- */
-.lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
+.lbar{position:fixed;left:var(--sidebar-width);right:var(--frame-gutter,0px);bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
 .lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
 .lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
@@ -1462,6 +1479,13 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
 .lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbar-pop .meta{margin:0}
+/* W-049: with no helper at work the Working helpers group says so in one line, on the rows' own left edge */
+.lbar-pop .lbar-none{padding:var(--s1) var(--s3)}
+/* W-047: a start that did not work stays under its row of the New menu: the reason, then Try again */
+.lbar-newfail{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:0 var(--s1) var(--s1);font-size:var(--fs-meta);line-height:18px}
+.lbar-newfail>.bad{min-width:0;overflow-wrap:anywhere}
+.lbar-newfail>.btn{flex:none}
+.live-opt>.spinner{flex:none;margin-left:auto}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
 body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
@@ -1901,7 +1925,7 @@ button.gtree-row:hover{background:var(--surface-2)}
  .run-fact dd{flex-wrap:nowrap;justify-content:space-between}
  .run-card .cmd-copy-row{flex-wrap:wrap}
  .run-card .cmd-copy-text{flex-basis:100%}
- .run-card .btn{min-height:44px}
+ :where(html:not([data-window=wide])) .run-card .btn{min-height:44px}
 }
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
@@ -2194,7 +2218,7 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
  body:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
  .swipe-top>.swipe-all{display:none}
  .swipe-jump{display:flex;flex:1 1 100%;order:6;gap:var(--s2);min-width:0}
- .swipe-jump .btn{min-height:var(--touch)}
+ :where(html:not([data-window=wide])) .swipe-jump .btn{min-height:var(--touch)}
  .swipe-jump-all{flex:1;justify-content:flex-start;min-width:0}
  .swipe-jump-all .meta{margin-left:auto}
  .swipe-files{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
@@ -2304,6 +2328,10 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-row.is-current:focus-visible{box-shadow:inset 3px 0 0 var(--brand),var(--focus-ring)}
 .review-row.is-done{color:var(--text-faint)}
 .review-row-icon{display:inline-flex;flex:none;margin-top:2px;color:var(--text-faint)}
+/* FX-05: a stuck row carries the shared Stuck pill in its second line, before its ticket */
+.review-row-icon.failed{color:var(--failed)}
+.review-row-stuck{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.review-row-stuck>.pill{font-size:12px;line-height:16px}
 .review-row-text{display:grid;flex:1;gap:2px;min-width:0}
 .review-row-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
 .review-row-sub{font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
@@ -2956,7 +2984,7 @@ button.status-row-none{color:var(--text-muted)}
   .files-mid>.files-gallery{overflow:visible}
   .files-gallery{padding:0 var(--s3) var(--s4)}
   .files-gallery .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
-  .files-sechead .btn{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .files-sechead .btn{min-height:var(--touch)}
 }
 /* ORCH-1467: the Review deck keeps its keyboard ring away from the content (space inside the frame); the cards behind a
    short card (a Stuck card, a plain question) are not drawn, they only peeked out below it; and a card's own answer

@@ -24,7 +24,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
 | `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
-| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat, on the Results shelf of a Focus pane and on the ticket page; the shelf `.live-shelf` in `widgets.css` (ORCH-1356) is a column beside the chat in full screen and in the bottom layer from 900 px, a one-row strip above it on the right and on a phone); `.results-host`, `.result-links` and `.result-more` lay them out. |
+| `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc; a click beside it does nothing). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat, on the Results shelf of a Focus pane and on the ticket page; the shelf `.live-shelf` in `widgets.css` (ORCH-1356) is a column beside the chat in full screen and in the bottom layer from 900 px, a one-row strip above it on the right and on a phone); `.results-host`, `.result-links` and `.result-more` lay them out. |
 | `widgets.css` (19 Nov, ORCH-834) | Switch list from the Skills page (draft A): `.switch-table` (on a `.data-table`: a switch or an "Always on" chip in the first cell, name with one quiet line, `td.nowrap` for short words, a row click opens the side panel; on a phone each row stacks), `.list-tools` (the segmented filter and the search above a list) and `.facts` (label and value pairs in a side panel). Gallery: Content, Switch list. |
 | `widgets.css` (20 Nov, ORCH-840) | `.sheet-actions`: Save and Cancel stay in view at the foot of a side panel (`dialog.sheet`) while its form scrolls (Skills page, Edit). Gallery: Content, Switch list. |
 | `widgets.css` (25 Nov, ORCH-2065) | Setting row (`.setting-row`): a switch only where flipping it saves the setting. When the change happens somewhere else (Chat), the row states today's behaviour from the record and its action is a secondary `btn outline sm` that names the destination ("Change in Chat"), never a switch that flips back. Gallery: Setting row. |
@@ -133,8 +133,12 @@ the first rows without any extra work.
   page inside another page (a ticket, New ticket, an add-on's settings, a Factory order) has `← <parent>` above its
   name (`.page-back`, `UI.pageBack`), the same on the computer and the phone. A switch or setting never sits in the top.
 - Side menu (owner D2 A, 26 Nov, ORCH-2283): Home, Tickets, Review, Chat, Contacts, then Add-ons in one list without
-  pins; `More (n)` / `Fewer` unfolds the rest in place (Lessons too), the page that is open always shows, and
-  `Change this list` (at the end of the unfolded list) shows one switch per add-on, `Done` closes it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
+  pins, in the person's order; `More (n)` / `Fewer` unfolds the rest in place (Lessons too) and the page that is open
+  always shows. No menu row edits the list (O-34, owner 28 Nov). Two ways are built for the owner to pick one: A, a
+  quiet `…` beside "Add-ons" (`.nav-edit`, on hover or keyboard) opens Settings › Menu (`.menu-order`: a switch, a grip
+  to drag and two arrows per page); B, each row is dragged in place and has its own `…` (`.nav-row-menu`: Move up,
+  Move down, Hide from menu; Show in menu under More). The Settings icon is the master gear (`icon('settings')`, O-35):
+  never redraw it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
   every page (`.page`, 32 px top). Two widths only: full (default, no max-width) and `.form-width` (`--form-width`,
   1024 px) for a form page such as Settings; both left-aligned. The top bar holds one outlined `New ticket`; the page's
   own main action is the only filled button. Phone mode while on = an outlined chip after the breadcrumb (menu),
@@ -226,7 +230,7 @@ For the eventual restyle, load system.css after today's kit and page CSS, then r
 | Card / raised / hover | `--surface #181b20`, `--surface-2 #20242b`, `--surface-3 #2a3038` | Cards are flat, overlays are raised. |
 | Divider / interactive border | `--border #30363f`, `--border-strong #79838f` | Quiet dividers do not identify controls. Inputs use the strong border. |
 | Text | `--text #edf0f3`, `--text-muted #b2bac5`, `--text-faint #a0aab6` | Primary, supporting, metadata. Never lower opacity for metadata. |
-| Action | `--brand #61d5b8`, `--on-brand #092b23` | One teal accent; dark label on filled teal. |
+| Action | `--brand #61d5b8`, `--on-brand #092b23` | One accent per place (teal in a workspace; the relay and publish portals each keep their own, P-006); dark label on the filled accent. |
 | Working | `--working / --info #8fbef5` | Blue, `◉ Working`. No looping live dot. |
 | Needs you / review | `--needs-you / --review / --warning #e5be72` | Amber, `! Needs you` or `◇ Ready for review`. Distinct words and symbols. |
 | Done | `--done / --success #98cda3` | Green, `✓ Done`. |
@@ -270,6 +274,47 @@ Topbar: current location and Chat / New ticket. These are navigation actions. Th
 Use `.columns` for story + properties; `.grid-2` for equal samples; `.grid-3` for three short units; `.grid-2.grid-wide-3` moves to three columns at 1600+. Do not add a third story column just because the screen is wide. Prose is capped at `76ch` using `.reading`, below the ~90-character ceiling. A board may retain five status columns when each fits at least 180 px; otherwise use a local horizontal board track or switch to the list, never body overflow. Every column has a count; empty columns say “None” (BP-01, BP-20).
 
 For ticket lists use `.page.list-page`, a one-line header, one 32 px toolbar, 8 px gaps, a 32 px table head, then 40 px rows. Budget at 1280×800: 56 chrome + 16 top pad + 36 heading + 8 + 32 toolbar + 8 + 32 table head + 15×40 rows = **788 px**. Extra subtitles or banners reduce that capacity; put the summary beside the title and don't stack filter bars. Compact gives 32 px rows. The shared gallery demonstrates the row sizes with four representative rows; the consuming list must validate the fifteen-row target (BP-04, BP-82).
+
+### The room a page really has (W-001, owner 28 Nov)
+
+A page lays out for its **page area**, not for the window. Beside the Focus panel at 40 % a 1440 px window leaves the
+page 617 px (menu open) or 785 px (menu closed); a layout that only asks the window keeps its wide form there and
+squeezes ("Save ticket" wrapped letter by letter in a 210 px box).
+
+- **The marks.** The shell sets `body[data-live-narrow]` while the page area is under 900 px and
+  `body[data-live-stack]` while it is under 1100 px (dashboard `pages/live-layer.js`). They are the contract: nothing
+  else measures the room.
+- **Write a narrow layout twice.** Once in its width query (a small window), once under the mark (a small page area):
+  `@media(max-width:899px){.x{…}}` and `body[data-live-narrow] .x{…}`. A layout that is wide-first in a `min-width`
+  query stands down under the mark with `:where(body:not([data-live-narrow])) .x{…}`; `:where()` adds no weight, so
+  nothing else in the cascade moves. Shared pieces carry both already (`.columns`, `.grid-3`, `.table-wrap`,
+  `.page-heading-actions`, the top bar, Review, the ticket page, Chat, New ticket, Home, Tickets, Documentation).
+- **Never stack every page by force.** Each page says what its narrow form is; a page with no narrow form keeps its
+  layout and scrolls a table inside its own box, never the window.
+- **Code asks, CSS decides.** A page whose code draws two different things asks `UI.pageRoom()` (the page area in px)
+  or `UI.pageRoom.under(900)` and listens on `window` for `orch:page-room`.
+- **Finger sizes follow the window and the pointer, never the room.** The 44 px touch rules belong to a phone-width
+  *window*. A framed add-on page beside the panel is narrower than a phone while the window is a wide one with a mouse:
+  the dashboard tells the frame (`kit/frame.js` sets `html[data-window=wide]`) and the touch rules stand down there
+  (`:where(html:not([data-window=wide]))`); the frame also keeps the wide window's 24 px gutter (W-006).
+- **A button's word never breaks inside itself** (`.btn`, `.chip`, `.badge`, `.pill`): a row of buttons wraps as
+  whole buttons.
+- **The top bar is one row beside the panel** (W-004): "Updated just now" goes first, then the page name ends with
+  "…"; the buttons keep their words and their size, so the page title sits at the same height on every page.
+- **The shell keeps the scrollbar room, embedded or not** (W-005): a framed page scrolls inside its frame, so the
+  window has no gutter there; `--frame-gutter` (the measured scrollbar width, 0 where bars lie over the page) is kept
+  by everything fixed to the window's right edge: the top bar, the Live bar, the right panel and its divider.
+- **The check.** `clickthrough/features/a-split-layout.cjs` opens every dashboard-drawn page at the 60/40 split with
+  the menu open and closed at 1440, 1920 and 1280 and fails on anything past the page area, a button word broken
+  inside itself, a second top bar row or a page title that jumps. A new page is added to its list.
+
+### One accent per place (P-006, owner 28 Nov)
+
+The sizes are one: the relay and publish portals take the master's text (14 px), page title (28/36), top bar (56 px)
+and filled button (36 px); `<html data-size="master">` turns them on in both portal sheets, from the same tokens
+(`brand/tests/test_portal_sizes.py` keeps the two blocks equal). The **accent is one colour per place** and says which
+server you are on: teal in a workspace (dashboard, add-ons), violet on the relay, blue on publish. Inside one place
+there is still exactly one accent, and it is never used to tell two things on the same page apart.
 
 ## Components and usage
 
@@ -337,11 +382,16 @@ says "Can't preview this file." with Try again and Download, too big says so and
 `.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
 It holds the page's name, one **Helpers** menu button (`.lbar-helpers`) and New: no chips, no counts in the row
 (owner pick J b, 26 Nov: calmer). The button shows an orange ◆ when something needs you, never a number (the number is
-on the Review badge). The menu (`.lbar-pop`) lists every session in groups (`.lbar-gh`, heading and count): Needs you,
-Working, Quiet (in line and idle); each `.lbar-row` has its symbol, key, name and "Open", opens its pane, and has More
-(Stop, End). A pinned session comes first in its group; an open one is marked (`aria-current`). Search from 9
+on the Review badge). The menu (`.lbar-pop`) has two labelled groups (`.lbar-gh`, heading and count; W-049, owner 28
+Nov): **Working helpers**, every session that does not wait on you with its state (Working, In line, Idle), and
+**Needs you**, the sessions that wait plus one link to Review for the rest. Working helpers always shows: with none it
+says "No helper is working. New starts one." Each `.lbar-row` has its symbol, key, name and "Open", opens its pane, and
+has More (Stop, End). A pinned session comes first in its state; an open one is marked (`aria-current`). Search from 9
 sessions. The menu opens inside the window on the side of the bar with room (`data-at` above or below: below when the
 bar sits at the top in full screen) and scrolls there. On a phone New is an icon (`data-fold` 3), above the tab bar.
+Starting from New (W-047): the row says "Starting…" with a spinner and every row is off, so a second click starts
+nothing; the menu stays open until the pane opens with the session. A start that did not work stays under its row
+(`.lbar-newfail`: the reason and **Try again**), never a toast that goes away.
 The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a session without a ticket (Empty helper,
 Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open
@@ -413,7 +463,9 @@ motion). Nothing goes out while watching; a paste with a line end shows `.term-a
 screen?" Paste / Cancel) first; Ctrl+C or Cmd+C with a selection copies. The screen is xterm.js on a canvas (WebGL,
 loaded before the terminal opens so no inline style is added); its colours are read from the tokens. A program's
 clipboard writes and title changes are ignored; links open only for http and https, with noopener. While watching the
-screen keeps the helper's size and scrolls; while typing it follows its box. States: loading (skeleton), live,
+screen keeps the helper's size and scrolls; while typing it follows its box. Text is never under 11 px (W-002,
+owner 28 Nov: 8 px was unreadable in a 40 % panel): a helper's wider screen keeps its size, scrolls sideways and follows
+the cursor; your own plain terminal is never drawn smaller than the page's 13 px. States: loading (skeleton), live,
 reconnecting (the last screen stays, typing off until the person turns it on again), typing off, closed, no screen
 (one sentence why), no WebGL (one sentence, the chat view instead).
 
@@ -542,7 +594,12 @@ Static validation covers HTML structure/local references, JS syntax, CSS token r
 
 Load `interaction.css` after page styles and load `overlay.js`, `select.js`, `date.js`, and `components.js` before page scripts. Keep `preview-controls.js` at the end of each shell page.
 
-- Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, backdrop, focus containment and restoration, scroll lock, 150 ms entry / `--dur-exit` (120 ms) exit. Reduced motion is instant. `await orch.close(dialog)` (= `UI.overlay.close`, = `dialog.close()`) settles only after the native close, the stack pop, the scroll unlock and the focus return, so the next line can open another dialog or read `document.activeElement`. Repeated closes share one promise; reopening during the exit cancels it. Tab pressed during the exit is replayed on the page, never inside the fading dialog. Focus goes to the opener; if it left the page, to the control with the same `data-key`/`id`, else the control that was next to it, else the nearest container. Never add page delays around a close. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
+- Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, focus containment and restoration, scroll lock, 150 ms entry / `--dur-exit` (120 ms) exit. Reduced motion is instant. `await orch.close(dialog)` (= `UI.overlay.close`, = `dialog.close()`) settles only after the native close, the stack pop, the scroll unlock and the focus return, so the next line can open another dialog or read `document.activeElement`. Repeated closes share one promise; reopening during the exit cancels it. Tab pressed during the exit is replayed on the page, never inside the fading dialog. Focus goes to the opener; if it left the page, to the control with the same `data-key`/`id`, else the control that was next to it, else the nearest container. Never add page delays around a close. A click beside a dialog does nothing (O-02, owner 28 Nov): only Esc, × Close and the dialog's own buttons close it, in every dialog, sheet and viewer; never add a backdrop click handler on a page. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
+- A dialog that can outgrow the window (W-060): class `dialog-fit` on the dialog and `dialog-body` on its middle. The title and the buttons stay in view and only the middle scrolls, so the main button is never cut off below the window edge. Tick boxes that belong together sit in one `.check-block` (a fieldset with its legend for screen readers and one small line of help), not as loose rows between paragraphs. Ask for words in one box where one sentence says it ("What happened, and what did you expect?"), not in three fields.
+- A selected choice never looks like the filled button (W-007): a button of a radio group (`.btn[role=radio]`) is outlined, and selected it has a soft surface and a strong edge (`aria-checked=true`); a selected card of a pick list has the same edge and surface, never a green fill. The page keeps one filled button, its main action.
+- A page title that takes the keyboard position after a page change shows no box (W-009): `h1[tabindex="-1"]` (and `main`) have no focus ring; a screen reader still lands on it. A ring is for controls.
+- Work that stopped wears one mark everywhere (FX-05): `UI.helperPill('stuck', 'Stuck')`, the red "!" pill, on Home, Tickets, the Review card and the Review list. Never a pause mark or a grey word for it.
+- A switch's knob keeps the same gap to the track's edge when Off and when On (O-28). A page that draws its own touch target around the track (Settings: 44 px around a 36 px track) sets the knob's start and its travel together: `travel = track - knob - 2 x gap`.
 - Native selects are enhanced automatically, including dynamic controls. They retain their form values and change events. Use `data-prefix="Sort"` for labels inside the trigger and `UI.select.sync()` after programmatic value changes outside click/change/reset handlers. Type to jump works like a native select (ORCH-2051): keys typed within 1 s form one prefix (a whole key such as SALES-097), one letter again cycles, Escape closes without choosing; typing only moves focus, Enter, Space or a click chooses. Focus given to the hidden native select goes to the trigger. Open choices wrap to show their whole text; the trigger edge is `--input`.
 - `UI.toast(message, undo)` and `UI.copy(url)` provide one notification pattern. Details menus with `.menu` and ARIA tablists get shared keyboard behaviour. Page handlers may update domain content, but should not add separate keyboard or overlay lifecycles.
 - `UI.date(valueInput, trigger, oldCalendar)` provides the shared calendar. `UI.question.render(host, config)` provides recommended choices, custom input, answered state and Undo. `UI.phone()` opens demo pairing and the same question component in a phone frame.

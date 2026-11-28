@@ -153,6 +153,24 @@ for (const motion of ['no-preference', 'reduce']) {
     assert.equal((await settled(page, 'c')).active, 'open-a', 'the second dialog hands focus back where the first one did');
   });
 
+  // O-02 (owner, 28 Nov): a click beside a dialog does nothing, so typed text is never lost; Esc still closes it.
+  test(`${label}: a click beside a dialog, a sheet or the file viewer leaves it open with what was typed`, {timeout: 30000}, async t => {
+    const page = await fresh(t);
+    await openA(page);
+    await page.evaluate(() => { const i = document.createElement('input'); i.id = 'typed'; i.className = 'input'; i.setAttribute('aria-label', 'Name'); document.getElementById('a').prepend(i); });
+    await page.fill('#typed', 'Weekly newsletter');
+    for (const [x, y] of [[8, 8], [1270, 400], [640, 790], [8, 400]]) await page.mouse.click(x, y);
+    await page.waitForTimeout(200);  // longer than the exit fade: a close would have finished
+    assert.deepEqual(await page.evaluate(() => ({ open: document.getElementById('a').open, top: window.UI.overlay.top()?.id, typed: document.getElementById('typed').value })),
+      { open: true, top: 'a', typed: 'Weekly newsletter' });
+    await page.keyboard.press('Escape');
+    assert.equal((await settled(page, 'a')).open, false, 'Esc still closes it');
+    await page.focus('#after-gone'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('dialog.fv')?.open);
+    await page.mouse.click(4, 4); await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => document.querySelector('dialog.fv')?.open), true, 'the viewer stays open too');
+  });
+
   test(`${label}: the file viewer closes through the same lifecycle and is gone when it settles`, {timeout: 30000}, async t => {
     const page = await fresh(t);
     await page.focus('#after-gone'); await page.keyboard.press('Enter');
