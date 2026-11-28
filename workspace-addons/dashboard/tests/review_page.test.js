@@ -162,6 +162,10 @@ test('W-036: the same order in every layout: the card, the list, then the Review
   assert.ok(!keys.includes('review-accepted'), 'no log on Waiting');
   const main = page.find(n => n.attrs?.['data-key'] === 'review-main');
   assert.deepEqual(main.children.map(n => n.attrs['data-key']), ['review-nav', 'review-host'], 'the switch, then the card: nothing above the decision');
+  const wide = page.find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.deepEqual(wide.children.map(x => x.attrs['data-key']), ['review-main', 'review-rail'], 'wide too: the card before the list in the page, so Tab reaches the decision first');
+  assert.equal(wide.attrs['data-narrow'], null, 'wide: no narrow mark, so the master stands the list on the left');
+  assert.match(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8'), /\.review-layout:not\(\[data-narrow\]\)>\.review-rail\{order:-1\}/, 'the master rule that keeps the list on the left');
   // narrow (a phone, or beside the Focus panel): one column, the card first, the list after it in the same scroll
   const n = ctx({review:{cards:[], accepted:[]}}, {document:{addEventListener(){}, getElementById:() => null, body:{dataset:{liveNarrow:''}}}});
   const layout = nodes(n.reviewPage()).find(x => x.attrs?.['data-key'] === 'review-layout');
@@ -581,7 +585,7 @@ test('ORCH-1804: "Open ticket" shows the card\'s ticket beside the deck (#review
   assert.equal(closed.reviewTicketHref('t_abcdef'), '#review?card=x&ticket=t_abcdef', 'the card the page opened on stays');
   const layout0 = nodes(closed.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
   assert.equal(layout0.attrs.className, 'review-layout');
-  assert.equal(layout0.children[0].attrs['data-key'], 'review-rail', 'closed: All cards on the left as before');
+  assert.deepEqual(layout0.children.map(n => n.attrs['data-key']), ['review-main', 'review-rail'], 'closed: the card before the list in the page (W-036); the master stands the list on the left');
   const c = ctx({}, at('#review?ticket=t_abcdef'));
   assert.equal(c.reviewTicketId(), 't_abcdef');
   assert.equal(c.reviewTicketHref(''), '#review', 'Close drops only the ticket');

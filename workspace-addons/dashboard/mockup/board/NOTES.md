@@ -203,3 +203,8 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
   the view chips (All … Done this week) on their own row under it; the table starts one gap below.
 - An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.
+
+## Tickets list and Board after the walk of 28 Nov (O-13, O-14 D, O-15 C, O-16 C, W-022 C)
+
+- `list.html`: no button on a row or a group line; each row ends in one state mark (icon and one word) in its own State column; Open release is a plain link. "Top tickets only" (off at first, `?top=1`) hides sub-tickets. Under 900 px of page area the table gives way to the compact two-line rows with the mark at the right edge (the same rows as on the phone). Every group opens and closes on each click.
+- `board.html`: a card is two lines: the title on one line with the add-on icon and the state icon top right (its word for screen readers and on hover), then tasks, one state word and "Part of: …". No Answer or Test results button; the card opens the ticket. "Top tickets only" works here too.

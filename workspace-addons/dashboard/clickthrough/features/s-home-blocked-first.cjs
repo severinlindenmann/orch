@@ -26,11 +26,11 @@ module.exports = {
       'p.write_text(json.dumps(d))', workspace, left);
     const done = JSON.parse(orchAsPerson('ticket', 'new', 'Blocked walk: order new chairs for the meeting room after the paint has dried and the old ones are gone', '--json')).id;
     orch('check', 'add', done, 'Order them');
-    orch('check', 'done', done, 'c1', '--summary', 'Twelve chairs ordered, they arrive on Friday.');
+    orch('check', 'done', done, 'c1', '--summary', 'Twelve chairs ordered, they arrive on Friday.', '--note', 'From the supplier.');
     orchAsPerson('ticket', 'status', done, 'done');
     // a tool that stopped working: the one kind of blocked row a click-through can make without a helper
-    orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
-    orch('logins');
+    orchAsPerson('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
+    orchAsPerson('logins');
 
     await open('#home');
     await until(s => (s.logins?.items || []).some(i => i.name === 'portal') && (s.needs || []).some(n => n.ticket === asked), 'the stopped tool and the question in the page state');
@@ -53,7 +53,7 @@ module.exports = {
 
     const fin = page.locator(`[data-key="finished-today"] [data-key="ticket-${done}"]`);
     await fin.waitFor();
-    must(/Twelve chairs ordered, they arrive on Friday\./.test(await fin.innerText()), 'the finished row has no result: ' + await fin.innerText());
+    must(/Twelve chairs ordered, they arrive on Friday\. From the supplier\./.test(await fin.innerText()), 'the finished row has no result: ' + await fin.innerText());
     must(await page.locator('[data-key="finished-today"] [data-key^="ticket-"]').count() <= 5, 'Finished shows more than five tickets');
     must(await page.locator('[data-key="what-changed"], [data-key="in-progress"], [data-key="not-started"]').count() === 0, 'Home still has a card the walk removed');
     must(await page.locator('[data-key="tiles"] .stat-tile').count() === 0 && await page.locator('[data-key="tiles"] [data-key^="tile-"]').count() === 4, 'the numbers are not one row of four');
@@ -67,7 +67,8 @@ module.exports = {
       await fin.waitFor();
       const fit = await page.evaluate(() => {
         const vw = window.innerWidth, m = document.querySelector('main');
-        const over = [...m.querySelectorAll('h1, h2, h3, p, a, button, span')].filter(e => { const r = e.getBoundingClientRect(); return r.width && r.right > vw + 1; })
+        // what a one-line title or result cuts with … is inside its own box; the box itself must fit
+        const over = [...m.querySelectorAll('h1, h2, h3, p, a, button, span')].filter(e => { const r = e.getBoundingClientRect(); return r.width && r.right > vw + 1 && !e.parentElement.closest('.truncate'); })
           .map(e => e.tagName + ' "' + (e.innerText || '').trim().slice(0, 40) + '"');
         const row = m.querySelector('.home-finished'), title = row.querySelector('h3'), numbers = m.querySelector('[data-key="tiles"]');
         return { over, page: document.documentElement.scrollWidth - vw, rowHeight: row.getBoundingClientRect().height, titleLines: Math.round(title.getBoundingClientRect().height / parseFloat(getComputedStyle(title).lineHeight)),
@@ -77,10 +78,11 @@ module.exports = {
       must(fit.page <= 1, `at ${width} Home is ${fit.page} px wider than the window`);
       must(fit.titleLines === 1, `at ${width} a finished title takes ${fit.titleLines} lines: ` + JSON.stringify(fit));
       if (width >= 1440) must(fit.numbersHeight < 40, `at ${width} the numbers are not one row (${fit.numbersHeight} px high)`);
-      if (shot) await shot('home-' + width);
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await open('#home');
+    await fin.waitFor();
+    await shot('home');
 
     // the one line opens Review, where the question and the Reviewer's ticket are
     await line.getByRole('link', { name: 'Open Review' }).click();
@@ -92,8 +94,8 @@ module.exports = {
     await row.locator('button, a.btn').click();
     if (/Sign in/.test(said)) await page.waitForFunction(() => location.hash.startsWith('#settings'), null, { timeout: 10000 });
 
-    orch('logins', 'remove', 'portal');   // leave the workspace as it was for the next click-through
-    orch('logins');
+    orchAsPerson('logins', 'remove', 'portal');   // leave the workspace as it was for the next click-through
+    orchAsPerson('logins');
     orchAsPerson('answer', asked, 'q1', 'Sea blue');
     orchAsPerson('ticket', 'status', left, 'done');
   },

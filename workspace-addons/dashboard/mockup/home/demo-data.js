@@ -28,5 +28,5 @@ if(location.pathname.endsWith('ticket-done.html')){const story=document.querySel
  'redesign the logo':['Ben','Paused','2 days ago','1 of 2 steps'],
  'thank-you notes for our top customers':['Ben','To do','Added Mon','To do'],
  'answer customer emails from last week':['Ben','To do','Added Mon','To do']};
- document.querySelectorAll('[data-ticket]').forEach(row=>{const fact=facts[row.dataset.title];if(!fact)return;if(row.matches('tr')){const cells=[...row.children].filter(c=>!c.classList.contains('pick-cell'));cells[2].textContent=fact[0];cells[4].textContent=fact[2];if(!cells[0].querySelector('.ticket-info')){const sub=document.createElement('div');sub.className='meta ticket-info';sub.textContent=fact[1];cells[0].append(sub)}}});
+ document.querySelectorAll('[data-ticket]').forEach(row=>{const fact=facts[row.dataset.title];if(!fact)return;if(row.matches('tr')){const cells=[...row.children].filter(c=>!c.classList.contains('pick-cell'));cells[2].textContent=fact[0];if(cells[4]&&!cells[4].classList.contains('ticket-mark'))cells[4].textContent=fact[2];/* the Tickets list ends in the state mark (O-15 C), not a Last change cell */if(!cells[0].querySelector('.ticket-info')){const sub=document.createElement('div');sub.className='meta ticket-info';sub.textContent=fact[1];cells[0].append(sub)}}});
 })();

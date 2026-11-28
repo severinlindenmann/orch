@@ -570,6 +570,7 @@ function home() {
   // an add-on's own row that says something is broken and offers the fix (a service work depends on, W-054 A)
   const broken = groups.filter(g => !isHelperRow(g.row) && g.row.tone === 'bad' && needActs(g.row).length);
   const signIns = blockedLogins(logins.stopped);
+  const holdsFilled = el => !!el && (/\bprimary\b/.test(String(el.className || el.attrs?.className || '')) || [...(el.children || [])].some(holdsFilled));
   const mark = (el, kind) => { el.setAttribute?.('data-blocked', kind); el.setAttribute?.('data-counts', '0'); return el; };
   const blocked = [...signIns.map(loginStoppedRow), stoppedServicesRow(), ...broken.map(g => mark(needActionsRow(g.row, 'need-' + g.row.id), 'addon')),
     ...failed.map(([t, sf]) => startFailedRow(t, sf)), ...stopped.map(g => stoppedRow(g.row))].filter(Boolean);
@@ -606,8 +607,8 @@ function home() {
   const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : null, finished = finishedCard(all);
   return fragment(head, banner,
     blockedCard || h('section', {className:'card home-card', 'data-key':'blocked', 'data-empty':''}, h('div', {className:'card-row muted'}, 'Nothing is blocked.')),
-    // one filled button on the page: a sign-in row's own Renew is the main thing to do while it shows
-    snapshot && !waiting ? null : reviewLine(waiting, questions, results, !signIns.length && !snapshot),
+    // one filled button on the page: a blocked row's own filled one (Renew a sign-in) is the main thing while it shows
+    snapshot && !waiting ? null : reviewLine(waiting, questions, results, !snapshot && !blocked.some(holdsFilled)),
     homeNumbers(inProgress.length, notStarted.length, finishedToday, window.DashHelpers.helpersWorking(helpers)),
     helpersEl ? h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'}, finished), h('aside', {className:'stack', 'data-key':'right'}, helpersEl)) : finished,
     alsoCard);

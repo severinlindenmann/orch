@@ -479,12 +479,15 @@ test('many cards keep the count, bar and "1 of N"; a tap on the next card right 
   const {d, host, decided} = deck([supplier('a'), supplier('b'), check('c')]);
   const [top] = host.children;
   assert.equal(top.hidden, false);
-  assert.equal(top.children[0].hidden, false); assert.match(top.children[0].textContent, /0 answered · 3 waiting/);
+  // W-038: the count, the bar and Undo appear with the first answer
+  assert.deepEqual([top.children[0].hidden, top.querySelector('.progress').hidden, top.children[4].hidden, top.classList.contains('is-fresh')], [true, true, true, true], 'nothing answered: no count, no bar, no greyed-out Undo');
   assert.equal(host.querySelector('.swipe-jump').hidden, false); assert.match(host.querySelector('.swipe-jump').textContent, /1 of 3/);
   const list = new N('div'); d.drawList(list);
   assert.equal(list.querySelectorAll('.review-row').length, 3, 'many cards: the All cards list stays');
   tap(host, 'Thursday'); await wait(130);
   assert.equal(d.index, 1, 'the next question is on top');
+  assert.equal(top.children[0].hidden, false, 'the first answer brings the progress row'); assert.match(top.children[0].textContent, /1 answered · 2 waiting/);
+  assert.deepEqual([top.querySelector('.progress').hidden, top.classList.contains('is-fresh')], [false, false]);
   tap(host, 'Thursday'); await wait(160);
   assert.deepEqual(decided.map(x => x.id), ['a'], 'the second tap of a double tap does not answer the next card');
   await wait(260); tap(host, 'Tuesday'); await wait(160);
@@ -640,8 +643,8 @@ test('o.endView shows in place of the summary when every card is answered', asyn
   assert.equal(host.querySelector('.tally'), null);
 });
 
-// UI.attentionTiles (ORCH-2184): three tile buttons, an empty one says so and does nothing; no minutes
-test('attention tiles: counts, holds up work, the next deadline, and an empty tile', () => {
+// UI.attentionTiles (ORCH-2184): tile buttons; W-038: a group with nothing in it has no tile; no minutes
+test('attention tiles: counts, holds up work, the next deadline; a tile with 0 is not shown', () => {
   const UI = {}; const window = {UI};
   vm.runInNewContext(readFileSync(new URL('../static/widgets.js', import.meta.url), 'utf8'), {window, document: doc, setTimeout, clearTimeout, performance, console, Promise});
   const picked = [];
@@ -651,14 +654,13 @@ test('attention tiles: counts, holds up work, the next deadline, and an empty ti
     {group: 'time', name: 'Take your time', count: 0, hold: 0},
   ], {onPick: g => picked.push(g)});
   const tiles = row.querySelectorAll('.attn-tile');
-  assert.deepEqual(tiles.map(t => t.tag), ['button', 'button', 'button']);
-  assert.deepEqual(tiles.map(t => t.querySelector('.stat-label').textContent), ['Quick look', 'Short decision', 'Take your time']);
+  assert.deepEqual(tiles.map(t => t.tag), ['button', 'button']);
+  assert.deepEqual(tiles.map(t => t.querySelector('.stat-label').textContent), ['Quick look', 'Short decision'], 'no "Take your time 0 · Nothing waits here"');
   assert.equal(tiles[1].querySelector('.attn-tile-line').textContent, '1 holds up work');
   assert.match(tiles[1].querySelector('.attn-due').textContent, /^Next deadline: Release 0\.42/);
-  assert.equal(tiles[2].querySelector('.stat-delta').textContent, 'Nothing waits here');
-  assert.equal(tiles[2].getAttribute('aria-disabled'), 'true');
+  assert.ok(!/Nothing waits here/.test(row.textContent));
   assert.ok(!/min/.test(row.textContent), 'no minutes');
-  tiles[2].click(); tiles[0].click();
+  tiles[0].click();
   assert.deepEqual(picked, ['quick']);
 });
 test('a deck built again on the same host: only the newest one answers a key (ORCH-2184)', async () => {
@@ -806,4 +808,18 @@ test('R2 A: the list is called by o.listTitle and a Review row says why it waits
   const list = new N('div'); d.drawList(list);
   assert.equal(list.querySelector('.review-list-title').textContent, 'Needs you');
   assert.deepEqual(list.querySelectorAll('.review-row-sub').map(x => x.textContent), ['A helper waits for this · DEM-4', '2 pictures · DEM-7']);
+});
+// O-06 (owner, 28 Nov): the Review page's deck has no Compare at all
+test('O-06: a deck with compare:false has no Compare button, no ticks and no pair, in the list beside it and in the phone list', () => {
+  const {d, host} = deck([draft('a'), draft('b'), choice], {compare: false, picking: true, ticked: ['a', 'b']});
+  assert.deepEqual([d.picking, d.ticked.length, d.comparing], [false, 0, false], 'ticks handed in are dropped');
+  d.setPicking(true); d.tick('a'); d.tick('b'); d.compare(['a', 'b']);
+  assert.deepEqual([d.picking, d.ticked.length, d.comparing], [false, 0, false], 'nothing turns Compare on');
+  const list = new N('div'); d.drawList(list);
+  assert.equal(list.querySelectorAll('.review-row').length, 3, 'the rows stay');
+  assert.equal(list.querySelector('.review-list-compare'), null); assert.equal(list.querySelectorAll('.review-tick-box').length, 0);
+  host.querySelector('.swipe-jump-all').click();
+  const ov = host.querySelector('.swipe-overview');
+  assert.equal(ov.querySelector('.review-list-compare'), null, 'the phone list has no Compare'); assert.equal(ov.querySelectorAll('.review-tick-box').length, 0);
+  assert.equal(ov.querySelectorAll('.review-row').length, 3);
 });
