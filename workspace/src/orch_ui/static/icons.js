@@ -51,6 +51,9 @@
     minus: '<path d="M5 12h14"/>',
     cards: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    'chevron-up': '<path d="m6 15 6-6 6 6"/>',
+    // a row that can be dragged to another place (O-34)
+    grip: '<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>',
     'chevron-right': '<path d="m9 6 6 6-6 6"/>',
     'chevron-left': '<path d="m15 6-6 6 6 6"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4"/>',  // the Tickets calendar (ORCH-1081)

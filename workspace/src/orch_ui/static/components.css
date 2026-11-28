@@ -88,22 +88,37 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .nav-group>summary:after{content:'';display:block;width:16px;height:16px;margin-left:auto;background:var(--text-faint);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat;transition:transform var(--dur-base) var(--ease-move)}.nav-group[open]>summary:after{transform:rotate(180deg)}
 .nav-group nav{margin-top:4px}
 /* Menu head and add-ons (ORCH-1184): the orch name with the button that closes the menu to its icons (1280 px and wider);
-   add-ons the person pinned, then Show more (n) that unfolds the rest in place. Each row has a pin button, faint until
-   the row is pointed at or focused, filled while pinned. */
+   add-ons the person keeps in the menu, then More (n) that unfolds the rest in place. */
 .side-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .side-head>.side-toggle{display:none}
 .nav-addons{display:grid;gap:4px}
 .nav-row{position:relative;display:grid}
-/* The menu's add-ons (D2 A, ORCH-2283): plain rows; 'Change this list' shows one small switch per row (In the list or
-   under More), Done hides them again. More (n) / Fewer unfolds the rest in place. */
-.nav-row-edit>.nav-item{padding-right:52px}
-.nav-row>.nav-pin{position:absolute;right:8px;top:0;bottom:0;margin-block:auto;display:grid;place-items:center;width:36px;height:28px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
-.nav-pin:focus-visible{outline:none;box-shadow:var(--focus-ring)}
-.nav-pin-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);transition:background var(--dur-fast) var(--ease-move)}
-.nav-pin-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform var(--dur-fast) var(--ease-move)}
-.nav-pin[aria-checked=true] .nav-pin-sw{background:var(--brand)}
-.nav-pin[aria-checked=true] .nav-pin-sw:after{transform:translateX(12px);background:var(--on-brand)}
-:is(.nav-more,.nav-change){width:100%;font:inherit;font-size:14px;cursor:pointer}
+/* The menu's add-ons (D2 A, ORCH-2283; O-34): plain rows in the person's order, More (n) / Fewer unfolds the rest in
+   place. No row edits the list. Way A: .nav-edit, a quiet '…' beside 'Add-ons' that shows when the menu is pointed at or
+   holds the keyboard, opens Settings › Menu (.menu-order: one row per page with a grip, two arrows and the switch).
+   Way B: every row is dragged in place and has its own '…' (.nav-row-menu). A dragged row fades; a line marks the place. */
+.nav-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
+.nav-head>.nav-edit{margin-right:4px}
+.nav-row-own>.nav-item{padding-right:40px}
+.nav-row>.nav-row-menu{position:absolute;right:4px;top:0;bottom:0;margin-block:auto;height:28px}
+.nav-row-more{cursor:pointer}
+@media(hover:hover){
+.nav-edit,.nav-row-menu:not([open])>.nav-row-more{opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
+.nav-addons:is(:hover,:focus-within) .nav-edit,.nav-row:is(:hover,:focus-within) .nav-row-more{opacity:1}
+}
+[data-menu-row][draggable=true]{cursor:grab}
+[data-menu-row].dragging{opacity:.35}
+[data-menu-row].drop-before{box-shadow:0 -2px 0 var(--brand)}
+[data-menu-row].drop-after{box-shadow:0 2px 0 var(--brand)}
+.menu-order>.menu-order-row{display:flex;align-items:center;flex-wrap:nowrap;gap:8px}
+.menu-order>.menu-order-row>.grow{flex:1 1 0;min-width:0}
+.card.menu-order>.card-row.menu-order-row>.btn{margin-left:0}
+@media(max-width:360px){.menu-order-row>.switch-text{display:none}}
+.menu-order-row h3{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu-grip{display:grid;place-items:center;flex:none;width:18px;color:var(--text-faint)}
+.menu-order-row.off h3{color:var(--text-muted)}
+@media(hover:none){.menu-grip{display:none}}
+.nav-more{width:100%;font:inherit;font-size:14px;cursor:pointer}
 @media(min-width:1280px){.side-head>.side-toggle{display:inline-flex}}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
@@ -491,7 +506,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:has(.nav-label){--sidebar-width:64px}
 .sidebar:has(.nav-label){padding:16px 8px}
 .sidebar:has(.nav-label) .brand{padding:0 12px}
-.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-edit,.nav-row-menu){display:none}
 .sidebar:has(.nav-label) .side-head{flex-direction:column;gap:12px}
 .sidebar:has(.nav-label) .ws-switch{padding:8px;justify-content:center}
 .sidebar:has(.nav-label) .nav-item{justify-content:center;padding:8px}
@@ -528,7 +543,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:is([data-side=rail],[data-live-rail]){--sidebar-width:64px}
 .shell:is([data-side=rail],[data-live-rail]) .sidebar{padding:16px 8px}
 .shell:is([data-side=rail],[data-live-rail]) .brand{padding:0 12px}
-.shell:is([data-side=rail],[data-live-rail]) .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-edit,.nav-row-menu){display:none}
 .shell:is([data-side=rail],[data-live-rail]) .side-head{flex-direction:column;gap:12px}
 .shell:is([data-side=rail],[data-live-rail]) .ws-switch{padding:8px;justify-content:center}
 .shell:is([data-side=rail],[data-live-rail]) .sidebar .nav-item{justify-content:center;padding:8px}
@@ -590,7 +605,7 @@ body[data-live-narrow] .page-heading-actions{flex-wrap:wrap}
    html[data-window=wide]); :where() adds no weight, so every rule here cascades exactly as before. */
 :where(html:not([data-window=wide])) .btn,:where(html:not([data-window=wide])) .btn.sm,:where(html:not([data-window=wide])) .btn.xs,:where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs,:where(html:not([data-window=wide])) .tabs button,:where(html:not([data-window=wide])) .tabs a,:where(html:not([data-window=wide])) .nav-item,:where(html:not([data-window=wide])) summary,:where(html:not([data-window=wide])) .menu-item{min-height:44px}
 :where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs{width:44px}
-.nav-row>.nav-pin{width:44px;height:44px;right:4px}
+.nav-row>.nav-row-menu{height:44px}.nav-row-own>.nav-item{padding-right:52px}
 :where(html:not([data-window=wide])) .page-back{min-height:44px;margin:-10px 0 -6px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}

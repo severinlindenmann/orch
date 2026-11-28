@@ -133,8 +133,12 @@ the first rows without any extra work.
   page inside another page (a ticket, New ticket, an add-on's settings, a Factory order) has `← <parent>` above its
   name (`.page-back`, `UI.pageBack`), the same on the computer and the phone. A switch or setting never sits in the top.
 - Side menu (owner D2 A, 26 Nov, ORCH-2283): Home, Tickets, Review, Chat, Contacts, then Add-ons in one list without
-  pins; `More (n)` / `Fewer` unfolds the rest in place (Lessons too), the page that is open always shows, and
-  `Change this list` (at the end of the unfolded list) shows one switch per add-on, `Done` closes it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
+  pins, in the person's order; `More (n)` / `Fewer` unfolds the rest in place (Lessons too) and the page that is open
+  always shows. No menu row edits the list (O-34, owner 28 Nov). Two ways are built for the owner to pick one: A, a
+  quiet `…` beside "Add-ons" (`.nav-edit`, on hover or keyboard) opens Settings › Menu (`.menu-order`: a switch, a grip
+  to drag and two arrows per page); B, each row is dragged in place and has its own `…` (`.nav-row-menu`: Move up,
+  Move down, Hide from menu; Show in menu under More). The Settings icon is the master gear (`icon('settings')`, O-35):
+  never redraw it. Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
   every page (`.page`, 32 px top). Two widths only: full (default, no max-width) and `.form-width` (`--form-width`,
   1024 px) for a form page such as Settings; both left-aligned. The top bar holds one outlined `New ticket`; the page's
   own main action is the only filled button. Phone mode while on = an outlined chip after the breadcrumb (menu),

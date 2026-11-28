@@ -321,15 +321,22 @@ function navIcon(name) {
 }
 const VIEWS_OPEN = 'orch.nav.views';
 const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
-// The menu's add-ons (ORCH-1184, tidied by owner D2 A, ORCH-2283): the person keeps the ones they use in the list, the
-// rest wait under More. They choose in one place, 'Change this list' (no pin on every row). Kept in this browser; a
-// browser that refuses storage still shows the menu with the first add-ons in the list.
-const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', PINNED_FIRST = 6;
+// The menu's add-ons (ORCH-1184, tidied by owner D2 A, ORCH-2283): the person keeps the ones they use in the menu, in
+// their own order; the rest wait under More. Kept in this browser; a browser that refuses storage still shows the menu
+// with the first add-ons in the list.
+// O-34 (owner, 28 Nov): no menu row edits the list. Two ways to edit it are built for the owner to pick one:
+//   A (default)  Settings › General › Menu (show or hide, drag or arrows for the order), reached from a quiet '…' beside
+//                'Add-ons' in the menu (#settings/menu);
+//   B            in the menu itself: drag a row, or its '…' (Move up, Move down, Hide from menu; Show in menu under More).
+// ?menu=a or ?menu=b in the address chooses for this browser. Both write the same list (NAV_PINS, in menu order).
+const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', NAV_EDIT = 'orch.nav.edit', PINNED_FIRST = 6;
 const navMemory = new Map();  // the same choices for this page view when the browser refuses storage
 const navRead = key => { try { const v = localStorage.getItem(key); if (v != null) return v; } catch (_) { /* no storage */ } return navMemory.has(key) ? navMemory.get(key) : null; };
 const navWrite = (key, value) => { navMemory.set(key, value); try { localStorage.setItem(key, value); } catch (_) { /* fine without storage */ } };
 const navList = key => { try { const v = JSON.parse(navRead(key) || 'null'); return Array.isArray(v) ? v : null; } catch (_) { return null; } };
-// The add-ons in the list, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
+try { const want = new URLSearchParams(location.search).get('menu'); if (want === 'a' || want === 'b') navWrite(NAV_EDIT, want); } catch (_) { /* no address to read */ }
+const navEditB = () => navRead(NAV_EDIT) === 'b';
+// The add-ons in the menu, in the person's order. The first time: the first PINNED_FIRST. An add-on turned on later
 // arrives in the list (the person just chose it); only one the person moved out waits under More. A page that lives in
 // Settings (manifest place = "settings") starts under More and goes into the list only when the person puts it there.
 function navPinned(pages) {
@@ -341,10 +348,19 @@ function navPinned(pages) {
     navWrite(NAV_PINS, JSON.stringify(pins));
     navWrite(NAV_KNOWN, JSON.stringify([...new Set([...(known || []), ...names])]));
   }
-  return pages.filter(a => pins.includes(a.name));
+  return window.DashHelpers.menuShown(pins, pages.map(a => a.name)).map(n => pages.find(a => a.name === n));
 }
+// The person's choice changes: a page goes into the menu (at its end) or under More; a page moves right before another
+// (null: to the end) or one step. Add-ons that are turned off now keep their place in the list.
+function menuPins(pages) { navPinned(pages); return navList(NAV_PINS) || []; }  // writes the first choice when there is none yet
+function menuToggle(pages, name) {
+  const pins = menuPins(pages), on = pins.includes(name);
+  navWrite(NAV_PINS, JSON.stringify(on ? pins.filter(n => n !== name) : pins.concat(name)));
+  return !on;
+}
+const menuMoveBefore = (pages, name, before) => navWrite(NAV_PINS, JSON.stringify(window.DashHelpers.laneReorder(menuPins(pages), name, before)));
+const menuMoveStep = (pages, name, dir) => navWrite(NAV_PINS, JSON.stringify(window.DashHelpers.menuStep(menuPins(pages), pages.map(a => a.name), name, dir)));
 const navMoreOpen = () => navRead(NAV_MORE) === 'open';
-let navEditing = false;  // 'Change this list' is open: every add-on shows with its In the list switch (this page view only)
 // The add-ons the menu lists: every add-on with a page except Contacts (a top-level entry); pages that live in Settings
 // (place = "settings") wait under More (D2 A: nothing is hidden for good).
 const menuPages = () => addons().filter(a => a.dashboard && a.dashboard.panel !== 'phone');
@@ -449,8 +465,8 @@ function pageRoute() {
   }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
+  const settingsHash = /^#settings(?:\/(general|menu|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone', menu:'general'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null, at:named === 'menu' ? 'menu' : null}; }  // #settings/menu: General, at its Menu section (O-34)
   // the Documentation page (book icon next to Settings, pages/docs.js): #docs, #docs/<page>, #docs/g-<group>
   const docsHash = /^#docs(?:\/([a-z][a-z0-9-]{1,41}))?$/.exec(hash);
   if (docsHash && !snapshot) return {kind:'docs', at:docsHash[1] || '', hash};
@@ -515,31 +531,54 @@ function followAddress(hash) {
   history.replaceState(null, '', hash);
   renderedRoute = route().hash;
 }
-// Add-ons in the menu (ORCH-1184, D2 A): the ones in the list, then More (n) that unfolds the rest in place, with
-// 'Change this list' at its end. Changing the list shows every add-on with one switch each, Done closes it. The page that
-// is open stays in the menu even when it is under More and More is closed.
+// Add-ons in the menu (ORCH-1184, D2 A; O-34): the ones the person keeps, in their order, then More (n) that unfolds
+// the rest in place. No row edits the list. Way A: a quiet '…' beside 'Add-ons' opens Settings › Menu. Way B: each row
+// can be dragged and has its own '…'. The page that is open stays in the menu even when it is under More and More is closed.
 // stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
 const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
-  const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
-  const url = a => '#addon/' + encodeURIComponent(a.name);
+  const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), open = navMoreOpen();
+  const url = a => '#addon/' + encodeURIComponent(a.name), own = navEditB() && !snapshot;
+  const item = (label, attrs) => h('button', {type:'button', className:'menu-item', role:'menuitem', ...attrs}, label);
   const row = a => {
     const label = addonLabel(a), link = navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a));
-    if (!navEditing) return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, link);
-    const on = pinned.includes(a);  // changing the list: one switch per add-on, In the list or under More
-    return h('div', {className:'nav-row nav-row-edit', 'data-key':'nav-row-' + a.name}, link,
-      h('button', {type:'button', className:'nav-pin', role:'switch', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-checked':String(on), 'aria-label':label + ' in the list', title:on ? 'In the list' : 'Under More'}, h('i', {className:'nav-pin-sw', 'aria-hidden':'true'})));
+    if (!own) return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, link);
+    const at = pinned.indexOf(a), on = at >= 0;
+    return h('div', {className:'nav-row nav-row-own', 'data-key':'nav-row-' + a.name, 'data-menu-row':a.name, draggable:on ? 'true' : null}, link,
+      h('details', {className:'menu nav-row-menu', 'data-key':'nav-row-menu-' + a.name},
+        h('summary', {className:'btn ghost icon xs nav-row-more', 'data-key':'nav-row-more-' + a.name, 'aria-label':label + ': change the menu', title:'Change the menu'}, iconEl('more')),
+        h('div', {className:'menu-pop', role:'menu'},
+          on && at > 0 ? item('Move up', {'data-menu-step':'-1', 'data-name':a.name, 'data-key':'nav-up-' + a.name}) : null,
+          on && at < pinned.length - 1 ? item('Move down', {'data-menu-step':'1', 'data-name':a.name, 'data-key':'nav-down-' + a.name}) : null,
+          item(on ? 'Hide from menu' : 'Show in menu', {'data-menu-pin':a.name, 'data-key':'nav-pin-' + a.name}))));
   };
-  const open = more || navEditing, shownRest = open ? rest : rest.filter(a => here === url(a));
+  const shownRest = open ? rest : rest.filter(a => here === url(a));
   const word = open ? 'Fewer' : 'More (' + rest.length + ')';
-  // 'Change this list' ends the unfolded list; with nothing under More it ends the list itself
-  const change = open || !rest.length ? h('button', {type:'button', className:'nav-item nav-change', 'data-key':'nav-change', 'aria-pressed':String(navEditing), 'aria-label':navEditing ? 'Done' : 'Change this list'}, navIcon(navEditing ? 'done' : 'edit'), h('span', {className:'nav-label'}, navEditing ? 'Done' : 'Change this list')) : null;
-  return h('div', {className:'nav-addons' + (navEditing ? ' nav-editing' : ''), 'data-key':'nav-addons'},
-    h('p', {className:'eyebrow'}, 'Add-ons'),
+  return h('div', {className:'nav-addons', 'data-key':'nav-addons'},
+    h('div', {className:'nav-head'}, h('p', {className:'eyebrow'}, 'Add-ons'),
+      own || snapshot || !state?.settings ? null : h('a', {className:'btn ghost icon xs nav-edit', href:'#settings/menu', 'data-key':'nav-edit', 'aria-label':'Edit menu', title:'Edit menu'}, iconEl('more'))),
     pinned.length ? h('nav', {'aria-label':'Add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
-    rest.length && !navEditing ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(open), 'aria-controls':open ? 'nav-rest' : null, 'aria-label':word}, navIcon(open ? 'less' : 'more'), h('span', {className:'nav-label'}, word)) : null,
-    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null,
-    change);
+    rest.length ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(open), 'aria-controls':open ? 'nav-rest' : null, 'aria-label':word}, navIcon(open ? 'less' : 'more'), h('span', {className:'nav-label'}, word)) : null,
+    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null);
+}
+// Settings › General › Menu (O-34, way A): one row per add-on page. The switch keeps it in the menu or under More; a row
+// in the menu is dragged to its place, or moved with its two arrows (keyboard). Saved at once, in this browser.
+function menuSettingsCard() {
+  const pages = menuPages();
+  if (snapshot || navEditB() || !pages.length) return null;
+  const pinned = navPinned(pages), rows = [...pinned, ...pages.filter(a => !pinned.includes(a))];
+  const arrow = (a, dir, off) => h('button', {type:'button', className:'btn ghost icon sm', 'aria-label':'Move ' + addonLabel(a) + (dir < 0 ? ' up' : ' down'), title:dir < 0 ? 'Move up' : 'Move down', 'data-menu-step':String(dir), 'data-name':a.name, 'data-key':'settings-menu-' + (dir < 0 ? 'up-' : 'down-') + a.name, disabled:off}, iconEl(dir < 0 ? 'chevron-up' : 'chevron-down'));
+  return h('div', {className:'stack', 'data-key':'settings-menu'}, h('h2', {className:'set-sub', id:'settings-menu', tabindex:'-1'}, 'Menu'),
+    h('p', {className:'meta'}, 'Choose the add-on pages in the menu and their order. Drag a row or use its arrows. A page you turn off waits under More. Kept in this browser.'),
+    h('div', {className:'card menu-order', role:'list', 'aria-label':'Add-on pages in the menu'}, rows.map(a => {
+      const at = pinned.indexOf(a), on = at >= 0, label = addonLabel(a);
+      return h('div', {className:'card-row menu-order-row' + (on ? '' : ' off'), role:'listitem', 'data-key':'settings-menu-row-' + a.name, 'data-menu-row':a.name, draggable:on ? 'true' : null},
+        h('span', {className:'menu-grip', 'aria-hidden':'true'}, on ? iconEl('grip') : null),
+        h('div', {className:'grow'}, h('h3', {}, label, stageTag(a) ? ' ' : null, stageTag(a))),
+        on ? arrow(a, -1, at === 0) : null, on ? arrow(a, 1, at === pinned.length - 1) : null,
+        h('span', {className:'switch-text', 'aria-hidden':'true'}, on ? 'On' : 'Off'),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':label + ' in the menu', 'data-menu-pin':a.name, 'data-key':'settings-menu-pin-' + a.name}));
+    })));
 }
 function render(arrived = new Set()) {
   if (!state) return;
@@ -670,7 +709,13 @@ function render(arrived = new Set()) {
   window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
   if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();
+  // #settings/menu (the menu's 'Edit menu'): the Menu section comes into view once and takes the keyboard position
+  if (r.kind === 'settings' && r.at === 'menu') {
+    const head = menuAt === location.hash ? null : document.getElementById('settings-menu');
+    if (head) { menuAt = location.hash; head.scrollIntoView({block:'start'}); head.focus({preventScroll:true}); }
+  } else menuAt = '';
 }
+let menuAt = '';
 // Pointing at an add-on in the menu starts fetching its view, so the click finds it ready.
 document.addEventListener('pointerover', event => {
   const link = event.target.closest?.('.sidebar a[href^="#addon/"]');
@@ -1433,35 +1478,82 @@ document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
 }, true);
-// More / Fewer, Change this list / Done and the In the list switches in the menu (ORCH-1184, D2 A). The keyboard stays
-// on the button pressed.
+// More / Fewer in the menu (ORCH-1184, D2 A). The keyboard stays on the button pressed.
 document.getElementById('side-addons')?.addEventListener('click', event => {
-  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more'), change = event.target.closest?.('.nav-change');
-  if (!pin && !more && !change) return;
-  const pages = menuPages();  // as render() lists them
-  if (change) {
-    navEditing = !navEditing;
-    if (!navEditing) navWrite(NAV_MORE, 'closed');  // Done: the list as chosen, the rest under More again
-    if (navEditing && sideClosed()) setSide(false);
-    render();
-    (document.querySelector('#side-addons .nav-change') || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
-    return;
-  }
-  if (pin) {
-    navPinned(pages);  // writes the first choice when there is none yet
-    const names = navList(NAV_PINS) || [], name = pin.dataset.pin, on = names.includes(name);  // keeps pins of add-ons turned off now
-    navWrite(NAV_PINS, JSON.stringify(on ? names.filter(n => n !== name) : names.concat(name)));
-    render();
-    const again = document.querySelector('#side-addons [data-pin="' + CSS.escape(name) + '"]');
-    (again || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
-    return;
-  }
+  if (!event.target.closest?.('.nav-more')) return;
   // More on the closed menu (icons only) opens the menu with the list unfolded
   if (sideClosed()) { navWrite(NAV_MORE, 'open'); setSide(false); }
   else navWrite(NAV_MORE, navMoreOpen() ? 'closed' : 'open');
   render();
   document.querySelector('#side-addons .nav-more')?.focus({preventScroll:true});
 });
+// Editing the menu (O-34): in the menu or under More, one step up or down, or dragged to a place. The same three moves
+// for Settings › Menu (way A) and for the rows of the menu itself (way B). Each is saved at once and said aloud; the
+// keyboard stays on the control used, or on the nearest one when that is gone.
+function menuSay(text) { const said = document.getElementById('page-said'); if (said) said.textContent = text; }
+function menuChanged(text, keys) {
+  render();
+  menuSay(text);
+  for (const key of keys) {
+    const node = document.querySelector('[data-key="' + CSS.escape(key) + '"]');
+    if (node && !node.disabled) { node.focus({preventScroll:true}); return; }
+  }
+}
+document.addEventListener('click', event => {
+  const pin = event.target.closest?.('[data-menu-pin]'), step = event.target.closest?.('[data-menu-step]');
+  if (!pin && !step) return;
+  const pages = menuPages(), name = pin ? pin.dataset.menuPin : step.dataset.name, page = pages.find(a => a.name === name);
+  if (!page) return;
+  const label = addonLabel(page), inMenu = !!event.target.closest('#side-addons');
+  event.target.closest('details.menu')?.removeAttribute('open');
+  if (pin) {
+    const on = menuToggle(pages, name);
+    if (inMenu && !on) navWrite(NAV_MORE, 'open');  // the hidden page stays in sight, under More, with Show in menu
+    return menuChanged(label + (on ? ' is in the menu.' : ' waits under More.'), inMenu ? ['nav-row-more-' + name, 'nav-more'] : [pin.dataset.key]);
+  }
+  const dir = Number(step.dataset.menuStep) < 0 ? -1 : 1;
+  menuMoveStep(pages, name, dir);
+  const at = navPinned(pages).findIndex(a => a.name === name) + 1;
+  menuChanged(label + ' is number ' + at + ' in the menu.', inMenu ? ['nav-row-more-' + name] : [step.dataset.key, 'settings-menu-' + (dir < 0 ? 'down-' : 'up-') + name]);
+});
+let menuDrag = '';
+const menuDropAt = event => {
+  const row = menuDrag ? event.target.closest?.('[data-menu-row][draggable="true"]') : null;
+  if (!row) return null;
+  const box = row.getBoundingClientRect();
+  return {row, after:event.clientY > box.top + box.height / 2};
+};
+const menuDragClear = () => document.querySelectorAll('[data-menu-row]:is(.dragging,.drop-before,.drop-after)').forEach(n => n.classList.remove('dragging', 'drop-before', 'drop-after'));
+document.addEventListener('dragstart', event => {
+  const row = event.target.closest?.('[data-menu-row][draggable="true"]');
+  if (!row) return;
+  menuDrag = row.dataset.menuRow;
+  event.dataTransfer.setData('text/plain', menuDrag);
+  event.dataTransfer.effectAllowed = 'move';
+  row.classList.add('dragging');
+});
+document.addEventListener('dragover', event => {
+  const at = menuDropAt(event);
+  if (!at) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('[data-menu-row]:is(.drop-before,.drop-after)').forEach(n => { if (n !== at.row) n.classList.remove('drop-before', 'drop-after'); });
+  at.row.classList.toggle('drop-before', !at.after);
+  at.row.classList.toggle('drop-after', at.after);
+});
+document.addEventListener('drop', event => {
+  const at = menuDropAt(event);
+  if (!at) return;
+  event.preventDefault();
+  const pages = menuPages(), name = menuDrag, shown = navPinned(pages).map(a => a.name).filter(n => n !== name);
+  const target = at.row.dataset.menuRow, before = at.after ? (shown[shown.indexOf(target) + 1] ?? null) : target;
+  menuDrag = ''; menuDragClear();
+  if (target === name) return;
+  menuMoveBefore(pages, name, before);
+  const page = pages.find(a => a.name === name);
+  menuChanged((page ? addonLabel(page) : 'The page') + ' is number ' + (navPinned(pages).findIndex(a => a.name === name) + 1) + ' in the menu.', []);
+});
+document.addEventListener('dragend', () => { menuDrag = ''; menuDragClear(); });
 // Open / close the menu (ORCH-1184): from 1280 px a button beside the orch name closes the menu to its icons and opens it
 // again; the choice stays in this browser. Narrower screens keep their own icon rail and the phone its More.
 const sideToggle = document.getElementById('side-toggle');
