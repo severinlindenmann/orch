@@ -84,6 +84,22 @@ def entries(root, ref):
     return {p: (mode, obj) for mode, kind, obj, p in incoming.tree(root, ref)} if ref else {}
 
 
+def beyond_renames(conflicts, merged, ours, theirs):
+    """The conflict paths a person must see, without the ones that only exist because git looked for renames
+    (ORCH-2321). git before 2.48 ignores merge.renames=false in `merge-tree --write-tree` (Debian 13 ships
+    2.47): both sides renaming one file is then reported as three paths with one side each, although the
+    merged tree is already what a merge without renames gives. Such a path is dropped only when the tree
+    proves it: the old name is gone, a new name holds exactly its own side's file. Anything else stays."""
+    left = []
+    for path, stages in conflicts.items():
+        if len(stages) == 1:
+            ((side, _),) = stages.items()
+            if merged.get(path) == {1: None, 2: ours.get(path), 3: theirs.get(path)}[side]:
+                continue
+        left.append(path)
+    return left
+
+
 def blob(root, entry):
     return repo.git(root, "cat-file", "blob", entry[1]).stdout if entry else None
 
@@ -497,6 +513,13 @@ def merged_tree(root, head, remote, index, now, first=False):
         for p in conflicts
         if not paths.TICKET.fullmatch(p) and p != "ticket-counter.json" and p not in decisions
     ]
+    if unresolved:
+        unresolved = beyond_renames(
+            {p: conflicts[p] for p in unresolved},
+            entries(root, tree),
+            entries(root, head),
+            entries(root, checked_remote),
+        )
     if unresolved:
         raise pause.Pause("Conflicting result needs a person", unresolved)
     repo.git(root, "read-tree", tree, index=index)
