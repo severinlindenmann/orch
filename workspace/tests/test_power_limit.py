@@ -17,6 +17,7 @@ from orch import cli, doctorpass, health, procs, services, stuck, worktrees
 from orch import needs as needs_mod
 
 SRC = Path(procs.__file__).resolve().parent
+FAKE_PIDS = 1_000_000_000  # above every real process id on any system
 
 
 @pytest.fixture
@@ -39,7 +40,7 @@ class _Fakes:
         self.envs: list[dict] = []
         self.most = {True: 0, False: 0}  # the most alive at once: detached tasks (True), asked add-ons
         self.lock = threading.Lock()
-        ids = itertools.count(500_000)
+        ids = itertools.count(FAKE_PIDS)
         real_alive = services.pid_alive
         fakes = self
 
@@ -86,8 +87,10 @@ class _Fakes:
 
         monkeypatch.setattr(procs.subprocess, "Popen", Child)
         monkeypatch.setattr(needs_mod, "_kill_tree", lambda p: p.kill())
+        # a fake pid is alive until its fake child ends; every real one (this test process, which holds a
+        # slot between taking it and starting the child) is asked for real. Linux pids go up to 4 million.
         monkeypatch.setattr(
-            services, "pid_alive", lambda pid: pid in self.alive if pid >= 500_000 else real_alive(pid)
+            services, "pid_alive", lambda pid: pid in self.alive if pid >= FAKE_PIDS else real_alive(pid)
         )
 
 
