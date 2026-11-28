@@ -1102,9 +1102,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
    pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
    a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
-.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
-.live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
-.live-dock[data-mode=right]{right:var(--live-w)}
+.live-dock{position:fixed;left:var(--sidebar-width);right:var(--frame-gutter,0px);bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
+.live-dock[data-mode=side]{left:auto;right:var(--frame-gutter,0px);top:50%;bottom:auto;transform:translateY(-50%)}
+.live-dock[data-mode=right]{right:calc(var(--live-w) + var(--frame-gutter,0px))}
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
 .live-bar{position:relative;display:flex;gap:var(--s2);align-items:center;min-width:0;min-height:var(--s8);padding:var(--s1) var(--s3);border-top:1px solid var(--border-strong);background:var(--sidebar)}
 .live-dock[data-mode=full] .live-bar{border-top:0;border-bottom:1px solid var(--border)}
@@ -1125,7 +1125,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pop.live-sample{position:relative;right:auto;bottom:auto;z-index:auto;box-shadow:none;animation:none}
 .live-panel{position:relative;display:flex;min-width:0;min-height:0;border-top:1px solid var(--border-strong);background:var(--surface)}
 .live-panel[data-mode=bottom]{height:var(--live-h);animation:live-up var(--dur-slow) var(--ease-enter)}
-.live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:0;bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
+.live-panel[data-mode=right]{position:fixed;top:var(--topbar-height);right:var(--frame-gutter,0px);bottom:0;width:var(--live-w);border-top:0;border-left:1px solid var(--border-strong);animation:live-in var(--dur-slow) var(--ease-enter)}
 .live-panel[data-mode=full]{flex:1;border-top:0;animation:orch-dialog var(--dur-settle) var(--ease-enter)}
 .live-pane{display:flex;flex:var(--f,1) 1 0;flex-direction:column;min-width:0;min-height:0;container:live-pane/inline-size}
 .live-panel[data-mode=right]{flex-direction:column}
@@ -1353,14 +1353,20 @@ button.live-pt:hover{color:var(--brand)}
 .live-dock[data-still] .live-panel,.live-dock[data-still] .live-edge{animation:none}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
-body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* W-005: --frame-gutter is the scrollbar room the shell keeps on a framed add-on page (dashboard style.css), 0 elsewhere:
+   the bar, the right panel and its divider sit on the same px on every page */
+body[data-live-layer=right] .shell-body{padding-right:calc(var(--live-padr,0px) + var(--frame-gutter,0px))}
 /* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
    bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
 @media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
-   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695):
-   the bar drops its "Updated" time and goes onto a second row when they do not fit beside the page name */
-body[data-live-narrow] .topbar{flex-wrap:wrap}
+   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695).
+   W-004 (owner, 28 Nov): the bar never wraps there, so the page title sits at the same height on every page. "Updated
+   just now" goes first, then the page name shortens with "…"; the buttons keep their words and their size. */
+body[data-live-narrow] .topbar{flex-wrap:nowrap}
+body[data-live-narrow] .topbar>*{flex-shrink:0}
+body[data-live-narrow] .topbar>.breadcrumb{flex:1 1 0;min-width:0;flex-wrap:nowrap;height:auto}
+body[data-live-narrow] .topbar .breadcrumb>#crumb{display:block;height:auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body[data-live-narrow] .topbar #updated{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 /* ORCH-2202 (owner pick I a): the ticket page beside Focus goes to one column: Properties under Progress, in the page
