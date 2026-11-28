@@ -7,6 +7,7 @@ import time
 
 import pytest
 import test_run_wrap
+from conftest import CONTRACTS
 
 from orch import phone_view, runs, runs_live, tickets
 from orch.errors import Refused
@@ -893,3 +894,38 @@ def test_a_link_error_that_means_busy_is_not_a_fallback(proj, monkeypatch):
     with pytest.raises(PermissionError):
         runs._create_lock(lock)
     assert not lock.exists()
+
+
+def test_a_start_without_tmux_keeps_why_it_has_no_screen_on_the_run(proj, run, gen, one_step, monkeypatch):
+    """ORCH-2391: the start printed why the helper works one step at a time, but a start from a page lost the
+    words. The run record keeps them, so the ticket page says why and a problem report carries the run mode
+    and the note of the start."""
+    from orch import adapters, diag_collect
+
+    gen("--silent 3")
+    real = adapters.load
+
+    def can_be_live(name, root=None):  # an agent that opens a live session where tmux is installed
+        a = real(name, root)
+        return {**a, "capabilities": {**a["capabilities"], "interactive_tmux": True}}
+
+    monkeypatch.setattr(adapters, "load", can_be_live)
+    tid = _new(run)
+    code, out, err = run("run", "start", tid)
+    assert code == 0 and "tmux is not installed" in out + err
+    rec = runs.read(proj, tid)
+    assert rec["mode"] == "oneshot" and rec["no_live"] == "no-tmux"
+    assert rec["start_note"].startswith("tmux is not installed") and "install tmux" in rec["start_note"]
+    schema = json.loads((CONTRACTS / "run.schema.json").read_text(encoding="utf-8"))
+    import jsonschema
+
+    assert not list(jsonschema.Draft202012Validator(schema).iter_errors(rec))
+    got = diag_collect.runs_data(proj, {"ticket": tid}, time.time())[0]["runs"][tid]
+    assert (got["mode"], got["no_live"]) == ("oneshot", "no-tmux")
+    assert got["start_note"] == rec["start_note"]
+    assert run("run", "stop", tid)[0] == 0
+    tid2 = _new(run, "Asked for one step at a time")
+    assert run("run", "start", tid2, "--mode", "oneshot")[0] == 0  # asked for: nothing to explain
+    rec = runs.read(proj, tid2)
+    assert "no_live" not in rec and "start_note" not in rec
+    assert run("run", "stop", tid2)[0] == 0
