@@ -379,7 +379,10 @@ def test_stream_one_byte_feeds_are_fast_and_equal():
         parts.append(stream.close())
         elapsed = time.perf_counter() - start
         assert source[:0].join(parts) == (expected.encode() if binary else expected)
-        assert elapsed < max(4, 60 * base), (elapsed, base)  # slow runner: the limit grows with it
+        # slow runner: the limit grows with it. The floor is 30 s: on a loaded runner the feeds took 6.9 s
+        # while the bare loop, measured a moment earlier, said 4 s were enough (ORCH-2395). Feeding that
+        # looks at the whole megabyte again for every byte would take hours: 30 s still tells them apart.
+        assert elapsed < max(30, 60 * base), (elapsed, base)
 
 
 def test_normalisation_and_escape_variants():

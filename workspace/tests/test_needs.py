@@ -196,11 +196,11 @@ def test_an_addon_that_was_late_is_not_waited_for_the_next_time(na, proj, run, m
     started = []
     real = needs_mod._Pull.start
     monkeypatch.setattr(needs_mod._Pull, "start", lambda self: started.append(self.name_) or real(self))
-    t0 = time.monotonic()
     rows = compute(proj)
-    assert time.monotonic() - t0 < needs_mod.FAST_BUDGET - 0.1
     assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)]
-    assert started == [] and na.spawned == ["hello", "hello"]  # not asked in line; refreshed behind
+    # never started in line, so there is nothing it could wait for; refreshed behind. No stopwatch here: on a
+    # loaded runner the call alone took 0.54 s against a limit of 0.5 s (ORCH-2395, run 46063443606)
+    assert started == [] and na.spawned == ["hello", "hello"]
     assert needs_mod.refresh(proj, "hello") is True  # still slow (1.2 s): stays out of line
     started.clear()  # the refresh's own asking
     assert compute(proj) and started == []
@@ -212,17 +212,22 @@ def test_an_addon_that_was_late_is_not_waited_for_the_next_time(na, proj, run, m
     assert [r["id"] for r in compute(proj)] == ["hello:new"] and started == ["hello"]
 
 
-def test_a_late_addon_whose_refresh_fails_is_asked_in_line_again(na, proj, run):
+def test_a_late_addon_whose_refresh_fails_is_asked_in_line_again(na, proj, run, monkeypatch):
     _rows(run)
     (proj / "mode.txt").write_text("late")
     compute(proj)
     (proj / "mode.txt").write_text("broken")
     assert needs_mod.refresh(proj, "hello") is False
+    # asked in line again, and its bad answer is heard however busy the machine is: on a loaded runner the
+    # add-on's start alone took longer than FAST_BUDGET and it counted as late once more (ORCH-2395)
+    monkeypatch.setattr(needs_mod, "FAST_BUDGET", 30)
     assert [(r["id"], r["stale"]) for r in compute(proj)] == [("hello:x", True)]  # asked: answer not good
 
 
-def test_first_answer_is_waited_for_without_a_saved_one(na, proj, run):
-    (proj / "mode.txt").write_text("late")
+def test_first_answer_is_waited_for_without_a_saved_one(na, proj, run, monkeypatch):
+    (proj / "mode.txt").write_text("late")  # 1.2 s: later than FAST_BUDGET
+    # the long wait holds on a loaded runner too: there the start plus the 1.2 s passed 3 s (ORCH-2395)
+    monkeypatch.setattr(needs_mod, "PULL_TIMEOUT", 30)
     rows = compute(proj)
     assert [(r["id"], r["stale"]) for r in rows] == [("hello:x", False)] and na.spawned == []
 

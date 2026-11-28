@@ -193,11 +193,13 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
     """The P1.7 case: the line lands, the Enter is lost, the line sits in the prompt box."""
     start, out = tui
     tid = _ticket(run)
-    rec = start(tid, deaf=1.0)
+    # the tool drops its first Enter by count, not for a time: on a loaded runner the line arrived after a
+    # one-second deaf window was over and went in at once (ORCH-2395, run 46063443606)
+    rec = start(tid, drop_enters=1)
     runs.pending_add(proj, tid, "human:lume", "message", EVIL)
     assert runs_live.deliver(proj, tid) == 1
-    time.sleep(1.2)  # the tool is ready now; its first Enter was dropped
-    assert _got(out) == [] and "orch run input" in _pane(proj, tid)
+    _until(lambda: "orch run input" in _pane(proj, tid), "the line sits in the prompt box")
+    assert _got(out) == []  # its Enter was dropped
     assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 3)) == "enter"
     _until(lambda: _got(out, "submit"), "submitted after the second Enter")
     # the echo above the box is not the box: nothing more is sent
