@@ -113,7 +113,7 @@ const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
 // Review page at 10,000 tickets); now one look-up in an index built once per ticket list. A row that is not where the
 // index says (a list changed in place) or not in it falls back to the scan, so the answer is always the scan's.
 const ticketRowIndex = new WeakMap();
-const ticketRow = id => {
+const liveRowOf = id => {
   const list = array(state?.tickets);
   let ix = ticketRowIndex.get(list);
   if (!ix || ix.n !== list.length) {
@@ -131,7 +131,7 @@ const ticketRow = id => {
   return i !== undefined && sameTicket(list[i], id) ? list[i] : list.find(t => sameTicket(t, id));
 };
 const ticketOf = id => {
-  const row = ticketRow(id);
+  const row = liveRowOf(id);
   if (row && !row.slim) return row;
   const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
   if (!full) return row;
