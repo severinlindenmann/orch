@@ -256,6 +256,13 @@ input[type=checkbox],input[type=radio]{width:16px;height:16px;accent-color:var(-
 .segmented .btn,.view-toggle .btn,.view-toggle .seg,.segmented label{border:0;min-height:32px;padding:4px 12px;border-radius:4px;color:var(--text-muted);background:transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:14px}
 .segmented [aria-pressed=true],.segmented [aria-current=true],.segmented label:has(input:checked),.view-toggle .active,.view-toggle [aria-pressed=true]{background:var(--surface-3);color:var(--text)}
 .segmented label:focus-within{outline:2px solid var(--brand);outline-offset:2px}
+/* W-007: a selected choice (a button that is one of a radio group) uses the normal selected look, never the filled button:
+   the page keeps one filled button, its main action. Unselected choices are outlined. */
+.btn[role=radio]{border-color:var(--border-strong);color:var(--text);background:transparent}
+.btn[role=radio]:hover:not(:disabled){background:var(--surface-2);border-color:var(--text-muted)}
+.btn[role=radio][aria-checked=true],.btn[role=radio][aria-checked=true]:hover:not(:disabled){background:var(--surface-3);border-color:var(--text-muted);color:var(--text);font-weight:600;cursor:default}
+.choice-card{border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.choice-card.sel,.choice-card:has(input:checked){border-color:var(--text-muted);background:var(--surface-2)}
 .tabs{display:flex;align-items:stretch;gap:16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .tabs a,.tabs button{min-height:40px;padding:8px 4px;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-muted);text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
 .tabs [aria-selected=true],.tabs [aria-current=page]{border-bottom-color:var(--brand);color:var(--text)}
