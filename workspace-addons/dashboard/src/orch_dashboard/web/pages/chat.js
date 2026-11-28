@@ -945,13 +945,15 @@ function chatPickTickets(query) {
   return {rows:open.slice(0, CHAT_PICK_TICKETS), more:Math.max(0, open.length - CHAT_PICK_TICKETS)};
 }
 function chatDmContacts() {
-  const {d, actions} = dialog('New chat', 'dialog dialog-fit');
+  const {d, actions} = dialog('New chat', 'dialog');
   d.classList.add('chat-page', 'chat-contacts');
-  const search = h('input', {type:'search', className:'chat-search', 'data-key':'new-chat-search', 'aria-label':'Search tickets and workspaces', placeholder:'Search tickets and workspaces', autocomplete:'off'});
-  const body = h('div', {className:'chat-contact-list dialog-body', 'data-key':'new-chat-list'});
+  // the master's field: the question is its visible label
+  const search = h('input', {type:'search', className:'input', 'data-key':'new-chat-search', placeholder:'Search tickets and workspaces', autocomplete:'off'});
+  const body = h('div', {className:'chat-contact-list stack', 'data-key':'new-chat-list'});
   let query = '';
   const done = async fn => { chatDm.picker = null; await window.orch.close(d); fn(); chatFocusBox(); };
-  const group = (label, key) => h('p', {className:'eyebrow', 'data-key':'new-chat-' + key}, label);
+  // one group: its small label, then its rows (each row keeps its own line)
+  const group = (label, key, rows) => h('div', {'data-key':'new-chat-' + key, role:'group', 'aria-label':label}, h('p', {className:'eyebrow'}, label), rows);
   const paint = () => {
     const rows = [], match = text => !query || clean(text).toLowerCase().includes(query);
     // your helper (and what came from your phone today, when something did)
@@ -959,17 +961,17 @@ function chatDmContacts() {
     chatNewChatRows(() => done(() => {})).forEach((row, i) => { if ((i === 0 || phone) && match(i === 0 ? 'Your helper' : 'Your phone')) rows.push(row); });
     const found = chatPickTickets(query);
     if (found.rows.length) {
-      rows.push(group('A ticket', 'tickets'));
+      const picks = [];
       for (const t of found.rows) {
         const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + t.id}, chatText('strong', '', chatPlainTitle(t.title, t.key) || t.key),
           chatText('small', 'chat-muted', [t.key, window.DashHelpers?.statusWord ? window.DashHelpers.statusWord(t.status) : ''].filter(Boolean).join(' · ')));
         row.addEventListener('click', () => done(() => { if (typeof tcSelect === 'function') tcSelect(t.id); else location.hash = '#chat/' + encodeURIComponent(t.id); }));
-        rows.push(row);
+        picks.push(row);
       }
+      rows.push(group('A ticket', 'tickets', picks));
       if (found.more) rows.push(chatText('p', 'chat-muted', found.more + (found.more === 1 ? ' more ticket' : ' more tickets') + '. Search to find one.'));
     }
-    const contacts = (chatDm.loaded ? chatDm.contacts : []).filter(c => match(c.name));
-    if (contacts.length) rows.push(group('A workspace', 'workspaces'));
+    const contacts = (chatDm.loaded ? chatDm.contacts : []).filter(c => match(c.name)), places = [];
     for (const c of contacts) {
       const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
       const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + c.ws, disabled:!allowed}, chatText('strong', '', c.name),
@@ -979,8 +981,9 @@ function chatDmContacts() {
           can.tasks ? chatText('small', 'chat-member-chip', 'Give tasks') : null,
           !allowed ? chatText('small', 'chat-member-chip', 'No access') : null));
       row.addEventListener('click', () => done(() => chatDmSelect(c.ws)));
-      rows.push(row);
+      places.push(row);
     }
+    if (places.length) rows.push(group('A workspace', 'workspaces', places));
     if (!chatDm.loaded) {
       if (chatDm.error && !chatDm.loading) {
         const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
@@ -988,13 +991,13 @@ function chatDmContacts() {
         rows.push(chatText('p', 'chat-muted', 'Could not load the workspaces.'), retry);
       } else rows.push(chatSkeleton());
     }
-    if (query && !rows.some(r => r.dataset ? r.dataset.key?.startsWith('pick-') : String(r.attrs?.['data-key'] || '').startsWith('pick-'))) rows.push(chatText('p', 'chat-muted', 'Nothing matches. Try another word.'));
+    if (query && !found.rows.length && !places.length && !rows.length) rows.push(chatText('p', 'chat-muted', 'Nothing matches. Try another word.'));
     body.replaceChildren(...rows);
   };
   search.addEventListener('input', () => { query = String(search.value || '').trim().toLowerCase(); paint(); });
   chatDm.picker = paint; paint();
   d.addEventListener('close', () => { if (chatDm.picker === paint) chatDm.picker = null; });
-  d.append(chatText('p', 'chat-muted', 'Who do you want to talk to?'), search, body, actions); window.orch.open(d);
+  d.append(h('label', {className:'field', 'data-key':'new-chat-who'}, 'Who do you want to talk to?', search), body, actions); window.orch.open(d);
 }
 function chatDmSelect(ws) {
   if (!chatDmId(ws)) return;
