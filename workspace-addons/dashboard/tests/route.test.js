@@ -161,6 +161,8 @@ test('#settings is General; #settings/<tab> opens that tab on the same Settings 
   assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
   // the address names the tab like its label; the old names still open the same tab
   for (const [name, tab] of [['helper', 'agent'], ['contacts', 'phone']]) assert.deepEqual({...route('#settings/' + name, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
+  // O-34: the menu's Edit menu opens General at its Menu section, on the same Settings page
+  assert.deepEqual({...route('#settings/menu', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null, at:'menu'});
   assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });

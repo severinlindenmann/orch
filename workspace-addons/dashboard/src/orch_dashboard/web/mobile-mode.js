@@ -209,7 +209,7 @@
             'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy}, mm.on ? 'On' : 'Off')),
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Switch off after'),
           h('div', {className: 'grow set-ctl mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
-            choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === shown ? 'primary' : 'ghost'), role: 'radio',
+            choices.map(n => h('button', {type: 'button', className: 'btn sm outline', role: 'radio',  /* W-007: the selected one is marked by aria-checked (kit), never the filled button */
               'aria-checked': n === shown ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
               'data-testid': 'mobile-mode-hours-' + n}, n + ' h')),
             h('span', {className: 'meta', role: 'status', 'data-key': 'mm-hours-saving', hidden: pendingHours == null}, 'Saving…'))));

@@ -28,3 +28,20 @@ test('ORCH-902: the ticket page 44px minimum height leaves .switch at its 24px h
   assert.match(rule[1], /button:not\(\.switch\)/);
   assert.match(kit, /\.switch\{[^}]*height:24px/);
 });
+
+// O-28 (owner, 28 Nov): a switch that is On had its knob in the middle. Settings draws its own 44 px target around a
+// 36 px track; the knob must keep the same gap to the track's edge when Off and when On, there and in the master.
+test('O-28: the switch knob has the same gap at both ends, in the master and in Settings', () => {
+  const px = (css, re) => { const m = css.match(re); assert.ok(m, String(re)); return m.slice(1).map(Number); };
+  // master: 36 px wide with a 1 px border, knob 16 px at left 3, travel 12
+  const [width] = px(kit, /\n\.switch\{[^}]*width:(\d+)px/), [left, knob] = px(kit, /\n\.switch:after\{[^}]*left:(\d+)px;width:(\d+)px/);
+  const [travel] = px(kit, /\.switch\[aria-checked=true\]:after\{[^}]*translateX\((\d+)px\)/);
+  assert.equal(left, (width - 2) - (left + travel + knob), 'master: Off gap = On gap');
+  const settings = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.css'), 'utf8');
+  const [trackLeft, trackWidth] = px(settings, /\.settings \.switch::before\{[^}]*left:(\d+)px;top:\d+px;width:(\d+)px/);
+  const [knobLeft] = px(settings, /\.settings \.switch::after\{top:\d+px;left:(\d+)px\}/);
+  const [go] = px(settings, /\.settings \.switch\[aria-checked=true\]::after\{transform:translateX\((\d+)px\)\}/);
+  const off = knobLeft - trackLeft, on = trackLeft + trackWidth - (knobLeft + go + knob);
+  assert.ok(off > 0, 'the knob sits inside the track');
+  assert.equal(off, on, 'Settings: Off gap = On gap');
+});
