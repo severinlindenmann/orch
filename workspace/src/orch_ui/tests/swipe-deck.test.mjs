@@ -40,7 +40,7 @@ class N {
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   closest(sel) { let n = this; while (n) { if (n.matches?.(sel)) return n; n = n.parent; } return null; }
 }
-const doc = {createElement: t => new N(t), createElementNS: (_, t) => new N(t), createDocumentFragment: () => new N('#fragment'), activeElement: null, body: new N('body')};
+const doc = {createElement: t => new N(t), createElementNS: (_, t) => new N(t), createTextNode: t => Object.assign(new N('#text'), {own: String(t)}), createDocumentFragment: () => new N('#fragment'), activeElement: null, body: new N('body')};
 
 function deck(items, o = {}, extra = {}) {
   const toasts = [], viewed = [], UI = {toast: (m, undo) => toasts.push({m, undo}), statusIcon: () => new N('span'), reviewViewer: (shots, i, vo) => viewed.push({shots, i, vo})};
@@ -166,6 +166,26 @@ test('ORCH-2431: with notNow a card of a ticket has "Not now" in its foot; the p
   assert.deepEqual(asked, ['a']);
   assert.equal(deck(cards).host.querySelectorAll('.swipe-not-now').length, 0, 'no notNow: no button');
   assert.equal(deck(cards, {notNow:() => null}).host.querySelectorAll('.swipe-not-now').length, 0, 'the page says no: no button');
+});
+
+// FX-05 (owner, 28 Nov): Home and Tickets show the red "!" pill "Stuck"; the Review card and list showed a pause mark
+// with the word in grey. One pill everywhere: UI.helperPill('stuck').
+test('FX-05: a stuck card and its list row wear the shared Stuck pill, never the pause mark', () => {
+  const stuck = {id:'s', kind:'stuck', kindLabel:'Stuck', icon:'pause', lane:'holds_up', laneName:'Holds up work now', title:'The checks failed.', ticket:'ORCH-7', href:'#ticket/t_abc123', preview:{type:'doc'}};
+  const {host} = deck([stuck, check('a', {ticket:'ORCH-8', lane:'look', laneName:'Look at the result'})], {list:true});
+  const card = host.querySelectorAll('.swipe-card').find(c => !c.className.includes('under'));
+  const pill = card.querySelector('.swipe-meta').querySelector('.helper-pill');
+  assert.ok(pill, 'the card meta line holds the pill');
+  assert.equal(pill.className, 'pill helper-pill failed'); assert.equal(pill.dataset.state, 'stuck'); assert.equal(pill.textContent, 'Stuck');
+  assert.equal(card.querySelector('.swipe-meta').querySelectorAll('.swipe-kind').length, 0, 'no grey kind word beside it');
+  const row = host.querySelectorAll('.review-row').find(r => r.dataset.item === 's');
+  if (row) {  // the list is drawn when the deck has one
+    assert.equal(row.querySelector('.review-row-stuck').querySelector('.helper-pill').textContent, 'Stuck');
+    assert.match(row.querySelector('.review-row-stuck').textContent, /ORCH-7/);
+    assert.equal(row.querySelector('.review-row-icon').className, 'review-row-icon failed');
+  }
+  const other = host.querySelectorAll('.review-row').find(r => r.dataset.item === 'a');
+  if (other) assert.equal(other.querySelectorAll('.helper-pill').length, 0, 'other rows keep their own mark');
 });
 
 test('ORCH-1804: with ticketLink every card has "Open ticket" (its ticket beside the deck, same tab) in place of the plain Open', () => {

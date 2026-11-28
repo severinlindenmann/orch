@@ -610,7 +610,14 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.match(web('index.html'), /id="open-agent"[^>]*aria-label="Chat"/);
   // ORCH-2149: on a framed add-on page the top bar keeps the room of the scrollbar the frame shows, so New ticket
   // ends at the same right edge as on Home
-  assert.match(style, /html:has\(iframe\.embed:not\(\.embed-loading\)\) \.topbar\{padding-right:calc\(var\(--page-gutter\) \+ var\(--scrollbar-w,0px\)\)\}/);
+  // W-005: the measured room is --frame-gutter on a framed page; the top bar, the Live bar and the right panel all keep it
+  assert.match(style, /@media\(min-width:721px\)\{html:has\(iframe\.embed:not\(\.embed-loading\)\)\{--frame-gutter:var\(--scrollbar-w,0px\)\}\}/);
+  assert.match(style, /html:has\(iframe\.embed:not\(\.embed-loading\)\) \.topbar\{padding-right:calc\(var\(--page-gutter\) \+ var\(--frame-gutter,0px\)\)\}/);
+  const kitWidgets = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(kitWidgets, /\.live-dock\{position:fixed;left:var\(--sidebar-width\);right:var\(--frame-gutter,0px\)/);
+  assert.match(kitWidgets, /\.live-dock\[data-mode=right\]\{right:calc\(var\(--live-w\) \+ var\(--frame-gutter,0px\)\)\}/);
+  assert.match(kitWidgets, /\.live-panel\[data-mode=right\]\{position:fixed;top:var\(--topbar-height\);right:var\(--frame-gutter,0px\)/);
+  assert.match(kitWidgets, /body\[data-live-layer=right\] \.shell-body\{padding-right:calc\(var\(--live-padr,0px\) \+ var\(--frame-gutter,0px\)\)\}/);
   assert.match(source, /html\.style\.scrollbarGutter = 'stable';\s+const room = Math\.max\(0, Math\.round\(window\.innerWidth - html\.getBoundingClientRect\(\)\.width\)\);[^]*?setProperty\('--scrollbar-w', room \+ 'px'\)/);
   // ORCH-2176: on the Chat page itself the top bar has no Chat button
   assert.match(source, /getElementById\('open-agent'\)\.hidden = snapshot \|\| r\.kind === 'chat';/);

@@ -178,18 +178,30 @@ UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','r
  const a=el('div','bulk-actions');(o.actions||[]).forEach(n=>{if(n)a.append(n)});bar.append(c,a);
  let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
  if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
+/* The room a page really has (W-001, owner 28 Nov). A page lays out for its page area, not for the window: beside the
+   Focus panel a 1440 px window leaves the page 617 px. CSS first: the shell marks the body (body[data-live-narrow] under
+   900 px, body[data-live-stack] under 1100 px) and a narrow layout is written for the width query and for the mark. Code
+   that must choose between two drawings asks here, and listens on window for 'orch:page-room' (sent when a mark changes).
+   UI.pageRoom() -> the page area's width in px (the window's width where there is no shell);
+   UI.pageRoom.under(px) -> true when the window or the page area is narrower than px. */
+UI.pageRoom=()=>{const m=document.querySelector('main');return m&&m.clientWidth?m.clientWidth:window.innerWidth};
+UI.pageRoom.under=px=>window.innerWidth<px||UI.pageRoom()<px;
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
    then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
    the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
-   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+   W-006 (owner, 28 Nov, the walk's measurements as the checklist): one place for a page's tag ("Preview"): `tag` puts
+   it after the name, on the title's middle, the same on every page; the name and the sentence are 4 px apart; the
+   Settings button is 32 px on every page (touch sizes follow the window, never the frame).
+   UI.pageTop({title, tag, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
 const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>'};
 const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
 /* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
 UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
 UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
  if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
- const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const h1=el('h1','',o.title||'');if(o.tag){const t=el('span','badge page-tag',String(o.tag));h1.append(' ',t)}
+ left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
  const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
  if(st&&(st.href||st.onClick))acts.push(UI.settingsButton(st));
  (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
@@ -217,7 +229,7 @@ UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='erro
  return b};
 UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'button','btn outline sm page-settings settings-btn');if(link){a.href=o.href||'#settings/addons';if(o.top)a.target='_top'}else a.type='button';
  if(o.onClick)a.addEventListener('click',o.onClick);a.dataset.key=o.dataKey||'page-settings';
- a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),el('span','',o.label||'Settings'));return a};
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>'),el('span','',o.label||'Settings'));return a};
 /* An add-on page drawn inside the dashboard's frame (Factory, Usage, Files, Skills, Personal, Insights ...) marks the
    place of its Settings button in its own top: <span data-settings-for="skills"></span>. It becomes the same
    UI.settingsButton, leading the dashboard (target _top; frame.js hands the move up) to that add-on's part of Settings. */
@@ -464,7 +476,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
  /* due within a day (it.dueAt) shows amber; any other deadline stays quiet */
  const soon=it=>{const t=it&&it.dueAt!=null?+new Date(it.dueAt):NaN;return isFinite(t)&&t-Date.now()<864e5};
- const metaLine=it=>{const m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''));m.append(k);
+ /* FX-05: work that stopped wears the one Stuck pill (UI.helperPill, as on Home and Tickets), never a pause mark with a grey word */
+ const stuckPill=it=>UI.helperPill('stuck',it.kindLabel||'Stuck');
+ const metaLine=it=>{const m=el('div','swipe-meta');let k;if(it.kind==='stuck')k=stuckPill(it);else{k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''))}m.append(k);
   if(it.need)m.append(el('span','swipe-need'+(soon(it)?' soon':''),it.need));if(it.ticket)m.append(el('span','swipe-key',it.ticket));return m};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   /* title first, then ONE quiet line: type · deadline · ticket key (ORCH-477 round 2: no routine time stamp, no group, no
@@ -711,8 +725,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   return [why,it.ticket].filter(Boolean).join(' · ')};
  const listRow=i=>{const it=items[i],a=ans[it.id],now=i===idx&&!pairNow()&&idx<items.length,r=btn('review-row'+(now?' is-current':'')+(a?' is-done':''),[]);
   r.dataset.item=it.id;r.title=it.title;if(now)r.setAttribute('aria-current','true');
-  const ico=el('span','review-row-icon');ico.append(ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
-  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
+  const stuck=it.kind==='stuck',ico=el('span','review-row-icon'+(stuck?' failed':''));ico.append(stuck?UI.statusIcon('needs'):ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
+  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else if(stuck){const sb=el('span','review-row-sub review-row-stuck');sb.append(stuckPill(it));const rest=[it.need,it.ticket].filter(Boolean).join(' · ');if(rest)sb.append(el('span','',rest));txt.append(sb)}
+  else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
   r.append(ico,txt);r.onclick=()=>jump(i);
   const li=el('div','review-li');li.setAttribute('role','listitem');
   if(!picking||a){li.append(r);return li}

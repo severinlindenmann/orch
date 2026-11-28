@@ -216,3 +216,19 @@ at a hook confirm: its pane shows the OK card (Helper asks to run a command, the
 Don't allow / Open terminal) in Chat and in Terminal view (there beside the terminal, no Open terminal). The product
 draws the two answers only for a prompt it recognised on the screen and answers exactly that prompt; any other wait
 shows the card with Open terminal only. Master: `.live-ok-t`, `.live-ok-cmd` (with `.code-block`) in widgets.css.
+
+## UI foundation, the owner's decisions of 28 Nov (W-049, W-047, W-002, W-001, W-004, W-005)
+
+- **Helpers menu (W-049, option A).** focus-v4d.html: the menu has two labelled groups with counts, **Working
+  helpers** (every session that does not wait on you, with its state: Working, In line, Idle) and **Needs you**. With
+  no helper at work the first group stays and says "No helper is working. New starts one." Nothing was removed.
+- **Starting a session (W-047).** The New menu's row says "Starting…" with a spinner, every row is off until it
+  started, the pane opens with the session, and a start that did not work stays under its row with **Try again**.
+  The two states are in the master gallery (Live bar: "Starting", "It did not start"); the mockup starts at once.
+- **Terminal text (W-002, option A).** The helper's screen keeps its size: text is never under 11 px and a wider line
+  scrolls sideways, following the cursor. Your own plain terminal uses the pane's width at 13 px. The mockup's screen
+  is drawn at 12 px (13 px in a large pane), inside these limits.
+- **Beside the panel (W-001 A, W-004 A, W-005).** A page lays out for its page area: under 900 px it takes its narrow
+  layout (New ticket in one column, Chat as list or conversation, Home with Finished below Needs you), the top bar
+  stays one row ("Updated" goes first, then the page name ends with "…"), and the bar, the panel and its divider keep
+  the scrollbar room on framed add-on pages too. Rule and check: the master DESIGN.md, "The room a page really has".

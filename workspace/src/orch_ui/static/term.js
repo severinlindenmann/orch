@@ -12,8 +12,10 @@
    itself (its last line ends are dropped). The helper's screen follows the size of its box (onSize):
    while typing, and while watching too when typing is allowed and no other page types (ORCH-1758, owner: the last
    page opened or resized sets the size). A screen of another size (another page set it, or typing is off in
-   Settings) is drawn with a smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways), and
-   the box follows the newest line and the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
+   Settings) is drawn with a smaller font so its whole width fits, but never under MIN_FONT (11 px, W-002: it was 8 px
+   and unreadable in a 40 % panel): a wider screen then keeps its size and scrolls sideways. A plain terminal (your own)
+   is never drawn smaller than the page's 13 px. The box follows the newest line and the cursor, down and sideways,
+   until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
      UI.term({label, plain, toolsOut, next, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
@@ -33,7 +35,7 @@
        handle.back()                      put the keyboard back after the page drew the pane again
        handle.dispose()                   free the terminal (its WebGL context or its copied style sheet)
    Pure parts for tests: UI.term.pasteText, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
-   UI.term.followTop, UI.term.plainText, UI.term.fitFont, UI.term.domSheet.
+   UI.term.followTop, UI.term.followLeft, UI.term.plainText, UI.term.fitFont, UI.term.domSheet.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -76,7 +78,14 @@
   }
   /* The font size that lets a screen of `cols` columns fit its box while watching (ORCH-1758): `fitCols` columns
      fit at font size `cur`; never larger than the page's font `base`, never under `min`, in half pixels. */
-  const MIN_FONT = 8;
+  const MIN_FONT = 11;
+  /* Where the box scrolls sideways while watching a screen wider than it (W-002): 0 while the cursor is in the first
+     view; else the cursor sits a few columns before the right edge. Never past the end. */
+  function followLeft(f) {
+    const x = (f.cursorCol | 0) * f.colPx + (f.pad || 0), max = Math.max(0, f.width - f.view);
+    if (!max || x + 2 * f.colPx <= f.view) return 0;
+    return Math.max(0, Math.min(max, Math.ceil(x + 4 * f.colPx - f.view)));
+  }
   function fitFont(f) {
     const base = +f.base || 13, min = Math.min(base, +f.min || MIN_FONT), cur = +f.cur || base;
     if (!(f.cols > 0) || !(f.fitCols > 0)) return base;
@@ -193,7 +202,7 @@
     const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, screen, loading, note, go);
 
     let state = 'loading', live = false, typing = false, allowed = false, canType = true, taken = false, escAt = 0, escTimer = null;
-    let stick = true, autoTop = -1, followAsked = false;
+    let stick = true, stickX = true, autoTop = -1, autoLeft = 0, followAsked = false;
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
     let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null, baseFont = 13;
     let fresh = false, sizeNo = false, baseCell = null;  // fresh: the first screen after a hello sizes the window; sizeNo: refused (403)
@@ -310,6 +319,12 @@
         const top = followTop({cursorRow: b.cursorY, lastRow: last, rowPx: height / rows, pad, view: screen.clientHeight, height: screen.scrollHeight});
         if (screen.scrollTop !== top) screen.scrollTop = top;
         autoTop = screen.scrollTop;
+        if (stickX && cols) {  // a screen wider than the box (W-002): the cursor stays in view sideways too
+          const padX = scr.getBoundingClientRect().left - screen.getBoundingClientRect().left + screen.scrollLeft;
+          const left = followLeft({cursorCol: b.cursorX, colPx: scr.offsetWidth / cols, pad: padX, view: screen.clientWidth, width: screen.scrollWidth});
+          if (screen.scrollLeft !== left) screen.scrollLeft = left;
+          autoLeft = screen.scrollLeft;
+        }
       };
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else run();
     }
@@ -317,6 +332,7 @@
     screen.addEventListener('scroll', () => {
       if (autoTop < 0 || typing) return;
       stick = Math.abs(screen.scrollTop - autoTop) < 4 || screen.scrollTop + screen.clientHeight >= screen.scrollHeight - 4;
+      stickX = Math.abs(screen.scrollLeft - autoLeft) < 4 || screen.scrollLeft < 4 || screen.scrollLeft + screen.clientWidth >= screen.scrollWidth - 4;
     });
     function screenNow(s) {
       if (!make()) return;
@@ -441,10 +457,10 @@
       if (!xt) return;
       if (xt.options.fontSize === baseFont) baseCell = cell() || baseCell;
       if (typing || !fit) { setFont(baseFont); return; }
-      const min = Math.min(baseFont, MIN_FONT);
+      const min = o.plain ? baseFont : Math.min(baseFont, MIN_FONT);  // your own terminal: the page's 13 px, never smaller
       let p = fit.proposeDimensions();
       if (!p || !(p.cols > 0)) return;  // the box is not shown now; fitted again when it is (ResizeObserver)
-      let f = fitFont({base: baseFont, cur: xt.options.fontSize, fitCols: p.cols, cols});
+      let f = fitFont({base: baseFont, min, cur: xt.options.fontSize, fitCols: p.cols, cols});
       setFont(f);
       for (let i = 0; i < 6 && f > min; i++) {  // a cell's width is rounded to whole pixels: smaller until it fits
         p = fit.proposeDimensions();
@@ -501,7 +517,7 @@
       }
     };
   }
-  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont; term.domSheet = domSheet;
+  term.followTop = followTop; term.followLeft = followLeft; term.MIN_FONT = MIN_FONT; term.plainText = plainText; term.fitFont = fitFont; term.domSheet = domSheet;
   term.pasteText = pasteText; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;

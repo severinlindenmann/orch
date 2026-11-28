@@ -1,12 +1,21 @@
 'use strict';
-// "Report a problem": the button in the top bar of every page, its dialog (what happened, what you expected, a picture
-// of the page, ticket text, more details, added pictures and files) and the "Report ready" answer with the checks.
+// "Report a problem": the button in the top bar of every page, its dialog (one text box for what happened and what you
+// expected, added pictures and files, and one short block of tick boxes: a picture of the page, ticket text, send to the
+// admin) and the "Report ready" answer with the checks. The dialog fits the window: its title and buttons stay in view
+// and only the middle scrolls (W-060, kit class dialog-fit). A click beside it does nothing (O-02, kit/overlay.js).
 // A switch at the top makes the same report a feature wish (owner 16 Nov, ORCH-81): other words, no page picture or
 // ticket text by default, and no hand-off to a helper (a wish is sorted first, never started blindly).
 // Nothing leaves this computer unless the workspace is connected to a relay AND the person ticks "Send this report":
 // then the same report goes to that relay's admin. The hand-off to a helper puts one line into the helper chat's
 // message box; it never sends it by itself.
 const reportUi = {busy:false, draft:null};  // draft: what was typed when the dialog closed without a report (Escape), kept for the next open (ORCH-242)
+// The one text box and the report's own fields (unchanged, so `orch report` and the dashboard write the same report): up
+// to 600 characters are the note; a longer text keeps its start as the note and goes whole into "more details".
+const REPORT_NOTE = 600, REPORT_TEXT = 4000;
+const reportWords = text => {
+  const t = String(text || '').trim();
+  return {note:t.slice(0, REPORT_NOTE) || undefined, more:t.length > REPORT_NOTE ? t.slice(0, REPORT_TEXT) : undefined};
+};
 const REPORT_FILES = 10, REPORT_FILE_BYTES = 8 * 1024 * 1024, REPORT_FILES_BYTES = 25 * 1024 * 1024;
 // The connected relay's host name, or '' (no relay, not turned on, not connected: the dialog then never mentions it).
 function reportRelay() {
@@ -100,13 +109,12 @@ function reportOpen() {
   if (snapshot || reportUi.busy) return;
   const scope = reportScope();
   const seen = reportPageSnapshot();  // before the dialog: what the person is looking at
-  const {d, actions} = dialog('Report a problem', 'dialog report-dialog', 'report');
-  const body = h('div', {className:'stack-sm'});
-  const happened = h('input', {type:'text', className:'input', maxLength:600, placeholder:'For example: stuck since 10:00, nothing happens', 'data-key':'report-happened'});
-  const expected = h('input', {type:'text', className:'input', maxLength:600, placeholder:'For example: the newsletter is sent', 'data-key':'report-expected'});
+  const {d, actions} = dialog('Report a problem', 'dialog report-dialog dialog-fit', 'report');
+  const body = h('div', {className:'stack-sm dialog-body'});
+  // One box for all the words (W-060 C): what happened and what was expected, as the person would say it.
+  const happened = h('textarea', {className:'input', rows:4, maxLength:REPORT_TEXT, 'data-key':'report-happened'});
   const picture = h('input', {type:'checkbox', 'data-key':'report-picture'}); picture.checked = true;
   const content = h('input', {type:'checkbox', 'data-key':'report-content'}); content.checked = true;
-  const more = h('textarea', {className:'input', rows:2, maxLength:4000, placeholder:'For example: it worked yesterday, and what you tried', 'data-key':'report-more'});
   const added = reportFiles(d);
   const relay = reportRelay();
   const share = h('input', {type:'checkbox', 'data-key':'report-share'});
@@ -118,23 +126,28 @@ function reportOpen() {
     return note;
   };
   const field = (label, input) => h('label', {className:'field'}, h('span', {}, h('span', {}, label), ' ', h('span', {className:'meta'}, '(optional)')), input, counter(input));
-  const happenedField = field('What happened?', happened), expectedField = field('What did you expect?', expected);
+  const happenedField = field('What happened, and what did you expect?', happened);
   const sent = relay ? 'It stays on this computer unless you tick the last box.' : 'It stays on this computer.';
   const intro = h('p', {className:'muted', 'data-key':'report-intro'});
   const pictureRow = h('label', {className:'check-label'}, picture, ' Add a picture of this page');
-  const pictureHint = h('p', {className:'meta'}, 'The picture can show ticket text. These two boxes only decide what goes into the saved report.');
   const contentRow = h('label', {className:'check-label'}, content, ' Include ticket text and helper conversation');
+  const shareRow = relay ? h('label', {className:'check-label'}, share, h('span', {}, ' Send this report to the admin of ', h('strong', {}, relay))) : null;
+  const hint = h('p', {className:'meta', 'data-key':'report-hint'});
+  // The tick boxes as one short block (W-060 C): what goes into the report, and whether it leaves this computer.
+  const include = h('fieldset', {className:'check-block', 'data-key':'report-include'}, h('legend', {className:'sr-only'}, 'What goes into the report'),
+    ...[pictureRow, contentRow, shareRow, hint].filter(Boolean));
   let about = 'problem';
   const words = () => {  // the same dialog for both kinds; only the words and the defaults change
     const wish = about === 'feature';
     intro.replaceChildren(...(wish ? ['orch saves your wish on this computer. ', sent]
       : ['orch saves what happened around ', h('strong', {}, scope.label), ' since the helper started, on this computer. ', sent]));
-    happenedField.firstChild.firstChild.textContent = wish ? 'What do you want?' : 'What happened?';
-    expectedField.firstChild.firstChild.textContent = wish ? 'Why would it help?' : 'What did you expect?';
-    happened.placeholder = wish ? 'For example: a dark look for the dashboard' : 'For example: stuck since 10:00, nothing happens';
-    expected.placeholder = wish ? 'For example: easier to read at night' : 'For example: the newsletter is sent';
+    happenedField.firstChild.firstChild.textContent = wish ? 'What do you want, and why would it help?' : 'What happened, and what did you expect?';
+    happened.placeholder = wish ? 'For example: a dark look for the dashboard, easier to read at night' : 'For example: stuck since 10:00, nothing happens. I expected the newsletter to be sent.';
     picture.checked = content.checked = !wish;
-    for (const n of [pictureRow, pictureHint, contentRow]) n.hidden = wish;
+    for (const n of [pictureRow, contentRow]) n.hidden = wish;
+    hint.textContent = [wish ? '' : 'The picture can show ticket text.', relay ? 'A sent report goes with the files you added; the admin and the workspaces they choose can read it.' : ''].filter(Boolean).join(' ');
+    hint.hidden = !hint.textContent;
+    include.hidden = wish && !relay;  // a wish with no relay has no box to tick
   };
   const kind = h('div', {className:'segmented', role:'radiogroup', 'aria-label':'What is it?', 'data-key':'report-about'},
     [['problem', 'A problem'], ['feature', 'A feature wish']].map(([value, label]) => {
@@ -146,18 +159,14 @@ function reportOpen() {
   words();
   const draft = reportUi.draft;
   if (draft) {  // the text from a closed dialog comes back
-    happened.value = draft.happened; expected.value = draft.expected; more.value = draft.more;
+    happened.value = draft.happened;
     if (draft.about !== about) { about = draft.about; words(); for (const r of kind.querySelectorAll('input')) r.checked = r.value === about; }
-    for (const i of [happened, expected, more]) i.dispatchEvent(new Event('input'));
+    happened.dispatchEvent(new Event('input'));
   }
-  const keep = () => { reportUi.draft = {happened:happened.value, expected:expected.value, more:more.value, about}; };
-  for (const i of [happened, expected, more]) i.addEventListener('input', keep);
+  const keep = () => { reportUi.draft = {happened:happened.value, about}; };
+  happened.addEventListener('input', keep);
   kind.addEventListener('change', keep);
-  body.append(...[kind, intro,
-    happenedField, expectedField, field('Anything else?', more), ...added.nodes,
-    pictureRow, pictureHint, contentRow,
-    relay ? h('label', {className:'check-label'}, share, ' Send this report to the admin of ', h('strong', {}, relay)) : null,
-    relay ? h('p', {className:'meta', 'data-key':'report-share-hint'}, 'Everything in the report goes along, with the files you added. The admin and the workspaces they choose can read it.') : null].filter(Boolean));  // append writes a null as the word
+  body.append(kind, intro, happenedField, ...added.nodes, include);
   const create = button('Create report', 'primary', async () => {
     reportUi.busy = true;
     create.disabled = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -167,8 +176,7 @@ function reportOpen() {
     body.replaceChildren(h('p', {role:'status'}, sharing ? 'Collecting and sending…' : 'Collecting…'), bar, h('p', {className:'meta'}, 'This page, the ticket, the helper and add-ons'));
     let result = null, failure = 'The report could not be made. Please try again.';
     try {
-      const payload = {ticket:scope.ticket, addon:scope.addon, note:happened.value.trim() || undefined, expected:expected.value.trim() || undefined,
-        more:more.value.trim() || undefined, files:added.count() ? await added.read() : undefined, share:sharing || undefined,
+      const payload = {ticket:scope.ticket, addon:scope.addon, ...reportWords(happened.value), files:added.count() ? await added.read() : undefined, share:sharing || undefined,
         content:content.checked, page:picture.checked && content.checked ? seen : undefined, about};
       const res = await fetch('/api/diag/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(window.DashHelpers.answerText(res.status, await res.text(), failure)) || failure;

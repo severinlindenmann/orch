@@ -325,3 +325,12 @@ a:not(.btn):not(.brand):not(.nav-item){color:var(--brand)}
 .signed-out .toasts{left:16px}.tag-input:has([aria-invalid=true]){border-color:var(--danger)}
 /* programmatic focus targets (h1, result lines) get no ring */
 [tabindex="-1"]:focus{outline:none;box-shadow:none}
+/* P-006 (owner, 28 Nov, option A): master sizes. This portal was a size smaller than the dashboard (text 13 px, page title
+   20 px, top bar 48 px, filled button 32 px). <html data-size="master"> turns the master's sizes on, read from the
+   tokens the server puts before this sheet: text 14 px, page title 28/36, top bar 56 px, a filled button 36 px. It is a
+   switch so that the long lists (P-012, P-016) change first; when every page carries it, the page-scoped sizes at the
+   top of this sheet go. Phone width keeps its own touch sizes. The accent stays one colour per portal: it says which
+   server you are on (kit DESIGN.md, "One accent per place"). The same block is in the relay and the publish portal. */
+:root[data-size=master]{--fs-body:var(--fs-3)}
+:root[data-size=master] h1{font-size:var(--fs-title);line-height:36px;letter-spacing:-.025em}
+@media(min-width:721px){:root[data-size=master] .topbar{min-height:var(--topbar-height)}:root[data-size=master] .btn.primary,:root[data-size=master] .btn.primary.sm{min-height:var(--control-height)}}

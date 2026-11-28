@@ -90,6 +90,10 @@ dialog.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
 .new-ticket-form > .new-ticket-go { border-top: 0; border-radius: 0 0 var(--radius-card) var(--radius-card); padding-top: 0; }
 .new-ticket-form > .new-ticket-go::before { content: ""; border-top: 1px solid var(--border); padding-bottom: 4px; }
 .new-ticket-form > .new-ticket-more { margin-top: var(--s5); border-radius: var(--radius-card); }
+/* W-001 (owner, 28 Nov): beside the Focus panel the page area is under 900 px in a wide window (body[data-live-narrow],
+   set by the shell). The form then takes its narrow layout, as on a small window: one column, the helper as a row of
+   choices, the buttons with whole words. The two blocks below are the same rules, once for the window and once for
+   the page area; the wide layout stands down there (:where adds no weight). */
 @media (max-width: 999px) {
   /* the helper is one row above the buttons: the choices sit side by side */
   .new-ticket-form .new-ticket-helper-list { display: flex; flex-wrap: wrap; border: 0; gap: 8px; }
@@ -103,20 +107,29 @@ dialog.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
   .new-ticket-step-row > .new-ticket-step-files { grid-area: files; }
   .new-ticket-step-row > :last-child { grid-area: remove; }
 }
+body[data-live-narrow] .new-ticket-form .new-ticket-helper-list { display: flex; flex-wrap: wrap; border: 0; gap: 8px; }
+body[data-live-narrow] .new-ticket .new-ticket-form .new-ticket-helper-list label { border: 1px solid var(--border); border-radius: var(--radius); }
+body[data-live-narrow] .new-ticket-form .new-ticket-helper-list .chip { margin-left: 0; }
+body[data-live-narrow] .new-ticket-form .new-ticket-side-title { font-size: 14px; }
+body[data-live-narrow] .new-ticket-step-row { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name files remove" "text text text"; }
+body[data-live-narrow] .new-ticket-step-row > .new-ticket-step-name { grid-area: name; }
+body[data-live-narrow] .new-ticket-step-row > textarea { grid-area: text; }
+body[data-live-narrow] .new-ticket-step-row > .new-ticket-step-files { grid-area: files; }
+body[data-live-narrow] .new-ticket-step-row > :last-child { grid-area: remove; }
 @media (min-width: 1000px) {
-  .new-ticket-form {
+  :where(body:not([data-live-narrow])) .new-ticket-form {
     /* the request spans the helper's row and the next, so Optional follows the helper and the buttons follow the
        request, whichever is taller; leftover height goes to the last row */
     grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto auto 1fr; column-gap: var(--s5);
     grid-template-areas: "main helper" "main more" "go more";
   }
-  .new-ticket-form.no-helper { grid-template-areas: "main more" "main more" "go more"; }
-  .new-ticket-form > .new-ticket-main { grid-area: main; }
-  .new-ticket-form > .new-ticket-go { grid-area: go; align-self: start; }
-  .new-ticket-form > .new-ticket-helper { grid-area: helper; align-self: start; border: 1px solid var(--border); border-radius: var(--radius-card); padding-top: var(--card-padding); }
-  .new-ticket-form > .new-ticket-more { grid-area: more; align-self: start; }
-  .new-ticket-form:not(.no-helper) > .new-ticket-more { margin-top: var(--s5); }
-  .new-ticket-form.no-helper > .new-ticket-more { margin-top: 0; }
-  .new-ticket-buttons { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
-  .new-ticket .new-ticket-buttons > .new-ticket-cancel { grid-column: auto; }
+  :where(body:not([data-live-narrow])) .new-ticket-form.no-helper { grid-template-areas: "main more" "main more" "go more"; }
+  :where(body:not([data-live-narrow])) .new-ticket-form > .new-ticket-main { grid-area: main; }
+  :where(body:not([data-live-narrow])) .new-ticket-form > .new-ticket-go { grid-area: go; align-self: start; }
+  :where(body:not([data-live-narrow])) .new-ticket-form > .new-ticket-helper { grid-area: helper; align-self: start; border: 1px solid var(--border); border-radius: var(--radius-card); padding-top: var(--card-padding); }
+  :where(body:not([data-live-narrow])) .new-ticket-form > .new-ticket-more { grid-area: more; align-self: start; }
+  :where(body:not([data-live-narrow])) .new-ticket-form:not(.no-helper) > .new-ticket-more { margin-top: var(--s5); }
+  :where(body:not([data-live-narrow])) .new-ticket-form.no-helper > .new-ticket-more { margin-top: 0; }
+  :where(body:not([data-live-narrow])) .new-ticket-buttons { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  :where(body:not([data-live-narrow])) .new-ticket .new-ticket-buttons > .new-ticket-cancel { grid-column: auto; }
 }
