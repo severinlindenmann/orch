@@ -185,3 +185,40 @@ def test_one_queued_pull_request_does_not_hide_another(proj, run, new_ticket):
     rows = [r for r in needs.core_rows(proj) if r["ticket"] == tid]
     assert [(r["kind"], r["pull"]["url"]) for r in rows] == [("helper:unmerged", other)]
     assert _cards(proj, tid) == []
+
+
+# FX-04 (owner, 28 Nov): "Stuck" cards for pull requests that are simply waiting to be merged.
+def _green_since(proj, minutes, url=PR):
+    now = time.time()
+    seen = {"state": "OPEN", "green": True, "head": "abc1234", "at": now, "green_since": now - minutes * 60}
+    stuck._write(proj, {"pulls": {url: seen}})
+
+
+def test_fx04_checks_that_only_just_passed_make_no_card_and_no_count(proj, run, new_ticket):
+    tid = _in_review(proj, run, new_ticket)
+    _green_since(proj, 5)
+    assert [r for r in needs.core_rows(proj) if r["ticket"] == tid] == []
+    assert _cards(proj, tid) == []
+    n = _needs(proj)
+    assert tid not in n["tickets"] and n["queue"] == [tid]  # it waits to be merged: one quiet line
+
+
+def test_fx04_the_card_comes_once_the_usual_wait_is_over(proj, run, new_ticket):
+    tid = _in_review(proj, run, new_ticket)
+    _green_since(proj, stuck.UNMERGED_WAIT / 60 + 1)
+    assert [r["kind"] for r in needs.core_rows(proj) if r["ticket"] == tid] == ["helper:unmerged"]
+    n = _needs(proj)
+    assert n["queue"] == [] and [i.get("stopped") for i in n["items"] if i["ticket"] == tid] == ["helper:unmerged"]
+
+
+def test_fx04_an_older_open_pull_request_beside_a_new_one_still_makes_the_card(proj, run, new_ticket):
+    tid = _in_review(proj, run, new_ticket)
+    other = "https://github.com/acme/app/pull/13"
+    tickets.ref_add(proj, tid, other, "agent:x")
+    now = time.time()
+    young = {"state": "OPEN", "green": True, "head": "abc1234", "at": now, "green_since": now - 60}
+    old = {**young, "head": "def5678", "green_since": now - 2 * stuck.UNMERGED_WAIT}
+    stuck._write(proj, {"pulls": {PR: young, other: old}})
+    rows = [r for r in needs.core_rows(proj) if r["ticket"] == tid]
+    assert [(r["kind"], r["pull"]["url"]) for r in rows] == [("helper:unmerged", other)]
+    assert _needs(proj)["queue"] == []
