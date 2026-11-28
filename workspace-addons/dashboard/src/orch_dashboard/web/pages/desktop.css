@@ -9,7 +9,7 @@
   .home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:32px}
   .home-columns .see-all{min-height:0}
   .message-field input,.message-field textarea,.notes-tools input{min-height:36px}
-  .ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}
+  .ticket-page :is(button:not(.switch,.task-check,.chip),summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}  /* O-12: the tick and the evidence chips of a task row keep their own size */
   .ticket-page .input{min-height:36px}
   .live-strip .btn{min-height:32px}
   .settings button,.addon-native button:where(:not(.switch)),.settings-other button:where(:not(.switch)),.settings .sync-chip{min-height:32px}

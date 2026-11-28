@@ -67,7 +67,7 @@ test('O-10: a row says name, tags, kind, size and date; a click, Enter or Space 
 test('O-10: the column heads sort; newest first to begin with, a second click turns the order', () => {
   const c = ctx(), t = {id:'t_one', status:'active'};
   vm.runInContext("artifactData.set('t_one', {at:Date.now(), data:{files:[{name:'b.md', size:30, mtime:'2026-11-14T09:00:00Z'}, {name:'a.md', size:10, mtime:'2026-11-14T11:00:00Z'}, {name:'c.csv', size:20, mtime:'2026-11-14T10:00:00Z'}]}})", c);
-  const names = () => nodes(h('div', {}, c.artifactsPanel(t))).filter(x => x.attrs.className === 'files-row').map(r => r.attrs['data-key'].replace('file-open-artifacts-', ''));
+  const names = () => nodes(h('div', {}, c.artifactsPanel(t))).filter(x => x.attrs.className === 'files-row').map(r => r.attrs['data-key'].replace('file-item-artifacts-', ''));
   const head = key => nodes(h('div', {}, c.artifactsPanel(t))).find(x => x.attrs['data-key'] === 'files-sort-' + key);
   assert.deepEqual(names(), ['a.md', 'c.csv', 'b.md']);
   assert.equal(head('changed').attrs['aria-sort'], 'descending'); assert.equal(head('name').attrs['aria-sort'], 'none');
@@ -87,7 +87,7 @@ test('O-09: a presentation a helper attached is listed on Files and in the Resul
   const c = ctx(), t = {id:'t_one', status:'review', history:[{by:'agent:claude', text:'Attached deck.pptx'}]};
   vm.runInContext("artifactData.set('t_one', {at:Date.now(), data:{files:[{name:'deck.pptx', size:48211, mtime:'2026-11-14T10:20:00Z'}, {name:'slide-1.png', size:900, mtime:'2026-11-14T10:21:00Z'}]}})", c);
   const rows = nodes(h('div', {}, c.artifactsPanel(t))).filter(x => x.attrs.className === 'files-row');
-  const deck = rows.find(r => r.attrs['data-key'] === 'file-open-artifacts-deck.pptx');
+  const deck = rows.find(r => r.attrs['data-key'] === 'file-item-artifacts-deck.pptx');
   assert.ok(deck, 'the original is on the Files tab');
   assert.equal(text(deck.children[1]), 'Presentation');
   assert.deepEqual(nodes(deck).filter(x => x.attrs.className === 'tag').map(text), ['Result']);

@@ -275,3 +275,37 @@ works. No "⋯". In Check, Looks good / Send back stay as a row of their own und
 - `ticket-idle.html`: More ticket actions › Move to Superseded opens the product's "Which ticket replaces it?" dialog
   (Replaced by, Cancel, Move to Superseded). The dialog opens with focus on the choice. Typing a whole key (ORCH-97)
   jumps to that ticket; typing never chooses, Enter or a click does. The long title and the long word wrap in full.
+
+
+## The owner's decisions of 28 Nov (walk-28nov, batch b303, built in the product in the same pull request)
+
+Every ticket page here draws its tabs through `ticket-sections.js`, so the four changes below show on all of them.
+
+- **O-07 (A) Overview is one compact screen.** State and whose turn it is (the header), In short, the result (one file shows
+  itself, the others are rows), the tasks as one line ("2 of 2 tasks done · Open tasks"), the last three events under
+  "Latest" with "Show all N in Activity", and Looks good / Send back under the result. No task list, no write box and no
+  history on the Overview: the history is on Activity only, the chat on Ticket chat only. This reverses the Overview
+  history of ORCH-777.
+- **O-12 (A) one task list.** The compact form (a mark, the title, one grey line of evidence, the state word) lives on the
+  Tasks tab only.
+- **O-10 (B) Files is a list.** One row per file with tags (Result, Evidence for task 2, Added by you), kind, size and
+  date; the column heads sort; a click on a row opens the file viewer. No tiles, no preview pane. It is the master's
+  file list (`.files-mid`, `.files-head`, `.files-row`), the same rows as the Files page.
+- **W-031 (B) Properties: every label above its value** (the master's `.rail-long` row). Nothing folds: no "More", no
+  "Show more". A switch keeps its label beside it.
+
+### ticket-review.html
+
+- **W-030 (B):** the note (Survey results) shows itself; the data file `survey-answers.json` and the presentation are one
+  row each. A code or data file shows itself only when it is the only result.
+- **O-09 (D):** the presentation itself (`survey-deck.pptx`, "Presentation") is a row with Open and Download; no pictures
+  stand in for it.
+- **W-028 (A):** Looks good is the one filled button, under the result; "Your turn: look at the result." in the header
+  jumps to it. (In the product "Open in Live" is outlined in this state.)
+- **W-033 (A):** under the summary one computed line, "Since then: pull request 43 merged on 27 Nov." The summary itself
+  stays as the helper wrote it and the state stays Review.
+- **O-12:** the evidence under the result is one line plus only what is not plainly passed (here the part of "Done
+  when" no task covers); each task's evidence is on the Tasks tab.
+- **W-029** has no page of its own: choosing Done in Actions (or on the state word) on a ticket that is not in Review
+  shows this same Result card first, with "You chose Done. Look at the result first: Looks good finishes the ticket."
+  and the buttons Looks good / Not yet.

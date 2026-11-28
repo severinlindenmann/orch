@@ -811,7 +811,7 @@ function filesHead() {
 }
 function fileListRow(t, f) {
   const tags = fileTags(f), kind = fileKindWord(f), size = Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', when = f.mtime ? localStamp(f.mtime) : '';
-  const row = h('div', {className:'files-row', role:'button', tabindex:'0', 'data-key':'file-open-' + f.kind + '-' + f.name,
+  const row = h('div', {className:'files-row', role:'button', tabindex:'0', 'data-key':'file-item-' + f.kind + '-' + f.name,
     'aria-label':['Open ' + f.title, kind, ...tags.map(x => x[0])].join(', ')},
     h('div', {className:'files-name'}, iconEl(fileIcon(f.name)),
       h('span', {}, f.title, tags.map(([word, title]) => h('span', {className:'tag', title:title || null}, word))),
@@ -1709,20 +1709,32 @@ function stepEvidence(t, task) {
     ran.map(x => h('p', {className:'meta mono'}, 'Ran: ' + clean(x))),
     links.length ? h('div', {className:'task-proofs row'}, links) : null);
 }
-// brief (the Result card, O-12): only the tasks that are not plainly passed keep a row; the list is on the Tasks tab.
+// The evidence in one short line ("3 checks passed", "2 notes"), read beside the tasks line of the Result card.
+function reviewEvidence(t) {
+  const p = t.proof;
+  if (!p || typeof p.line !== 'string' || !p.line) return null;
+  const level = ({ok:'ok', note:'none', warn:'warn', fail:'bad'})[p.level] || 'none';
+  return h('span', {className:'ticket-proof-line', 'data-key':'review-evidence-' + t.id}, h('span', {className:'proof-mark proof-' + level}, {ok:'✓', bad:'×', warn:'!', none:'–'}[level]), ' ', p.line);
+}
+// brief (the Result card, O-07 / O-12): the short line sits beside the tasks line (reviewEvidence); here only what
+// needs a look keeps a row: a failed or changed check, a task with no evidence, a part of Done when no task covers.
+// The evidence of every task is on the Tasks tab.
 function ticketProofLine(t, brief = false) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
   const per = p.per_item && typeof p.per_item === 'object' ? p.per_item : {};
   const level = ({ok:'ok', note:'none', warn:'warn', fail:'bad'})[p.level] || 'none';
   const mark = {ok:'✓', bad:'×', warn:'!', none:'–'}[level];
-  const rows = array(t.checklist).filter(task => !brief || per[task.id] !== 'passed').map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
+  const shown = task => !brief || (!task.wont_do && !['passed', 'note'].includes(per[task.id]));
+  const rows = array(t.checklist).filter(shown).map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
     return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing),
       t.status === 'review' ? stepEvidence(t, task) : null); });
+  const recheck = Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask your helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null;
+  const list = rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “', linkRefs(t, part), '” ', h('span', {className:'meta'}, 'Nothing in the to-do list covers this yet')))) : null;
+  if (brief && !recheck && !list) return null;
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
-    h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
-    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask your helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
-    rows.length || array(p.uncovered).length ? h('ul', {className:'ticket-proof-rows'}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “', linkRefs(t, part), '” ', h('span', {className:'meta'}, 'Nothing in the to-do list covers this yet')))) : null);
+    brief ? null : h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
+    recheck, list);
 }
 
 // Header line: only in review (the card shows it there) and done, only with tasks; never a warning on a finished ticket.
@@ -1876,7 +1888,7 @@ function ticketProgressCounts(t) {
 const tabJump = (t, tab, label, key) => snapshot ? null : ticketButton(label, 'ghost sm', null, {'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':tab, 'data-key':key});
 // O-07 / O-12 (owner, 28 Nov): on the Overview the tasks are one line ("3 of 3 tasks done · Open tasks"), with the task
 // in progress named beside it. The list itself is on the Tasks tab only, so nothing shows twice.
-function overviewTasksLine(t) {
+function overviewTasksLine(t, evidence = null) {
   const list = array(t.checklist);
   if (!list.length) return null;
   const p = window.DashHelpers.progressOf(state?.counts, t), open = p.total - p.wont_do;
@@ -1885,7 +1897,7 @@ function overviewTasksLine(t) {
     h('strong', {}, p.done + ' of ' + open + (open === 1 ? ' task done' : ' tasks done')),
     p.wont_do ? h('span', {className:'meta'}, p.wont_do + ' ' + window.DashHelpers.WONT_DO.toLowerCase()) : null,
     current ? h('span', {className:'meta', 'data-key':'overview-task-now'}, (ticketRunLive(t) ? 'The helper is on: ' : 'In progress: ') + taskTitle(current)) : null,
-    tabJump(t, 'tasks', 'Open tasks', 'overview-open-tasks'));
+    evidence, tabJump(t, 'tasks', 'Open tasks', 'overview-open-tasks'));
 }
 // The helper's browser, live, next to the steps (ORCH-1494): only after a click on its small preview (the address
 // says ?browser=open); side by side when the column has room, else on top of the tasks line (kit .bview-beside).
@@ -1911,7 +1923,7 @@ const RESULT_ROWS = 5;
 function overviewResultFiles(t, preview) {
   const shown = resultShown(t), main = preview ? shown.main : null, rows = main ? shown.rows : shown.all;
   return [main ? ticketResultFrame(t, main.kind, main.file) : null,
-    rows.slice(0, RESULT_ROWS).map(x => ticketFileRow(t, x.kind, x.file)),
+    rows.length ? h('div', {className:'result-rows', 'data-key':'result-rows-' + t.id}, rows.slice(0, RESULT_ROWS).map(x => ticketFileRow(t, x.kind, x.file))) : null,
     rows.length > RESULT_ROWS ? h('p', {className:'meta', 'data-key':'result-more-' + t.id}, '+ ' + (rows.length - RESULT_ROWS) + ' more on the Files tab ', tabJump(t, 'files', 'Open files', 'overview-open-files')) : null];
 }
 // W-033 (owner chose A, 28 Nov): the helper's summary stays as written. Under it one computed line when a linked pull
@@ -1967,7 +1979,7 @@ function ticketReviewCard(t) {
     t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Review the work, then click Looks good.') : null,
     resultFiles(t).length ? overviewResultFiles(t, true) : list.length ? null : h('p', {className:'meta'}, 'No result file and no tasks are attached.'),
     t.done_when ? h('p', {className:'review-check'}, 'Is this what you asked for? “', linkRefs(t, t.done_when), '”') : null,
-    overviewTasksLine(t),
+    list.length ? overviewTasksLine(t, reviewEvidence(t)) : reviewEvidence(t),
     ticketProofLine(t, true),
     snapshot ? null : h('div', {className:'stack', 'data-key':'review-actions-' + t.id}, ticketChangesEditor(t),
       closing ? null : h('p', {className:'meta'}, 'Looks good finishes the ticket. Send back opens a box right here for what should change.')));
