@@ -197,7 +197,8 @@ def test_every_argument_the_card_passes_is_one_ask_takes():
         if isinstance(n, ast.Call) and n.args and ast.unparse(n.args[0]) == "tickets.ask"
     ]
     assert calls, "cli_review no longer calls tickets.ask through _guard: look at _make_card again"
-    takes = set(inspect.signature(tickets.ask).parameters)
+    spec = inspect.getfullargspec(tickets.ask)
+    takes = {*spec.args, *spec.kwonlyargs}
     for c in calls:
         assert {k.arg for k in c.keywords} <= takes
 
