@@ -974,6 +974,13 @@ def run(args) -> int:
         return cmd_simple(args, root, args.verb, args.target[0])
     if cmd == "log":
         return cmd_log(args, root)
+    if cmd == "needs":  # W-054 A: Home hears of a failing service only when work depends on it
+        from . import needs
+
+        rs = needs.rows(_rows(root)[0])
+        return _emit(
+            args, rs, "\n".join(f"{r['title']}: {r['text']}" for r in rs) or "Nothing needs you here."
+        )
     if cmd == "view":
         from .view import build
 
@@ -1042,6 +1049,7 @@ def main(argv=None) -> int:
     s.add_argument("verb", choices=ACT_VERBS)
     s.add_argument("--by")
     p("view")
+    p("needs")
     want_json = "--json" in argv
     try:
         args = ap.parse_args(argv)
