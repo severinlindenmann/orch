@@ -7,32 +7,43 @@
 <details class="nav-group" open><summary class="nav-item" aria-label="Add-ons"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Add-ons</span></summary><nav aria-label="Add-ons"><a class="nav-item" href="../automation/automation.html" aria-label="Automation"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-7z"/></svg><span class="nav-label">Automation</span></a><a class="nav-item" href="../focus/focus-v4d.html" aria-label="Live"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-label">Live</span></a><a class="nav-item" href="../insights/insights.html" aria-label="Insights"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v17h17M8 16v-4m5 4V7m5 9v-6"/></svg><span class="nav-label">Insights</span></a><a class="nav-item" href="../sync/sync.html" aria-label="Backup"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 9a8 8 0 0 0-14-3L3 9m0-5v5h5m-4 6a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/></svg><span class="nav-label">Backup</span></a><a class="nav-item" href="../publish/publish.html" aria-label="Shared"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span class="nav-label">Shared</span></a><a class="nav-item" href="../relay/relay.html" aria-label="Contacts"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/></svg><span class="nav-label">Contacts</span></a></nav></details></div>
 <div class="side-foot person-row"><div class="person-switch"><details class="menu person-menu"><summary class="nav-item" aria-label="You: Severin, signed in. Switch person" title="Severin · Signed in"><span class="avatar sm" aria-hidden="true">S<span class="dot ok" aria-hidden="true"></span></span><span class="nav-label">Severin</span><span class="grow"></span><span class="chev" aria-hidden="true"></span></summary><div class="menu-pop" role="menu"><p class="eyebrow">You are</p><button type="button" class="menu-item"><span class="avatar sm" aria-hidden="true">S</span><span class="truncate">Severin</span><span class="grow"></span><span class="ck" aria-label="You">&#10003;</span></button><button type="button" class="menu-item"><span class="avatar sm" aria-hidden="true">A</span><span class="truncate">Anna</span></button><button type="button" class="menu-item">Add person</button></div></details><span class="sr-only session-state" role="status" data-state="signed-in">Signed in</span></div><button type="button" class="mm-toggle phone-toggle" role="switch" aria-checked="false" aria-label="Send questions to my phone (demo)" title="Phone: off"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></button><nav class="side-settings" aria-label="Settings"><a class="nav-item nav-icon-only" href="../settings/settings.html" aria-label="Settings" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/></svg></a><a class="nav-item nav-icon-only" href="../docs/docs.html" aria-label="Documentation" title="Documentation"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/></svg></a></nav></div></aside><div class="shell-body"><header class="topbar"><span class="meta">Review <span class="badge needs">Draft</span></span><div class="topbar-actions"><a class="btn ghost sm" href="../chat/chat.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Chat</a><a class="btn outline sm" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a></div></header><main id="content" class="page" tabindex="-1" aria-label="Review">
 <div class="page-heading"><div><h1>Review</h1><p>20 things need you. 5 hold up work now.</p></div></div>
+<!-- W-043 (28 Nov): a paused automation is one line on top with Turn on (?paused=1), never a card per ticket -->
+<div class="banner attn" id="review-paused" role="status" hidden><p class="grow"><strong>Automation is paused: Disk almost full: 8 GB free.</strong> Nothing starts by itself. 4 tickets wait for a helper.</p><button class="btn outline sm" type="button">Turn on</button></div>
 <div class="review-layout">
  <div class="stack review-rail">
+ <!-- O-04 / O-05 / O-06 (28 Nov): the page's own list: five compact rows and the count, Next five / All, one row per repeated cause with Open, no Compare; under it the merge line (FX-04) and the Reviewer's one line (W-036). Wide: beside the card; narrow: after it. -->
+ <aside class="card review-side" aria-label="Needs you"><div id="queue" class="review-queue"></div></aside>
  <!-- ORCH-1798: shown only while a switch is on (turned on in Settings > General) --><section class="card" aria-label="Auto Reviewer"><div class="card-h"><h2>Auto Reviewer</h2></div>
-  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with âI review the resultâ on wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
+  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with &ldquo;I review the result&rdquo; on wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
   <div class="card-row"><div class="grow"><h3>Away for the night</h3><p class="meta">Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.</p></div><button type="button" class="switch" role="switch" aria-label="Away for the night" aria-checked="false"></button></div>
   <div class="card-row"><div class="grow"><h3>Nothing closes by itself</h3><p class="meta">The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.</p></div><button type="button" class="switch" role="switch" aria-label="Nothing closes by itself" aria-checked="false"></button></div>
-  <div class="card-row"><p class="meta">Each verdict shows in the ticket&rsquo;s history, and you can undo it under What the Reviewer did on Review.</p></div>
+  <div class="card-row"><p class="meta">Each verdict shows in the ticket&rsquo;s history, and you can undo it on Review under Answered.</p></div>
  </section>
- <aside class="card review-side" aria-label="All cards"><!-- ORCH-1741: results whose pull request waits in the merge queue: one line, no card, not counted --><p class="meta">2 in the merge queue, nothing to do</p><div id="queue" class="review-queue"></div></aside>
- <section class="card" aria-label="What the Reviewer did"><div class="card-h"><h2>What the Reviewer did</h2></div>
+ </div>
+<!-- ORCH-2094: the rail first, then the deck, as the product draws it wide (review-rail / review-main); narrow: the card first -->
+ <div class="review-main stack"><nav class="segmented" aria-label="Show"><button class="btn sm" type="button" data-show="deck" aria-pressed="true">Waiting <span class="meta">20</span></button><button class="btn sm" type="button" data-show="answered" aria-pressed="false">Answered <span class="meta"></span></button></nav>
+ <!-- W-036 / O-04: what the Reviewer did is the first block of Answered (each entry with its reason, Send back and Undo), no longer a column under the list -->
+ <section class="card" id="review-accepted" aria-label="What the Reviewer did" hidden><div class="card-h"><h2>What the Reviewer did</h2></div>
   <div><div class="card-row"><div class="grow"><a href="../ticket/ticket.html">ORCH-74 &middot; Speed up the run tests</a><p class="meta">Auto Reviewer &middot; Accepted</p><p class="meta">code work, all 4 points shown.</p><div class="row"><button class="btn outline sm" type="button">Send back</button><button class="btn ghost sm" type="button">Undo</button></div></div></div></div>
   <div><div class="card-row"><div class="grow"><a href="../ticket/ticket.html">ORCH-73 &middot; Sort the ticket list</a><p class="meta">Away mode &middot; Answered</p><p class="meta">answered q2 = A (By date)</p><div class="row"><button class="btn ghost sm" type="button">Undo</button></div></div></div></div>
   <div><div class="card-row"><div class="grow"><a href="../ticket/ticket.html">ORCH-72 &middot; Home page spacing</a><p class="meta">Auto Reviewer &middot; Sent back to the helper</p><p class="meta">pictures at 1280, 1920 and 390 px wide: no picture says 390 px</p></div></div></div>
   <div><div class="card-row"><div class="grow"><a href="../ticket/ticket.html">ORCH-71 &middot; Fix the date on the Home page</a><p class="meta">Reviewer &middot; Accepted</p><p class="meta">pull request #12 merged, 17 checks green, 1 of 1 tasks with evidence, small fix (1 file, 24 lines).</p><div><button class="btn outline sm" type="button">Send back</button></div></div></div></div>
   <div><div class="card-row"><div class="grow"><a href="../ticket/ticket.html">ORCH-68 &middot; Wrong count in the Sync line</a><p class="meta">Reviewer &middot; Accepted</p><p class="meta">pull request #9 merged, 15 checks green, 2 of 2 tasks with evidence, small fix (2 files, 31 lines).</p><p class="meta">Undone</p></div></div></div>
  </section>
- </div>
-<!-- ORCH-2094: the rail first, then the deck, as the product draws it (review-rail / review-main) -->
- <div class="review-main stack"><nav class="segmented" aria-label="Show"><button class="btn sm" type="button" data-show="deck" aria-pressed="true">Waiting <span class="meta">20</span></button><button class="btn sm" type="button" data-show="answered" aria-pressed="false">Answered <span class="meta"></span></button></nav>
+ <!-- W-043: questions that closed by themselves today because their cause is gone: one line each -->
+ <section class="card" id="review-closed" aria-label="Closed without you" hidden><div class="card-h"><h2>Closed without you</h2></div>
+  <div class="card-row"><div class="grow"><a href="../ticket/ticket.html">DT-58 &middot; Weekly sales mail</a><p class="meta">The helper could not start: Automation is paused in this workspace.</p><p class="meta">Closed by itself &middot; Automation runs again, so this needs no answer. The start is tried again.</p></div></div>
+ </section>
+ <section id="deck" aria-label="Review deck"></section>
+ <section id="deck" aria-label="Review deck"></section>
  <!-- ORCH-1616: what the Review badge counts but has no card (a helper asking on its screen, a question without a card) is listed (?screen=1) -->
  <section class="card" id="review-screen" aria-label="Also waiting for you" hidden><div class="card-h"><h2>Also waiting for you</h2></div>
   <div class="card-row"><div class="grow"><strong><span class="key">ORCH-238</span> Add files and notes to a ticket</strong><p class="meta">Waits for your answer.</p></div><button class="btn outline sm" type="button">Answer</button></div>
   <!-- ORCH-1643: a question with two or three choices is answered in its row: the Focus pane's question card -->
   <div class="card-row"><div class="grow"><strong><span class="key">ORCH-214</span> New price list for the shop</strong><div class="live-ask"><p class="live-ask-q">Show prices with VAT or without VAT in the shop?</p><p class="meta live-ask-why">The helper suggests “With VAT”: most of the shop's customers are private people.</p><div class="live-ask-opts"><button class="btn outline sm suggested" type="button">With VAT</button><button class="btn outline sm" type="button">Without VAT</button><button class="btn outline sm" type="button">Both</button><button class="btn ghost sm" type="button">Write an answer</button></div></div></div></div>
  </section>
- <section id="deck" aria-label="Review deck"></section>
+ <!-- narrow (a phone, beside the Focus panel): the list comes here, after the card, in the same page scroll -->
+ <section class="card" id="review-next" aria-label="Needs you" hidden></section>
  <section id="answered" class="stack" aria-label="Answered" hidden></section></div>
 </div>
 </main></div></div>
@@ -40,8 +51,42 @@
 /* ?one=1 (ORCH-1847): one plain question alone, answered in one tap; no count, bar, "1 of 1" or All cards list.
    ?empty=1 (ORCH-2094): nothing waits: the master empty state with one next step (See answers). */
 const items=new URLSearchParams(location.search).has('one')?[window.SWIPE_ONE]:window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
-/* the All cards list is the kit's own (deck.drawList), as on the product page; one card leaves it empty and the rail hides */
-const drawSide=()=>{if(deck)deck.drawList(q)};
+/* The waiting list as the product page draws it (pages/review.js reviewListNodes, 28 Nov): five compact rows and the count,
+   Next five / All, cards that wait for one cause as one row with Open, no Compare; then the merge line and the Reviewer's line. */
+let listFrom=0,listAll=false,listCur='';const listOpen=new Set(),CAUSE={'helper:unmerged':'Pull request not merged'};
+const mk=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n};
+const causeOf=it=>it.cause&&CAUSE[it.cause]?{key:'cause:'+it.cause,label:CAUSE[it.cause]}:{key:'title:'+it.kind+':'+String(it.title).toLowerCase(),label:it.title};
+function drawSide(follow){if(!deck)return;const wait=deck.items.map((it,i)=>({it,i,now:i===deck.index,c:causeOf(it)})).filter(x=>!deck.answers[x.it.id]),n=new Map(),rows=[],gs=new Map();
+ wait.forEach(x=>n.set(x.c.key,(n.get(x.c.key)||0)+1));
+ wait.forEach(x=>{if(n.get(x.c.key)<2){rows.push(x);return}let g=gs.get(x.c.key);if(!g){g={group:x.c.key,label:x.c.label,rows:[],now:false};gs.set(x.c.key,g);rows.push(g)}g.rows.push(x);g.now=g.now||x.now});
+ const row=(x,sub)=>{const w=mk('div','review-queue-item'+(sub?' sub':'')),b=mk('button','btn ghost review-queue-row'+(x.now?' is-now':''));w.setAttribute('role','listitem');b.type='button';b.title=x.it.title;if(x.now)b.setAttribute('aria-current','true');
+  b.append(mk('span','review-queue-title',x.it.title));if(x.it.ticket)b.append(mk('span','meta',x.it.ticket));b.onclick=()=>deck.jump(x.i);w.append(b);return w};
+ const list=mk('div','review-group');list.setAttribute('role','list');list.setAttribute('aria-label','Waiting');
+ /* five rows at a time; the five shown are the ones that hold the card on screen when it changes */
+ const at=rows.findIndex(r=>r.now),cur=at>=0?String((rows[at].group?rows[at].rows.find(x=>x.now):rows[at]).it.id):'';
+ if(follow!==false){if(cur&&cur!==listCur&&!listAll)listFrom=Math.floor(at/5)*5;listCur=cur}
+ if(listFrom>=rows.length)listFrom=Math.max(0,Math.floor((rows.length-1)/5)*5);if(rows.length<=5)listAll=false;
+ const from=listAll?0:listFrom,shownRows=listAll?rows:rows.slice(from,from+5);
+ shownRows.forEach(r=>{if(!r.group){list.append(row(r));return}const open=listOpen.has(r.group),w=mk('div','review-queue-item'),b=mk('button','btn ghost review-queue-row'+(r.now&&!open?' is-now':''));w.setAttribute('role','listitem');b.type='button';b.title=r.label;b.setAttribute('aria-expanded',String(open));
+  b.append(mk('span','review-queue-title',r.rows.length+' · '+r.label),mk('span','meta',open?'Close':'Open'));b.onclick=()=>{open?listOpen.delete(r.group):listOpen.add(r.group);drawSide(false)};w.append(b);list.append(w);if(open)r.rows.forEach(x=>list.append(row(x,true)))});
+ const head=mk('div','review-list-head');head.append(mk('h2','review-list-title','Needs you'),mk('span','review-group-count',wait.length+' waiting'));
+ const body=mk('div','review-list-groups'),step=(word,go,cls)=>{const b=mk('button','btn '+cls+' sm',word);b.type='button';b.onclick=()=>{go();drawSide(false)};return b},foot=mk('div','card-row');
+ if(!listAll&&from+5<rows.length)foot.append(step('Next five',()=>{listFrom=from+5},'outline'));
+ if(listAll?rows.length>5:from>0)foot.append(step('First five',()=>{listFrom=0;listAll=false},'ghost'));
+ if(!listAll&&rows.length>5){foot.append(step('All '+wait.length,()=>{listAll=true},'ghost'),mk('span','meta','Rows '+(from+1)+' to '+(from+shownRows.length)+' of '+rows.length))}
+ /* FX-04: in the queue or only just passed its checks: no card, one quiet line */
+ const look=mk('button','btn ghost sm','Look');look.type='button';look.onclick=()=>document.querySelector('[data-show="answered"]').click();
+ const merge=mk('div','card-row'),rev=mk('div','card-row');merge.append(mk('p','meta grow','2 wait to be merged, nothing to do'));rev.append(mk('p','meta grow','The Reviewer accepted 3, sent back 1, answered 1 for you today.'),look);
+ body.append(list);const kids=[head,...(wait.length>1?[body]:[]),...(foot.childElementCount?[foot]:[]),merge,rev];
+ /* wide: the aside beside the card; narrow (a phone; ?narrow=1 stands for the page beside the Focus panel): a card after the deck */
+ const narrow=matchMedia('(max-width:720px)').matches||new URLSearchParams(location.search).has('narrow'),next=document.getElementById('review-next'),lay=document.querySelector('.review-layout'),ae=document.activeElement,held=ae&&(q.contains(ae)||next.contains(ae))?ae.textContent:'';
+ if(lay.querySelector('.review-side'))lay.querySelector('.review-side').hidden=narrow;next.hidden=!narrow||document.getElementById('deck').hidden;
+ if(narrow&&lay.firstElementChild.classList.contains('review-rail'))lay.append(lay.firstElementChild);/* one column: the card first, as the product */
+ (narrow?q:next).replaceChildren();(narrow?next:q).replaceChildren(...kids);
+ if(held)[...(narrow?next:q).querySelectorAll('button')].find(b=>b.textContent===held)?.focus({preventScroll:true})}
+if(new URLSearchParams(location.search).has('paused'))document.getElementById('review-paused').hidden=false;
+if(new URLSearchParams(location.search).has('narrow'))document.body.dataset.liveNarrow='';/* the shell's mark for a page area under 900 px beside the Focus panel */
+addEventListener('resize',()=>drawSide(false));
 /* ?empty=1 (ORCH-2024) and ?one=1 (ORCH-2113): as the product, the rail holds only the empty All cards list, so the page is
    one column, the Waiting / Answered switch lines up with the heading and the empty state or the one card sits in the
    card's column under it (no empty left column) */
@@ -83,7 +128,9 @@ const ans=document.getElementById('answered'),fu=(e,r)=>'assets/'+String(r).spli
  {id:'a2',ticket:'DT-51',ticket_key:'DT-51',ticket_title:'Weekly report for the café',text:'Is the weekly report ready to send to the team? It covers sales, the survey and the new opening hours.',by:'Severin',via:'phone',at:ago(3),card:{kind:'check',preview:{type:'doc',heading:'What was done',paras:['Read all 48 survey answers from 1 to 12 November and grouped them by topic. 40 praise the friendly team; 29 ask for Sunday opening.','Wrote the weekly report with sales, the survey and a proposal to try Sunday 9 to 13 for four weeks.','Smaller points: waiting time on Saturday, oat milk, a second card reader.']}},decision:{action:'approve',summary:'Looks good'}},
  {id:'a3',ticket:'DT-52',ticket_key:'DT-52',ticket_title:'Export button name',text:'Which name for the export button?',by:'Severin',via:'dashboard',at:ago(26),card:{kind:'choice',preview:{type:'options',options:[{id:'Export',title:'Export'},{id:'Download',title:'Download'}]}},decision:{action:'use',picked:'Download'}}
 ].forEach(e=>ans.append(UI.answerRecord(e,{fileUrl:fu,ticketHref:tk})));
-document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{const v=b.dataset.show;document.querySelectorAll('[data-show]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));document.getElementById('deck').hidden=v!=='deck';ans.hidden=v!=='answered'});
+document.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{const v=b.dataset.show;document.querySelectorAll('[data-show]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));document.getElementById('deck').hidden=v!=='deck';ans.hidden=v!=='answered';
+ /* W-036: Answered starts with what the Reviewer did, then what closed by itself (W-043), then your own answers */
+ ['review-accepted','review-closed'].forEach(id=>{document.getElementById(id).hidden=v!=='answered'});attn.hidden=v!=='deck'||!attn.childElementCount;drawSide()});
 /* ORCH-1804 draft (?ticket=<id>): "Open ticket" on a card shows its ticket beside the deck, in place of All cards. The product
    draws the ticket page itself (dashboard detail()) in the panel; the mockup shows its top lines. It follows the card on screen. */
 const tp=new URLSearchParams(location.search).get('ticket'),lay=document.querySelector('.review-layout');let tpanel=null;
@@ -110,7 +157,9 @@ function drawTicket(){if(!tp||!deck)return;const it=deck.items[deck.index]||deck
  const hand=e('section','card pad stack');hand.append(e('h3',null,'Handover'),e('p',null,it.why||'The helper finished the work and waits for your check.'));
  const acts=e('div','row'),ok=e('button','btn primary sm','Looks good'),back=e('button','btn outline sm','Send back');ok.type=back.type='button';acts.append(ok,back);
  b.append(top,e('h3',null,it.ticketTitle||it.title),acts,steps,hand,e('p','meta','Updated 10 min ago'));tpanel.replaceChildren(head,b)}
-const sub=document.querySelector('.page-heading p');sub.textContent=!items.length?'Nothing waits for you.':items.length===1?'1 thing waits on you.':items.length+' things wait on you, most urgent first.';
+/* W-003: the heading reads the menu badge's number (one number everywhere) */
+const sub=document.querySelector('.page-heading p'),held=items.filter(it=>it.lane==='holds_up').length;sub.textContent=!items.length?'Nothing waits for you.':items.length===1?'1 thing needs you.':items.length+' things need you.'+(held?' '+held+(held===1?' holds':' hold')+' up work now.':'');
+document.querySelectorAll('.nav-item[aria-current] .count,.tabbar [aria-current] .count').forEach(n=>{n.textContent=items.length;n.setAttribute('aria-label',items.length+' need you')});
 {const n=document.querySelector('[data-show="deck"] .meta');if(items.length>1)n.textContent=items.length;else n.remove()}
 if(!items.length){document.getElementById('deck').replaceChildren(UI.pageEmpty({title:"You're up to date",text:'New cards appear here when a helper needs you.',step:{label:'See answers',onClick:()=>document.querySelector('[data-show="answered"]').click()}}))}
 drawTicket();drawSide();document.getElementById('deck').focus();

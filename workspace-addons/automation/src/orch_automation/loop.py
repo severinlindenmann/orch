@@ -66,6 +66,8 @@ PAUSE_OVER = "Automation runs again, so this needs no answer. The start is tried
 def paused_cause(text) -> bool:
     """The words say a start did not happen because automation is paused (`orch pause`)."""
     return isinstance(text, str) and PAUSED_WORDS in text.lower()
+
+
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
 SKILL_REVIEW_EVERY = 3600  # seconds between two looks at the skills' review-by dates (core, no AI)
@@ -375,13 +377,20 @@ class Scheduler:
         started = []
         for t in read_tickets(self.root):
             for q in t.get("questions") or []:
-                if q.get("kind") not in KINDS or q.get("answer") is not None or not paused_cause(q.get("text")):
+                if (
+                    q.get("kind") not in KINDS
+                    or q.get("answer") is not None
+                    or not paused_cause(q.get("text"))
+                ):
                     continue
-                if orchcli.call(self.root, "ask", t["id"], "--take-back", str(q.get("id")), PAUSE_OVER) is None:
+                if (
+                    orchcli.call(self.root, "ask", t["id"], "--take-back", str(q.get("id")), PAUSE_OVER)
+                    is None
+                ):
                     continue  # not closed: look again next pass
-                if t["status"] in OPEN and t["id"] not in started and self.may_start(t):
-                    if self.start_due(t["id"], "automation runs again", now) == "started":
-                        started.append(t["id"])
+                may = t["status"] in OPEN and t["id"] not in started and self.may_start(t)
+                if may and self.start_due(t["id"], "automation runs again", now) == "started":
+                    started.append(t["id"])
         return started
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:

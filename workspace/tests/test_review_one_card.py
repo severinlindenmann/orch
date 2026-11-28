@@ -208,7 +208,8 @@ def test_fx04_the_card_comes_once_the_usual_wait_is_over(proj, run, new_ticket):
     _green_since(proj, stuck.UNMERGED_WAIT / 60 + 1)
     assert [r["kind"] for r in needs.core_rows(proj) if r["ticket"] == tid] == ["helper:unmerged"]
     n = _needs(proj)
-    assert n["queue"] == [] and [i.get("stopped") for i in n["items"] if i["ticket"] == tid] == ["helper:unmerged"]
+    assert n["queue"] == []
+    assert [i.get("stopped") for i in n["items"] if i["ticket"] == tid] == ["helper:unmerged"]
 
 
 def test_fx04_an_older_open_pull_request_beside_a_new_one_still_makes_the_card(proj, run, new_ticket):

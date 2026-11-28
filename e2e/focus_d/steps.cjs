@@ -1067,7 +1067,7 @@ async function staysOpen(page, dash, width) {
     const line = /(\d+) things? (?:needs?|waits?)/.exec(  // ORCH-2316 (R2 A): "N things need you."
       document.querySelector('main [data-key="heading"]')?.innerText || '');
     const extra = document.querySelectorAll('[data-key="review-extra"] .card-row').length;
-    const cards = document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length;
+    const cards = Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0);  // O-05: every waiting card, not only the five rows shown
     return { badge: Number(badge?.textContent || 0), line: line ? Number(line[1]) : 0, listed: extra + cards };
   });
   if (!(nums.badge === nums.line && nums.line === nums.listed)) throw new Error(`Review badge ${nums.badge}, heading ${nums.line}, listed ${nums.listed}: they must agree`);

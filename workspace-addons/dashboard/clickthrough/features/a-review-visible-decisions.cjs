@@ -36,6 +36,7 @@ module.exports = {
     await card.waitFor();
     // R6 A (ORCH-2173): a result card is titled with the helper's first summary sentence, the ticket's name is not repeated
     if (!(await card.innerText()).includes('Most customers like our staff.')) {  // the first load may still show the first card
+      if (await page.locator('.review-side [data-review-more="all"]').count()) await page.locator('.review-side [data-review-more="all"]').click();  // O-05: five rows at a time
       await page.locator('.review-side').getByText('Most customers like our staff.').first().click();
       await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Most customers like our staff.'}).first().waitFor();
     }

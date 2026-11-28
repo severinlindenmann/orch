@@ -32,6 +32,9 @@ module.exports = {
     must(await checked('auto'), 'Check finished work turned on in Settings is not on in the Review card');
     orchAsPerson('review', 'tend');
     await reload();
+    // W-036 (28 Nov): what the Reviewer did is the first block of Answered; the list's line "… · Look" leads there
+    const answered = async () => { await page.locator('[data-review-nav] button[data-show="answered"]').click(); };
+    await page.locator('[data-review-look]').first().click();
     const row = page.locator(`[data-key^="review-accepted-${tid}"]`).first();
     await row.waitFor();
     must((await row.innerText()).includes('Auto Reviewer · Accepted'), 'the accept is not marked as the Auto Reviewer\'s');
@@ -39,6 +42,7 @@ module.exports = {
     await reload();
     const shown = JSON.parse(orchAsPerson('ticket', 'show', tid, '--json'));
     must(shown.status === 'review', 'the ticket is not back in Review after Undo');
+    await answered();
     must((await page.locator(`[data-key^="review-accepted-${tid}"]`).first().innerText()).includes('Undone'),
       'the row does not say Undone after a reload');
 

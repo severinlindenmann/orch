@@ -34,7 +34,8 @@
           "type": "object", "required": ["url", "head"],
           "properties": {
             "url": { "type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}$" },
-            "head": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The commit whose checks passed: a Merge merges only this one." }
+            "head": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The commit whose checks passed: a Merge merges only this one." },
+            "checked_at": { "$ref": "#/$defs/time", "description": "Optional (28 Nov 2026): when GitHub was last asked about this pull request, so a page can say how fresh \"checks passed\" is. Older readers ignore it." }
           },
           "description": "Core row helper:unmerged (id core:unmerged:<ticket id>): the ticket is in Review, this pull request is open with every check passed and no helper works on it. A person merges it with `orch ref merge <ticket> <url> --head <head>`, or starts the helper again. `helper` says whether a helper sits on the ticket: none or idle."
         },

@@ -174,7 +174,8 @@ def _ready(seen) -> bool:
 def _young(seen, now: float) -> bool:
     """Its checks passed less than UNMERGED_WAIT ago (the time is known): it still waits to be merged."""
     since = seen.get("green_since") if isinstance(seen, dict) else None
-    return isinstance(since, (int, float)) and not isinstance(since, bool) and 0 <= now - since < UNMERGED_WAIT
+    known = isinstance(since, (int, float)) and not isinstance(since, bool)
+    return known and 0 <= now - since < UNMERGED_WAIT
 
 
 def merging_ids(
@@ -235,7 +236,8 @@ def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
                 "tone": "needs-you",
                 "since": _iso(float(seen.get("green_since") or seen.get("at") or now)),
                 "cli": f"orch run start {key}",
-                "pull": {"url": url, "head": seen["head"]},
+                # W-040: when GitHub was last asked (the card says how fresh its "checks passed" is)
+                "pull": {"url": url, "head": seen["head"], "checked_at": _iso(float(seen.get("at") or now))},
                 "helper": helper,
             }
         )
