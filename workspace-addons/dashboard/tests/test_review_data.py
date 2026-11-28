@@ -61,3 +61,17 @@ def test_a_snapshot_carries_no_review(ws, tmp_path):
 def test_review_carries_what_the_reviewer_accepted(ws, tmp_path):
     orch = fake(tmp_path, {"workspace": "w", "cards": []}, [], accepted=[ACC, "junk"])
     assert load_review(ws, orch)["accepted"] == [ACC]
+
+
+def test_w043_a_paused_automation_is_in_the_state_with_its_reason(ws, tmp_path):
+    from orch import brake
+    from orch_dashboard.data import load_paused
+
+    assert load_paused(ws) is None
+    brake.pause(ws, "human:s", "Disk almost full: 8 GB free")
+    assert load_paused(ws) == {"reason": "Disk almost full: 8 GB free"}
+    orch = fake(tmp_path, {"workspace": "w", "cards": []}, [])
+    assert load_state(ws, orch_bin=orch, with_settings=True)["paused"] == {"reason": "Disk almost full: 8 GB free"}
+    assert load_state(ws, orch_bin=orch)["paused"] is None  # a shared copy never says it
+    brake.resume(ws)
+    assert load_paused(ws) is None

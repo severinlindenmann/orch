@@ -697,6 +697,12 @@ def _reviewer_mode_set(a):
     return ["config", "set", "workflow.reviewer_mode", "propose" if a["on"] else "accept"], [], []
 
 
+def _automation_resume(a):
+    """Review > "Automation is paused" > Turn on (W-043): `orch resume`; a plain click, nothing typed."""
+    _only(a, ())
+    return ["resume"], [], []
+
+
 def _review_undo(a):
     """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
     _only(a, ("ticket", "question"))
@@ -1592,6 +1598,7 @@ OPS = {
     "auto_reviewer.set": _auto_reviewer_set,
     "reviewer_mode.set": _reviewer_mode_set,
     "away.set": _away_set,
+    "automation.resume": _automation_resume,
     "review.undo": _review_undo,
     "live.set": _live_set,
     "diag.set": _diag_set,
