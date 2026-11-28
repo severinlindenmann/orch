@@ -263,10 +263,10 @@ test('same numbers: every page shows the same count, date and state for the same
     // ---- ORCH-476: the ticket page of the working helper: its progress line against its task rows and the words
     await visit('#ticket/' + state.tickets.find(t => t.key === 'PIL-2').id);
     const tasksPage = await page.evaluate(() => {
-      const card = document.querySelector('[data-key="progress"]');
-      // a task row ends with its word; the task the helper is on is its own row ("Your helper is working on this task")
-      const words = [...(card ? card.querySelectorAll('ol.task-list > li') : [])].map(li => li.classList.contains('current-task') ? 'Working' : (li.querySelector(':scope > .meta')?.innerText || '').trim());
-      return {line: card?.querySelector('.section-head .meta')?.innerText.trim() || '', words, skipped: /skipped/i.test(document.querySelector('main').innerText)};
+      // O-07 / O-12 (owner, 28 Nov): the Overview says the tasks in one line; the rows are on the Tasks tab (in the page, not shown)
+      const line = document.querySelector('[data-key^="overview-tasks-"]');
+      const words = [...document.querySelectorAll('ol.tasks-list > li.task-row')].map(li => (li.querySelector(':scope > .task-word')?.textContent || '').trim());
+      return {line: [...(line ? line.querySelectorAll(':scope > strong, :scope > .meta:not([data-key])') : [])].map(n => n.textContent.trim()).join(' · '), words, skipped: /skipped/i.test(document.querySelector('main').innerText)};
     });
     await page.screenshot({path: path.join(OUT, 'ticket-PIL-2-tasks.png')});
     // tabbar (phone bottom bar) is checked at 390 below
@@ -341,7 +341,8 @@ test('same numbers: every page shows the same count, date and state for the same
     else if (!row2.meta.startsWith(`Step ${step.n} of ${step.of}`)) problems.push(`Helpers: PIL-2 says "${row2.meta}", the core says Step ${step.n} of ${step.of}`);
     if (home.helperRows.some(r => r.title.startsWith('PIL-80'))) problems.push('Helpers: PIL-80 is listed as a helper but no process runs');
     if (int(home.helperSum) !== home.helperRows.length || home.helperRows.length !== state.counts.running) problems.push(`Helpers: the summary says "${home.helperSum}", ${home.helperRows.length} rows, the core counts ${state.counts.running} running`);
-    const want = [prog.done && prog.done + ' done', prog.wont_do && prog.wont_do + " won't do", prog.doing && prog.doing + ' in progress', prog.todo && prog.todo + ' to do'].filter(Boolean).join(' · ');
+    const openTasks = prog.done + prog.doing + prog.todo;
+    const want = [prog.done + ' of ' + openTasks + (openTasks === 1 ? ' task done' : ' tasks done'), prog.wont_do && prog.wont_do + " won't do"].filter(Boolean).join(' · ');
     if (tasksPage.line !== want) problems.push(`ticket page PIL-2: progress says "${tasksPage.line}", the core says "${want}"`);
     const byWord = w => tasksPage.words.filter(x => x === w).length;
     if (byWord('Done') !== prog.done || byWord("Won't do") !== prog.wont_do || byWord('Working') !== prog.doing) problems.push(`ticket page PIL-2: task rows ${JSON.stringify(tasksPage.words)} do not match its progress "${tasksPage.line}"`);

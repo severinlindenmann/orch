@@ -713,18 +713,12 @@ async function widgetsTicket(page, dash, width) {
   await extraShot(page, 'fd-21b-chat', width);
   // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
   await paneMin(page, `#live-dock .live-pane[data-session="${WIDGET_ID}"]`);
-  // 3. the ticket page: every kind, the same overlay
+  // 3. the ticket page (O-07, owner 28 Nov): the Overview lists the result files as rows, one per file, not as widgets
   await page.evaluate(id => { location.hash = '#ticket/' + id; }, WIDGET_ID);
-  const host = `[data-key="ticket-results-${WIDGET_ID}"]`;
-  await page.waitForFunction(h => { const el = document.querySelector(h); return el && el.querySelectorAll('[data-type]').length >= 16 && !el.querySelector('[data-state="loading"]'); }, host, { timeout: 15000 });
-  const onPage = await page.$$eval(`${host} [data-type]`, els => [...new Set(els.map(el => el.dataset.type))]);
-  const miss = WIDGET_KINDS.filter(k => !onPage.includes(k));
-  if (miss.length) throw new Error('the ticket page misses the widgets: ' + miss.join(', '));
-  const broken = await page.$$eval(`${host} .result[data-state="error"]`, els => els.map(el => el.querySelector('.result-name')?.textContent));
-  if (broken.length) throw new Error('these results could not be read: ' + broken.join(', '));
-  if ((await page.textContent(`[data-key="results-widgets"] h2`)).trim() !== 'Results') throw new Error('the card is not called Results');
-  await overlayRound(page, `${host} .result[data-type="chart"] .result-open`, 15);
-  await page.locator(host).scrollIntoViewIfNeeded();
+  const rows = `[data-key="ticket-page-${WIDGET_ID}"] #ticket-panel-overview .file-row`;
+  await page.waitForSelector(rows, { timeout: 15000 });
+  if (await page.locator(`[data-key="ticket-results-${WIDGET_ID}"]`).count()) throw new Error('the ticket Overview still draws the result widgets');
+  await page.locator(rows).first().scrollIntoViewIfNeeded();
   await noSideways(page);
 }
 

@@ -97,7 +97,7 @@ test('Files: All / Helper / You with counts when both kinds exist, and the filte
   assert.equal(byKey(tree, 'files-who-All').attrs['aria-pressed'], 'true');
   byKey(tree, 'files-who-You').onclick();
   tree = nodes(ctx.detail(t));
-  const tiles = nodes(tree.find(n => n.attrs.id === 'ticket-panel-files')).filter(n => n.attrs.className === 'file-tile');
+  const tiles = nodes(tree.find(n => n.attrs.id === 'ticket-panel-files')).filter(n => n.attrs.className === 'files-row');
   assert.equal(tiles.length, 1);
   assert.equal(byKey(tree, 'files-who-You').attrs['aria-pressed'], 'true');
 });
@@ -108,7 +108,7 @@ test('Files: one kind only needs no filter and shows every file, whatever was pi
   vm.runInContext("filesUI.who = 'You'", ctx);
   const tree = nodes(ctx.detail(t));
   assert.equal(byKey(tree, 'files-who'), undefined);
-  assert.equal(nodes(tree.find(n => n.attrs.id === 'ticket-panel-files')).filter(n => n.attrs.className === 'file-tile').length, 2);
+  assert.equal(nodes(tree.find(n => n.attrs.id === 'ticket-panel-files')).filter(n => n.attrs.className === 'files-row').length, 2);
 });
 
 test('Activity: the master segmented filter with counts, and a Phone tag on what came from the phone', () => {

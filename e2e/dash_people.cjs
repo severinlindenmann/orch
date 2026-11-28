@@ -49,15 +49,16 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
     out.steps.push('Settings > People');
     await pictures('settings');
 
-    await p.goto(base + '/#ticket/' + tid);
+    // O-07 (owner, 28 Nov): the whole history is on the Activity tab
+    await p.goto(base + '/#ticket/' + tid + '?tab=activity');
     await p.getByText('Book the table at Rossi', { exact: false }).first().waitFor({ timeout: T });
     await p.waitForTimeout(800);
     const text = await p.locator('body').innerText();
     // each name on its own line: Max on the answer to the card, Lea on the line her text made
-    const answer = await p.locator('[data-key="history-answer-q1"]').innerText();
-    check(/Answered · Max · on the phone/.test(answer), `the answer does not name Max: ${answer}`);
-    const made = await p.locator('.history-event').filter({ hasText: 'Ticket created' }).first().innerText();
-    check(/^Lea · /.test(made.trim()), `the line Lea's text made does not name her: ${made}`);
+    const answer = await p.locator('#ticket-panel-activity .ticket-event').filter({ hasText: 'Answered a question' }).first().innerText();
+    check(/Max · Answered a question/.test(answer), `the answer does not name Max: ${answer}`);
+    const made = await p.locator('#ticket-panel-activity .ticket-event').filter({ hasText: 'Ticket created' }).first().innerText();
+    check(/Lea · Ticket created/.test(made), `the line Lea's text made does not name her: ${made}`);
     check(!/pr_[a-z0-9]{10}/.test(text), 'the ticket shows a person id instead of a name');
     out.steps.push('ticket');
     await pictures('ticket');

@@ -32,8 +32,8 @@ module.exports = {
     const body = await seen(['Choose the paper', 'Send to the printer', 'Pick them up']);
     must(['Choose the paper', 'Send to the printer', 'Pick them up'].every(s => body.includes(s)), 'added steps are missing after a reload');
 
-    const row = name => page.locator('.ticket-task-row', { hasText: name }).first();
-    const more = name => row(name).getByRole('button', { name: 'More' });
+    const row = name => page.locator('.tasks-list > .task-row', { hasText: name }).first();  // O-12: the one compact task list
+    const more = name => row(name).getByRole('button', { name: /^More for / });
 
     // rename
     await more('Choose the paper').click();
@@ -50,7 +50,7 @@ module.exports = {
     await act('check.move', () => row('Pick them up').getByRole('button', { name: 'Move up' }).click());
     await reload();
     await tasksTab();
-    const order = (await page.locator('.ticket-task-row h3').allInnerTexts()).map(s => s.trim());
+    const order = (await page.locator('.tasks-list > .task-row .task-title').allInnerTexts()).map(s => s.trim());
     must(order.indexOf('Pick them up') < order.indexOf('Send to the printer') && order.indexOf('Pick them up') >= 0, 'the moved step is not above the other one after a reload: ' + order.join(' | '));
 
     // tick it

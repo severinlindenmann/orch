@@ -188,3 +188,37 @@ def test_the_listing_drops_rows_it_cannot_trust(art, monkeypatch):
             {"name": "ohne Zeit.txt", "size": 1, "mtime": ""},
         ],
     }
+
+
+def _pptx() -> bytes:
+    """A small real PowerPoint container (a zip with the parts a .pptx has), not text with a .pptx name."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", b'<?xml version="1.0"?><Types/>')
+        z.writestr("ppt/presentation.xml", b"<p:presentation/>")
+        z.writestr("ppt/slides/slide1.xml", bytes(range(256)) * 40)
+    return buf.getvalue()
+
+
+def test_a_presentation_is_listed_and_downloads_as_the_same_bytes(art, monkeypatch):
+    """O-09 (ORCH-2437): the original a helper put on the ticket (`orch ticket attach --name deck.pptx`,
+    workspace/tests/test_ticket_attach.py) reaches the Files tab and the Result card as itself: it is in the
+    list, Download hands out the stored bytes unchanged under its own name, and nothing opens or converts it."""
+    root, d = art
+    deck = _pptx()
+    (d / "Quartal März.pptx").write_bytes(deck)
+    monkeypatch.setattr(
+        tf,
+        "run_orch",
+        lambda *a, **k: [{"name": "Quartal März.pptx", "size": len(deck), "mtime": "2026-11-28T10:00:00Z"}],
+    )
+    assert tf.listing(root, None, TID)["files"] == [
+        {"name": "Quartal März.pptx", "size": len(deck), "mtime": "2026-11-28T10:00:00Z"}
+    ]
+    code, body, ctype, extra = tf.read_file(root, TID, "artifacts", "Quartal März.pptx", download=True)
+    assert (code, ctype) == (200, "application/octet-stream")
+    assert body == deck  # byte for byte
+    assert unquote(extra["Content-Disposition"].split("filename*=UTF-8''")[1]) == "Quartal März.pptx"
+    # shown inline it is refused: the page never renders or converts an office file, it only hands it out
+    assert tf.read_file(root, TID, "artifacts", "Quartal März.pptx")[0] == 404
+    assert tf.preview_kind("Quartal März.pptx") == "none"

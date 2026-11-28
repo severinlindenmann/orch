@@ -586,7 +586,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   return tile;
 }
 // A real artifact: its name, what kind it is, a preview and Open. A proof without a file shows no "Completed" filler.
-const KIND_WORD = [[/\.(png|jpe?g|gif|webp|svg)$/i, 'Picture'], [/\.pdf$/i, 'PDF'], [/\.xlsx$/i, 'Spreadsheet'], [/\.zip$/i, 'Archive'], [/\.(m4a|aac|mp3|wav|caf|ogg)$/i, 'Sound'], [/\.(mp4|webm|mov|m4v|ogv)$/i, 'Video'], [/\.(csv|tsv)$/i, 'Table'], [/\.md$/i, 'Note'], [/\.html?$/i, 'Page'], [/\.(js|py|css|json|xml|ya?ml|toml|ini)$/i, 'Code'], [/\.(txt|log)$/i, 'Text file']];
+const KIND_WORD = [[/\.(png|jpe?g|gif|webp|svg)$/i, 'Picture'], [/\.pdf$/i, 'PDF'], [/\.xlsx$/i, 'Spreadsheet'], [/\.pptx$/i, 'Presentation'], [/\.docx$/i, 'Document'], [/\.zip$/i, 'Archive'], [/\.(m4a|aac|mp3|wav|caf|ogg)$/i, 'Sound'], [/\.(mp4|webm|mov|m4v|ogv)$/i, 'Video'], [/\.(csv|tsv)$/i, 'Table'], [/\.md$/i, 'Note'], [/\.html?$/i, 'Page'], [/\.(js|py|css|json|xml|ya?ml|toml|ini)$/i, 'Code'], [/\.(txt|log)$/i, 'Text file']];
 const kindWord = fileName => KIND_WORD.find(([re]) => re.test(fileName))?.[1] || 'File';
 const evidenceFile = (t, ev) => {
   const prefix = '.orch/tickets/' + t.id + '/evidence/', ref = String(ev.ref || '');
@@ -690,7 +690,7 @@ function fileEntry(t, group, file) {
   const kind = viewerKind(file.name);
   const role = attachedInput(t).has(file.name) ? 'Attached by you' : group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
-  return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
+  return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, taskN:group.kind === 'evidence' ? group.n || 0 : 0, created:at,
     title:titleOf(file), named:!!oneLineTitle(file.title),
     meta:[viewerWord(kind), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', at, task ? 'Task: ' + task : '', role].filter(Boolean).join(' · ')};
 }
@@ -758,15 +758,18 @@ function ticketFileGroups(t) {
   for (const task of array(t.checklist)) {
     const files = uniqueBy(array(task.evidence).map(ev => evidenceFile(t, ev)).filter(Boolean), f => f.name).filter(f => !owned.has(f.name));
     files.forEach(f => owned.add(f.name));
-    if (files.length) groups.push({label:clean(changeTask(task.text, task.origin)?.title || task.text), kind:'evidence', files});
+    if (files.length) groups.push({label:clean(changeTask(task.text, task.origin)?.title || task.text), kind:'evidence', files, n:array(t.checklist).indexOf(task) + 1});
   }
   const rest = artifactFiles(t).filter(f => !owned.has(f.name));
   if (rest.length) groups.unshift({label:'Results', kind:'artifacts', files:rest});
   return groups;
 }
 const ticketFileCount = t => ticketFileEntries(t).length;
-// ---- Files tab: one card per file (thumbnail, name, kind · size · date); a toolbar (find, sort, cards/list) only above 6 files.
-const filesUI = {q:'', sort:'newest', view:'cards', who:'All'};
+// ---- Files tab (O-10, owner chose B, 28 Nov): a compact list like a file explorer, built from the master's file list
+// (.files-mid / .files-head / .files-row, the Files page's own rows). One row per file: its name with tags that say
+// what it is ("Result", "Evidence for task 2", "Added by you"), kind, size and date; the column heads sort. A click on
+// a row opens the existing file viewer (Open in new tab, Download and Copy link are there). No preview pane, no tiles.
+const filesUI = {q:'', sort:'changed', dir:-1, who:'All'};
 // Draft E (ORCH-778): who added a file. "You" = files a person attached; "Helper" = results and the files tasks proved.
 const fileWho = f => f.role === 'Attached by you' ? 'You' : 'Helper';
 // All / Helper / You with counts, only when both kinds are there (one kind needs no filter).
@@ -778,34 +781,46 @@ function filesWhoFilter(all) {
 }
 // The filter only counts while both kinds exist; otherwise every file shows.
 const filesWho = all => all.some(f => fileWho(f) === 'You') && all.some(f => fileWho(f) === 'Helper') ? filesUI.who : 'All';
-const FILES_TOOLBAR_FROM = 7;
-const SORTS = [['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
+const FILES_SEARCH_FROM = 7;
+// The kind in words: the viewer's word, and a presentation or a document by its own name (O-09: the original is a file to download).
+const fileKindWord = f => f.fileKind === 'other' ? kindWord(f.name) : viewerWord(f.fileKind);
+const FILE_COLS = [['name', 'Name', ''], ['kind', 'Kind', 'kindcol'], ['size', 'Size', ''], ['changed', 'Changed', '']];
 function sortedEntries(list) {
-  const time = f => Date.parse(f.mtime) || 0;
-  const by = {newest:(a, b) => time(b) - time(a), oldest:(a, b) => time(a) - time(b), name:(a, b) => a.title.localeCompare(b.title)};
-  return list.slice().sort(by[filesUI.sort] || by.newest);
+  const time = f => Date.parse(f.mtime) || 0, size = f => Number.isFinite(f.size) ? f.size : -1;
+  const by = {name:(a, b) => a.title.localeCompare(b.title), kind:(a, b) => fileKindWord(a).localeCompare(fileKindWord(b)) || a.title.localeCompare(b.title),
+    size:(a, b) => size(a) - size(b), changed:(a, b) => time(a) - time(b)};
+  const cmp = by[filesUI.sort] || by.changed, dir = filesUI.dir < 0 ? -1 : 1;
+  return list.map((f, i) => [f, i]).sort((a, b) => dir * cmp(a[0], b[0]) || a[1] - b[1]).map(x => x[0]);
 }
-function fileThumb(t, f) {
-  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind, 'aria-hidden':'true'});
-  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
-  if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
-    const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
-    p.classList.add('file-snippet'); thumb.append(p); return thumb;
-  }
-  thumb.append(h('span', {className:'file-sym'}, iconEl(fileIcon(f.name)), h('span', {}, viewerWord(f.fileKind))));
-  const live = shownThumb(t, f.kind, f);
-  if (live) thumb.append(live);
-  return thumb;
+// What a file is on this ticket, as small tags after its name.
+function fileTags(f) {
+  if (f.role === 'Attached by you') return [['Added by you', '']];
+  if (f.kind === 'evidence') return [[f.taskN ? 'Evidence for task ' + f.taskN : 'Evidence', f.task ? 'Task: ' + f.task : '']];
+  return [['Result', '']];
 }
-function fileTile(t, f) {
-  // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
+function filesHead() {
+  return h('div', {className:'files-head', 'data-key':'files-head-row'}, FILE_COLS.map(([key, label, cls]) => {
+    const on = filesUI.sort === key;
+    const b = h('button', {type:'button', className:cls || null, 'aria-sort':on ? (filesUI.dir > 0 ? 'ascending' : 'descending') : 'none', 'aria-label':'Sort by ' + label.toLowerCase(), 'data-key':'files-sort-' + key}, label, window.UI?.chevron ? window.UI.chevron() : null);
+    // a first click sorts the way that column reads best (newest and biggest first, names from A)
+    b.onclick = () => { filesUI.dir = on ? -filesUI.dir : (key === 'changed' || key === 'size' ? -1 : 1); filesUI.sort = key; render(); };
+    return b;
+  }), h('span', {}));
+}
+function fileListRow(t, f) {
+  const tags = fileTags(f), kind = fileKindWord(f), size = Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', when = f.mtime ? localStamp(f.mtime) : '';
+  const row = h('div', {className:'files-row', role:'button', tabindex:'0', 'data-key':'file-open-' + f.kind + '-' + f.name,
+    'aria-label':['Open ' + f.title, kind, ...tags.map(x => x[0])].join(', ')},
+    h('div', {className:'files-name'}, iconEl(fileIcon(f.name)),
+      h('span', {}, f.title, tags.map(([word, title]) => h('span', {className:'tag', title:title || null}, word))),
+      f.named ? h('span', {className:'sub'}, shortName(f)) : null,
+      h('span', {className:'sub phone'}, [kind, size, when].filter(Boolean).join(' · '))),
+    h('span', {className:'kindcol cut'}, kind), h('span', {className:'num'}, size), h('span', {className:'cut'}, when), h('span', {}));
+  // Read the list when clicked: a redraw keeps this row, so a list captured now could be out of date.
   const open = () => previewFile(t.id, f.kind, f.name);
-  const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
-  // The name is the words on the card after a hidden "Preview"; the picture is decoration (label in name, #2243)
-  const link = h('button', {type:'button', className:'file-preview-link', 'data-key':'file-open-' + f.kind + '-' + f.name},
-    h('span', {className:'sr-only'}, 'Preview '), fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
-  link.onclick = open;
-  return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
+  row.onclick = open;
+  row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  return row;
 }
 function visibleFileEntries(t, all) {
   const q = filesUI.q.trim().toLowerCase(), who = filesWho(all);
@@ -814,16 +829,13 @@ function visibleFileEntries(t, all) {
 function filesPanelBody(t, all) {
   const entries = visibleFileEntries(t, all);
   if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? (filesUI.q.trim() ? 'No files match. Clear the search.' : 'No files here. Choose All.') : 'No files attached yet. Files your helper attaches appear here.');
-  return h('div', {className:'files-collection', 'data-view-mode':filesUI.view === 'list' ? 'list' : 'grid', 'data-key':'files-collection'}, h('div', {className:'file-grid'}, entries.map(f => fileTile(t, f))));
+  return h('div', {className:'files-mid', 'data-key':'files-collection'}, filesHead(), h('div', {className:'files-list', role:'group', 'aria-label':'Files'}, entries.map(f => fileListRow(t, f))));
 }
-function filesToolbar(count) {
-  const sort = h('select', {'aria-label':'Sort', 'data-key':'files-sort', 'data-label':'Sort', 'data-prefix':'Sort'}, SORTS.map(([v, text]) => h('option', {value:v}, text)));
-  sort.value = filesUI.sort; sort.onchange = () => { filesUI.sort = sort.value; render(); };
-  const search = h('input', {type:'search', className:'files-search', placeholder:'Search files', 'aria-label':'Search files', 'data-key':'files-search', value:filesUI.q});
+function filesSearch() {
+  const search = h('input', {type:'search', className:'input files-search', placeholder:'Search files', 'aria-label':'Search files', 'data-key':'files-search', value:filesUI.q});
   search.value = filesUI.q;
   search.oninput = () => { filesUI.q = search.value; render(); };
-  const view = (id, label) => { const b = h('button', {type:'button', className:'btn sm', 'aria-pressed':String(filesUI.view === id), 'data-key':'files-view-' + id}, label); b.onclick = () => { filesUI.view = id; render(); }; return b; };
-  return h('div', {className:'files-toolbar', 'data-key':'files-toolbar'}, search, h('div', {className:'row'}, sort, h('div', {className:'segmented', role:'group', 'aria-label':'File view'}, view('cards', 'Cards'), view('list', 'List'))));
+  return search;
 }
 function artifactsPanel(t) {
   if (snapshot) {  // a saved copy cannot read files: names only, no controls
@@ -833,12 +845,12 @@ function artifactsPanel(t) {
         : h('p', {className:'muted'}, 'No files attached yet.')];
   }
   const all = ticketFileEntries(t), hit = artifactData.get(t.id);
-  // the list did not load (no answer, an error): say so with one Try again instead of the loading tiles for ever
+  // the list did not load (no answer, an error): say so with one Try again instead of the loading rows for ever
   if (!all.length && hit && hit.data === null) return [stateNote('The files did not load', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:() => { artifactData.delete(t.id); render(); }})];
-  if (!all.length && !hit?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
-    [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
-  const who = filesWhoFilter(all);
-  return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
+  if (!all.length && !hit?.data) return [h('div', {className:'sk-stack', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
+    [0, 1, 2].map(i => h('span', {className:'skeleton sk-row', 'data-key':'skeleton-' + i})))];
+  const who = filesWhoFilter(all), search = all.length >= FILES_SEARCH_FROM ? filesSearch() : null;
+  return [who || search ? h('div', {className:'tab-head', 'data-key':'files-head'}, who, search) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by, person) {
   // a line stamped with a person of the list (a phone's line, ORCH-1164) reads as that person, as on the Activity tab
@@ -1217,7 +1229,7 @@ function ticketHistoryPanel(t) {
     const entry = row.entry, view = row.view;
     const node = row.run ? h('div', {className:'ticket-event', 'data-key':'run-' + row.run.id}, h('p', {}, runLine(row.run)), h('time', {className:'meta', datetime:row.iso}, time(row.iso)))
       : h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-        h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null, (tag => tag ? [' ', tag] : null)(addonTag(entry))),
+        h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by, entry.person), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null, (tag => tag ? [' ', tag] : null)(addonTag(entry))),
         (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at)));
     const day = ticketHistoryDay(row.iso);
     if (!groups.has(day)) groups.set(day, []);

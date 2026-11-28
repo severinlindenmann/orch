@@ -1,5 +1,6 @@
-// A person makes a ticket, moves it to Check, then on its page adds a text file and a few words and presses
-// "Send back with this": the file is on the ticket, the ticket is back with the helper, and it stays so after a reload.
+// A person makes a ticket, moves it to Review, then under the result presses Send back, adds a text file and a few
+// words and sends: the file is on the ticket, the ticket is back with the helper, and it stays so after a reload.
+// (O-07, owner 28 Nov: the Overview has no write box of its own; Send back opens its box under the result.)
 module.exports = {
   name: 'Ticket page: add a file and send back from Check',
   covers: ['ticket.attach', 'ticket.changes', 'ticket.patch', 'page:ticket'],
@@ -16,19 +17,20 @@ module.exports = {
 
     await page.locator('summary[data-key^="ticket-actions-"]').click();
     await act('ticket.patch', () => page.getByRole('menuitemradio', { name: 'Review', exact: true }).click());
-    // the box is one line until it is selected (ORCH-777): click into it, then Send back shows
-    await page.getByPlaceholder(/Write what is new/).last().click();
-    await page.getByRole('button', { name: 'Send back with this' }).waitFor();
+    const card = page.locator('[data-key^="review-card-"]');
+    await card.getByRole('button', { name: 'Send back', exact: true }).click();
+    const box = card.locator('[id^="ticket-changes-box-"]');
+    await box.getByPlaceholder('Write, paste a picture or record').waitFor();
 
-    await page.locator('input[type=file]').first().setInputFiles({ name: 'allergies.txt', mimeType: 'text/plain', buffer: Buffer.from('Nuts: Jonas\nGluten: Mira\n') });
-    await page.getByLabel('Add to this ticket').last().fill('Please add the new names from the file.');
+    await box.locator('input[type=file]').first().setInputFiles({ name: 'allergies.txt', mimeType: 'text/plain', buffer: Buffer.from('Nuts: Jonas\nGluten: Mira\n') });
+    await box.getByPlaceholder('Write, paste a picture or record').fill('Please add the new names from the file.');
     // the file goes on the ticket first, then the words are sent back: wait for both before the reload
-    await act('ticket.changes', () => act('ticket.attach', () => page.getByRole('button', { name: 'Send back with this' }).click()));
+    await act('ticket.changes', () => act('ticket.attach', () => box.getByRole('button', { name: 'Send back', exact: true }).click()));
 
     await reload();
     const t = await seen(['allergies.txt', 'Text file', 'Please add the new names']);
     must(t.includes('allergies.txt') && t.includes('Text file'), 'the added file is not on the ticket after a reload');
     must(t.includes('Please add the new names'), 'the note that was sent back is not on the ticket after a reload');
-    must(!(await page.getByRole('button', { name: 'Send back with this' }).count()), 'the ticket is still in Check after it was sent back');
+    must(!(await page.locator('[data-key^="review-card-"]').count()), 'the ticket is still in Review after it was sent back');
   },
 };
