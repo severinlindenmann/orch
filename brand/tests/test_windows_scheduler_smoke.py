@@ -84,3 +84,85 @@ if ((Get-Content $log -Raw) -notmatch 'a diagnostic on stderr') { throw 'diagnos
         env=env, capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# ORCH-2406: on a loaded VM the automation's helper start timed out once, and the flow failed on the question
+# "The helper could not start: orch could not be run (TimeoutExpired)". The flow now answers Try again once.
+RETRY_CASES = {
+    # case: (DoneWithin's answer, how often the flow answered Try again)
+    "done": (True, 0),
+    "retry-then-done": (True, 1),
+    "fails-twice": (False, 1),
+    "refused": (False, 1),
+    "other-reason": (False, 0),
+}
+
+
+def test_the_flow_retries_only_the_timed_out_helper_start_and_only_once():
+    script = (ROOT / "e2e/windows/scheduler-flow.ps1").read_text(encoding="utf-8")
+    body = script.split("function DoneWithin($tid, $sec) {", 1)[1].split("\n}\n", 1)[0]
+    assert "orch could not be run \\(TimeoutExpired\\)" in body and "-not $retried" in body
+    assert body.count("O answer $tid $q '\"Try again\"' --by human:owner") == 1
+    assert "$retried = $true" in body and "$t0 = Get-Date" in body.split("$retried = $true", 1)[1]
+    # the limit of the helper start itself stays as it is (the ask: the wait is in the flow)
+    cli = (ROOT / "workspace-addons/automation/src/orch_automation/orchcli.py").read_text(encoding="utf-8")
+    assert cli.count("timeout=120") == 2
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="PowerShell is needed (available on Windows CI)")
+@pytest.mark.parametrize("case", sorted(RETRY_CASES))
+def test_scheduler_done_within_retries_the_helper_start_once(tmp_path, case):
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:FLOW, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+foreach ($name in @('L', 'O', 'DoneWithin')) {
+    $fn = $ast.Find({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true)
+    if (-not $fn) { throw "missing $name" }
+    Invoke-Expression $fn.Extent.Text
+}
+$log = Join-Path $env:TEST_DIR 'flow.log'
+function Start-Sleep { [System.Threading.Thread]::Sleep(100) }
+$script:answers = 0
+function cmd {
+    $line = $args[1]
+    $global:LASTEXITCODE = 0
+    $failed = "Needs an answer:`n  The helper could not start: orch could not be run (TimeoutExpired). (Try again / Leave it)  [q1]`nChecklist:"
+    if ($line -like 'orch ticket show t_abc123*') {
+        switch ($env:CASE) {
+            'done' { 'Status: Done - 1 of 1 done' }
+            'retry-then-done' { if ($script:answers) { 'Status: Done - 1 of 1 done' } else { $failed } }
+            'fails-twice' { if ($script:answers) { $failed.Replace('[q1]', '[q2]') } else { $failed } }
+            'refused' { $failed }
+            'other-reason' { '  The helper could not start: no agent is set up here. (Try again / Leave it)  [q1]' }
+        }
+    } elseif ($line -like 'orch answer t_abc123 q1 "Try again" --by human:owner*') {
+        $script:answers++
+        if ($env:CASE -eq 'refused') { $global:LASTEXITCODE = 2; 'refused' } else { 'Answered' }
+    } else { throw "unexpected command: $line" }
+}
+$ok = DoneWithin 't_abc123' 2
+if ("$ok" -ne $env:WANT_OK) { throw "DoneWithin gave $ok, want $($env:WANT_OK)" }
+if ("$($script:answers)" -ne $env:WANT_ANSWERS) { throw "answered $($script:answers) times, want $($env:WANT_ANSWERS)" }
+$said = Get-Content $log -Raw
+if ($env:WANT_ANSWERS -eq '1' -and $said -notmatch 'one retry') { throw 'the retry is not in the log' }
+if ($env:CASE -eq 'refused' -and $said -notmatch 'no retry') { throw 'the refused answer is not in the log' }
+'''
+    ok, answers = RETRY_CASES[case]
+    env = {
+        **os.environ,
+        "FLOW": str(ROOT / "e2e/windows/scheduler-flow.ps1"),
+        "TEST_DIR": str(tmp_path),
+        "CASE": case,
+        "WANT_OK": str(ok),
+        "WANT_ANSWERS": str(answers),
+    }
+    encoded = base64.b64encode(script.encode("utf-16le")).decode()
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        env=env, capture_output=True, text=True, timeout=60, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
