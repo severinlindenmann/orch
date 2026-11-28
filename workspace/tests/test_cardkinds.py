@@ -163,16 +163,17 @@ def test_a_question_without_a_suggested_answer_gets_the_next_step(proj, run, new
     assert code == 0 and cardkinds.ASK_HINT not in out
 
 
-def test_a_helpers_question_without_answers_is_refused(proj, run, new_ticket):
+def test_a_helpers_question_without_answers_is_refused(proj, run, new_ticket, monkeypatch):
     """ORCH-2177 (AGENTS R2.4): one sentence and the next step; nothing is written."""
     tid = new_ticket("Trip to Rome")
+    monkeypatch.setattr(tickets, "attended", lambda: False)
     for who in (["--by", "agent:x"], []):  # nobody named and no terminal is a helper too
         code, out, err = run("ask", tid, "Which hotel?", *who)
         assert code != 0 and cardkinds.ASK_NEEDS_ANSWERS in err, out + err
         assert "--option" in err and "--recommend" in err
     assert tickets.load(proj, tid)["questions"] == []
     # the more telling refusals come first
-    code, _, err = run("ask", tid, "What is your password?", "--by", "agent:x")
+    code, _, err = run("ask", tid, "Paste your API key", "--by", "agent:x")
     assert code != 0 and "credential" in err and cardkinds.ASK_NEEDS_ANSWERS not in err
     # ideas to sort, a card, and an add-on's own question bring their answers or word themselves
     ideas = ["--idea", "A reel", "--idea", "A post"]
