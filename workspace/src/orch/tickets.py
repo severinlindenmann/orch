@@ -449,30 +449,44 @@ def _root_of(p: Path) -> Path:
 _NAMELESS_STALE = 3.0
 
 
-def _break_stale(lock: Path) -> bool:
-    """Claim a stale lock by renaming it to a name only we know (atomic: just one waiter wins), then check
-    that what we took is really stale. If it was a fresh lock a faster waiter had just made, put it back."""
-    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
-    try:
-        os.replace(lock, mine)
-    except OSError:
+def _break_stale(lock: Path, _depth: int = 0) -> bool:
+    """Remove a lock whose writer is gone; True when this call removed it. Only one waiter at a time may do
+    that: it holds a marker next to the lock (`<lock>.take`, exclusive) and judges the lock again while it
+    holds it. A writer removes only its own lock, so the lock judged is the lock removed, and the lock's name
+    is never free in between: a waiter that judged a dead writer's lock a moment too early finds the next
+    writer's fresh lock under the marker and leaves it alone (ORCH-2369; the lock was renamed away and put
+    back before, and a third writer could make its own in that gap). A waiter killed while it holds the marker
+    leaves it behind; the marker is a lock like any other and is removed by the same rule."""
+    marker = lock.with_name(f"{lock.name}.take")
+    for _ in range(2):
+        try:
+            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError):  # Windows: a marker being deleted refuses like this
+            if _depth >= 2 or not _break_stale(marker, _depth + 1):
+                return False  # another waiter is at it right now
+        except OSError:
+            return False
+    else:
         return False
     try:
         try:
-            holder = mine.read_text(encoding="utf-8")
-        except OSError:
-            holder = ""
-        named = bool(holder.strip())
-        if named and procs.owner_dead(holder):  # a live or unverifiable holder keeps it
-            return True
-        if not named and time.time() - mine.stat().st_mtime > _NAMELESS_STALE:
-            return True
-        with contextlib.suppress(OSError):
-            os.link(mine, lock)  # no-clobber put-back
+            os.write(fd, procs.own_token().encode())
+        finally:
+            os.close(fd)
+        holder = lock.read_text(encoding="utf-8").strip()
+        if holder:
+            stale = procs.owner_dead(holder)  # a live or unverifiable holder keeps it
+        else:
+            stale = time.time() - lock.stat().st_mtime > _NAMELESS_STALE
+        if stale:
+            procs.unlink(lock)
+        return stale
+    except OSError:
         return False
     finally:
         with contextlib.suppress(OSError):
-            mine.unlink()
+            procs.unlink(marker)
 
 
 @contextlib.contextmanager
@@ -558,7 +572,19 @@ def _locked(root: Path, tid: str, wait: float = 5.0):
         yield
     finally:
         with contextlib.suppress(OSError):
-            procs.unlink(lock)
+            if _names(lock, token):
+                procs.unlink(lock)
+
+
+def _names(lock: Path, token: bytes) -> bool:
+    """Is this lock still the caller's own? A writer never removes another writer's lock. A lock that can't
+    be read right now counts as its own (it made it, and nobody else removes a live writer's lock)."""
+    try:
+        return lock.read_bytes() == token
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
 
 
 def revision(ticket: dict) -> int:

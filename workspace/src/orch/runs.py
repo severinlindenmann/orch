@@ -1897,12 +1897,15 @@ def start(
         if mode == "live":
             notes.append("A start on an API key works one step at a time; it does not open a live session.")
         mode = "oneshot"
+    said = len(notes)  # what is said from here on is about how the run works (kept on its record, ORCH-2391)
+    no_live = None
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
         mode = "oneshot"  # a live session did not take this input (check_submit): one step at a time now
     if mode is None:
         mode = "live" if live_ok else "oneshot"
         if not live_ok and a["capabilities"].get("interactive_tmux") and os.name != "nt":
+            no_live = "no-tmux"
             notes.append(
                 "tmux is not installed, so the agent works one step at a time: watch it in Focus. "
                 "For a live session you can open, install tmux (on a Mac: brew install tmux)."
@@ -1965,8 +1968,14 @@ def start(
         # Start replaces it, instead of looking alive for the whole lease (ORCH-2362)
         pid=os.getpid(),
     )
+    mode_notes = notes[said:]
     notes += copy_notes
     try:
+        if mode_notes or no_live:
+            # why this run has no screen to open, on its record: the ticket page says it and a problem report
+            # carries it (ORCH-2391: the words were only printed by the start, lost for a start from a page)
+            kept = {"start_note": " ".join(mode_notes)[:400]} if mode_notes else {}
+            set_process_fields(root, tid, rec["run"], **kept, **({"no_live": no_live} if no_live else {}))
         if (
             credit is not None
         ):  # on the run record before the wrapper starts: names and words only, never a value

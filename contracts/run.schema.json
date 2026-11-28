@@ -34,6 +34,8 @@
     "seen_revision": { "type": "integer", "minimum": 0, "description": "Ticket revision the running agent has seen; the 'New on <ticket> since you looked' footer (stderr only) lists what changed after it." },
     "maybe_stale_since": { "$ref": "#/$defs/time", "description": "Optional. Set when a claim without a pid passed 30 min without an orch write." },
     "reason": { "type": "string", "maxLength": 200, "description": "Optional. Plain words why the run was started, e.g. 'Answer to q2'." },
+    "no_live": { "enum": ["no-tmux"], "description": "Optional. Why a run that could be a live session works one step at a time with no screen to open: tmux is not installed." },
+    "start_note": { "type": "string", "maxLength": 400, "description": "Optional. What the start said about how this run works (e.g. why it is not a live session), kept for the ticket page and problem reports." },
     "agent_pid": { "oneOf": [{ "type": "integer", "minimum": 2 }, { "type": "null" }], "description": "Optional. Process of the agent itself, set by the wrapper. The claim is alive while pid OR agent_pid is alive with its recorded start time, so a killed wrapper does not free a working agent." },
     "agent_pid_started": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }], "description": "Optional. Start time of agent_pid (pid-reuse guard)." },
     "seen_history": { "type": "integer", "minimum": 0, "description": "Optional. Number of history lines the running agent has seen (for the footer)." },
