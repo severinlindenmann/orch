@@ -1020,8 +1020,14 @@ TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for thi
 
 
 def _chat_read(a):
-    """The person opened a ticket chat on the Chats page: its unread count starts again from now."""
-    _only(a, ("ticket",))
+    """The person opened a ticket chat on the Chats page: its unread count starts again from now. With
+    `workspace` it is the conversation with that workspace (O-18: its messages are the ones that count)."""
+    _only(a, ("ticket", "workspace"))
+    ws = a.get("workspace")
+    if ws is not None:
+        if "ticket" in a or not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+            raise BadRequest("That is not a workspace.")
+        return ["chat", "read", ws], [], []
     return ["chat", "read", _tid(a.get("ticket"))], ["--reader", TICKET_CHAT_READER], []
 
 

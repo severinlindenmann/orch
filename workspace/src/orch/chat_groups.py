@@ -1766,6 +1766,20 @@ def _by_name(g: dict, ws: str) -> str:
     return "agent:" + _line(g["members"].get(ws, {}).get("name") or ws, 60)
 
 
+def peer_writers(root: Path) -> dict[str, set[str]]:
+    """{ticket id: the `by` of every other workspace that writes in that ticket's chat} (also one that left:
+    its old lines are still its own). The Chat list counts only these lines as unread (ticketchats)."""
+    out: dict[str, set[str]] = {}
+    for g in _load(root)["hosted"].values():
+        if not isinstance(g, dict) or not isinstance(g.get("ticket"), str):
+            continue
+        members = g.get("members") if isinstance(g.get("members"), dict) else {}
+        names = {_by_name(g, ws) for ws in members if ws != g.get("host")} - {"agent:relay"}
+        if names:
+            out.setdefault(g["ticket"], set()).update(names)
+    return out
+
+
 # ---- @ asks one helper ---------------------------------------------------------------------------------
 
 

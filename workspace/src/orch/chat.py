@@ -1087,32 +1087,44 @@ def _contacts_list(root: Path) -> list[dict]:
         ]
         if tags := [t for t in tags if t]:
             item["tags"] = tags
-        count, last_at = _dm_summary(root, ws)
-        item.update(count=count, last_at=last_at)
+        count, last_at, unread = _dm_summary(root, ws)
+        item.update(count=count, last_at=last_at, unread=unread)
         out[ws] = item
         if len(out) >= 500:
             break
     return list(out.values())
 
 
-_DM_SUMMARY: dict = {}  # path -> ((mtime_ns, size), (count, last_at)): a GET does not parse every thread again
+_DM_SUMMARY: dict = {}  # path -> ((mtime_ns, size), (count, last_at, unread)): a GET does not parse every thread again
 
 
-def _dm_summary(root: Path, ws: str) -> tuple[int, str]:
+def _dm_unread(data: dict) -> int:
+    """How many of the other workspace's messages came after the person's read mark (O-18: only their
+    messages count, never one of ours). A thread from before the mark existed counts nothing until the next
+    message arrives (the import then puts the mark before it)."""
+    if "read" not in data:
+        return 0
+    rows = data["messages"]
+    at = next((i for i, m in enumerate(rows) if m.get("id") == data["read"]), -1) if data["read"] else -1
+    return sum(1 for m in rows[at + 1 :] if m.get("by") == data["ws"])
+
+
+def _dm_summary(root: Path, ws: str) -> tuple[int, str, int]:
     path = _dm_path(root, ws)
     try:
         st = path.stat()
     except OSError:
-        return 0, ""
+        return 0, "", 0
     key = (st.st_mtime_ns, st.st_size)
     hit = _DM_SUMMARY.get(str(path))
     if hit and hit[0] == key:
         return hit[1]
     try:
-        messages = _dm_read(root, ws)["messages"][-500:]
+        data = _dm_read(root, ws)
     except Refused:
-        return 0, ""
-    value = (len(messages), str(messages[-1].get("at", ""))[:40] if messages else "")
+        return 0, "", 0
+    messages = data["messages"] = data["messages"][-500:]
+    value = (len(messages), str(messages[-1].get("at", ""))[:40] if messages else "", _dm_unread(data))
     if len(_DM_SUMMARY) > 2000:
         _DM_SUMMARY.clear()
     _DM_SUMMARY[str(path)] = (key, value)
@@ -1150,7 +1162,10 @@ def _dm_read(root: Path, ws: str) -> dict:
     elif not isinstance(data, dict):
         raise Refused("A saved conversation file cannot be read. It was left as it is.")
     rows = data.get("messages") if isinstance(data, dict) and data.get("ws", ws) == ws else None
+    read = data.get("read") if isinstance(data, dict) else None
     return {
+        # the id of the last message the person has read ("" = none yet); absent in a file from before the mark
+        **({"read": read[:40]} if isinstance(read, str) else {}),
         "schema": "orch.chat-dm/1",
         "ws": ws,
         "messages": [m for m in rows if isinstance(m, dict)] if isinstance(rows, list) else [],
@@ -1238,6 +1253,7 @@ def dm_send(
                 raise Refused("Only a failed message can be retried.")
             data["messages"].remove(old)
         data["messages"].append(entry)
+        data["read"] = entry["id"]  # whoever writes has read what came before
         _dm_write(root, ws, data)
     try:
         sent = relay.send_text(root, ws, text)
@@ -1258,6 +1274,19 @@ def dm_read(root: Path, ws: str, by: str | None = None) -> dict:
     contact = _dm_contact(root, ws, by)
     data = _dm_read(root, ws)
     return {**contact, "messages": data["messages"][-500:]}
+
+
+def dm_mark_read(root: Path, ws: str, by: str | None = None) -> dict:
+    """The person opened the conversation with this workspace: its unread count starts again from here."""
+    _dm_person(by)
+    _dm_contact(root, ws, by)
+    with tickets._locked(root, "chat"):
+        data = _dm_read(root, ws)
+        last = next((m["id"] for m in reversed(data["messages"]) if isinstance(m.get("id"), str)), "")
+        if data.get("read") != last and (last or _dm_path(root, ws).exists()):
+            data["read"] = last
+            _dm_write(root, ws, data)
+    return {"workspace": ws, "read": last}
 
 
 def dm_thread(root: Path, ws: str, by: str | None = None) -> dict:
@@ -1347,6 +1376,10 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
                 or not isinstance(body.get("text"), str)
             ):
                 continue
+            if "read" not in data[ws]:  # the first message since the read mark exists: all before it is read
+                data[ws]["read"] = next(
+                    (m["id"] for m in reversed(data[ws]["messages"]) if isinstance(m.get("id"), str)), ""
+                )
             data[ws]["messages"].append(
                 {
                     "id": mid,

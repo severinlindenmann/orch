@@ -1411,7 +1411,15 @@ def test_chat_new_and_make_ticket_validation():
         ["--reader", "dashboard"],
         [],
     )
+    # O-18: opening the conversation with a workspace marks it read (the person's own mark, no reader)
+    assert actions.OPS["chat.read"]({"workspace": "ws_abcdefghij"}) == (
+        ["chat", "read", "ws_abcdefghij"],
+        [],
+        [],
+    )
     for op, args in [
+        ("chat.read", {"workspace": "--help"}),
+        ("chat.read", {"workspace": "ws_abcdefghij", "ticket": "t_abcdef"}),
         ("chat.say", {"text": "hi", "new": "yes"}),
         ("chat.say", {"text": "hi", "ticket": "--help"}),
         ("chat.say", {"text": "hi", "ticket": "t_abcdef", "new": True}),
