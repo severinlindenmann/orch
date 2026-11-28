@@ -38,6 +38,22 @@ const T = {
 };
 
 // Checks the runner can use inside a step.
+// Bring an element into view. The page draws itself again when new state arrives and may replace the element between
+// finding it and scrolling to it ("Element is not attached to the DOM", ORCH-2396: step 21 in CI 46079433360 and
+// again on 28 Nov): then it is found again, at most SCROLL_TRIES times. Any other error is the step's own.
+const SCROLL_TRIES = 5;
+async function scrollTo(page, sel, first = false) {
+  for (let i = 1; ; i++) {
+    try {
+      const loc = page.locator(sel);
+      return await (first ? loc.first() : loc).scrollIntoViewIfNeeded();
+    } catch (e) {
+      if (i >= SCROLL_TRIES || !/not attached to the DOM/.test(String(e && e.message))) throw e;
+      await page.waitForTimeout(150);
+    }
+  }
+}
+
 async function noSideways(page) {
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   if (over > 1) throw new Error(`the page scrolls sideways by ${over} px`);
@@ -451,11 +467,16 @@ async function chatView(page, dash) {
   await page.click('#live-bar [data-lbar-open="t_bar238"]');
   const pane = '#live-dock .live-pane[data-session="t_bar238"]', chat = `${pane} [data-live-chat]`;
   await page.waitForFunction(c => /Step 1 done/.test(document.querySelector(c)?.textContent || ''), chat, { timeout: 10000 });
-  const rows = await page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim()));
+  const readRows = () => page.$$eval(`${chat} > *`, els => els.map(el => (el.dataset.w || 'e') + ' ' + el.textContent.replace(/\s+/g, ' ').trim())).catch(() => []);
   // ORCH-2204: the stand-in has no conversation orch can read, so the chat is the ticket's summary and says so on top
   const want = [/^e Summary from the ticket\s*Open terminal$/, /^e ✓ The helper started/, /^e ✓ Step 1 done: Files can be dropped on a ticket/, /^h Helper · .*Uploading works/,
     /^h Helper · .*above or below the files\?$/, /^y Demo · .*Below$|^y You · .*Below$/];
-  if (rows.length !== want.length || want.some((re, i) => !re.test(rows[i]))) throw new Error('the chat reads:\n' + rows.join('\n'));
+  // ORCH-2396: the chat draws itself again when the state arrives; read once right then it was empty (CI 46079433360,
+  // "the chat reads:" with nothing after it). So read until the rows are the wanted ones, at most 10 s.
+  const asWanted = rows => rows.length === want.length && want.every((re, i) => re.test(rows[i]));
+  let rows = await readRows();
+  for (const end = Date.now() + 10000; !asWanted(rows) && Date.now() < end;) { await page.waitForTimeout(100); rows = await readRows(); }
+  if (!asWanted(rows)) throw new Error('the chat reads:\n' + rows.join('\n'));
   if (await page.isVisible(`${pane} [data-live-lines]`)) throw new Error('Chat also shows the last lines');
   // ORCH-697: the step's pull request is a result widget inside its message; a click opens it big
   const prw = `${chat} .live-chat-msg .result[data-type="pr"]`;
@@ -524,7 +545,7 @@ function widgetFiles() {
 }
 // The overlay: open from a widget, step through with the arrow keys, Esc closes and the keyboard is back on the opener.
 async function overlayRound(page, opener, want, keys = false) {
-  await page.locator(opener).first().scrollIntoViewIfNeeded();
+  await scrollTo(page, opener, true);
   // keys: open it from the keyboard (a phone sheet with the Results strip leaves the chat a few lines; the message box
   // stays over the lower part of a widget there, so a click in its middle would land on the box)
   if (keys) { await page.locator(opener).first().focus(); await page.keyboard.press('Enter'); } else await page.locator(opener).first().click();
@@ -554,7 +575,7 @@ async function widgetsGuide(page, dash) {
   if (kinds.length !== 16 || miss.length) throw new Error(`the style guide shows ${kinds.length} widgets; missing: ${miss.join(', ')}`);
   await overlayRound(page, '#rw-grid .result[data-type="md"] .result-open', 15);
   for (const st of ['empty', 'loading', 'error', 'large']) if (!(await page.$(`#rw-states .result[data-state="${st}"]`))) throw new Error(`no ${st} state in the style guide`);
-  await page.locator('#rw-grid').scrollIntoViewIfNeeded();
+  await scrollTo(page, '#rw-grid');
   await noSideways(page);
   // ORCH-1616 (owner's look stop): the picture shows the widgets inside the app, as results in a session's pane
   await widgetsInPane(page, dash);
@@ -701,7 +722,7 @@ async function widgetsTicket(page, dash, width) {
   const more = (await page.textContent(`${tile} .result-more`)).trim();
   if (!/^\+\d+ more$/.test(more)) throw new Error('the tile does not say how many more results: ' + more);
   await overlayRound(page, `${tile} .wall-results .result-open`, 15);
-  await page.locator(tile).scrollIntoViewIfNeeded();
+  await scrollTo(page, tile);
   await extraShot(page, 'fd-21a-tile', width);
   // 2. the session's chat: each step's results inside its message
   await page.click(`${tile} [data-wall-open]`);
@@ -724,7 +745,7 @@ async function widgetsTicket(page, dash, width) {
   if (broken.length) throw new Error('these results could not be read: ' + broken.join(', '));
   if ((await page.textContent(`[data-key="results-widgets"] h2`)).trim() !== 'Results') throw new Error('the card is not called Results');
   await overlayRound(page, `${host} .result[data-type="chart"] .result-open`, 15);
-  await page.locator(host).scrollIntoViewIfNeeded();
+  await scrollTo(page, host);
   await noSideways(page);
 }
 
@@ -2666,7 +2687,7 @@ async function motionTour(page, dash, width, reduce) {
   await page.waitForSelector('#rw-grid .result[data-type="md"] .result-open', { timeout: 15000 });
   await motionWatch(page);
   const opener = '#rw-grid .result[data-type="md"] .result-open';
-  await page.locator(opener).scrollIntoViewIfNeeded();
+  await scrollTo(page, opener);
   await step('open the big overlay', async () => {
     await page.click(opener);
     await page.waitForSelector('dialog.result-overlay[open]', { timeout: 2000 });
@@ -2795,7 +2816,7 @@ async function reviewReach(page, dash, width) {
   if (m.h > cap + 1) throw new Error(`the bottom panel is ${m.h} px high over Review; at most ${cap} px keeps a card in reach`);
   // the card's answers sit above the layer, never under it (a deck's answer bar sticks to the bottom of the page area);
   // the page scrolls the card into reach
-  await page.locator(btn).first().scrollIntoViewIfNeeded();
+  await scrollTo(page, btn, true);
   await page.waitForTimeout(300);
   const r = await page.locator(btn).first().boundingBox();
   const top = await page.evaluate(() => document.getElementById('live-dock').getBoundingClientRect().top);

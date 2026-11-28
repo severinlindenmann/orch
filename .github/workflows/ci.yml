@@ -43,7 +43,7 @@ jobs:
   changes:
     # A merge queue group the local gate already checked (group_check = local, ORCH-1124): the queue posted gate and
     # banned-words itself, so nothing runs here. ci_proven.py never counts such a run as proof for the push.
-    if: "${{ github.event.pull_request.draft != true && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
+    if: "${{ github.event.pull_request.draft != true && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && vars.GROUP_CHECK == 'local' && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -110,7 +110,7 @@ jobs:
             # the dashboard's pages and what takes their pictures (ORCH-312)
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # orch at 10,000 tickets against develop (ORCH-1609): the CLI, the add-on pages it measures, its scripts
-            perf: ['workspace/**', 'workspace-addons/**', 'install.sh', 'e2e/perf/**', '.github/workflows/perf.yml']
+            perf: ['workspace/**', 'workspace-addons/**', 'install.sh', 'e2e/perf/**', 'scripts/perf_calibrate.py', '.github/workflows/perf.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/check_contracts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       - id: place
         env:
@@ -423,7 +423,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
   gate:
-    if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
+    if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && vars.GROUP_CHECK == 'local' && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, brand, dash-shots, perf]
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -1,5 +1,6 @@
 #!/bin/sh
-# orch e2e: e2e/run.sh <id|all> [--mode local|live] [--fast]
+# orch e2e: e2e/run.sh <id|all|rest|long> [--mode local|live] [--fast]
+# rest and long are the two parts of all (e2e/parts.py): CI runs them as two jobs so each fits the job time limit.
 # Everything runs in a temp folder under a clean environment (env -i): no ORCH_*/XDG_* from the dev shell.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -25,13 +26,16 @@ mkdir -p "$ACCT_HOME/.orch-test"
 chmod 700 "$ACCT_HOME/.orch-test"
 TMP=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-XXXX")
 OHOME=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-home-XXXX")
-trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
+. "$HERE/cleanup.sh"  # ends what the run left alive, removes both folders, keeps the run's exit code (ORCH-2397)
+trap e2e_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$TMP/home"
 
 BINS='{}'
 if [ "$MODE" = local ]; then
   case "$WHAT" in
-    all|A22|*,A22|A23|*,A23|P*|R*|M*|F*|LOOK*|*,LOOK*|*,P*|*,R*|V2|V3|V3-P*|V3-SIM|V2-P6*|V2-W2*|V2-M1*|*,V3-P*|*,V3-SIM|*,V2-P6*|*,V2-W2*|*,V2-M1*)
+    all|rest|long|A22|*,A22|A23|*,A23|P*|R*|M*|F*|LOOK*|*,LOOK*|*,P*|*,R*|V2|V3|V3-P*|V3-SIM|V2-P6*|V2-W2*|V2-M1*|*,V3-P*|*,V3-SIM|*,V2-P6*|*,V2-W2*|*,V2-M1*)
       export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
       ( cd "$REPO/publish" && cargo build --release -j 4 -q )
       ( cd "$REPO/relay" && cargo build --release -j 4 -q )

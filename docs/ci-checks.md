@@ -44,7 +44,7 @@ files the group touches. A push to develop whose files equal a green queue group
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
 With the queue setting `group_check = local` (ORCH-1124) the queue checks a group with the local check on this Mac
-instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it, and the push to
+instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it only while the repository variable `GROUP_CHECK` is `local` (set it with the queue setting; unset, a pull request body alone skips nothing, ORCH-1124), and the push to
 develop runs the full set because a skipped group run proves nothing.
 
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran
@@ -94,8 +94,8 @@ Increasing `max_group` does not help a PR that must run alone.
 | publish, relay (with the relay browser page click-through, #2495), transcription | (ORCH-1118 q6) | required | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
-| full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
-| perf at 10,000 seeded tickets (`perf` workflow: commands, pages, idle minute; nightly 02:41 UTC against the owner's limits in `e2e/perf/limits.json`, ORCH-525; a queue group that touches `workspace/`, `workspace-addons/` or `e2e/perf/` fails only on more than 30% slower than develop's newest nightly numbers, R8.3, ORCH-1609) | | required, when it touches orch | | runs | |
+| full e2e (`e2e` workflow, 03:17 UTC; two jobs, `e2e (1/2)` = `rest` and `e2e (2/2)` = `long`, each under the 60-minute limit: `e2e/parts.py`, ORCH-2399) | | | | runs | |
+| perf at 10,000 seeded tickets (`perf` workflow: commands, pages, idle minute; nightly 02:41 UTC against the owner's limits in `e2e/perf/limits.json`, ORCH-525; a queue group that touches `workspace/`, `workspace-addons/` or `e2e/perf/` fails only on more than 30% slower than develop's newest nightly numbers, R8.3, ORCH-1609; develop's times are first rewritten for the speed of the runner at hand, measured by a fixed piece of work on every perf run: `scripts/perf_calibrate.py`, ORCH-2399) | | required, when it touches orch | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
 `ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run no macOS part
@@ -153,7 +153,8 @@ ones out; `--only <name>` still runs one (the light job does so for a click-thro
 They run in the `quarantine` workflow instead: nightly on develop (02:23 UTC), on every push to a `release/*` branch
 and by hand (`--quarantined` runs only the quarantined click-throughs). It has no pull request trigger, so no queue
 group or pull request sees these checks, and the release keeper leaves the workflow's checks out when it judges a
-release pull request. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
+release pull request. So do the Merge click and `orch review tend-releases` (ORCH-2399): they leave out the checks
+of the runs of `quarantine.yml` on the commit, told by the workflow file, never by the display name. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
 keeper, not started, no rerun, no revert); while it is open, each further red run adds a note to it.
 
 `p-looks-good-cases` and `s-role-page` were quarantined with the 27 Nov train and are back in the default run

@@ -1186,6 +1186,10 @@ def test_a_known_red_job_covers_its_parts():
     assert rk.known_name("workspace / test (macos-latest, 1/5)", known) is None
     assert rk.known_name("workspace / test (windows-latest-arm, 1/2)", known) is None
     assert rk.known_name("workspace / test (windows-latest, arm64)", known) is None  # another axis, no part
+    # ORCH-2399: the full e2e runs in parts, and "e2e" covers each of them (its only matrix axis is the part)
+    assert rk.known_name("e2e (1/2)", {"e2e": "ORCH-2139"}) == "e2e"
+    assert rk.known_name("e2e (ubuntu-latest)", {"e2e": "ORCH-2139"}) is None
+    assert rk.known_name("e2e-smoke (1/2)", {"e2e": "ORCH-2139"}) is None
     red = {"name": "workspace / test (windows-latest, 2/6)", "status": "COMPLETED", "conclusion": "FAILURE"}
     green = {"name": "workspace / test (ubuntu-latest, 1/2)", "status": "COMPLETED", "conclusion": "SUCCESS"}
     assert rk.checks_green([red, green], frozenset(known)) == "green"
@@ -1504,6 +1508,36 @@ def test_an_expired_exception_no_longer_lets_the_check_through(tmp_path):
         exceptions=old,
     )
     assert out["did"] == [f"ticket:Release 31 checks are red: {MAC}"]
+
+
+def test_a_known_red_flag_wins_over_an_ended_exception_for_the_same_job(tmp_path):
+    """ORCH-2399 (release 52): `mobile / test` had an exception that ended on 25 Nov; the --known-red flag for
+    the same job lost against it, so the pass judged ci red, reset the release and set skip_sha."""
+    old = {MAC: {**EXC[MAC], "until": "2020-01-01"}}
+    w = rk.World(None, cfg(tmp_path), {"exceptions": old, "known_red": {MAC: "ORCH-900"}}, known=KNOWN)
+    assert w.known_red() == {MAC: "ORCH-900"}
+    done = [
+        {"id": "t_454", "key": "ORCH-454", "status": "done"}
+    ]  # the exception's ticket is done, the flag's not
+    w = rk.World(
+        None, cfg(tmp_path), {"exceptions": EXC, "known_red": {MAC: "ORCH-900"}, "tickets": done}, known=KNOWN
+    )
+    assert w.known_red() == {MAC: "ORCH-900"}
+    # an exception that still holds keeps its place (it says until when); with no flag an ended one is gone
+    w = rk.World(None, cfg(tmp_path), {"exceptions": EXC, "known_red": {MAC: "ORCH-900"}}, known=KNOWN)
+    assert w.known_red() == {MAC: "ORCH-454, until 2099-01-01"}
+    w = rk.World(None, cfg(tmp_path), {"exceptions": old, "known_red": {}}, known=KNOWN)
+    assert w.known_red() == {}
+    out = go(
+        tmp_path,
+        state={"release": gate()},
+        open_release={"number": 9031},
+        prs=pr(checks=red_mac()),
+        exceptions=old,
+        known_red={MAC: "ORCH-900"},
+    )
+    assert out["did"] == ["card:release 31", "tend-releases"]
+    assert out["state"]["release"]["known_red"] == [f"{MAC} (ORCH-900)"]
 
 
 def test_an_exception_ends_when_its_ticket_is_done(tmp_path):

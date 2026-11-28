@@ -163,6 +163,9 @@ function focusMark() {
 
 // H3: the keyboard path through dialogs, menus and tabs, by real key presses.
 const KEY_WAIT = 260; // the overlay closes after its 100 ms fade
+// A dialog's opening and closing are waited for as a state, at most STATE_WAIT ms (ORCH-2396: on a busy runner the
+// close took longer than the fixed 260 ms once, and the check said "Escape did not close the dialog").
+const STATE_WAIT = 3000;
 async function keyboardPath(page, note) {
   const where = () => page.evaluate(() => { const a = document.activeElement; return a ? a.outerHTML.slice(0, 60) : 'nothing'; });
   // Dialogs: a button opens each closed dialog with Enter, as a person would.
@@ -173,6 +176,7 @@ async function keyboardPath(page, note) {
     await page.evaluate(i => { const b = document.createElement('button'); b.type = 'button'; b.id = 'uxc-opener'; b.textContent = 'Open';
       b.onclick = () => document.querySelector(`[data-uxc-dialog="${i}"]`)?.showModal(); document.body.prepend(b); b.focus(); }, i);
     await page.keyboard.press('Enter');
+    await page.waitForFunction(i => { const d = document.querySelector(`[data-uxc-dialog="${i}"]`); return !d || (d.open && d.contains(document.activeElement)); }, i, { timeout: STATE_WAIT }).catch(() => {});
     await page.waitForTimeout(KEY_WAIT);
     const inside = () => page.evaluate(i => { const d = document.querySelector(`[data-uxc-dialog="${i}"]`); return !!d && d.open && d.contains(document.activeElement); }, i);
     if (!(await inside())) note(`${name}: focus did not move into the dialog when it opened (on ${await where()})`);
@@ -185,7 +189,7 @@ async function keyboardPath(page, note) {
       if (f && !f.ok) { note(`${name}: no focus mark on ${f.name}`); break; }
     }
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(KEY_WAIT);
+    await page.waitForFunction(i => !document.querySelector(`[data-uxc-dialog="${i}"]`)?.open && document.activeElement === document.getElementById('uxc-opener'), i, { timeout: STATE_WAIT }).catch(() => {});
     const after = await page.evaluate(i => ({ open: document.querySelector(`[data-uxc-dialog="${i}"]`)?.open,
       back: document.activeElement === document.getElementById('uxc-opener') }), i);
     if (after.open) note(`${name}: Escape did not close the dialog`);

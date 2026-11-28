@@ -27,7 +27,11 @@ The same text twice is saved once. A secret is refused and named; take it out an
 
     orch lessons list
     orch lessons edit <id> "<new text>"
+    orch lessons review <id>
     orch lessons rm <id>
+
+`list` flags a lesson as outdated when nobody added, edited or reviewed it for 90 days. Check it against what you see:
+still true, `review` it; changed, `edit` it; wrong, `rm` it.
 
 **Over 3 KB**: helpers see only the newest lessons. Merge related ones with `orch lessons edit` and remove the old
 ones with `orch lessons rm`. Nobody needs to be asked.

@@ -383,7 +383,7 @@ def test_ci_and_rules_skip_only_a_local_check_queue_group():
     rules = (ROOT / ".github" / "workflows" / "rules.yml").read_text(encoding="utf-8")
     skip = (
         "startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == "
-        "github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')"
+        "github.repository && vars.GROUP_CHECK == 'local' && contains(github.event.pull_request.body, 'orch-group-check: local')"
     )
     assert CI.count(skip) == 2 and rules.count(skip) == 1
 

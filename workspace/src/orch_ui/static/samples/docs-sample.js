@@ -1956,7 +1956,11 @@ window.DOCS_SAMPLE = {
      ],
      [
       "orch lessons list",
-      "all lessons"
+      "all lessons, with their date; outdated ones are flagged"
+     ],
+     [
+      "orch lessons review <id>",
+      "mark one as still true"
      ],
      [
       "orch lessons rm <id>",

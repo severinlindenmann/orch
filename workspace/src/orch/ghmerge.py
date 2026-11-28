@@ -215,11 +215,51 @@ def failed_names(rollup) -> list[tuple[str, str]] | None:
     return failed
 
 
+# Flaky checks taken out of the merge queue run in this workflow file (ORCH-2363): never required, so its
+# checks never count for a pull request, red or still running (ORCH-2399: release 52's Merge click refused
+# over them). Told by the workflow FILE of the run, which GitHub sets, never by the display name, which any
+# workflow can carry.
+QUARANTINE_FILE = "quarantine.yml"
+QUARANTINE_NAME = "quarantine"  # its display name: only the reason to ask GitHub, never the proof
+RUN_OF = re.compile(r"/actions/runs/([0-9]{1,20})(?:/|$)")
+
+
+def without_quarantine(rollup, repo: str, head: str, read):
+    """`rollup` without the checks of the quarantine workflow's runs on the commit `head`. `read(args,
+    timeout)` runs gh. GitHub is asked (one read) only while a check that is not green carries the
+    quarantine workflow's name and belongs to an Actions run, so an ordinary pull request costs nothing
+    more; the answer, the runs of the workflow FILE, decides. On any doubt (no answer, an odd answer) the
+    rollup comes back whole: nothing is excused by mistake."""
+    if not isinstance(rollup, list) or not all(isinstance(c, dict) for c in rollup) or passed(rollup):
+        return rollup
+    if not SHA.fullmatch(str(head or "")):
+        return rollup
+    runs = {
+        i: (m[1] if (m := RUN_OF.search(str(c.get("detailsUrl") or ""))) else "")
+        for i, c in enumerate(rollup)
+    }
+    if not any(
+        run and c.get("workflowName") == QUARANTINE_NAME and not passed([c])
+        for run, c in zip(runs.values(), rollup, strict=True)
+    ):
+        return rollup
+    got = read(
+        ["api", f"repos/{repo}/actions/workflows/{QUARANTINE_FILE}/runs?head_sha={head}&per_page=100",
+         "--jq", ".workflow_runs[].id"],
+        15,
+    )  # fmt: skip
+    if got.returncode != 0:  # also a repository without that workflow (404)
+        return rollup
+    ids = {x.strip() for x in got.stdout.split() if x.strip().isdigit()}
+    return [c for i, c in enumerate(rollup) if runs[i] not in ids] if ids else rollup
+
+
 def checks(url: str) -> dict | None:
     """What GitHub says about a pull request now, read-only, with whatever login this process has:
     {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>,
     "failed": <names of the failed checks once every check finished on an open pull request that is no draft,
-    else None>, "draft": <open and a draft>}.
+    else None>, "draft": <open and a draft>}. The quarantine workflow's checks do not count
+    (without_quarantine).
     None when it cannot be read (no gh, not signed in, no network): the caller then shows nothing."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url):
@@ -236,6 +276,11 @@ def checks(url: str) -> dict | None:
         return None
     ready = data["state"] == "OPEN" and data.get("isDraft") is False
     rollup = data.get("statusCheckRollup")
+    if ready:
+        try:
+            rollup = without_quarantine(rollup, _parts(url)[0], head, lambda a, t: _gh_plain(gh, a, t))
+        except Refused:
+            pass
     green = ready and passed(rollup)
     return {
         "state": data["state"],
@@ -311,10 +356,15 @@ def summary(url: str, head: str) -> dict | None:
         seen.add(m[1])
         title = next((x.strip() for x in str(c.get("messageBody") or "").splitlines() if x.strip()), "")
         items.append({"pr": int(m[1]), "title": title[:200]})
+    rollup = data.get("statusCheckRollup")
+    try:  # the card says what the Merge click will judge
+        rollup = without_quarantine(rollup, _parts(url)[0], head, lambda a, t: _gh_plain(gh, a, t))
+    except Refused:
+        pass
     return {
         "title": str(data.get("title") or "")[:200],
         "base": str(data.get("baseRefName") or "")[:100],
-        "checks": checks_state(data.get("statusCheckRollup")),
+        "checks": checks_state(rollup),
         "items": items[:MAX_ITEMS],
         "more": max(0, len(items) - MAX_ITEMS),
         "other": other,
@@ -635,16 +685,18 @@ def head_of(url: str) -> str:
     return head
 
 
-def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset()) -> str | None:
+def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset(), head: str = "") -> str | None:
     """Plain words when the pull request's checks have not all passed yet ("3 of 18 checks still running",
     "1 check failed: lint"), read now at GitHub; None when they passed, there are none (a repository without
     checks), or GitHub could not be read (GitHub's own rules then decide). `excused`: (full check name,
     conclusion) pairs that may be red (a release's named exceptions, ORCH-178); every other check must pass,
-    none may still run, and GitHub must answer: with exceptions nothing merges on an unread or empty list."""
+    none may still run, and GitHub must answer: with exceptions nothing merges on an unread or empty list.
+    The quarantine workflow's checks on `head` do not count (without_quarantine, ORCH-2399)."""
     unread = "GitHub could not be read right before the merge" if excused else None
     try:
         v = _answered(_gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15))
         rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+        rollup = without_quarantine(rollup, _parts(url)[0], head, lambda a, t: _answered(_gh(gh, a, t)))
     except GitHubUnreachable:
         raise
     except (ValueError, AttributeError, Refused):
@@ -706,7 +758,7 @@ def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> di
         raise Refused("The pull request is closed on GitHub, so it cannot be merged. Open it to see why.")
     if now != head:
         raise MergeFailed(CHANGED)
-    unfinished = _unfinished_checks(gh, url, frozenset(excused))
+    unfinished = _unfinished_checks(gh, url, frozenset(excused), head)
     if unfinished:  # say it plainly instead of GitHub's "base branch policy prohibits the merge"
         raise Refused(
             f"Its checks have not all passed yet ({unfinished}), so nothing was merged. "

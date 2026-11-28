@@ -35,14 +35,17 @@ final class GroupApprovalUITests: XCTestCase {
         app.launch()
         let any = { (id: String) in app.descendants(matching: .any)[id].firstMatch }
         let card = any("group-approval")
-        XCTAssertTrue(card.buttons["Always"].waitForExistence(timeout: 10))
+        // firstMatch: `card.buttons["Always"]` alone reads the whole card to be sure there is only one, which timed out
+        // on the slow CI simulator ("Timed out while evaluating UI query" at the tap, ORCH-2389)
+        let always = card.buttons["Always"].firstMatch
+        XCTAssertTrue(always.waitForExistence(timeout: 20))
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1.0)
-        card.buttons["Always"].tap()
-        XCTAssertTrue(any("group-approval-pending").waitForExistence(timeout: 5))
+        always.tap()
+        XCTAssertTrue(any("group-approval-pending").waitForExistence(timeout: 15))
         XCTAssertEqual(any("group-approval-pending").label, "Always · sent in a moment")
         XCTAssertEqual(any("group-undo").label, "Undo Always")
         any("group-undo").tap()
-        XCTAssertTrue(card.buttons["Always"].waitForExistence(timeout: 5), "undo brings the buttons back")
+        XCTAssertTrue(always.waitForExistence(timeout: 15), "undo brings the buttons back")
         XCTAssertFalse(any("group-approval-pending").exists)
     }
 }
