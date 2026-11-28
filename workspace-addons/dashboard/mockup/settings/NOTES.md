@@ -316,3 +316,15 @@ a connection address to show.
 ## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
 
 - "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.
+
+## W-059, W-011, W-058d, O-27 (owner 28 Nov): one place per option
+
+- settings.html (General): the profile and the folder, then "Everyday settings" (one row per thing edited elsewhere:
+  Helper, Phone questions, Backup, Shared pages, each with its state and a link), then named sections: "Sharing and
+  finished work", "Working copies", "Report a problem". No "More" fold and no "More settings" heading.
+- addon-detail.html (Publish settings): the on/off list, then the add-on's own options (owner shown on shared pages,
+  "Shared pages: show workspace name and icon").
+- addon-detail-backup.html (new, Backup settings): the on/off list, the line "Backed up to …", then the card "Where to
+  keep a copy" with the address, Check connection and Sync now. This is the only place the choice is edited.
+- The add-on with the phone tab (Relay) has one Settings page, that tab: its on/off and Remove rows sit at the end of
+  the tab and every link to its settings leads there.

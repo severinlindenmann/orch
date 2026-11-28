@@ -76,3 +76,11 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Rows fit a phone (ORCH-2213, 28 Nov)
 
 - The "Shared now" rows are the master `card-row` (file name, note, then ticket and end on one line; the buttons in `actions`). They wrap by themselves, so nothing is cut at 390 and 320 px, also in `?state=offline`. The old mockup-only row grid is gone from `mockup.css`; the buttons are always visible, as in the product.
+
+## O-25 (owner 28 Nov): a shared file beside the panel
+
+- publish.html: a shared file is its name and note, then the ticket and "Ends in …"; in a page area under 900 px the
+  buttons sit on a line of their own under the text, as whole buttons that wrap (never a word broken letter by
+  letter). On a wide page they stay at the right of the row.
+- See it: narrow the window under 900 px, or open `publish.html?room=617` and `?room=785`.
+- "Stop sharing" in the danger colour is W-058f (another batch).
