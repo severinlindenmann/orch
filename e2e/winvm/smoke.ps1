@@ -32,8 +32,9 @@ $t.Restart()
 Set-Location $src
 # The smoke's scripted fake agent needs a python on PATH (ORCH-2069). setup.ps1 installs one through uv, which puts
 # only python3.13.exe there: add the folder of that python, which holds python.exe (ORCH-2206).
-$py = (& uv python find cpython-3.13-windows-x86_64-none 2>$null | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or -not $py -or -not (Test-Path $py)) { "no python from uv for the fake agent" | Write-Host; exit 1 }
+# All of uv's output first, then its first line: "| Select-Object -First 1" ends uv early and its exit code is -1 then.
+$py = @(& uv python find cpython-3.13-windows-x86_64-none 2>$null)[0]
+if (-not $py -or -not (Test-Path $py)) { "no python from uv for the fake agent" | Write-Host; exit 1 }
 $env:Path = "$(Split-Path $py);$env:Path"
 $rc = Invoke-Native bash -c 'export PATH="$HOME/.local/bin:$PATH"; bash e2e/ci/cli-smoke.sh focus'
 "STEP smoke $([int]$t.Elapsed.TotalSeconds)s rc=$rc" | Write-Host
