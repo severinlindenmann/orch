@@ -597,6 +597,29 @@ def _asks(m: dict) -> bool:
     return m.get("by") == "you" or _from_workspace(m)
 
 
+def _open_to(root: Path, ticket: dict, asker: dict) -> None:
+    """ORCH-2354 (owner 28 Nov: allow per ticket): the person made this ticket for what another workspace
+    asked, so it stays open to that workspace. Its later messages on the same topic (its own ticket, or an
+    answer to ours) come here and wake this ticket's helper, also after Done, never through Chat again. A
+    dropped ticket takes no more (relay._answered_ticket)."""
+    frm = asker["by"]
+    r = ticket.setdefault("ext", {}).setdefault("relay", {})
+    r.setdefault("from", frm)
+    if r["from"] != frm:
+        return  # already open to another workspace: never a second one
+    r["messages"] = list(dict.fromkeys([*r.get("messages", []), asker["id"]]))[-50:]
+    try:
+        theirs = relay._peer_ticket(relay.load_message(root, asker["id"]))
+    except (Refused, OSError, ValueError, KeyError):
+        theirs = None  # the inbox copy is gone: their answers to ours still come here (the sent log)
+    if theirs:
+        r["peer_ticket"], r["peer_key"] = theirs
+    name = relay.clean_untrusted(relay.name_of(root, frm), 60) or frm
+    tickets.add_history(
+        ticket, "agent:relay", f"Open to {name}: what they send about this comes here", "relay"
+    )
+
+
 def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None = None) -> dict:
     who = tickets.current_actor(by)
     if tickets.agent_tool() or not who.startswith("human:"):
@@ -683,7 +706,8 @@ def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None 
                     via,
                 )
                 ticket["history"][-1]["at"] = m.get("at", ticket["history"][-1]["at"])
-
+            if asker := next((m for m in reversed(conversation) if _from_workspace(m)), None):
+                _open_to(root, ticket, asker)
             state["made_from"] = mid
 
         tickets.apply_op(root, t["id"], copy_history, by=tickets.SYSTEM)

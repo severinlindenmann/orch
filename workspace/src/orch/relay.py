@@ -4138,6 +4138,8 @@ def _answered_ticket(root: Path, msg: dict) -> tuple[str, bool] | None:
             return t["id"], True
         if t.get("status") != "dropped" and _linked_to(root, t, frm):
             return t["id"], False
+    if topic := _open_topic(root, msg):
+        return topic, False
     # an answer (a reply link, or the sender's own ticket key) that reached none of ours: the one ticket
     # waiting on this workspace; a fresh message with neither stays in General (ORCH-1762)
     if msg.get("reply_to") or msg.get("ticket"):
@@ -4145,6 +4147,22 @@ def _answered_ticket(root: Path, msg: dict) -> tuple[str, bool] | None:
         if asked:
             return asked, False
     return None
+
+
+def _open_topic(root: Path, msg: dict) -> str | None:
+    """ORCH-2354 (owner 28 Nov: allow per ticket): the ticket here that stays open to the sender for the
+    sender's own ticket named in this message (chat._open_to, made when the person pressed Make ticket for
+    its request, or a task it handed over). Done tickets count: the next weekly request opens it again.
+    Dropped ones never. The newest one when there are several."""
+    pt = _peer_ticket(msg)
+    if pt is None:
+        return None
+    found = None
+    for t in tickets.list_all(root, ext="relay"):
+        r = (t.get("ext") or {}).get("relay") or {}
+        if r.get("peer_ticket") == pt[0] and r.get("from") == msg["from"] and t.get("status") != "dropped":
+            found = t["id"]
+    return found
 
 
 WAITING_ON_DAYS = 3
