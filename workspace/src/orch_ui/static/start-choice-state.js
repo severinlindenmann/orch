@@ -117,7 +117,7 @@
     if (what !== 'model' && ctx.unavailable) return ctx.unavailable;
     if (ctx.inLine) return 'This ticket already waits in line. It starts by itself when a place is free.';
     if (what === 'fresh' || what === 'main') {
-      if (ctx.tools && !ctx.tools.tools.length) return 'No helper tool is set up on this computer.';
+      if (ctx.tools && !ctx.tools.tools.length) return 'No helper tool is set up yet.';
     }
     if (what === 'model' && ctx.tool && !ctx.tool.models) return 'This tool uses its own model.';
     if (what === 'reopen' && ctx.row) return ctx.row.current ? 'This session is in use now.' : (ctx.row.why || '');

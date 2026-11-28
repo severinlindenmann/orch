@@ -102,14 +102,15 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
         const t = s => [...document.querySelectorAll(s)].filter(n => n.getClientRects().length).map(n => n.innerText.replace(/\s+/g, ' ').trim());
         return {topbar: t('.topbar'), head: t('.chat-thread-head'), list: t('.chat-list-row'), cards: t('.chat-ticket').slice(0, 4), times: t('.chat-message-time').slice(0, 3)};
       });
-      // Every ticket card: a plain title (no ids), its status chip, nothing under a closed Details. The title row of the
+      // Every ticket card: a plain title (no ids), its status chip, no Details toggle to open (ORCH-2176). The title row of the
       // thread header is one row with Earlier on the right; the header is two rows at most. "Open helper" is a Menu item
       // only where the header has no room for its button.
       report[`chat-facts-${w}`] = await page.evaluate(() => {
         const visible = n => !!n && n.getClientRects().length > 0;
         const cards = [...document.querySelectorAll('.chat-log .chat-ticket')].map(card => ({
           title: card.querySelector('.chat-ticket-title').innerText.trim(), status: !!card.querySelector('.chat-status'),
-          band: Math.round(card.getBoundingClientRect().bottom - card.querySelector('.chat-ticket-more > summary').getBoundingClientRect().bottom)}));
+          // the card's Details toggle is gone (ORCH-2176): where a card still has one, nothing hangs under it closed
+          band: (more => more ? Math.round(card.getBoundingClientRect().bottom - more.getBoundingClientRect().bottom) : 0)(card.querySelector('.chat-ticket-more > summary'))}));
         const top = document.querySelector('.chat-head-top'), kids = [...top.children].filter(visible).map(k => k.getBoundingClientRect());
         const earlier = top.querySelector('[data-chat-action="history"]').getBoundingClientRect();
         const text = s => document.querySelector(s)?.innerText.trim();
