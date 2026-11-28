@@ -1899,6 +1899,7 @@ function ticketPrepareSentence(m) {
   return m.sentence;
 }
 function ticketStripModel(t, run, fresh) {
+  const noTool = typeof ticketNoHelperTool === 'function' && ticketNoHelperTool();  // ORCH-2388: then no line names a Start button
   const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   // ORCH-415: a helper that may be stuck is passed too (helperState gives null when none runs), so the pill never says no helper
@@ -1931,7 +1932,7 @@ function ticketStripModel(t, run, fresh) {
   const prep = ticketPrepare(t);
   if (prep) {
     const said = {waiting:'In line to be prepared. Start still works.', preparing:'Preparing: reading the links and filling in the ticket.',
-      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '.' + (ticketNoHelperTool() ? '' : ' Press ' + ticketStartWord(t) + ' to begin.'), not_prepared:'Not prepared yet. Start still works.'}[prep.state];
+      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '.' + (noTool ? '' : ' Press ' + ticketStartWord(t) + ' to begin.'), not_prepared:'Not prepared yet. Start still works.'}[prep.state];
     return {...m(said), prepare:prep.state};
   }
   if (run?.running || run?.state === 'maybe-stale') {
@@ -1939,11 +1940,11 @@ function ticketStripModel(t, run, fresh) {
     if (s.helper) return m(((window.UI?.helperWhy ? window.UI.helperWhy(s.helper.detail) : s.helper.detail) || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
-  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts' + (ticketNoHelperTool() ? '.' : '; press ' + ticketStartWord(t) + ' to begin now.'));
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts' + (noTool ? '.' : '; press ' + ticketStartWord(t) + ' to begin now.'));
   // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
   // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
   // ORCH-2388: with no helper tool there is no Start to press; the line says what is true
-  const begins = ticketNoHelperTool() ? 'No helper is set up yet.' : 'Your helper begins when you press ' + ticketStartWord(t) + '.';
+  const begins = noTool ? 'No helper is set up yet.' : 'Your helper begins when you press ' + ticketStartWord(t) + '.';
   if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m(begins), word:'Not started'};
   if (fresh) return m('Not started. ' + begins);
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
