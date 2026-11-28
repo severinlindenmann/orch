@@ -181,6 +181,59 @@ def test_an_older_loaded_core_still_gets_the_merge_card_through_the_installed_or
     assert ran and ran[0][:2] == ["ask", "t_abc123"] and "--merge" in ran[0] and url(1) in ran[0]
 
 
+def test_every_argument_the_card_passes_is_one_ask_takes():
+    """ORCH-2422: cli_review.ask_card and tickets.ask of one core fit each other (read from the source, so it
+    holds wherever these tests run)."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    from orch import tickets
+
+    src = Path(inspect.getfile(tickets)).with_name("cli_review.py").read_text(encoding="utf-8")
+    calls = [
+        n
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call) and n.args and ast.unparse(n.args[0]) == "tickets.ask"
+    ]
+    assert calls, "cli_review no longer calls tickets.ask through _guard: look at _make_card again"
+    takes = set(inspect.signature(tickets.ask).parameters)
+    for c in calls:
+        assert {k.arg for k in c.keywords} <= takes
+
+
+def test_a_core_loaded_half_old_half_new_still_gets_the_merge_card(ws, monkeypatch):
+    """ORCH-2422 (28 Nov, PR 3453): the queue ran since before an update, so orch.tickets was the old one and
+    cli_review, loaded on the first card, the new one: "ask() got an unexpected keyword argument 'if_wait'",
+    no Merge card. The installed orch makes it instead."""
+    import sys
+    import types
+
+    def old_ask(root, tid, text, options, recommended, by, *, action=None, card=None, shown=None):
+        raise AssertionError("never reached: the call fails on its arguments")
+
+    def ask_card(ns, root, tid, by):  # the new cli_review: one more argument than the old tickets.ask takes
+        return old_ask(root, tid, "Merge?", [], None, by, if_wait=None)
+
+    cli = types.SimpleNamespace(build_parser=lambda: types.SimpleNamespace(parse_args=lambda argv: argv))
+    review = types.SimpleNamespace(ask_card=ask_card)
+    monkeypatch.setitem(sys.modules, "orch.cli", cli)
+    monkeypatch.setitem(sys.modules, "orch.cli_review", review)
+    import orch
+
+    monkeypatch.setattr(orch, "cli", cli, raising=False)
+    monkeypatch.setattr(orch, "cli_review", review, raising=False)
+    ran = []
+    monkeypatch.setattr(runner, "_ask_installed", lambda root, argv: ran.append(argv))
+    runner._make_card(ws, "t_abc123", "QE-1", url(1))
+    assert ran and ran[0][:2] == ["ask", "t_abc123"] and "--merge" in ran[0] and url(1) in ran[0]
+    # a card that was made in this process is not asked a second time
+    ran.clear()
+    monkeypatch.setattr(review, "ask_card", lambda *a: ({}, {}))
+    runner._make_card(ws, "t_abc123", "QE-1", url(1))
+    assert ran == []
+
+
 def test_the_installed_orch_ask_refusing_says_what_to_do(ws, monkeypatch):
     import subprocess
 
