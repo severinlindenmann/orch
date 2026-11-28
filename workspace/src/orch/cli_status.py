@@ -261,6 +261,40 @@ def _with_known(ws: list) -> list:
     return sorted([*ws, *extra], key=lambda x: (x["name"].lower(), x["workspace"])) if extra else ws
 
 
+def _ticket_name(root: Path, tid: str) -> str:
+    from orch import tickets
+
+    try:
+        return tickets.load(root, tid).get("key") or tid
+    except Exception:  # noqa: BLE001
+        return tid
+
+
+def _not_back_text(root: Path, tid: str, result: dict) -> str:
+    """Why a helper's finished work is not in the project folder yet, and the next step (ORCH-2298)."""
+    from orch import worktrees
+
+    again = f"orch copy approve {tid}"
+    code, reason = result.get("reason_code"), str(result.get("reason") or "").rstrip(".")
+    if code == "agent-folder":
+        names = [_ticket_name(root, t) for t in worktrees.helpers_in_folder(root)]
+        if names:
+            who = "the helper on " + names[0] if len(names) == 1 else "the helpers on " + ", ".join(names)
+            stop = " and ".join(f"orch run stop {n}" for n in names)
+            has = "has" if len(names) == 1 else "have"
+            return (
+                f"Not brought back yet: {who} still {has} a session open in your project folder (an idle "
+                f"one counts). Stop it or wait until it ends: {stop}. Then: {again}"
+            )
+    if code == "agent":
+        n = _ticket_name(root, tid)
+        return (
+            f"Not brought back yet: the helper on {n} is still working in its separate copy. Wait until "
+            f"it ends or stop it: orch run stop {n}. Then: {again}"
+        )
+    return f"Not brought back yet: {reason or 'something still holds it up'}. When that is sorted: {again}"
+
+
 def _copy_clean(args, root: Path) -> None:
     from orch import worktrees
 
@@ -292,6 +326,12 @@ def _copy_clean(args, root: Path) -> None:
         )
         _out(args, result, text)
         return
+    if args.sub == "approve" and worktrees.already_back(root, args.ticket):
+        # ORCH-2298: orch brought it back by itself meanwhile (what held it up is gone): success, no git error
+        name = _ticket_name(root, args.ticket)
+        text = f"Already brought back: the work from {name} is in your project folder."
+        _out(args, {"state": "merged", "already": True}, text)
+        return
     if args.sub == "approve" or (args.sub == "retry" and getattr(args, "approve_tip", None)):
         target, tip, paths = worktrees.approval_view(root, args.ticket)
         count, digest = len(paths), target.rsplit(":", 1)[1]
@@ -302,7 +342,14 @@ def _copy_clean(args, root: Path) -> None:
         ):
             raise Refused("The copy changed after it was shown. Review it again.")
         result = worktrees.approve_copy(root, args.ticket, target)
-        _out(args, result, result.get("reason") or "Brought back.")
+        if result.get("state") == "waiting":
+            text = _not_back_text(root, args.ticket, result)
+            if args.sub == "approve":  # ORCH-2298: not brought back is a refusal with its next step
+                raise Refused(text)
+            _out(args, result, text)  # the page's click: the card stays and shows why
+            return
+        name = _ticket_name(root, args.ticket)
+        _out(args, result, f"Brought back: the work from {name} is in your project folder.")
         return
     if args.sub == "remove-orphaned":
         if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):

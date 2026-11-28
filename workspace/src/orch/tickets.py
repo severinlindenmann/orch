@@ -601,27 +601,60 @@ def _get(ticket: dict, path: str):
 
 # R5.1: a shared file's key lives only in its link's fragment (`#k=<key>`, contracts/crypto.md). A ticket
 # keeps the link without the key (`#k=…`, as in contracts/review/ticket.example.json): tickets go to git,
-# other workspaces and the phone, the key never does.
-_LINK_KEY_RE = re.compile(r"#k=[A-Za-z0-9_-]{16,}")
+# other workspaces and the phone, the key never does. The same holds for an app's view link
+# (`?token=apv_…`): the ticket keeps the address, never the token. A link copied out of a mail or a chat can
+# arrive percent-encoded (`%23k%3D<key>`, also encoded twice), and a key can be pasted with no link around it:
+# both are dropped too (ORCH-2208).
+_LINK_KEY_RE = re.compile(r"(?:#|%(?:25)*23)k(?:=|%(?:25)*3[Dd])[A-Za-z0-9_-]{16,}")
+_VIEW_TOKEN_RE = re.compile(r"apv_[A-Za-z0-9_-]{16,}")
 LINK_KEY_KEPT = "#k=\u2026"
+LINK_SECRET_KEPT = "\u2026"
 
 
-def drop_link_keys(obj):
-    """`obj` with the key of every shared link (`#k=<key>`) replaced by `#k=…`, changed in place."""
+def _own_link_secrets(root: Path) -> list[str]:
+    """The keys and view tokens of the links THIS workspace shared (publish.share_file / deploy keep them in
+    `.orch/secrets`), longest first. A ticket never holds one, with or without a link around it. Nothing is
+    read in a workspace that never shared anything."""
+    out: set[str] = set()
+    for path in (
+        net.secrets_dir(root) / "files" / "keys.json",
+        net.secrets_dir(root) / "apps" / "view-tokens.json",
+    ):
+        saved = net.read_json(path, {}) if path.is_file() else {}
+        if isinstance(saved, dict):
+            out.update(v for v in saved.values() if isinstance(v, str) and len(v) >= 16)
+    return sorted(out, key=lambda v: (-len(v), v))
+
+
+def _drop_in_text(text: str, own: tuple | list = ()) -> str:
+    if "k" in text and ("#k=" in text or "%" in text):
+        text = _LINK_KEY_RE.sub(LINK_KEY_KEPT, text)
+    if "apv_" in text:
+        text = _VIEW_TOKEN_RE.sub(LINK_SECRET_KEPT, text)
+    for value in own:
+        if value in text:
+            text = text.replace(value, LINK_SECRET_KEPT)
+    return text
+
+
+def drop_link_keys(obj, own: tuple | list = ()):
+    """`obj` with the key of every shared link (`#k=<key>`, also percent-encoded) replaced by `#k=…` and every
+    app view token (`apv_…`) and every value in `own` (this workspace's own link keys and tokens) replaced by
+    `…`, changed in place."""
     if isinstance(obj, str):
-        return _LINK_KEY_RE.sub(LINK_KEY_KEPT, obj) if "#k=" in obj else obj
+        return _drop_in_text(obj, own)
     if isinstance(obj, dict):
         for k, v in obj.items():
-            obj[k] = drop_link_keys(v)
+            obj[k] = drop_link_keys(v, own)
     elif isinstance(obj, list):
-        obj[:] = [drop_link_keys(v) for v in obj]
+        obj[:] = [drop_link_keys(v, own) for v in obj]
     return obj
 
 
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + fsync + os.replace). Callers hold the lock. The temp file names the
     ticket, so the next writer cleans up after a writer that was killed before the replace."""
-    drop_link_keys(ticket)
+    drop_link_keys(ticket, _own_link_secrets(root))
     p = ticket_path(root, ticket["id"])
     people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
@@ -826,6 +859,10 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
             from orch import runs_live  # runs_live imports tickets
 
             runs_live.stop_closed(root, tid, by)
+        except Exception:  # noqa: BLE001
+            pass
+        try:  # ORCH-2295: a start that waited in line for it is no longer wanted, whoever closed it
+            runs_live.leave_line(root, tid)
         except Exception:  # noqa: BLE001
             pass
         try:

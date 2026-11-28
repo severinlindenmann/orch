@@ -23,14 +23,18 @@
     const used = rows.filter(r => r && r.running === true).length; /* one-step helpers hold a place too (ORCH-1677) */
     const max = Number.isInteger(settings && settings.live_max) && settings.live_max > 0 ? settings.live_max : null;
     const waiting = Array.isArray(line && line.waiting) ? line.waiting.filter(x => typeof x === 'string') : [];
-    return {used, max, waiting, full: max !== null && used >= max};
+    return {used, working: rows.filter(atWork).length, max, waiting, full: max !== null && used >= max};
   }
+  /* ORCH-2314: a helper that sits idle at its prompt, is stuck or waits for the person holds a place but is not
+     "working": three idle helpers read "3 helpers working". An older core without the helper state counts as before. */
+  const atWork = r => !!r && r.running === true && (!r.helper || typeof r.helper.state !== 'string' || ['working', 'starting'].includes(r.helper.state));
+  const working = p => Number.isInteger(p.working) ? p.working : p.used;
   /* The places line above the choices, in plain words with the right singular and plural. */
   function placesText(p) {
     const wait = p.waiting.length ? plural(p.waiting.length, 'ticket waits', 'tickets wait') + ' in line.' : '';
     if (p.max === null) {
       // ORCH-1664: "open" was unclear (a closed session's pane said "1 helper open"): what they do, in plain words
-      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
+      const now = working(p) ? plural(working(p), 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
       return [now, wait].filter(Boolean).join(' ');
     }
     if (p.full) return [(p.max === 1 ? 'The one helper place is in use.' : 'All ' + p.max + ' helper places are in use.'), wait,
@@ -39,11 +43,12 @@
       (p.used === 1 ? 'is' : 'are') + ' in use.', wait].filter(Boolean).join(' ');
   }
   /* The short places line in the Start choice's header (owner, ORCH-484): "4 of 6 places in use"; the full sentence
-     when every place is taken (a start then waits in line); '' when there is no limit and no helper works. */
+     when every place is taken (a start then waits in line); '' when there is no limit and no helper works (an idle
+     helper is not working, ORCH-2314). */
   function placesShort(p) {
     if (p.full) return placesText(p);
     const wait = p.waiting.length ? ' · ' + plural(p.waiting.length, 'ticket waits', 'tickets wait') : '';
-    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' working' + wait : '';
+    if (p.max === null) return working(p) ? plural(working(p), 'helper', 'helpers') + ' working' + wait : wait.slice(3);
     return p.used + ' of ' + p.max + ' places in use' + wait;
   }
   /* Where this ticket stands in the line ({at:2, of:3}), or null when it does not wait. */

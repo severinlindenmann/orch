@@ -74,10 +74,14 @@ function liveWallCounts(sessions) {
 // The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
 // `total` is the one number of things waiting on the person (the Review badge, as the live bar reads it, ORCH-464);
 // the wall never says less than it or than the sessions that ask (ORCH-674).
-function liveWallSummary(sessions, total) {
+// ORCH-2149 (8): `tiles` is how many tiles the Needs you band shows. Two things on one ticket (two questions, a
+// question and a result) are one tile, so "5 need you" stood over 4 tiles while Review listed 5 cards: the line then
+// says both, "5 need you on 4 tickets".
+function liveWallSummary(sessions, total, tiles) {
   const c = liveWallCounts(sessions), out = [];
   c['needs-you'] = Math.max(Number(total) || 0, c['needs-you']);
-  out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you')} : {s:'', text:'Nobody needs you'});
+  const on = Number.isInteger(tiles) && tiles > 0 && tiles < c['needs-you'] ? ' on ' + tiles + (tiles === 1 ? ' ticket' : ' tickets') : '';
+  out.push(c['needs-you'] ? {s:'needs-you', text:c['needs-you'] + (c['needs-you'] === 1 ? ' needs you' : ' need you') + on} : {s:'', text:'Nobody needs you'});
   if (c.working) out.push({s:'working', text:c.working + ' working'});
   if (c['in-line']) out.push({s:'in-line', text:c['in-line'] + ' in line'});
   if (c.idle) out.push({s:'idle', text:c.idle + ' idle'});
@@ -275,13 +279,21 @@ function liveWallBand(id, title, empty, list, ui, many) {
 }
 // The bands and the summary (repainted in place on every answer of the sessions API).
 // The tickets the needs-you number counts, as wall entries (home.js needsToday: questions, results, failed starts).
+// Read once per page state: the summary and the bands both ask on every answer of the sessions API, and each entry
+// looks its ticket up in the whole list (at 10,000 tickets a second read per paint made the page a third slower,
+// perf check of ORCH-2149).
+let liveWallNeedsMemo = null;
 function liveWallNeeds() {
   if (typeof needsToday !== 'function' || typeof ticketOf !== 'function') return [];
+  const st = typeof state === 'object' ? state : null, m = liveWallNeedsMemo;
+  if (st && m && m.state === st && m.tickets === st.tickets && m.needs === st.needs && m.counts === st.counts && m.runs === st.runs) return m.list;
   let n;
   try { n = needsToday(); } catch (e) { return []; }
   const ids = [...array(n.askedItems).map(i => i.ticket), ...array(n.review).map(t => t.id), ...array(n.failed).map(([t]) => t.id)];
-  return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
+  const list = [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
     word:t.status === 'review' ? 'Review' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
+  if (st) liveWallNeedsMemo = {state:st, tickets:st.tickets, needs:st.needs, counts:st.counts, runs:st.runs, list};
+  return list;
 }
 // One of the master's states (kit UI.state via stateNote) under the filter; its button is caught by the click below.
 function liveWallNote(key, title, text, kind, label, attr) {
@@ -296,7 +308,8 @@ function liveWallHead() {
   // the header and the session total count the sessions (the header never says less than the needs-you number)
   const ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
   return h('div', {className:'wall-sum', 'data-key':'wall-sum'},
-    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
+    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0,
+      ready ? liveWallWithNeeds(sessions, liveWallNeeds()).filter(liveWallAsks).length : null).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
     // no "0 sessions" while the list is still being read
     ready ? h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,

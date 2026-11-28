@@ -355,6 +355,13 @@ def test_stopped_background_addon_is_a_row(proj, run, tmp_path, monkeypatch, uv_
     (row,) = _rows(run)
     assert row["id"] == "core:down:hello" and row["tone"] == "bad" and row["cli"] == "orch start"
     assert compute(proj)[0]["id"] == "core:down:hello"
+    # ORCH-2149: named as a person reads it, and said once ("core  hello: hello is not running" before)
+    assert row["title"] == "Hello" and row["text"].startswith("Hello is not running (last seen ")
+    code, out, _ = run("needs")
+    line = next(ln for ln in out.splitlines() if "is not running" in ln)
+    assert line.split()[:5] == ["add-on", "Hello", "is", "not", "running"]
+    assert "core" not in line and "hello" not in line
+    assert line.rstrip().endswith("(orch start)")
 
 
 def test_option_labels_name_card_options_by_title():

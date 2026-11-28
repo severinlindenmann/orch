@@ -439,7 +439,8 @@ function liveLayerSession(key) {
   }
   const run = state.runs?.[t.id], live = window.LiveSessions?.get(t.id) || null;
   const own = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
-  const helper = liveLayerHelper(live, own);
+  // ORCH-2314 (owner pick C a): a helper that waits for an OK on its screen says so in the pane's pill, above its OK card
+  const waits = liveLayerHelper(live, own), helper = waits?.state === 'you' && liveOkWaits({status:'needs-you', detail:waits.detail}) ? {...waits, word:'Waits for your OK'} : waits;
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
   return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(live ? liveName(live) : t.title) || 'Untitled', live,
     running:live ? ['working', 'needs-you', 'idle'].includes(live.status) : !!state.runs?.[t.id]?.running};
@@ -631,7 +632,7 @@ function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
     phone ? null : item('pin', 'pinned', pinned ? 'Unpin' : 'Pin', {'aria-pressed':String(pinned), 'data-key':'live-pin', 'data-fold-item':''}),
     ...(phone ? [] : ['right', 'down'].map(dir => h('button', {type:'button', className:'live-opt', 'data-live':'menu', 'data-menu':'split:' + dir + ':' + key, 'data-key':'live-more-split-' + dir, 'aria-haspopup':'true', 'data-fold-item':''},
       liveIc('split-' + dir), h('span', {}, dir === 'right' ? 'Split right' : 'Split down')))),
-    sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view', 'data-fold-item':narrow ? null : ''},
+    sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view', 'data-fold-item':narrow ? null : 'view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
     sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
     typeof liveHistMenuItem === 'function' ? liveHistMenuItem(key) : null,
@@ -646,7 +647,8 @@ function liveMoreMenu(key, label, where, pinned, narrow, besideMenu) {
 // step, open time, how long it stays, permissions (they restart the helper) and Open ticket. A plain terminal has none.
 function liveStatusPill(sess, key, open, label) {
   if (!sess || sess.kind === 'terminal') return null;
-  const live = sess.live, word = live?.status === 'needs-you' ? 'Needs you' : clean(live?.word || '') || (sess.running ? 'Working' : 'Ended');
+  // a helper that waits for an OK on its screen says so (ORCH-2314, owner pick C a): the OK card is in the pane below
+  const live = sess.live, word = live?.status === 'needs-you' ? (liveOkWaits(live) ? 'Waits for your OK' : 'Needs you') : clean(live?.word || '') || (sess.running ? 'Working' : 'Ended');
   const pill = sess.pill || (window.UI?.ticketPill ? window.UI.ticketPill({pill:live?.status === 'needs-you' ? 'needs' : live?.status === 'working' ? 'working' : 'todo', word}) : h('span', {className:'pill'}, word));
   return h('button', {type:'button', className:'live-stat', 'data-live':'menu', 'data-menu':'status:' + key, 'data-key':'live-status',
     'aria-expanded':String(open), 'aria-haspopup':'true', title:'About ' + label}, pill);
@@ -681,7 +683,7 @@ function liveMoreEnd(key) {
 const liveEndHere = (key, label) => typeof window.liveEndButtons !== 'function' ? []
   : [window.liveEndOpenAt?.('pane') === key ? window.liveEndMenu(key, 'pane:' + key) : null];
 // ORCH-2199: a pane narrower than this folds Pin and Split into More (owner pick G a; widgets.css container query)
-const LIVE_FOLD_W = 600;  // owner's drawing: 480 px; the header here also has Split down and Copy, so it folds at 600
+const LIVE_FOLD_W = 720;  // owner's drawing: 480 px; the header here also has Split down, Copy and (typing off) Turn typing on: the layer beside a ticket at 1280 is 615 px (ORCH-2314). Chat | Terminal folds under 600
 function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n, compact = o.compact;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;

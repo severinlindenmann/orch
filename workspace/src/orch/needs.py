@@ -70,7 +70,8 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
         "source": "core",
         "kind": "copies:bring-back",
         "ticket": tid,
-        "title": _clip(f"Your work from {title} is on its own branch", 200),
+        # plain words (ORCH-2298, R7.1): where the work is, never a git word
+        "title": _clip(f"The finished work from {title} is not in your project folder yet", 200),
         "text": "Bring it back into your project?",
         "reason": reason,
         "tone": "needs-you",
@@ -194,14 +195,16 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     doctorpass.soon(root)  # the machine's health checks, when set up here and due (ORCH-104)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
+            # ORCH-2149: the add-on by the name a person reads (its dashboard label), never its package name
+            shown = addons.display_title(r["name"])
             rows.append(
                 {
                     "id": f"core:down:{r['name']}",
                     "source": "core",
                     "kind": "addon:not-running",
                     "ticket": None,
-                    "title": r["name"],
-                    "text": f"{r['name']} is not running (last seen {services.ago(r['last_seen'])})",
+                    "title": shown,
+                    "text": f"{shown} is not running (last seen {services.ago(r['last_seen'])})",
                     "tone": "bad",
                     "since": r["last_seen"] or now,
                     "cli": "orch start",

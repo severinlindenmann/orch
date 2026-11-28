@@ -122,7 +122,10 @@ function resultsItems(t, files, withOwn = false) {
         if (!own.has(file.name)) add(resultsFileItem(tid, file.kind, known || {name:file.name}, {title:resultsStr(ev.title), at:ev.at || ''}), task.id);
       } else if (kind === 'command' && (typeof ev.exit === 'number' || ev.output_tail)) runs.push(resultsRunItem(tid, task, ev, i));
       else if ((kind === 'pr' || kind === 'url') && /^https:\/\//.test(String(ev.ref || ''))) {
-        const ref = resultsArr(t.refs).find(r => r && (r.url || r.ref) === ev.ref) || {};
+        // ORCH-2347: the reference of the same pull request gives the live state, also when the two addresses differ
+        // in their tail (/files, #comment): one pull request reads the same in Results and References
+        const same = u => { const m = RESULTS_PR.exec(String(u || '')); return m ? m[1].toLowerCase() + '/' + m[2] + '/' + m[3] : String(u || ''); };
+        const ref = resultsArr(t.refs).find(r => r && same(r.url || r.ref) === same(ev.ref)) || {};
         add(resultsLinkItem(String(ev.ref), ref, ev), task.id);
       }
     });

@@ -432,6 +432,19 @@ def scan_files(
     )
 
 
+NAME_HIDDEN = "(a name that is not shown: it has a secret in it)"
+
+
+def _shown_skipped(root: Path | None, rel: str) -> str:
+    """A left-out file's path for the list the person reads ("Left out (look like secrets)"). It is not
+    uploaded, but the list is printed and lands in a helper's log: a path that itself holds a secret (R5.2)
+    is not repeated there. A scan that cannot run hides the name too."""
+    try:
+        return NAME_HIDDEN if secretscan.find(rel, root, strict=False) else rel
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        return NAME_HIDDEN
+
+
 def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -> bytes:
     """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files.
     `report` gets "files" (bundled paths) and "skipped" (secret-looking files left out)."""
@@ -454,7 +467,10 @@ def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -
     scan_names(root, [r for r, _ in files], outer, "folder")
     files = sorted((_bundle_path(r), p) for r, p in files)
     if report is not None:
-        report["files"], report["skipped"] = [r for r, _ in files], sorted(skipped)
+        report["files"], report["skipped"] = (
+            [r for r, _ in files],
+            sorted(_shown_skipped(root, r) for r in skipped),
+        )
     pages = [r for r, _ in files if r.lower().endswith((".html", ".htm"))]
     if not pages:
         raise Refused("The folder needs at least one .html page to be shared.")
@@ -955,6 +971,10 @@ def pack(
                     raw = p.read_bytes()
                     info = tar.gettarinfo(str(p), arcname=rel)
                 info.size = len(raw)
+                # R5.2: nothing about this computer's account travels in the archive (tar keeps the owner's
+                # login name, group and ids by default); the server gives the files its own owner anyway
+                info.uname = info.gname = ""
+                info.uid = info.gid = 0
                 scanned.append((rel, _MANIFEST_FLAGS.sub(b"", raw) if rel == "app.toml" else raw))
                 tar.addfile(info, io.BytesIO(raw))
     scan_files(root, scanned, name, "app")

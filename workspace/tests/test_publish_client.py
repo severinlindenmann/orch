@@ -149,6 +149,91 @@ def test_link_key_never_lands_in_a_ticket_or_a_run_record(proj, run, pub):
     assert key not in secretrun.record_writer(proj).hider.hide_text(f"orch publish file -> {link}")
 
 
+def test_encoded_link_keys_and_app_view_tokens_never_land_in_a_ticket(proj, run, pub):
+    """ORCH-2208 (R5.1, R5.2): a link copied out of a mail arrives percent-encoded, a key is pasted with no
+    link around it, and an app's view link carries its token: a ticket keeps none of them, the CLI echoes
+    none."""
+    from urllib.parse import quote
+
+    from orch import tickets
+
+    connect(run, pub)
+    f = proj / "report.txt"
+    f.write_bytes(b"hello report")
+    link = json.loads(run("publish", "file", str(f), "--json")[1])["link"]
+    address, key = link.split("#k=")
+    once = address + quote("#k=", safe="") + key  # %23k%3D<key>
+    twice = address + quote(quote("#k=", safe=""), safe="") + key  # %2523k%253D<key>
+    half = address + "%23k=" + key
+    lower = address + "%23k%3d" + key
+    token = "apv_" + "Zq3" * 7 + "x"  # the shape publish gives an app's view link (22 characters)
+    (proj / ".orch/secrets/apps").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch/secrets/apps/view-tokens.json").write_text(json.dumps({"shop": token}), "utf-8")
+    app = f"{pub.url}/a/shop/?token={token}"
+    foreign = "apv_" + "Hh7" * 7 + "y"  # another workspace's app link: this workspace never stored it
+    tid = json.loads(run("ticket", "new", "Share report", "--json")[1])["id"]
+    for n in range(1, 6):
+        run("check", "add", tid, f"Step {n}")
+    outs = [
+        run("ref", "add", tid, once),
+        run("ticket", "summary", tid, f"Shared at {twice}"),
+        run("check", "done", tid, "c1", "--note", f"sent {lower} by mail"),
+        run("check", "done", tid, "c2", "--note", f"the key is {key} if the link breaks"),
+        run("check", "done", tid, "c3", "--note", f"or {half}"),
+        run("ticket", "show", tid),
+        run("ticket", "show", tid, "--json"),
+    ]
+    # a view token is an orch token: the secret scan refuses it at the door and never repeats it
+    refused = [
+        run("check", "done", tid, "c4", "--note", f"app at {app}"),
+        run(
+            "check", "done", tid, "c5", "--note", f"their app: https://pub.example.org/a/crm/?token={foreign}"
+        ),
+        run("ticket", "summary", tid, f"app at {app}"),
+    ]
+    for n, (code, out, err) in enumerate(outs + refused):
+        assert code == (0 if n < len(outs) else 2), (n, out, err)
+        assert not any(v in out + err for v in (key, token, foreign)), (n, out, err)
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert not any(v in text for v in (key, token, foreign))
+    assert text.count(address + tickets.LINK_KEY_KEPT) >= 4  # every encoded form keeps the address, as `#k=…`
+    # a write that never passed the scan (a ticket from another workspace, a hand-made file) is stripped too
+    t = tickets.load(proj, tid)
+    t["summary"] = f"app at {app}, theirs at /a/crm/?token={foreign}, key {key}"
+    tickets._write(proj, t)
+    text = (proj / ".orch/tickets" / f"{tid}.json").read_text("utf-8")
+    assert not any(v in text for v in (key, token, foreign))
+    assert (
+        f"{pub.url}/a/shop/?token={tickets.LINK_SECRET_KEPT}, theirs at /a/crm/?token="
+        f"{tickets.LINK_SECRET_KEPT}" in text
+    )
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file()
+        and "secrets" not in p.parts
+        and any(v in p.read_text("utf-8", errors="ignore") for v in (key, token, foreign))
+    ]
+    assert leaks == []
+
+
+def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, pub):
+    """ORCH-2167: 'Next: describe this workspace' only while it has no description."""
+    pub.me["description"] = "Shares the weekly reports"
+    code, out, _ = connect(run, pub)
+    assert code == 0 and "Next: share a file: orch publish file <path>" in out and "describe this" not in out
+    pub.me["description"] = ""
+    assert "Next: describe this workspace: orch publish profile" in connect(run, pub)[1]
+
+
+def test_link_strip_leaves_other_text_alone():
+    """The strip is narrow: a short `#k=`, a plain percent character and words with `apv_` stay as written."""
+    from orch import tickets
+
+    kept = {"a": "50% of #k=short and %23 alone", "b": ["apv_short", "k=AAAAAAAAAAAAAAAAAAAAAAAA"], "c": 3}
+    assert tickets.drop_link_keys(json.loads(json.dumps(kept))) == kept
+
+
 BVEC = json.loads((VEC_DIR / "publish-bundle-v1.json").read_text())
 
 
@@ -924,6 +1009,46 @@ def test_app_name_and_member_paths_are_scanned_before_upload(proj, run, pub):
     assert code != 0 and "app's name" in err
     assert NAME_TOKEN not in out + err and NAME_TOKEN[8:] not in out + err
     assert len(pub.calls) == n
+
+
+def test_left_out_names_with_a_secret_are_not_repeated(proj, run, pub):
+    """ORCH-2220: a file the folder share leaves out is listed by name ("Left out"). That list is printed and
+    kept in a helper's log, so a left-out path that itself holds a token is counted but never repeated."""
+    connect(run, pub)
+    site = proj / "site"
+    (site / PLANT).mkdir(parents=True)
+    (site / "index.html").write_text("<h1>hi</h1>")
+    (site / PLANT / "server.pem").write_text("x")
+    (site / f"secrets.{PLANT}").write_text("x")
+    (site / "api.key").write_text("x")
+    code, out, err = run("publish", "file", "site")
+    assert code == 0 and "Left out (look like secrets):" in out and "api.key" in out
+    _no_echo(out, err)
+    code, out, err = run("publish", "file", "site", "--json")
+    _no_echo(out, err)
+    res = json.loads(out)
+    assert res["files"] == ["index.html"]
+    assert sorted(res["skipped"]) == [publish.NAME_HIDDEN, publish.NAME_HIDDEN, "api.key"]
+    leaks = [
+        p
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and PLANT in p.read_text("utf-8", errors="ignore")
+    ]
+    assert leaks == []
+
+
+def test_app_archive_carries_nothing_about_this_computers_account(proj):
+    """ORCH-2220: the app archive goes to the publish server. tar would put the login name, the group and
+    their ids of whoever packed it into every entry: they stay here."""
+    app = make_app(proj)
+    (app / "docs").mkdir()
+    (app / "docs" / "notes.md").write_text("clean")
+    for extra in ({}, {"reach": "private", "auth": True}):  # with and without the rewritten app.toml
+        members = tarfile.open(
+            fileobj=io.BytesIO(publish.pack(app, root=proj, name="shop", **extra))
+        ).getmembers()
+        assert {m.name for m in members} >= {"app.toml", "docs/notes.md"}
+        assert all((m.uname, m.gname, m.uid, m.gid) == ("", "", 0, 0) for m in members)
 
 
 def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):

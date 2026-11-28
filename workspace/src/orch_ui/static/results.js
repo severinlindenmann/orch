@@ -313,10 +313,15 @@
       }
       case 'pr': {
         const checks = item.checks || [], green = checks.filter(c => c.state === 'pass').length;
-        const word = {draft: 'Draft', open: 'Open', merged: 'Merged', closed: 'Closed'}[item.status] || 'Open';
-        const pill = el('span', 'pill result-state ' + (item.status || 'open'), word);
+        // ORCH-2347: the card says the reference's live state word (the one References shows), so a pull request never
+        // reads "Open · No checks yet" here and "Conflict" there. A conflict gets no checks: the line says why.
+        const st = /^[a-z][a-z ]{0,39}$/.test(item.status || '') ? item.status : 'open';
+        const tone = {draft: 'draft', merged: 'merged', 'ready to merge': 'merged', closed: 'closed', 'checks failed': 'closed', conflict: 'warn'}[st] || 'open';
+        const pill = el('span', 'pill result-state ' + tone, st.charAt(0).toUpperCase() + st.slice(1));
         const facts = el('div', 'stack');
-        const top = el('div', 'row'); top.append(pill, el('span', 'meta', checks.length ? green + ' of ' + plural(checks.length, 'check') + ' green' : 'No checks yet')); facts.append(top);
+        const line = checks.length ? green + ' of ' + plural(checks.length, 'check') + ' green'
+          : st === 'conflict' ? 'Checks start after ' + (item.base || 'the base branch') + ' is merged in' : st === 'open' || st === 'draft' ? 'No checks yet' : '';
+        const top = el('div', 'row'); top.append(pill); if (line) top.append(el('span', 'meta', line)); facts.append(top);
         if (item.title) facts.append(el('p', 'result-prtitle', item.title));
         if (big && checks.length) {
           const ul = el('ul', 'result-checks');
