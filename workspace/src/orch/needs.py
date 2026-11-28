@@ -322,7 +322,7 @@ class _Pull(threading.Thread):
             return _OWN_SLOT
         end = time.monotonic() + PULL_TIMEOUT
         while True:
-            slot = procs.bg_claim(self.root)
+            slot = procs.bg_claim(self.root, "ask")
             if slot is not None or self._stopped or time.monotonic() > end:
                 return slot
             time.sleep(0.05)

@@ -128,13 +128,16 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
 ```
 
 - **orch limits its own power** (ORCH-2407): everything orch starts by itself in the background (the refresh of an
-  add-on's needs, the look at pull requests, the login checks, the scheduled checks, the cleanup of copies, a sign-in
-  worker, and each add-on's `needs --json` child) holds one slot file `.orch/run/bg/<n>.slot` (the process id; runtime
-  state, never synced). At most `background_max` run at once per workspace; a slot whose process is gone is taken over.
+  add-on's needs, the look at pull requests, the login checks, the scheduled checks, the cleanup of copies) holds one
+  slot file `.orch/run/bg/<n>.slot` (the process id; runtime state, never synced). At most `background_max` run at once
+  per workspace; a slot that its process has ended is free again. The add-ons a command asks for their needs
+  (`needs --json` children) have a pool of their own, four times as large (`ask-<n>.slot`): one `orch needs` asks all
+  its add-ons side by side and never waits behind background work, and many commands at once stay bounded.
   While the computer's 1-minute load per processor core is over `background_load`, no background task is started
   (Windows reports no load: there only `background_max` counts). A start that is skipped is not an error: a later command
   starts it. Every such process gets `ORCH_BG_DEPTH` in its environment and never starts background work itself, so no
-  command can start itself again. A start a person asked for (Renew a sign-in) is counted but never skipped.
+  command can start itself again. A start a person asked for (Renew a sign-in) has slots of its own
+  (`person-<n>.slot`): counted, never skipped, and it never takes a background task's place.
   `orch doctor` names both limits and the current count. Set them with `orch config set workspace.background_max 4` and
   `orch config set workspace.background_load 1.5`.
 - **Permissions**: the mode (ask | auto | full, default auto) is NOT in config.toml (a committed or agent-edited file could raise it; a `permissions` key there is ignored). It is kept per machine in the orch home, `permissions.json`, keyed by the workspace's real path, and set by `orch config set workspace.permissions <mode>`; an agent (`--by agent:*` or an agent tool in the environment) may lower it, never raise it. It is mapped to tool flags only by the adapter's `permissions` data (agents.json). Claude:

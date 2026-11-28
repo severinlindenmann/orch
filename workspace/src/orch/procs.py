@@ -8,6 +8,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -85,8 +86,10 @@ def background_popen_kwargs() -> dict[str, int | bool]:
 # ---- orch limits its own power (ORCH-2407) ------------------------------------------------------------
 # Release 52 had an `orch needs` that started itself again without end and filled a computer until it had to
 # be restarted (ORCH-2372). Three brakes, all here, so every background start of orch's own passes them:
-#   1. one budget per workspace: at most `workspace.background_max` background processes at once, each
-#      holding a slot file in .orch/run/bg/ (a slot whose process is gone is taken over);
+#   1. one budget per workspace: at most `workspace.background_max` background tasks at once, each
+#      holding a slot file in .orch/run/bg/ (a slot whose process is gone is taken over). The add-ons a
+#      command asks for their needs have a pool of their own, BG_ASK_TIMES as large: one `orch needs` asks
+#      all its add-ons side by side and never waits behind background work, yet many at once stay bounded;
 #   2. a busy computer: while the 1-minute load per core is over `workspace.background_load`, background
 #      work is not started (it is started by a later command);
 #   3. no start from inside: a background process carries ORCH_BG_DEPTH and never starts another one.
@@ -95,7 +98,8 @@ BG_DEPTH = "ORCH_BG_DEPTH"  # set for every background process orch starts: how 
 BG_MAX_DEFAULT = 4  # background processes at once per workspace ([workspace] background_max)
 BG_MAX_MOST = 64
 BG_LOAD_DEFAULT = 1.5  # 1-minute load per core over which background work waits ([workspace] background_load)
-BG_OVER = 16  # slots past the limit for a start a person asked for (never skipped, still counted)
+BG_ASK_TIMES = 4  # add-ons asked at once (their `needs --json` children): this many times background_max
+BG_OVER = 16  # slots of their own for a start a person asked for (never skipped, still counted)
 BG_OLD = 600  # a slot older than this is checked for a pid that now belongs to another program
 _BG_LOCK_WAIT = 1.0  # the longest a start waits for the slot lock; then it is skipped
 
@@ -221,26 +225,31 @@ def _slot_held(slot: Path) -> bool:
     return True
 
 
-def bg_count(root: Path) -> int:
-    """How many background processes of this workspace run right now (slots whose process is alive)."""
+def bg_count(root: Path, kind: str | None = None) -> int:
+    """How many background tasks of this workspace run right now (slots whose process is alive): orch's own
+    and the ones a person asked for. `kind="ask"`: the add-ons being asked for their needs right now."""
     try:
-        return sum(1 for s in _bg_dir(root).glob("*.slot") if _slot_held(s))
+        slots = [s for s in _bg_dir(root).glob("*.slot") if (kind == "ask") == s.name.startswith("ask-")]
+        return sum(1 for s in slots if _slot_held(s))
     except OSError:
         return 0
 
 
-def bg_claim(root: Path, *, over: bool = False) -> Path | None:
-    """Take one free slot for a background process about to start, or None when the budget is used up.
-    The slot names this process until bg_bind hands it to the child. `over`: a start a person asked for
-    takes a slot past the limit instead of being skipped. Never raises."""
+def bg_claim(root: Path, kind: str = "task") -> Path | None:
+    """Take one free slot for a process about to start, or None when that pool is used up. The slot names
+    this process until bg_bind hands it to the child. Pools: "task" (orch's own background work, at most
+    background_max), "ask" (an add-on asked for its needs, BG_ASK_TIMES as many), "person" (a start a
+    person asked for: its own slots, so it is never skipped and never takes a task's place). Never raises."""
     try:
         most = bg_limits(root)[0]
+        size = {"task": most, "ask": most * BG_ASK_TIMES, "person": BG_OVER}[kind]
+        name = "" if kind == "task" else f"{kind}-"
         with _bg_lock(root) as got:
             if not got:
                 return None
             d = _bg_dir(root)
-            for i in range(most + (BG_OVER if over else 0)):
-                slot = d / f"{i}.slot"
+            for i in range(size):
+                slot = d / f"{name}{i}.slot"
                 if slot.exists() and _slot_held(slot):
                     continue
                 slot.write_text(str(os.getpid()), encoding="ascii")
@@ -287,7 +296,7 @@ def background_start(
         return False
     if not person and bg_busy(root):
         return False
-    slot = bg_claim(root, over=person)
+    slot = bg_claim(root, "person" if person else "task")
     if slot is None:
         return False
     try:
@@ -296,7 +305,19 @@ def background_start(
         bg_release(slot)
         raise
     bg_bind(slot, getattr(p, "pid", None))
+    if callable(getattr(p, "wait", None)):
+        # a long-lived starter (a page's service) must take the ended child off the process table, or it
+        # would look alive and hold its slot for as long as the starter runs; the slot is free at once
+        threading.Thread(target=_bg_reap, args=(p, slot), daemon=True, name="orch-bg-reap").start()
     return True
+
+
+def _bg_reap(p: subprocess.Popen, slot: Path) -> None:
+    try:
+        p.wait()
+    except Exception:  # noqa: BLE001  nothing to wait for: the slot is free once its process is gone
+        return
+    bg_release(slot, getattr(p, "pid", None))
 
 
 def power_words(root: Path) -> str:

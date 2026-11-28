@@ -34,9 +34,10 @@ class _Fakes:
 
     def __init__(self, monkeypatch, pull_seconds=0.05, job_seconds=0.2):
         self.alive: set[int] = set()
+        self.kinds: dict[int, bool] = {}
         self.started: list[list[str]] = []
         self.envs: list[dict] = []
-        self.most = 0
+        self.most = {True: 0, False: 0}  # the most alive at once: detached tasks (True), asked add-ons
         self.lock = threading.Lock()
         ids = itertools.count(500_000)
         real_alive = services.pid_alive
@@ -48,11 +49,14 @@ class _Fakes:
             def __init__(self, argv, **kw):
                 self.pid = next(ids)
                 self.detached = kw.get("stdout") != procs.subprocess.PIPE
+                self.ended = threading.Event()
                 with fakes.lock:
                     fakes.started.append(list(argv))
                     fakes.envs.append(dict(kw.get("env") or {}))
                     fakes.alive.add(self.pid)
-                    fakes.most = max(fakes.most, len(fakes.alive))
+                    fakes.kinds[self.pid] = self.detached
+                    now = sum(1 for p in fakes.alive if fakes.kinds[p] == self.detached)
+                    fakes.most[self.detached] = max(fakes.most[self.detached], now)
                 if self.detached:  # nobody waits for it: it ends by itself
                     t = threading.Timer(job_seconds, self._end)
                     t.daemon = True  # never keeps the test run open
@@ -61,6 +65,7 @@ class _Fakes:
             def _end(self):
                 with fakes.lock:
                     fakes.alive.discard(self.pid)
+                self.ended.set()
 
             def communicate(self, timeout=None):
                 time.sleep(pull_seconds)
@@ -74,6 +79,7 @@ class _Fakes:
                 self._end()
 
             def wait(self, timeout=None):
+                self.ended.wait(timeout)
                 return 0
 
         monkeypatch.setattr(procs.subprocess, "Popen", Child)
@@ -140,7 +146,8 @@ def test_an_old_slot_whose_pid_now_belongs_to_another_program_is_free(ws, monkey
 
 def test_200_needs_calls_at_once_stay_under_the_budget(ws, monkeypatch):
     """200 `orch needs` at once, each asking one add-on in line, starting the refresh of a late one and the
-    look at pull requests: never more than the budget of orch's own processes run at the same time."""
+    look at pull requests: never more background tasks than the budget, and never more add-ons asked at
+    once than their pool, however many callers there are."""
     f = _Fakes(monkeypatch)
     manifests = {n: {"name": n, "run": f"orch_{n}", "needs": True} for n in ("hello", "late")}
     monkeypatch.setattr(needs_mod.addons, "active_manifests", lambda root: manifests)
@@ -168,8 +175,13 @@ def test_200_needs_calls_at_once_stay_under_the_budget(ws, monkeypatch):
     assert not errors and not any(t.is_alive() for t in threads)
     cap = procs.bg_limits(ws)[0]
     assert cap == procs.BG_MAX_DEFAULT == 4
-    assert 1 <= f.most <= cap, f"{f.most} orch processes at once, the budget is {cap}"
-    assert len(f.started) < 200  # most calls answered from the saved rows instead of starting a process
+    tasks, asks = f.most[True], f.most[False]
+    assert 1 <= tasks <= cap, f"{tasks} background tasks at once, the budget is {cap}"
+    assert 1 <= asks <= cap * procs.BG_ASK_TIMES, (
+        f"{asks} add-ons asked at once, {cap * procs.BG_ASK_TIMES} may be"
+    )
+    assert tasks + asks <= 20  # 200 callers, two add-ons each: never the 400 processes of release 52
+    assert len(f.started) < 400
     assert any("--look-at-pulls" in a for a in f.started) and any("needs" in a for a in f.started)
 
 
@@ -367,7 +379,8 @@ def test_an_addon_asked_for_its_needs_is_one_level_deeper_and_the_deepest_asks_n
     monkeypatch.setattr(needs_mod.addons, "orch_bin", lambda: "orch")
     m = {"name": "hello", "run": "orch_hello", "needs": True}
     assert needs_mod._pull(ws, "hello", m) == []
-    assert f.envs[-1][procs.BG_DEPTH] == "1" and procs.bg_count(ws) == 0  # its slot is given back
+    assert f.envs[-1][procs.BG_DEPTH] == "1"
+    assert procs.bg_count(ws, "ask") == 0 and procs.bg_count(ws) == 0  # its slot is given back
     monkeypatch.setenv(procs.BG_DEPTH, "1")  # the background refresh asks its add-on, in its own slot
     assert needs_mod._pull(ws, "hello", m) == []
     assert f.envs[-1][procs.BG_DEPTH] == "2" and len(f.started) == 2
@@ -395,3 +408,42 @@ def test_doctor_names_the_limits_and_the_count(ws, run, monkeypatch):
     row = next(r for r in json.loads(out)["checks"] if r["name"] == "background work")
     assert row["ok"] is True and row["fact"] == procs.power_words(ws)
     assert "orch runs at most 4 background tasks at once" in run("doctor")[1]
+
+
+# ---- what the first version got wrong (the Focus page smoke went red) -----------------------------------
+
+
+def test_one_needs_asks_all_its_addons_side_by_side_even_with_the_task_budget_used_up(ws, monkeypatch):
+    """Seven add-ons answer needs. One `orch needs` asks them all at once and none waits behind orch's
+    background tasks, even when those hold their whole budget."""
+    f = _Fakes(monkeypatch, pull_seconds=0.2, job_seconds=3600)
+    assert all(procs.background_start(ws, ["x"]) for _ in range(4)) and procs.bg_count(ws) == 4
+    names = [f"a{i}" for i in range(7)]
+    manifests = {n: {"name": n, "run": f"orch_{n}", "needs": True} for n in names}
+    monkeypatch.setattr(needs_mod.addons, "active_manifests", lambda root: manifests)
+    monkeypatch.setattr(needs_mod.addons, "orch_bin", lambda: "orch")
+    monkeypatch.setattr(needs_mod, "core_rows", lambda root: [])
+    began = time.monotonic()
+    assert needs_mod.needs(ws) == []
+    assert time.monotonic() - began < 1.5  # side by side: about one add-on's time, not seven
+    assert f.most[False] == 7 and len(f.started) == 4 + 7
+    assert not any(needs_mod._late_mark(ws, n).exists() for n in names)
+
+
+def test_an_ended_task_frees_its_slot_at_once_in_a_long_running_starter(ws, monkeypatch):
+    """A page's service starts background tasks and lives on: an ended task must not keep its slot."""
+    f = _Fakes(monkeypatch, job_seconds=0.05)
+    for _ in range(3):  # three rounds of the whole budget, one after the other
+        assert all(procs.background_start(ws, ["x"]) for _ in range(4))
+        end = time.monotonic() + 5
+        while list((ws / ".orch/run/bg").glob("*.slot")) and time.monotonic() < end:
+            time.sleep(0.02)
+        assert not list((ws / ".orch/run/bg").glob("*.slot"))  # given back by the reaper, not only found dead
+    assert len(f.started) == 12
+
+
+def test_a_start_a_person_asked_for_takes_no_task_slot(ws, monkeypatch):
+    f = _Fakes(monkeypatch, job_seconds=3600)
+    assert procs.background_start(ws, ["x"], person=True) is True  # a sign-in that waits for its code
+    assert [procs.background_start(ws, ["x"]) for _ in range(5)] == [True] * 4 + [False]
+    assert procs.bg_count(ws) == 5 and len(f.started) == 5
