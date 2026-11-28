@@ -1365,7 +1365,7 @@ body[data-live-layer=right] .shell-body{padding-right:calc(var(--live-padr,0px) 
    just now" goes first, then the page name shortens with "…"; the buttons keep their words and their size. */
 body[data-live-narrow] .topbar{flex-wrap:nowrap}
 body[data-live-narrow] .topbar>*{flex-shrink:0}
-body[data-live-narrow] .topbar>.breadcrumb{flex:1 1 0;min-width:0;flex-wrap:nowrap;height:auto}
+body[data-live-narrow] .topbar>.breadcrumb{flex:0 1 auto;min-width:0;flex-wrap:nowrap;height:auto}
 body[data-live-narrow] .topbar .breadcrumb>#crumb{display:block;height:auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body[data-live-narrow] .topbar #updated{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
@@ -1374,6 +1374,19 @@ body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .ticket-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .ticket-layout>.rail-sheet{position:static;max-height:none;overflow:visible;padding:var(--s4) 0 0;border-left:0;border-top:1px solid var(--border)}
 body[data-live-rail] .live-dock{--live-w:clamp(320px,calc(100vw - var(--sidebar-width) - 600px),760px)}
+/* W-001 (owner, 28 Nov): beside the Focus panel the page area is under 900 px in a wide window (body[data-live-narrow],
+   set by the shell). Chat then takes its narrow layout, as on a small window: the list or the conversation, "‹ Chats"
+   goes back, the starters one under the other, so the message box and Send keep their whole width. The same rules as
+   the 899 px block of the dashboard's pages/chat.css (whose own rules all start with .chat-page), without its phone
+   height (the window is tall, the bar below is --live-pad). */
+body[data-live-narrow] .chat-page,body[data-live-narrow] .chat-page.chat-with-side{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .chat-page.chat-with-side>.pane-side{display:none}
+body[data-live-narrow] .chat-page.chat-list-open .chat-main{display:none}
+body[data-live-narrow] .chat-page.chat-thread-open .chat-list{display:none}
+body[data-live-narrow] .chat-page .chat-list{border-right:0}
+body[data-live-narrow] .chat-page .chat-back{display:inline-flex;border:0;background:transparent;padding:0 8px 0 0}
+body[data-live-narrow] .chat-page .chat-head-top{flex-wrap:nowrap}
+body[data-live-narrow] .chat-page .chat-prompts{grid-template-columns:1fr}
 body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */

@@ -178,6 +178,14 @@ UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','r
  const a=el('div','bulk-actions');(o.actions||[]).forEach(n=>{if(n)a.append(n)});bar.append(c,a);
  let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
  if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
+/* The room a page really has (W-001, owner 28 Nov). A page lays out for its page area, not for the window: beside the
+   Focus panel a 1440 px window leaves the page 617 px. CSS first: the shell marks the body (body[data-live-narrow] under
+   900 px, body[data-live-stack] under 1100 px) and a narrow layout is written for the width query and for the mark. Code
+   that must choose between two drawings asks here, and listens on window for 'orch:page-room' (sent when a mark changes).
+   UI.pageRoom() -> the page area's width in px (the window's width where there is no shell);
+   UI.pageRoom.under(px) -> true when the window or the page area is narrower than px. */
+UI.pageRoom=()=>{const m=document.querySelector('main');return m&&m.clientWidth?m.clientWidth:window.innerWidth};
+UI.pageRoom.under=px=>window.innerWidth<px||UI.pageRoom()<px;
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
    then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,

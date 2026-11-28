@@ -80,7 +80,10 @@
   // a tile shows the page's own title; "Relay: your phone" sits under a Relay label, so it reads "Your phone"
   const short = p => { const s = p.title.indexOf(': ') > 0 ? p.title.split(': ')[1] : p.title; return s.charAt(0).toUpperCase() + s.slice(1); };
   const groupOf = id => D.groups.find(g => g.id === id);
-  const narrow = () => window.matchMedia('(max-width: 1099px)').matches;
+  // Narrow: the window is under 1100 px, or the page area is (W-001: beside the Focus panel the shell marks the body with
+  // data-live-stack). The map with lines, the side list and the three columns are for a wide page area only.
+  const roomNarrow = () => !!(document.body && typeof document.body.hasAttribute === 'function' && document.body.hasAttribute('data-live-stack'));
+  const narrow = () => window.matchMedia('(max-width: 1099px)').matches || roomNarrow();
   const actorsOf = steps => steps.map(s => s.who).filter((a, i, all) => all.indexOf(a) === i);
 
   /* ---------- routing ---------- */
@@ -118,7 +121,10 @@
   host.replaceChildren(bar, root);
   function navBar(p) {
     const title = '<a href="' + L('') + '"' + (p ? '' : ' aria-current="page"') + '>' + ic('book', 16) + '<span>Documentation</span></a>';
-    bar.innerHTML = (p ? '<p class="dn-title">' + title + '</p>' : '<h1 class="dn-title">' + title + '</h1>') +
+    // W-006 (one top for every page): the overview's name is the page title below (the master page top), so the bar
+    // holds only the groups there; on a page the bar's "Documentation" is the way back.
+    bar.classList.toggle('dn-home', !p);
+    bar.innerHTML = (p ? '<p class="dn-title">' + title + '</p>' : '') +
       '<nav class="tabs dn-tabs" aria-label="Groups">' + D.groups.map(g =>
         '<a href="' + L('g-' + g.id) + '"' + ((p && p.group === g.id) || (!p && at === 'g-' + g.id) ? ' aria-current="page"' : '') + '>' + ic(GROUP_ICON[g.id], 14) + esc(g.label) + '</a>').join('') + '</nav>';
     const cur = bar.querySelector('.dn-tabs [aria-current]');
@@ -225,7 +231,7 @@
     const go = groupOf('orch'), gb = groupOf('builtin'), ga = groupOf('addon');
     const HINT = '<span class="eyebrow">Related topics</span><span class="dm-note">Press Related on a part to see what it works with.</span>';
     root.innerHTML =
-      '<p class="muted dl-lead">How orch works, in pictures. Pick a part.</p>' +
+      '<header class="page-heading page-top dl-top"><div class="page-top-text"><h1>Documentation</h1><p class="muted dl-lead">How orch works, in pictures. Pick a part.</p></div></header>' +
       '<div class="dl-first">' + tile(BY[START]) + '</div>' +
       '<nav class="dl" aria-label="The layers of orch">' +
       '<section class="dl-band dz-builtin" data-group="builtin">' + head(gb, LAYER_NOTE) + '<div class="dl-subs">' + subs.map(s =>
@@ -340,9 +346,10 @@
     root.innerHTML = '<div class="sl-wrap">' + pageList(p) + '<div class="sl-main">' + h + '</div></div>';
     st(root);
     const det = root.querySelector('.sl'), mq = window.matchMedia('(max-width: 1099px)');
-    const fold = () => { det.open = !mq.matches; };
+    const fold = () => { det.open = !narrow(); };
     fold();
     mq.addEventListener('change', fold); cleanup.push(() => mq.removeEventListener('change', fold));
+    watch(root, fold);  // the page area changed (the Focus panel opened or closed): the same rule
     const wrap = root.querySelector('.sl-wrap'), foldBtn = det.querySelector('.sl-fold');
     const setRail = on => {
       wrap.classList.toggle('is-rail', on);

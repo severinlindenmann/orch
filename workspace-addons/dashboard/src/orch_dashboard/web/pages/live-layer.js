@@ -1246,9 +1246,13 @@ function liveLayerPad() {
   // ORCH-1616: beside the right panel a page under 900 px takes its narrow rules (top bar icons only, one column),
   // so its header and rows read normally instead of being squeezed
   const pageRoom = where === 'right' && panel ? document.documentElement.clientWidth - liveLayerSide() - panel.offsetWidth : Infinity;
+  const marksWas = liveRoomMarks();
   if (pageRoom < 900) document.body.dataset.liveNarrow = ''; else delete document.body.dataset.liveNarrow;
   // ORCH-1643: under 1100 px (the side split at 1920) a page with a rail beside its list stacks the rail above it
   if (pageRoom < 1100) document.body.dataset.liveStack = ''; else delete document.body.dataset.liveStack;
+  // W-001: these two marks are the page-room contract of the kit (DESIGN.md, "The room a page really has"); a page whose
+  // code draws two different things (not only CSS) hears of a change here
+  if (liveRoomMarks() !== marksWas) window.dispatchEvent(new CustomEvent('orch:page-room', {detail:{narrow:pageRoom < 900, stack:pageRoom < 1100}}));
   // Tab scrolls the next link of the page clear of the layer, never under it (ORCH-1360).
   const root = document.documentElement.style;
   root.setProperty('scroll-padding-bottom', (pad + tb + (pad ? 12 : 0)) + 'px');  // the phone's tab bar sits under the layer; the grip sticks out 8 px above it
@@ -1260,6 +1264,7 @@ function liveLayerPad() {
   }
   window.UI?.toastPlace?.();  // a toast already shown moves with the bar and the message box (ORCH-1359)
 }
+const liveRoomMarks = () => (document.body.dataset.liveNarrow === undefined ? '' : 'n') + (document.body.dataset.liveStack === undefined ? '' : 's');
 function liveLayerRail(right) {
   const shell = document.querySelector('.shell');
   if (!shell) return;
@@ -1276,8 +1281,10 @@ function liveLayerOff() {
   delete document.body.dataset.liveLayer;
   document.body.style.removeProperty('--live-pad');
   document.body.style.removeProperty('--live-padr');
+  const hadMarks = liveRoomMarks();
   delete document.body.dataset.liveNarrow;
   delete document.body.dataset.liveStack;
+  if (hadMarks) window.dispatchEvent(new CustomEvent('orch:page-room', {detail:{narrow:false, stack:false}}));
   document.documentElement.style.removeProperty('scroll-padding-bottom');
   document.documentElement.style.removeProperty('scroll-padding-right');
   liveLayerPainted = '';

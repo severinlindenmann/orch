@@ -547,6 +547,22 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:is([data-side=rail],[data-live-rail]) .nav-item:focus-visible:after,.shell:is([data-side=rail],[data-live-rail]) .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
 }
 @media(max-width:899px){:root{--page-gutter:16px}.columns{grid-template-columns:minmax(0,1fr)}.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{gap:8px}.topbar-actions{flex-wrap:wrap}.page{padding-top:24px}.table-wrap table{min-width:560px}}
+/* The room a page really has (W-001, owner 28 Nov). A page lays out for its page area, not for the window: beside the
+   Focus panel a 1440 px window leaves the page 617 px. The shell marks the body while the page area is narrow:
+   body[data-live-narrow] under 900 px, body[data-live-stack] under 1100 px (dashboard pages/live-layer.js). Every
+   narrow layout is written twice, on the same line where possible: once in its width query for a small window, once
+   under the mark for the page area. Layout only: sizes for fingers (44 px) follow the window and the pointer, never
+   the room (see the touch block below). The shared pieces: */
+body[data-live-narrow] .columns{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-live-narrow] .table-wrap table{min-width:560px}
+body[data-live-narrow] .page-heading-actions{flex-wrap:wrap}
+/* A framed add-on page in a wide window keeps the wide window's page gutter (24 px), so its left edge is the same as on
+   a dashboard-drawn page whether or not the frame is narrow (W-006: left edges of 248 and 256 px). */
+:root[data-window=wide]{--page-gutter:24px}
+/* A button's word never breaks inside itself (W-001: "Save ticket" and "Send" wrapped letter by letter in a 210 px
+   box). A row of buttons wraps as whole buttons instead; a long label still wraps between its words. */
+.btn,.chip,.badge,.pill{overflow-wrap:normal;word-break:normal;hyphens:manual}
 @media(max-width:720px){.shell{display:block}
 .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border);padding:8px 16px;gap:8px}
 .sidebar-top{display:flex;align-items:center;justify-content:space-between}
