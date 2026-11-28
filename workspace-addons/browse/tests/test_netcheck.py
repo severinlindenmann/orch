@@ -212,4 +212,32 @@ def test_a_thousand_sites_match_fast_and_exactly():
     for _ in range(200):
         assert nc.check_target("www.site999.example.org", 443, sites) is None
         assert "site list" in nc.check_target("www.site1000.example.org", 443, sites)
-    assert time.perf_counter() - start < 2.0  # 400 checks against 1000 sites: far below a page's own time
+    assert (
+        time.perf_counter() - start < 2.0
+    )  # 400 checks against 1000 sites: under 5 ms each, far below a page's own time
+
+
+def test_the_filter_reads_a_thousand_sites_once_and_sees_every_change(tmp_path):
+    """What the network filter does on every connection: read both lists, check the host. Under 5 ms with 1,000
+    sites (ORCH-2443), because an unchanged file is not read again; a changed or damaged file is seen at once."""
+    import time
+
+    from orch_browse import paths
+
+    paths.save_workspace_sites(tmp_path, [f"site{i}.example.org" for i in range(1000)])
+    paths.save_sites(tmp_path, "t_abc123", ["docs.python.org"])
+    assert len(paths.load_sites(tmp_path, "t_abc123")) == 1001
+    start = time.perf_counter()
+    for _ in range(100):
+        assert nc.check_target("www.site999.example.org", 443, paths.load_sites(tmp_path, "t_abc123")) is None
+    assert (time.perf_counter() - start) / 100 < 0.005
+    paths.save_workspace_sites(
+        tmp_path, ["only.example.org"]
+    )  # a person changed the list: the next request sees it
+    assert paths.load_sites(tmp_path, "t_abc123") == ["docs.python.org", "only.example.org"]
+    got = paths.load_sites(tmp_path, "t_abc123")
+    got.append("evil.example")  # what a caller does with its list never reaches the next reader
+    assert paths.load_sites(tmp_path, "t_abc123") == ["docs.python.org", "only.example.org"]
+    paths.workspace_sites_file(tmp_path).write_text("{ not json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        paths.load_sites(tmp_path, "t_abc123")

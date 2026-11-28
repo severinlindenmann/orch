@@ -65,15 +65,32 @@ def workspace_sites_file(root: Path) -> Path:
     return base(root) / "sites" / f"{WORKSPACE_LIST}.json"
 
 
+_READ: dict[
+    str, tuple[tuple[int, int], list[str]]
+] = {}  # file -> ((mtime_ns, size), its sites): see _read_sites
+
+
 def _read_sites(f: Path) -> list[str]:
-    """One stored list. Missing = empty; damaged = an error (the filter then allows nothing)."""
-    if not f.exists():
+    """One stored list. Missing = empty; damaged = an error (the filter then allows nothing). The network filter
+    asks on every connection, so a file that did not change is not read and checked again (1,000 sites took
+    4 ms each time); a damaged file is never kept."""
+    try:
+        st = f.stat()
+    except OSError:
         return []
+    # a saved list is a new file (os.replace), so its file number changes even where times are coarse
+    mark, hit = (st.st_mtime_ns, st.st_size, st.st_ino), _READ.get(str(f))
+    if hit and hit[0] == mark:
+        return list(hit[1])
     doc = json.loads(f.read_text(encoding="utf-8"))
     sites = doc.get("sites", []) if isinstance(doc, dict) else None
     if not isinstance(sites, list) or not all(isinstance(s, str) for s in sites):
         raise ValueError('the file must hold {"sites": ["example.com", ...]}')
-    return [netcheck.norm_site(s) for s in sites]
+    out = [netcheck.norm_site(s) for s in sites]
+    if len(_READ) > 256:
+        _READ.clear()
+    _READ[str(f)] = (mark, out)
+    return list(out)
 
 
 def _write_sites(f: Path, sites: list[str]) -> None:
