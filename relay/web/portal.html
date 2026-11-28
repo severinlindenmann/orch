@@ -212,39 +212,45 @@ async function groupsPage(v){
 }
 const flagLabels=[['text','Send messages and files'],['files','Send files'],['delegate','Give tasks'],['start','Start work']];
 async function rules(v){
- const [r,allows]=await Promise.all([api('/rules'),all('/allows')]);if(v!==epoch)return;
+ const [r,allows]=await Promise.all([api('/rules'),all('/allows')]);if(v!==epoch)return;networkRules=r.rules||[];
  drawRules(r,allows);
 }
+// P-012: only pairs that have a rule, one card per pair with a line per direction; filter and search above ten pairs.
 function drawRules(r,allows){
- const rows=[],top=[],groups=new Map(),views=new Map(),shortFlag={mf:'Send messages and files',delegate:'Give tasks',start:'Start work'};
- for(const from of workspaces){groups.set(from.id,{from,cards:[]});for(const to of workspaces){if(from.id===to.id)continue;const old=(r.rules||[]).find(x=>x.from===from.id&&x.to===to.id)||{};const row={from:from.id,to:to.id};
-  for(const k of ['text','files'])row[k]=input(k,'',{type:'checkbox',checked:!!(old.text||old.files)});
-  for(const k of ['delegate','start'])row[k]=input(k,'',{type:'checkbox',checked:!!old[k]});
-  const lbl=from.name+' → '+to.name;
-  const mf=input('mf','',{type:'checkbox',class:'toggle',role:'switch',checked:!!(old.text||old.files),id:'r-'+from.id+'-'+to.id+'-mf','aria-label':lbl+': Send messages and files'});
-  mf.onchange=()=>{row.text.checked=row.files.checked=mf.checked};row.mf=mf;
-  const sw=(k,c)=>el('label',{class:'switch-label'},c,el('span',{},shortFlag[k]));
-  const dl=input('delegate','',{type:'checkbox',class:'toggle',role:'switch',checked:!!old.delegate,id:'r-'+from.id+'-'+to.id+'-delegate','aria-label':lbl+': Give tasks'});dl.onchange=()=>{row.delegate.checked=dl.checked};row.dl=dl;
-  const st=input('start','',{type:'checkbox',class:'toggle',role:'switch',checked:!!old.start,id:'r-'+from.id+'-'+to.id+'-start','aria-label':lbl+': Start work'});st.onchange=()=>{row.start.checked=st.checked};row.st=st;
-  const both=el('button',{type:'button',class:'outline pair-both',onclick:()=>{const rev=rows.find(x=>x.from===to.id&&x.to===from.id);if(!rev)return;const on=!(mf.checked||dl.checked||st.checked)?{mf:true,dl:false,st:false}:{mf:mf.checked,dl:dl.checked,st:st.checked};for(const x of [row,rev]){x.mf.checked=x.text.checked=x.files.checked=on.mf;x.dl.checked=x.delegate.checked=on.dl;x.st.checked=x.start.checked=on.st;views.get(x).expand()}updateDirty();toast('Allowed both ways. Press Save changes to keep it.')}},'Allow both ways');
-  rows.push(row);const switches=el('div',{class:'pair-switches'},sw('mf',mf),sw('delegate',dl),sw('start',st));
-  const allow=el('button',{type:'button',class:'outline',onclick:()=>{mf.checked=row.text.checked=row.files.checked=true;expand();updateDirty();mf.focus()}},'Allow');
-  const line=el('div',{class:'pair pair-line'},el('h3',{},lbl),allow,switches,both);
-  function expand(){line.classList.remove('pair-compact');allow.hidden=true;switches.hidden=both.hidden=false}
-  views.set(row,{expand});line.addEventListener('change',updateDirty);
-  if(flagLabels.some(([k])=>old[k]))expand();else{line.classList.add('pair-compact');switches.hidden=both.hidden=true}
-  if(flagLabels.some(([k])=>old[k]))top.push(line);else groups.get(from.id).cards.push(line)}}
+ const rows=[],cards=[],shortFlag={mf:'Send messages and files',delegate:'Give tasks',start:'Start work'},byId=new Map(workspaces.map(w=>[w.id,w])),pairs=new Map();
+ for(const x of r.rules||[]){if(!flagLabels.some(([k])=>x[k])||!byId.has(x.from)||!byId.has(x.to)||x.from===x.to)continue;const [a,b]=[x.from,x.to].sort((p,q)=>workspaces.indexOf(byId.get(p))-workspaces.indexOf(byId.get(q)));pairs.set(a+' '+b,[a,b])}
+ const ruleOf=(from,to)=>(r.rules||[]).find(x=>x.from===from&&x.to===to)||{};
+ for(const [a,b] of pairs.values()){
+  const lines=[],dir=[];
+  for(const [from,to] of [[a,b],[b,a]]){const old=ruleOf(from,to),row={from,to},lbl=name(from)+' → '+name(to);
+   for(const k of ['text','files'])row[k]=input(k,'',{type:'checkbox',checked:!!(old.text||old.files)});
+   for(const k of ['delegate','start'])row[k]=input(k,'',{type:'checkbox',checked:!!old[k]});
+   const sw=(k,key,on)=>{const c=input(k,'',{type:'checkbox',class:'toggle',role:'switch',checked:on,id:'r-'+from+'-'+to+'-'+k,'aria-label':lbl+': '+shortFlag[k]});c.onchange=()=>{if(k==='mf')row.text.checked=row.files.checked=c.checked;else row[key].checked=c.checked;refreshBoth()};row[k==='mf'?'mf':k==='delegate'?'dl':'st']=c;return el('label',{class:'switch-label'},c,el('span',{},shortFlag[k]))};
+   const switches=el('div',{class:'pair-switches'},sw('mf','text',!!(old.text||old.files)),sw('delegate','delegate',!!old.delegate),sw('start','start',!!old.start));
+   rows.push(row);dir.push(row);lines.push(el('div',{class:'pair pair-line'},el('h3',{},lbl),switches))}
+  const any=x=>x.mf.checked||x.dl.checked||x.st.checked;
+  // 'Allow both ways' only while one direction allows nothing; it copies the other direction, never all switches.
+  const both=el('button',{type:'button',class:'outline pair-both',onclick:()=>{const [src,dst]=any(dir[0])?[dir[0],dir[1]]:[dir[1],dir[0]];for(const [k,f] of [['mf',['text','files']],['dl',['delegate']],['st',['start']]]){dst[k].checked=src[k].checked;f.forEach(x=>dst[x].checked=src[k].checked)}refreshBoth();updateDirty();toast('Allowed both ways. Press Save changes to keep it.');dst.mf.focus()}},'Allow both ways');
+  function refreshBoth(){both.hidden=any(dir[0])===any(dir[1])}
+  const card=el('section',{class:'pair-card','data-pair':a+' '+b,'data-names':(name(a)+' '+name(b)).toLowerCase()},el('h3',{class:'pair-title'},name(a)+' and '+name(b)),...lines,el('div',{class:'actions'},both));
+  card.addEventListener('change',updateDirty);refreshBoth();cards.push(card)}
  const snapshot=()=>JSON.stringify(rows.map(r=>[r.mf.checked,r.dl.checked,r.st.checked])),initial=snapshot();
  function updateDirty(){const d=snapshot()!==initial;saveBox.classList.toggle('is-dirty',d);saveBtn.disabled=!d}
  const saveErr=el('div',{class:'form-error',role:'alert',hidden:true});
- async function saveRules(){saveErr.hidden=true;clearToast();try{const rules=rows.map(r=>Object.fromEntries(Object.entries(r).filter(([k])=>!['mf','dl','st'].includes(k)).map(([k,v])=>[k,flagLabels.some(([f])=>f===k)?v.checked:v]))).filter(r=>flagLabels.some(([k])=>r[k]));const res=await api('/rules','PUT',{rules});drawRules(res,allows);toast('Saved')}catch(e){if(e.name==='AbortError')return;const m=e.status>=500||!e.status?'Couldn’t save the permissions. Your choices are kept.':e.message;saveErr.replaceChildren(...errBody({message:m},()=>saveBtn.click()));saveErr.hidden=false;setTimeout(()=>saveBtn.focus(),0)}}
+ async function saveRules(){saveErr.hidden=true;clearToast();try{const shown=new Set(rows.map(x=>x.from+' '+x.to));const keep=(r.rules||[]).filter(x=>!shown.has(x.from+' '+x.to));const rules=[...keep,...rows.map(r=>Object.fromEntries(Object.entries(r).filter(([k])=>!['mf','dl','st'].includes(k)).map(([k,v])=>[k,flagLabels.some(([f])=>f===k)?v.checked:v])))].filter(r=>flagLabels.some(([k])=>r[k]));const res=await api('/rules','PUT',{rules});networkRules=res.rules||rules;drawRules(res,allows);toast('Saved')}catch(e){if(e.name==='AbortError')return;const m=e.status>=500||!e.status?'Couldn’t save the permissions. Your choices are kept.':e.message;saveErr.replaceChildren(...errBody({message:m},()=>saveBtn.click()));saveErr.hidden=false;setTimeout(()=>saveBtn.focus(),0)}}
  const saveBtn=button('Save changes',saveRules,'primary','Saving…'),saveBox=el('div',{class:'sticky-save'},saveErr,el('div',{class:'actions'},saveBtn));saveBtn.disabled=true;
- const folded=[...groups.values()].flatMap(g=>g.cards);
  const seen=new Set();const clean=allows.filter(a=>isKnown(a.from)&&isKnown(a.to)).filter(a=>{const k=[a.from,a.to,a.kind,a.key,a.mode].join('|');if(seen.has(k))return false;seen.add(k);return true});
  const kindText={start:'start work',delegate:'give a task',files:'send files'};
- show(...head('Permissions','Who can do what','Choose what may travel between each pair of workspaces.'),
-  panel('Between workspaces'+(top.length?' · '+top.length+' allowed':''),el('div',{},...(rows.length?[top.length?el('div',{},...top):null,...folded]:[empty('Add at least two workspaces','Permissions are set for each pair.',el('a',{class:'button primary',href:'#add'},'Add workspace'))])),saveBox),
+ // Filter and search once there are more than ten pairs; both live in the address.
+ const P=hashState().params,wsF=workspaceSelect(),q=input('q',P.get('q')||'',{type:'search',placeholder:'Workspace name',autocomplete:'off','aria-label':'Search pairs'}),none=el('p',{class:'meta muted',hidden:true},'No pair matches. Clear the filter or the search.');
+ wsF.value=workspaces.some(w=>w.id===P.get('ws'))?P.get('ws'):'';
+ function filter(){const t=q.value.trim().toLowerCase();let n=0;for(const c of cards){const ok=(!wsF.value||c.dataset.pair.split(' ').includes(wsF.value))&&(!t||c.dataset.names.includes(t));c.hidden=!ok;if(ok)n++}none.hidden=!!n||!cards.length;setParams({ws:wsF.value,q:q.value.trim()})}
+ wsF.onchange=filter;q.oninput=filter;
+ const many=cards.length>10,list=panel('Between workspaces'+(cards.length?' · '+cards.length+(cards.length===1?' pair':' pairs'):''),...(many?[el('div',{class:'filters form-body'},field('Workspace',wsF),field('Search',q))]:[]),el('div',{class:'pair-cards'},...(cards.length?cards:[workspaces.length>1?empty('No connections yet','Two workspaces work together only when you allow it.',button('Add connection',()=>edgeSheet(),'primary')):empty('Add at least two workspaces','Permissions are set for each pair.',el('a',{class:'button primary',href:'#add'},'Add workspace'))]),none),cards.length?saveBox:null);
+ if(workspaces.length>1&&cards.length)list.firstChild.append(button('Add connection',()=>edgeSheet(),'outline'));
+ show(...head('Permissions','Who can do what','Choose what may travel between each pair of workspaces.'),list,
   panel('Permissions workspaces gave',...(clean.length?clean.map(a=>el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},name(a.to)+' lets '+name(a.from)+' '+(kindText[a.kind]||a.kind||'act')+(a.key?': '+a.key:''))),el('span',{class:'badge'},a.mode==='permanent'?'Always':'Once'))):[empty('None yet','When a workspace asks to start a task, the workspace receiving it can allow it. Nothing to do now.')])));
+ if(many)filter();
 }
 function workspaceSelect(label='All workspaces'){return el('select',{'aria-label':'Filter by workspace'},el('option',{value:''},label),workspaces.map(w=>el('option',{value:w.id},w.name)))}
 const clock=v=>{const d=new Date(v);return isNaN(d)?'':d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})};
@@ -604,12 +610,18 @@ function connectionList(id,badges=false){
  for(const s of subList.filter(s=>!id||subscriberMembers(s).includes(id)))rows.push(el('button',{type:'button',class:'ghost connection-row subscriber-connection','data-ws-pair':subscriberMembers(s).join(' '),onclick:()=>{location.hash='subscribers'}},el('span',{class:'connection-names'},uiIcon('antenna'),' '+s.name),el('span',{class:'connection-direction'},subscriberScope(s),s.can_answer?' ↔ ':' → ',subscriberKindsText(s)),el('span',{class:'connection-direction'+(s.push&&s.push.state!=='ok'?' sub-warn':'')},subscriberStatus(s,true))));
  return rows.length?rows:[sub('No connections yet')];
 }
+// P-017: Add connection starts with no pair chosen; the switches show once both are chosen; the title says Edit when the
+// pair exists; Save stays off until two different workspaces are chosen.
 function edgeSheet(from,to){
- const adding=!from;let a=from||workspaces[0]?.id,b=to||workspaces[1]?.id;const controls=el('div'),rows=[];
- function draw(){rows.length=0;controls.replaceChildren();if(!a||!b||a===b)return;for(const [src,dst]of [[a,b],[b,a]]){const old=networkRules.find(r=>r.from===src&&r.to===dst)||{},r={from:src,to:dst};const switches=[['mf','Send messages and files',!!(old.text||old.files)],['delegate','Give tasks',!!old.delegate],['start','Start work',!!old.start]].map(([k,label,checked])=>{const c=input(k,'',{type:'checkbox',class:'toggle',role:'switch',checked,'aria-label':name(src)+' to '+name(dst)+': '+label});r[k]=c;return el('label',{class:'switch-label'},c,label)});rows.push(r);controls.append(el('section',{class:'pair'},el('h3',{},name(src)+' → '+name(dst)),el('div',{class:'pair-switches'},switches)))}}
- const choose=(label,value,change)=>{const s=el('select',{onchange:()=>{change(s.value);draw()}},workspaces.map(w=>el('option',{value:w.id,selected:w.id===value},w.name)));return field(label,s)};
- let d;const f=form(async()=>{if(!a||!b||a===b)throw Error('Choose two different workspaces.');const rules=networkRules.filter(r=>!((r.from===a&&r.to===b)||(r.from===b&&r.to===a)));for(const r of rows){const rule={from:r.from,to:r.to,text:r.mf.checked,files:r.mf.checked,delegate:r.delegate.checked,start:r.start.checked};if(permissionLabel(rule))rules.push(rule)}const saved=await api('/rules','PUT',{rules});networkRules=saved.rules||rules;await orch.close(d);toast('Saved');await route()},adding?[choose('From',a,x=>a=x),choose('To',b,x=>b=x)]:null,controls,button('Allow both ways',()=>rows.forEach(r=>{r.mf.checked=r.delegate.checked=r.start.checked=true}),'ghost'),submit('Save'));
- draw();d=sheet(adding?'Add connection':name(a)+' → '+name(b),f);
+ const adding=!from;let a=from||'',b=to||'';const controls=el('div'),rows=[],hint=el('p',{class:'meta muted',role:'status'});
+ const exists=()=>networkRules.some(r=>((r.from===a&&r.to===b)||(r.from===b&&r.to===a))&&permissionLabel(r));
+ const title=()=>!a||!b||a===b?'Add connection':exists()?(adding?'Edit connection':name(a)+' → '+name(b)):'Add connection';
+ function draw(){rows.length=0;controls.replaceChildren();const ready=a&&b&&a!==b;bothBtn.hidden=!ready;saveBtn.disabled=!ready;hint.textContent=!a||!b?'Choose two workspaces. Nothing changes until you press Save.':a===b?'Choose two different workspaces.':'';hint.hidden=!hint.textContent;if(d){const h=d.querySelector('h2');h.textContent=title();d.setAttribute('aria-label',title())}if(!ready)return;
+  for(const [src,dst]of [[a,b],[b,a]]){const old=networkRules.find(r=>r.from===src&&r.to===dst)||{},r={from:src,to:dst};const switches=[['mf','Send messages and files',!!(old.text||old.files)],['delegate','Give tasks',!!old.delegate],['start','Start work',!!old.start]].map(([k,label,checked])=>{const c=input(k,'',{type:'checkbox',class:'toggle',role:'switch',checked,'aria-label':name(src)+' to '+name(dst)+': '+label});r[k]=c;return el('label',{class:'switch-label'},c,label)});rows.push(r);controls.append(el('section',{class:'pair'},el('h3',{},name(src)+' → '+name(dst)),el('div',{class:'pair-switches'},switches)))}}
+ const choose=(label,value,change)=>{const s=el('select',{onchange:()=>{change(s.value);draw()}},el('option',{value:'',disabled:true,selected:!value},'Choose a workspace'),workspaces.map(w=>el('option',{value:w.id,selected:w.id===value},w.name)));return field(label,s)};
+ const bothBtn=button('Allow both ways',()=>rows.forEach(r=>{r.mf.checked=r.delegate.checked=r.start.checked=true}),'ghost'),saveBtn=submit('Save');
+ let d;const f=form(async()=>{if(!a||!b||a===b)throw Error('Choose two different workspaces.');const rules=networkRules.filter(r=>!((r.from===a&&r.to===b)||(r.from===b&&r.to===a)));for(const r of rows){const rule={from:r.from,to:r.to,text:r.mf.checked,files:r.mf.checked,delegate:r.delegate.checked,start:r.start.checked};if(permissionLabel(rule))rules.push(rule)}const saved=await api('/rules','PUT',{rules});networkRules=saved.rules||rules;await orch.close(d);toast('Saved');await route()},adding?[choose('From',a,x=>a=x),choose('To',b,x=>b=x)]:null,hint,controls,bothBtn,saveBtn);
+ draw();d=sheet(title(),f);draw();
 }
 async function removePhone(p){if(!await confirmDialog('Remove '+p.name+'?','It will be signed out.',p.kind==='browser'?'Remove browser':'Remove phone'))return;await api('/phones/'+enc(p.id),'DELETE');toast(p.name+' removed');await route();focusMain()}
 function phoneEditor(p,after){return form(async f=>{await api('/phones/'+enc(p.id),'PATCH',{workspaces:selected(f)});p.workspaces=selected(f);toast('Saved');if(after)await after()},checks(p.workspaces||[]),submit('Save access'))}

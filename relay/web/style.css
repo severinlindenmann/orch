@@ -222,3 +222,9 @@ pre.sub-code{min-width:0;width:100%;max-width:100%;white-space:pre;overflow:auto
 .msg-line .msg-ticket{max-width:14rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
 .day-group .card-h h2{font-size:inherit;font-weight:inherit;display:inline}
 @media(max-width:899px){.msg-line{grid-template-columns:3.5rem minmax(0,1fr) auto;row-gap:2px}.msg-line .msg-text{grid-column:2/-1;grid-row:2}.msg-line .msg-wait{display:none}}
+.pair-cards{display:grid;gap:12px;padding:12px 16px}
+.pair-card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.pair-card .pair-title{padding:12px 12px 0;font-weight:600}
+.pair-card .pair:last-of-type{border-bottom:0}
+.pair-card .actions{padding:0 12px 12px}
+.pair-card .actions:has(> [hidden]:only-child){display:none}
