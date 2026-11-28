@@ -76,11 +76,23 @@ def _root() -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+RUN_ID = re.compile(r"t_[a-z0-9]{4,32}")  # one plain folder name: no path part, no upper case, nothing else
+
+
 def _not_own(tid: str) -> str:
     """The browser a person opened for themselves (paths.OWN_RUN) is not a ticket's: no command takes it, however
     the name is written and whatever a ticket reference resolves to."""
-    if str(tid).strip().lower() == paths.OWN_RUN:
+    if str(tid).strip().casefold() == paths.OWN_RUN:
         raise Refused("That is the person's own browser, not a ticket's. Use your ticket's browser.")
+    return tid
+
+
+def _run_id(tid: str) -> str:
+    """The id a browser folder is made from: a ticket id in its plain form and never the person's own run. The
+    same check on every way in (the core's answer, and the fallback without the core)."""
+    _not_own(tid)
+    if not isinstance(tid, str) or not RUN_ID.fullmatch(tid):
+        raise Refused("That is not a ticket id.")
     return tid
 
 
@@ -92,16 +104,17 @@ def _ticket(root: Path, ref: str | None) -> str:
     try:
         from orch import tickets
 
-        return _not_own(tickets.resolve(root, ref))
+        return _run_id(tickets.resolve(root, ref))
     except ImportError:
         pass
     except Refused:
         raise
     except Exception as e:  # noqa: BLE001 - the core's refusal already says what to do
         raise Refused(str(e)) from None
+    _run_id(ref)  # before it is used as a file name
     if not (root / ".orch" / "tickets" / f"{ref}.json").exists():
         raise Refused(f"No ticket {ref} here.")
-    return _not_own(ref)
+    return ref
 
 
 def _in_helper() -> bool:

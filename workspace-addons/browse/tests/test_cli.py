@@ -506,6 +506,16 @@ def test_no_command_reaches_the_persons_own_browser(ws, capsys, monkeypatch):
     monkeypatch.setenv("ORCH_TICKET", paths.OWN_RUN)
     code, out = run(capsys, "look")
     assert code == 2 and "person's own browser" in out
+    for odd in (
+        "./t_self",
+        "t_self/",
+        "../tickets/t_abc123",
+        "T_ABC123",
+    ):  # never a path part or another case
+        code, out = run(capsys, "look", "--ticket", odd)
+        assert code == 2 and (
+            "not a ticket id" in out or "person's own browser" in out or "No ticket" in out
+        ), out
     for spelled in (" T_SELF ", "t_Self"):  # however it is written
         code, out = run(capsys, "look", "--ticket", spelled)
         assert code == 2 and "person's own browser" in out
