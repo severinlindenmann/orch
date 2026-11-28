@@ -24,7 +24,7 @@ function liveNow(s) {
   if (s.status === 'needs-you') return s.question || s.detail || 'Needs you.';
   if (s.status === 'in-line') return 'Waits in line for a free helper place.';
   // ORCH-1687: a ticket that waits for the person without a session (a result, a question, a start that failed)
-  if (s.status === 'closed' && s.needs === true) return s.word === 'Check' ? 'A result to check.' : s.word === 'Could not start' ? 'The helper could not start.' : 'Waits for your answer.';
+  if (s.status === 'closed' && s.needs === true) return s.word === 'Review' ? 'A result to review.' : s.word === 'Could not start' ? 'The helper could not start.' : 'Waits for your answer.';
   if (s.status === 'closed') return 'No session right now.';
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
@@ -43,13 +43,13 @@ function liveNow(s) {
 function liveTool(s) {
   return [s?.tool, s?.model].filter(x => typeof x === 'string' && x).join(' · ');
 }
-// How long it stays: draft D's words
+// How long it stays, in plain words (ORCH-1684: no "stays warm", no "the conversation is kept")
 function liveWarm(s) {
   if (!s) return '';
   if (s.status === 'idle') return Number.isFinite(s.closes_in_seconds) ? 'closes in ' + liveDur(s.closes_in_seconds) + ' if left idle' : 'idle';
-  if (s.status === 'closed') return s.needs === true ? '' : 'closed, the conversation is kept';
+  if (s.status === 'closed') return s.needs === true ? '' : 'closed, you can continue it later';
   if (s.status === 'in-line') return 'starts when a place is free';
-  return s.status === 'needs-you' ? 'stays warm while it waits for you' : 'stays warm while it works';
+  return s.status === 'needs-you' ? 'stays open while it waits for you' : 'stays open while it works';
 }
 // The meta line of a pane or tile: tool and model, open time, how long it stays
 function liveMeta(s) {

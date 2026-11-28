@@ -8,6 +8,7 @@
 //   node workspace-addons/dashboard/clickthrough/run.cjs --size 390x844   another window size (default 1280x900)
 //   node workspace-addons/dashboard/clickthrough/run.cjs --part 1/2       every 2nd click-through from the 1st (CI runs
 //                                                                          the parts as jobs at once, ORCH-1118)
+//   node workspace-addons/dashboard/clickthrough/run.cjs --quarantined    only the QUARANTINED ones (nightly, ORCH-2363)
 //
 // Each click-through (features/*.cjs) does a thing, reloads the page, checks the result is still there, and fails on
 // any console error or uncaught exception. The server is the real dashboard with working actions (server.py): a click
@@ -28,6 +29,9 @@
 // click-through has a time limit of 3 minutes, so one hang cannot eat the job. A click-through on the short
 // UNSTEADY list (each entry names the ticket that fixes it) still runs, but its failure is printed as
 // "FAILED (known unsteady, does not count): <file>" and does not make the run red.
+// A click-through on the QUARANTINED list (ORCH-2363) does not run at all, unless named with --only or run with
+// --quarantined (nightly on develop and on release branches, the quarantine workflow); the features only it covers
+// are not asked for. With --quarantined a failure makes that run red.
 'use strict';
 const fs = require('node:fs');
 const net = require('node:net');
@@ -44,6 +48,12 @@ let SIZE = { width: 1280, height: 900 };
 const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation', 'browse'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
+/** `python -I -c AT_TERMINAL <orch words>`: orch with a terminal as its input, as a person types it. An unattended
+ *  orch call (no terminal, no --by) is a helper (ORCH-2108); the person helpers below run this way. Enter is
+ *  already typed a few times, so a question orch asks at a terminal (init's name, a y/N) is skipped, never waited on. */
+const AT_TERMINAL = "import os, runpy, sys\ntry:\n    import pty\n    m, s = pty.openpty()\n    os.dup2(s, 0)\n    os.close(s)\n"
+  + "    os.write(m, b'\\n' * 16)\nexcept (ImportError, OSError):\n    pass\n"
+  + "sys.argv = ['orch', *sys.argv[1:]]\nrunpy.run_module('orch', run_name='__main__', alter_sys=True)";
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
  *  above count as shipped and "the newest orch" is read from here, never from the internet */
 const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1',
@@ -53,10 +63,11 @@ const runEnv = dir => ({ HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 
 const envArgs = env => ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
 
 function args(argv) {
-  const o = { only: null, out: null, list: false, part: null };
+  const o = { only: null, out: null, list: false, part: null, quarantined: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--list') o.list = true;
+    else if (a === '--quarantined') o.quarantined = true;
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(s => s.replace(/\.cjs$/, '')));
     else if (a === '--out') o.out = path.resolve(argv[++i]);
     else if (a === '--part') {
@@ -259,15 +270,15 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs({ ...runEnv(srv.dir), ORCH_AGENT: 'standin' }), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
-    /** like orch(...), but as the person at the computer (no helper mark): what a person types in a terminal */
+    /** like orch(...), but as the person at the computer (no helper mark, a terminal as input): what a person types */
     orchAsPerson(...words) {
-      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
+      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', AT_TERMINAL, ...words],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
     /** orch as the person at the computer in another folder of the throw-away home (a second workspace) */
     orchIn(dir, ...words) {
       if (!path.resolve(dir).startsWith(srv.dir + path.sep)) throw new Error('orchIn: not inside the throw-away home: ' + dir);
-      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-m', 'orch', ...words],
+      return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', AT_TERMINAL, ...words],
         { cwd: dir, encoding: 'utf8', timeout: 120000 });
     },
     /** git in a folder of the throw-away home, with no settings of this computer and a made-up author */
@@ -470,6 +481,19 @@ const MAX_RETRIES = 3;
 const UNSTEADY = {
   'r-factory-idea-to-start.cjs': 'ORCH-1118',  // failed twice in one run in group #2220 (Running after a reload; 404)
 };
+/** Quarantined click-throughs (ORCH-2363, owner 27 Nov): they made most red merge queue groups, so they are out of
+ *  the queue and of every default run; the quarantine workflow runs them alone (--quarantined) nightly on develop and
+ *  on release branches, where a red run opens or refreshes one "later" ticket (release keeper). Each entry names the
+ *  ticket that fixes it; remove the entry when it is fixed and green there again. */
+const QUARANTINED = {
+  'a-board-families.cjs': 'ORCH-2153',
+  'f-sync-page.cjs': 'ORCH-2363',
+  'q-automation-repeats.cjs': 'ORCH-2363',
+  // the two that time out when their lane is slow late in a run (45 s and 30 s alone, over 180 s there): they failed
+  // their first try in nearly every run on develop too and, with one more, stopped every second try (group #3416)
+  'p-looks-good-cases.cjs': 'ORCH-2372',
+  's-role-page.cjs': 'ORCH-2372',
+};
 /** No second try starts after this long, and every second try must end by RUN_END_MS (the CI job stops at 15
  *  minutes, its setup takes about one): a second try gets only the time that is left, so a slow first round (run
  *  45082995989: 12 minutes) still leaves room to try its failures again instead of none (ORCH-1652). */
@@ -562,7 +586,7 @@ async function main() {
     console.log(`\n${cov.features.length} features, ${cov.missing.length} without a click-through${cov.missing.length ? ': ' + cov.missing.join(' ') : ''}`);
     return 0;
   }
-  const picked = all.filter(c => !o.only || o.only.has(c.file.replace(/\.cjs$/, '')));
+  const picked = pick(all, o);
   if (o.only && picked.length !== o.only.size) throw new Error(`no such click-through: ${[...o.only].filter(n => !all.some(c => c.file === n + '.cjs')).join(', ')}`);
   const todo = o.part ? part(picked, o.part) : picked;
   if (o.part) console.log(`part ${o.part.n} of ${o.part.of}: ${todo.length} of ${picked.length} click-throughs`);
@@ -624,18 +648,31 @@ async function main() {
     for (const one of [...servers, ...spent]) one.stop();
   }
   const { results, secondTry } = run;
-  const wanted = o.only ? null : partFeatures(all, todo, catalogue.features(), o.part);
+  const wanted = o.only || o.quarantined ? null : partFeatures(all, todo, notQuarantined(all, catalogue.features()), o.part);
   const v = verdict(results, wanted);
   if (v.missing.length) {
     console.log('\nThese dashboard features have no passing click-through (add one in workspace-addons/dashboard/clickthrough/features/):');
     for (const k of v.missing) console.log(`  - ${k}`);
   }
   const nFeatures = (wanted || []).length;
-  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${o.only ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
+  console.log(`\n${results.length - v.failed.length - v.unsteady.length} of ${results.length} click-throughs passed${!wanted ? '' : `; ${nFeatures - v.missing.length - v.excused.length} of ${nFeatures} features done`}.`);
   if (secondTry.length) console.log(`passed on second try: ${secondTry.join(', ')}`);
   for (const r of v.unsteady) console.log(`FAILED (known unsteady, does not count): ${r.c.file} (${UNSTEADY[r.c.file]} fixes it)`);
   if (v.failed.length) console.log(`failed: ${v.failed.map(r => r.c.file).join(', ')}`);
   return v.code;
+}
+
+/** The click-throughs a run does: the --only names; with --quarantined only the QUARANTINED ones; else all but those. */
+function pick(all, o, quarantined = QUARANTINED) {
+  if (o.only) return all.filter(c => o.only.has(c.file.replace(/\.cjs$/, '')));
+  return all.filter(c => Boolean(quarantined[c.file]) === Boolean(o.quarantined));
+}
+
+/** The features a default run asks for: none that only quarantined click-throughs cover (they are not run). */
+function notQuarantined(all, features, quarantined = QUARANTINED) {
+  const by = list => new Set(list.flatMap(c => c.covers || []));
+  const kept = by(all.filter(c => !quarantined[c.file])), parked = by(all.filter(c => quarantined[c.file]));
+  return features.filter(k => kept.has(k) || !parked.has(k));
 }
 
 /** The click-throughs of part {n, of}: every of-th one from the n-th, so the long ones spread over the parts. */
@@ -667,6 +704,6 @@ function verdict(results, features, unsteady = UNSTEADY) {
   return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
 }
 
-module.exports = { tools, recorder, where, loggedIn, stayLoggedIn, runAll, withTimeout, verdict, part, partFeatures, seedState, restoreSeed, UNSTEADY };
+module.exports = { tools, recorder, where, loggedIn, stayLoggedIn, runAll, withTimeout, verdict, part, partFeatures, pick, notQuarantined, seedState, restoreSeed, UNSTEADY, QUARANTINED };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

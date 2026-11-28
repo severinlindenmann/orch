@@ -52,7 +52,7 @@ test('at most 10 rows, in the order orch gives (newest first)', () => {
 
 test('the layer shows the History button and the list in the pane, and the page loads the file', () => {
   const layer = fs.readFileSync(path.join(dir, 'pages/live-layer.js'), 'utf8');
-  assert.match(layer, /liveHistButton\(sess, label\)/);
+  assert.match(layer, /function liveMoreMenu[^]*?liveHistMenuItem\(key\)/, 'History sits in More (ORCH-2199, owner pick G a)');
   assert.match(layer, /liveHistShown\(sess\) \? h\('div', \{className:'live-pb live-pb-hist'\}, liveHistBody\(sess\)\)/);
   assert.match(layer, /liveHistKey\(\)/, 'opening History repaints the dock');
   const index = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');

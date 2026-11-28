@@ -142,7 +142,7 @@ def _scan(root, data):
 def scan_stop(root, order, n):
     """The page's dialog check: the exact card title, line and question that will be sent, and per item the checklist
     text that will be sent and its pictures' scan: {"title", "line", "question", "items": [{"i", "title", "check",
-    "files": [{"name", "ok", "why"?}]}]}. Read only."""
+    "files": [{"name", "ok", "why"?, "found"?}]}]}. Read only."""
     from . import flow
 
     store = Store(root)
@@ -159,7 +159,9 @@ def scan_stop(root, order, n):
         for _, name in _image_names(e["data"], [i]):
             data = _read(store, order, name)
             why = "is missing or too big" if data is None else _scan(root, data)
-            files.append({"name": name, "ok": why is None, **({"why": why} if why else {})})
+            # found: the scan had a hit; without it a refused file could not be checked (the page words them apart)
+            found = {"found": True} if why and data is not None else {}
+            files.append({"name": name, "ok": why is None, **({"why": why} if why else {}), **found})
         out.append({"i": i, "title": clean(item["title"]), "check": shown["checks"][i], "files": files})
     return {"title": shown["title"], "line": shown["line"], "question": shown["question"], "items": out}
 

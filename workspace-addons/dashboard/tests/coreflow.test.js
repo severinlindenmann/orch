@@ -160,7 +160,7 @@ function pageContext(snapshot = false) {
     setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text, ticketKey:t => (t && t.key) || ''}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('function workingRow')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('// Helpers (ORCH-61')), ctx);
   vm.runInContext('ANSWER_UNDO_MS = 5', ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('const HELD_WORDS'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
@@ -189,7 +189,7 @@ test('offline answers do not send; network failures show the plain message; snap
   const row = ctx.needRow(data), control = row.querySelectorAll('button')[0], event = {currentTarget:{closest:() => row}};
   connection.hidden = false; await control.onclick(event); assert.equal(sent, 0);
   connection.hidden = true; await control.onclick(event); await new Promise(r => setTimeout(r, 40)); assert.equal(sent, 1);
-  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent.") && toasts.at(-1) === "Can't reach orch. Your change was not sent.");
+  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent; try again in a moment.") && toasts.at(-1) === "Can't reach orch. Your change was not sent; try again in a moment.");
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
 test('connection notice keeps the saved view and offers Try again', () => {
@@ -211,7 +211,7 @@ test('a server error and a slow answer have their own words; only a failure hold
   assert.match(toasts.at(-1), /orch had a problem/);
   ctx.connectionNotice(connection, true, 'slow');
   assert.equal(connection.children[0].children[0].children[0], 'Still loading');
-  assert.ok(connection.children[1] == null, 'no Try again for an answer that is only late');
+  assert.equal(connection.children.length, 1, 'no Try again, and no null child (it would show as the word null)');
   assert.equal(ctx.changeUnavailable(), false);
 });
 test('while offline the Start and Try again buttons are off and come back with the connection', () => {

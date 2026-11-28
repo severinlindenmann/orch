@@ -24,7 +24,7 @@
  },
  "workspace-addons/dashboard/src/orch_dashboard/actions.py": {
   "Sign": 2,
-  "agent": 5,
+  "agent": 3,
   "agents": 1,
   "signed": 1
  },
@@ -91,14 +91,11 @@
   "agent": 1
  },
  "workspace/src/orch/cli.py": {
-  "agent": 7
+  "agent": 1
  },
  "workspace/src/orch/cli_config.py": {
   "Agents": 1,
-  "agent": 7
- },
- "workspace/src/orch/cli_diag.py": {
-  "agent": 1
+  "agent": 5
  },
  "workspace/src/orch/cli_leave.py": {
   "agent": 2
@@ -110,9 +107,9 @@
   "agent": 1
  },
  "workspace/src/orch/cli_run.py": {
-  "agent": 4
+  "agent": 1
  },
- "workspace/src/orch/collect_claude.py": {
+ "workspace-addons/insights/src/orch_insights/collector.py": {
   "Agent": 1
  },
  "workspace/src/orch/config.py": {
@@ -120,6 +117,10 @@
  },
  "workspace/src/orch/doctorpass.py": {
   "agent": 1
+ },
+ "workspace/src/orch/helptext.py": {
+  "agent": 2,
+  "agents": 3
  },
  "workspace/src/orch/init.py": {
   "Agent": 4,
@@ -133,15 +134,12 @@
   "agent": 1
  },
  "workspace/src/orch/nextstep.py": {
-  "agent": 4,
+  "agent": 3,
   "agents": 1
  },
  "workspace/src/orch/profile_propose.py": {
   "agent": 1,
   "agents": 2
- },
- "workspace/src/orch/publish.py": {
-  "agent": 1
  },
  "workspace/src/orch/record.py": {
   "agent": 10,

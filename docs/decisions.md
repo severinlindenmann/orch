@@ -81,3 +81,21 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-24 (ORCH-1676, owner): No dev relay. relay.dev.severin.io is dropped (it failed every secure connection
   since the server move and no code uses it); the demo workspaces and the demo phone use the production relay as one
   more pair set by the admin. One relay is simpler.
+- 2026-11-25 (ORCH-2166, RP3 A, owner): No extra accept step. Two workspaces the admin paired on the relay trust each
+  other from the first message (no fingerprint compare, no Accept); it shows on Home as a new contact connected by the
+  admin. A task (delegate or start) still asks the receiver first (R3.2), and a key that changes later or a contact
+  taken back stays held until a person accepts. Security-relevant: the pairing on the relay is now the trust basis.
+- 2026-11-27 (ORCH-2349, security review of RP3 A): the key trusted on first contact is the one refresh kept in the
+  guarded orch home from the relay's own answer, never `workspaces.json` in the workspace folder. They differ or no
+  copy is kept yet: the message is held and a refresh settles it.
+- 2026-11-27 (ORCH-2348, decided by the dev agent in finish mode, owner reviews the words on the ticket): receipts
+  between workspaces are automatic `ack` updates with fixed lines ("Passed on to <KEY>", "Passed on to Chat",
+  "Delivered"); no relay route, no schema change. No answer for 3 days on an open ticket raises one question for the
+  person. "Accept a workspace once" is RP3 A (already built): no further accept step.
+- 2026-11-25 (ORCH-2166, RP8 B, owner): The two add-ons are called "Relay" and "Publish" on every screen, in menus,
+  Settings and the helper's texts; commands stay `orch relay` / `orch publish`. "Contacts", "Phone link" and
+  "Shared" are no longer names of them. Errors read "The relay can't be reached" / "Publish can't be reached".
+- 2026-11-25 (review overhaul, owner's picks R1 A, R2 A, R3 B, R5 A): Review cards are twelve kinds in four
+  families (Decide, Look at the result, Only you can press it, Needs you in person), picked by orch from what a card
+  carries; the list shows what holds up work first. `orch ask` refuses a question over 40 words and a report of a
+  state. "Nothing closes by itself" is the Reviewer mode `workflow.reviewer_mode = propose`; the default stays accept.

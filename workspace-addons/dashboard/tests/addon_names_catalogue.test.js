@@ -38,15 +38,15 @@ const head = slice(ssrc, '// The add-on\'s name, the same', 'const asList');
 test('an add-on has the same display name on or off (never the lower-case package name)', () => {
   const c = load(settingsCtx(), head);
   for (const n of ['factory', 'insights', 'sync', 'publish', 'relay']) assert.equal(c.rowLabel({name: n, active: false}), capitalise(n));
-  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'relay', active: true, dashboard: {label: 'Relay'}}), 'Relay');
 });
 
-// ORCH-141: the Settings list says the menu name (Shared links, Contacts), the same as the sidebar
+// ORCH-141: the Settings list says the menu name (Publish, Relay), the same as the sidebar
 test('the Settings list row uses the menu name that the sidebar shows', () => {
   const c = load(settingsCtx(), head);
-  assert.equal(c.rowLabel({name: 'publish', label: 'Shared'}), 'Shared');
-  assert.equal(c.rowLabel({name: 'relay', label: 'Contacts'}), 'Contacts');
-  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Contacts'}}), 'Contacts');
+  assert.equal(c.rowLabel({name: 'publish', label: 'Publish'}), 'Publish');
+  assert.equal(c.rowLabel({name: 'relay', label: 'Relay'}), 'Relay');
+  assert.equal(c.rowLabel({name: 'relay', dashboard: {label: 'Relay'}}), 'Relay');
   assert.equal(c.rowLabel({name: 'sync'}), 'Sync');
 });
 
@@ -146,11 +146,21 @@ test('turning on says one plain sentence and keeps the technical lines behind De
 // 20/21: Remove is offered, except for the add-ons that are part of orch (said plainly)
 test('the add-on page offers Remove, and says plainly when the add-on is part of orch', () => {
   const ctx = settingsCtx({
-    addons: () => [], state: {look: null}, heading: (t) => el('h1', {}, t),
+    addons: () => [], state: {look: null}, heading: (t) => el('h1', {}, t), settingsBack: null,
   });
   vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
-  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Uninstall');
+  assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Remove');
+  // D6: one list: on or off first, Remove last with one line about what stays; Back goes to Settings › Add-ons
+  assert.match(text(find(removable, byKey('addon-detail-switch'))), /^Factory is off/);
+  assert.match(text(find(removable, byKey('addon-detail-remove-row'))), /^Remove FactoryYour tickets stay as they are\./);
+  assert.equal(find(removable, byKey('addon-detail-back')).props?.href ?? find(removable, byKey('addon-detail-back')).attrs?.href, '#settings/addons');
+  assert.equal(text(find(removable, byKey('addon-detail-back'))), '← Back to Add-ons');
+  assert.equal(find(removable, byKey('addon-detail-open')), null, 'no Open row: the page is reached from the menu');
+  assert.equal(find(removable, byKey('addon-about')), null, 'no second copy of the description');
+  ctx.settingsBack = {hash: '#addon/factory', label: 'Factory'};
+  const fromPage = ctx.page({name: 'factory', active: true, description: 'd', removable: true});
+  assert.equal(text(find(fromPage, byKey('addon-detail-back'))), '← Back to Factory');
   const core = ctx.page({name: 'relay', active: false, description: 'd', removable: false});
   assert.equal(find(core, byKey('addon-detail-remove')), null);
   assert.match(text(find(core, byKey('addon-detail-core'))), /Relay is part of orch\. You can turn it off, but not remove it\./);
@@ -158,7 +168,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
 
 // ORCH-816: the new Focus is the only Focus; its add-on page has no Preview switch, in any state
 test('the live-session add-on page has no Preview switch', () => {
-  const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t)});
+  const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t), settingsBack: null});
   vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const page = ctx.page({name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true});
   assert.equal(find(page, byKey('addon-detail-live-preview')), null);
@@ -181,7 +191,7 @@ test('the Update button keeps the installed version for the finished banner', ()
 // 885: the Focus add-on page has the one switch the refusal points to
 test('the Focus add-on page shows the typing switch with one plain line, only when Focus is on', () => {
   const mk = (settings) => {
-    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
+    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t), settingsBack: null});
     vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
@@ -194,20 +204,30 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
   assert.equal(find(mk({typing_on: true}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-typing')), null);
 });
 
-// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default
-test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
-  const mk = (settings) => {
-    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+// ORCH-261 (owner): the plain terminal is a shell, so typing into it has its own switch, off by default. ORCH-1684: the
+// switch is the owner's, in People; the Focus page keeps only the helper's Typing, and says its description once
+test('the plain terminal switch sits in People, not on the Focus add-on page; the description shows once', () => {
+  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'Watch helpers work and answer them'};
+  const mk = (settings, list = [focus]) => {
+    const ctx = settingsCtx({addons: () => list, state: {look: null, settings}, heading: t => el('h1', {}, t), settingsBack: null});
+    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()')
+      + '\n' + slice(ssrc, 'function terminalTypingCard(', 'function peoplePanel(') + '\nthis.page = addonDetailPage; this.card = terminalTypingCard;', ctx);
     return ctx;
   };
-  const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};
-  const on = mk({typing_on: true, terminal_typing_on: false}).page(focus);
-  const sw = find(on, byKey('addon-detail-terminal-typing'));
+  const c = mk({typing_on: true, terminal_typing_on: false});
+  const page = c.page(focus);
+  assert.doesNotMatch(text(page), /plain terminal/, 'no plain terminal switch on the add-on page');
+  assert.ok(find(page, byKey('addon-detail-typing')), 'the helper switch stays as it was');
+  assert.equal(text(page).split('Watch helpers work and answer them').length, 2, 'the description shows once');
+  assert.equal(find(page, byKey('addon-about')), null, 'no About section that only repeats the description');
+  // the connection address is the Connection row's own line (D6: one list), not a section under it
+  assert.match(text(find(c.page({name: 'relay', active: true, description: 'd', detail: {connected: true, address: 'https://relay.example'}}), byKey('addon-detail-connection'))), /Connection address: https:\/\/relay\.example/);
+  const card = c.card({typing_on: true, terminal_typing_on: false});
+  const sw = find(card, byKey('settings-terminal-typing-switch'));
   assert.equal(sw.props['data-action'], 'terminal-typing');
   assert.equal(sw.props['aria-checked'], false, 'helper typing on leaves the plain terminal off');
-  assert.match(text(find(on, byKey('addon-detail-terminal-typing-row'))), /Let me type into the plain terminal.*shell on this computer/);
-  assert.ok(find(on, byKey('addon-detail-typing')), 'the helper switch stays as it was');
-  assert.equal(find(mk({typing_on: true}).page(focus), byKey('addon-detail-terminal-typing')), null, 'an older core without the setting: no row');
-  assert.equal(find(mk({terminal_typing_on: true}).page({...focus, active: false}), byKey('addon-detail-terminal-typing')), null);
+  assert.match(text(card), /Plain terminal.*Let me type into the plain terminal.*shell on this computer.*Only the owner can change this/);
+  assert.equal(mk({}).card({typing_on: true}), null, 'an older core without the setting: no card');
+  assert.equal(mk({}, [{...focus, active: false}]).card({terminal_typing_on: true}), null, 'no add-on with live sessions on: no card');
+  assert.match(ssrc, /panel\('people', \[\.\.\.peoplePanel\(settings\), terminalTypingCard\(settings\)\]\)/);
 });

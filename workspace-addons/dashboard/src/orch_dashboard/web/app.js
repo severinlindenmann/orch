@@ -11,6 +11,9 @@ const showWs = value => String(value ?? '').replace(/\bws_[a-zA-Z0-9]{4,}\b/g, i
 const TAG_HEAD = /^(?:\s*\[[^\]\n]{1,24}\]\s*)+/, TAG_TAIL = /(?:\s*\[(?:\d{4,}|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{8}T?\d{0,6}Z?)\])+\s*$/;
 const cleanIds = value => showWs(value).replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
 const clean = value => { const text = cleanIds(value); return text.replace(TAG_HEAD, '').replace(TAG_TAIL, '').trim() || text; };
+// One text node of a page cleaned like clean(), keeping one space where it had one at either end: a title split
+// around a ticket number ('ORCH-1098' + ' team chat draft') must not lose its space (report r-1127-0539-ws-3).
+const cleanTextNode = data => { const c = clean(data), lead = /^\s/.test(data) ? ' ' : '', tail = /\s$/.test(data) ? ' ' : ''; return c ? lead + c + tail : lead || tail; };
 // The tags clean() hides, in order ("[R] ... [0722]" -> "[R] [0722]"); shown muted after the title only when two visible
 // tickets would otherwise look identical.
 const hiddenTags = value => { const text = cleanIds(value), head = text.match(TAG_HEAD), tail = text.replace(TAG_HEAD, '').match(TAG_TAIL); return [head && head[0], tail && tail[0]].filter(Boolean).map(x => x.trim().replace(/\]\s*\[/g, '] [')).join(' '); };
@@ -42,8 +45,9 @@ function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null) continue;
-    // a route (#), a web address, or a path on this site (/x; never //x or /\x, which leave the site)
-    if (key === 'href' && !/^(#|https?:|\/(?![\/\\]))/i.test(String(value))) continue;
+    // a route (#), a web address, or a path on this site (/x; never //x or /\x, which leave the site). A tab or
+    // line break is dropped by the browser, so "/\t/x" would become "//x": such an address is no link either.
+    if (key === 'href' && (!/^(#|https?:|\/(?![\/\\]))/i.test(String(value)) || /[\t\n\r]/.test(String(value)))) continue;
     if (key.startsWith('data-')) node.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(value);
     else if (['className', 'hidden', 'disabled'].includes(key)) node[key] = value;
     else node.setAttribute(key, String(value));
@@ -72,7 +76,7 @@ const parse = value => {
 // One date and time format everywhere: the master kit's UI.stamp ("today 10:32", "Mon 08:00", "14 Nov 2026, 10:32").
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
-let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+let state, renderedRoute = '', renderedKind = '', fetching = false, writing = 0, serial = 0, mutation = 0;
 // Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
 // (session.js) and stops asking; a sign-in link reloads the page.
 let signedOut = false;
@@ -181,7 +185,7 @@ function activity(t, where = '') {
   const text = full;
   const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
   const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(helper ? (window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : chip(text, busy ? 'active' : '')) : chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
     note ? h('p', {className:'meta'}, note) : null,
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }
@@ -193,10 +197,14 @@ const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
   return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
 };
-// Page header (the one frame): title + one muted line under it, no eyebrow; an optional actions slot at the end.
-const heading = (title, sub = '', {actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
-  h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
-  actions ? h('div', {className:'page-heading-actions'}, actions) : null);
+// Page header: one top for every page (owner D1, ORCH-2282), the master UI.pageTop. Title + one muted line, Settings
+// first on the right and the page's one filled button last; a page inside another page gets `back` ({label, href}),
+// '← Tickets' above its name. The plain frame below only when the kit is not loaded (a test without the master).
+const heading = (title, sub = '', {actions = null, back = null, settings = null} = {}) => window.UI?.pageTop && typeof sub === 'string'
+  ? window.UI.pageTop({title:clean(title), text:sub, back, settings, actions:actions ? [actions] : [], key:'heading'})
+  : h('header', {className:'page-heading', 'data-key':'heading'},
+    h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
+    actions ? h('div', {className:'page-heading-actions'}, actions) : null);
 // Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
@@ -213,9 +221,17 @@ function skeletonFor(kind) {
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
+// A small part of a page still loading (a card row, a side list): master skeleton lines in place of a bare "Loading…",
+// shown after 300 ms (skeleton-late); the words stay for screen readers only.
+function skeletonLines(label = 'Loading…', n = 2, key = 'loading-lines') {
+  return h('div', {className:'skeleton-late stack-sm', 'aria-busy':'true', 'data-key':key}, h('p', {className:'sr-only', role:'status'}, label),
+    Array.from({length:n}, (_, i) => h('span', {className:'skeleton line' + (n > 1 && i === n - 1 ? ' short' : ''), 'aria-hidden':'true'})));
+}
 // One menu entry; `here` is the address of the page shown, which gets aria-current.
 function navEntry(here, url, text, glyph, tail = null) {
-  return h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+  // The spoken name starts with the words on screen and then says the count ("Review, 1 needs you"; label in name, #2243)
+  const said = tail ? (tail.getAttribute?.('aria-label') || tail.textContent || '').trim() : '';
+  return h('a', {className:'nav-item', href:url, 'aria-label':said ? text + ', ' + said : text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
 }
 // The menu before the state is there (report r-1118-2330, ORCH-692): on a busy machine the first state can take
 // seconds after 'orch start', and the menu stayed empty until then. Home, Tickets and Review never depend on the
@@ -238,19 +254,18 @@ function offAddonName(hash) {
   const row = m && array(state?.settings?.addons).find(a => a && a.name === m[1]);
   return row && !row.active && !addons().some(a => a.name === m[1]) ? m[1] : null;
 }
-// The name a person sees for an add-on row: its menu label (Contacts), not its folder name (relay).
+// The name a person sees for an add-on row: its menu label (Relay), not its folder name (relay).
 function addonRowLabel(row) {
   return String(row?.label || '').trim() || capitalise(row?.name || '');
 }
 function notFoundPage() {
   const off = offAddonName(location.hash);
   if (off) {
-    const label = addonRowLabel(array(state?.settings?.addons).find(a => a && a.name === off));
-    return fragment(heading(label + ' is turned off', 'Turn it on in Settings to use this page.'),
-      h('div', {className:'state-frame', 'data-key':'addon-off'}, h('section', {className:'card pad stack'},
-        h('p', {className:'muted'}, label + ' is turned off, so it has no page right now.'),
-        h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#settings/addons/' + encodeURIComponent(off)}, 'Open ' + label + ' settings'),
-          h('a', {className:'btn ghost sm', href:'#home'}, 'Go to Home')))));
+    // D5 (26 Nov): the page keeps its name; one notice under it with one green button (the Turn on of Settings).
+    const row = array(state?.settings?.addons).find(a => a && a.name === off), label = addonRowLabel(row);
+    return fragment(heading(label, '', {settings:addonSettingsHref(off)}),
+      pageNotice({what:label + ' is turned off.', still:'Your tickets and everything else still work.', dataKey:'addon-off',
+        action:snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'settings-addon', 'data-name':off, 'data-key':'addon-off-on', disabled:settingsBusy.has('addon-' + off)}, 'Turn on ' + label)}));
   }
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
@@ -270,8 +285,10 @@ const NAV_ICON = {
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
-  pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
   more:'<path d="m6 9 6 6 6-6"/>',
+  less:'<path d="m6 15 6-6 6 6"/>',
+  edit:'<path d="m4 20 1-4L16 5l3 3L8 19z"/>',
+  done:'<path d="M20 6 9 17l-5-5"/>',
   sideClose:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/>',
   sideOpen:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m4-11 3 3-3 3"/>',
 };
@@ -283,17 +300,19 @@ function navIcon(name) {
 }
 const VIEWS_OPEN = 'orch.nav.views';
 const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
-// The menu's add-ons (ORCH-1184): the person pins the ones they use, the rest wait under Show more. Kept in this browser;
-// a browser that refuses storage still shows the menu with the first add-ons pinned.
+// The menu's add-ons (ORCH-1184, tidied by owner D2 A, ORCH-2283): the person keeps the ones they use in the list, the
+// rest wait under More. They choose in one place, 'Change this list' (no pin on every row). Kept in this browser; a
+// browser that refuses storage still shows the menu with the first add-ons in the list.
 const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', PINNED_FIRST = 6;
 const navMemory = new Map();  // the same choices for this page view when the browser refuses storage
 const navRead = key => { try { const v = localStorage.getItem(key); if (v != null) return v; } catch (_) { /* no storage */ } return navMemory.has(key) ? navMemory.get(key) : null; };
 const navWrite = (key, value) => { navMemory.set(key, value); try { localStorage.setItem(key, value); } catch (_) { /* fine without storage */ } };
 const navList = key => { try { const v = JSON.parse(navRead(key) || 'null'); return Array.isArray(v) ? v : null; } catch (_) { return null; } };
-// The pinned add-ons, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
-// arrives pinned (the person just chose it); only one the person unpinned waits under Show more.
+// The add-ons in the list, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
+// arrives in the list (the person just chose it); only one the person moved out waits under More. A page that lives in
+// Settings (manifest place = "settings") starts under More and goes into the list only when the person puts it there.
 function navPinned(pages) {
-  const names = pages.map(a => a.name), known = navList(NAV_KNOWN);
+  const names = pages.filter(a => a.dashboard?.place !== 'settings').map(a => a.name), known = navList(NAV_KNOWN);
   let pins = navList(NAV_PINS) || names.slice(0, PINNED_FIRST);
   const fresh = known ? names.filter(n => !known.includes(n)) : [];
   if (!known || fresh.length) {
@@ -304,6 +323,10 @@ function navPinned(pages) {
   return pages.filter(a => pins.includes(a.name));
 }
 const navMoreOpen = () => navRead(NAV_MORE) === 'open';
+let navEditing = false;  // 'Change this list' is open: every add-on shows with its In the list switch (this page view only)
+// The add-ons the menu lists: every add-on with a page except Contacts (a top-level entry); pages that live in Settings
+// (place = "settings") wait under More (D2 A: nothing is hidden for good).
+const menuPages = () => addons().filter(a => a.dashboard && a.dashboard.panel !== 'phone');
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
@@ -344,6 +367,7 @@ function sync(target, source) {
   }
   reconcile(target, source);
   if (target.matches('[data-settings-agent],[data-settings-permissions],[data-sync-where]')) target.checked = source.checked;
+  if (target.matches('[data-pick]')) { target.checked = source.checked; target.indeterminate = source.dataset.mixed === 'true'; }
   if (target.matches('[data-settings-field]')) {
     if (target.type === 'checkbox') target.checked = source.checked;
     else if (target.value !== source.value) target.value = source.value;
@@ -396,9 +420,10 @@ function pageRoute() {
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // `orch review link` prints .../#/review: the same page
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
-  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change
+  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change,
+  // nor is a switch of its tab (tab=, term=; ORCH-2185)
   if (hash === '#review') {
-    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !p.startsWith('ticket=')).join('&');
+    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !/^(ticket|tab|term)=/.test(p)).join('&');
     return {kind:'review', hash:'#review' + (rest ? '?' + rest : '')};
   }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
@@ -454,30 +479,37 @@ function followAddress(hash) {
   history.replaceState(null, '', hash);
   renderedRoute = route().hash;
 }
-// Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
-// pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
-// when it is not pinned and Show more is closed.
+// Add-ons in the menu (ORCH-1184, D2 A): the ones in the list, then More (n) that unfolds the rest in place, with
+// 'Change this list' at its end. Changing the list shows every add-on with one switch each, Done closes it. The page that
+// is open stays in the menu even when it is under More and More is closed.
 // stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
 const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
   const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
   const url = a => '#addon/' + encodeURIComponent(a.name);
   const row = a => {
-    const on = pinned.includes(a), label = addonLabel(a);
-    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
-      h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
+    const label = addonLabel(a), link = navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a));
+    if (!navEditing) return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, link);
+    const on = pinned.includes(a);  // changing the list: one switch per add-on, In the list or under More
+    return h('div', {className:'nav-row nav-row-edit', 'data-key':'nav-row-' + a.name}, link,
+      h('button', {type:'button', className:'nav-pin', role:'switch', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-checked':String(on), 'aria-label':label + ' in the list', title:on ? 'In the list' : 'Under More'}, h('i', {className:'nav-pin-sw', 'aria-hidden':'true'})));
   };
-  const shownRest = more ? rest : rest.filter(a => here === url(a));
-  const word = more ? 'Show less' : 'Show more (' + rest.length + ')';
-  return h('div', {className:'nav-addons', 'data-key':'nav-addons'},
+  const open = more || navEditing, shownRest = open ? rest : rest.filter(a => here === url(a));
+  const word = open ? 'Fewer' : 'More (' + rest.length + ')';
+  // 'Change this list' ends the unfolded list; with nothing under More it ends the list itself
+  const change = open || !rest.length ? h('button', {type:'button', className:'nav-item nav-change', 'data-key':'nav-change', 'aria-pressed':String(navEditing), 'aria-label':navEditing ? 'Done' : 'Change this list'}, navIcon(navEditing ? 'done' : 'edit'), h('span', {className:'nav-label'}, navEditing ? 'Done' : 'Change this list')) : null;
+  return h('div', {className:'nav-addons' + (navEditing ? ' nav-editing' : ''), 'data-key':'nav-addons'},
     h('p', {className:'eyebrow'}, 'Add-ons'),
-    pinned.length ? h('nav', {'aria-label':'Pinned add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
-    rest.length ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(more), 'aria-controls':more ? 'nav-rest' : null, 'aria-label':word}, navIcon('more'), h('span', {className:'nav-label'}, word)) : null,
-    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null);
+    pinned.length ? h('nav', {'aria-label':'Add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
+    rest.length && !navEditing ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(open), 'aria-controls':open ? 'nav-rest' : null, 'aria-label':word}, navIcon(open ? 'less' : 'more'), h('span', {className:'nav-label'}, word)) : null,
+    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null,
+    change);
 }
 function render(arrived = new Set()) {
   if (!state) return;
-  const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash, first = !renderedRoute, was = renderedRoute;
+  // ORCH-2159: changing Tickets filters is an in-page update. Keep the search input, caret and scroll.
+  const r = route(), sameTickets = r.kind === 'tickets' && renderedRoute.split('?')[0] === '#tickets' && ticketAddressKey === ticketAddressPart();
+  const changed = !!renderedRoute && renderedRoute !== r.hash && !sameTickets, first = !renderedRoute, was = renderedRoute;
   if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if ((r.kind === 'page' || r.kind === 'live') && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
@@ -531,14 +563,16 @@ function render(arrived = new Set()) {
   reconcile(nav, fragment(navLink('#home', 'Home', 'home'), navLink('#tickets', 'Tickets', 'tickets'),
     snapshot ? null : navLink('#review', 'Review', 'review', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null),
     state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
-    // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
+    // Relay (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
   paintTabbar(here, needCount, needsWords);
-  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
+  const pages = menuPages();  // Contacts is above; a place=settings page waits under More
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
+  showMarkedRow();
   // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
-  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null,
+  // icons in the one-row person block (ORCH-1880), their words on hover
+  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? h('a', {className:'nav-item nav-icon-only', href:'#settings', 'aria-label':'Settings', title:'Settings', 'aria-current':here === '#settings' ? 'page' : null}, navIcon('settings')) : null,
     snapshot ? null : h('a', {className:'nav-item nav-icon-only', href:'#docs', 'aria-label':'Documentation', title:'Documentation', 'aria-current':here === '#docs' ? 'page' : null}, navIcon('book'))));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
@@ -561,6 +595,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'docs') mountDocs(main, r);
+  if (r.kind === 'chat' && typeof mountChatBoxes === 'function') mountChatBoxes(main);  // the Chat message box (pages/chat.js)
   if (r.kind === 'ticket' || (r.kind === 'review' && typeof reviewTicketId === 'function' && reviewTicketId())) mountTicketTalk(main);  // the ticket beside Review too (ORCH-1804)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
@@ -568,7 +603,8 @@ function render(arrived = new Set()) {
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
-      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
+      // ORCH-2140 W3: on the ticket page the question already stands above its card, so the card is the plain one
+      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))}, {plain:!!host.closest('.ticket-page .next-question, .ticket-page .ticket-question')});
     }
   });
   const shown = shownAddon();
@@ -588,6 +624,11 @@ function render(arrived = new Set()) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
+  // Another kind of page, or the focused control went with the old page: the keyboard place and a screen reader
+  // follow to the new page (#1350). A pick inside the same kind of page (a chat thread, a doc) keeps the keyboard place.
+  const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+  if (soft && changed && !document.querySelector('dialog[open]') && (r.kind !== renderedKind || lost)) soft.arrive(main, title);
+  renderedKind = r.kind;
   window.scrollTo(...(changed ? (soft ? soft.scrollAfterChange() : [0, 0]) : scroll));
   if (soft) { soft.hold(false); if (changed || first) soft.said(first ? '' : was, r.hash, r.kind); }
   warmAddons();
@@ -914,8 +955,8 @@ function dialog(title, cls = 'dialog', lock = '') {
     for (const [host, mounted] of mounts) if (d.contains(host)) { mounted.destroy(); mounts.delete(host); }
     d.remove();
     if (!resolving) render();
-    if (trigger?.isConnected) trigger.focus({preventScroll:true});
-    else if (triggerKey) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
+    // The trigger is already focused (kit/overlay.js, ORCH-2060); only a trigger the render above replaced is found again
+    if (!trigger?.isConnected && triggerKey && !document.querySelector('dialog[open]')) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
   });
   document.body.append(d);
   return {d, actions};
@@ -966,6 +1007,17 @@ if (sideScroll && window.ResizeObserver) {
   const watch = new ResizeObserver(fit);
   watch.observe(sideScroll);
   for (const part of sideScroll.children) watch.observe(part);
+}
+// D2 (ORCH-2315): the open page always shows in the menu, marked. When the list scrolls (a short window, 1280x772), the
+// marked row is moved into its view once per page, never hidden under the foot. Only the list scrolls, not the page.
+var sideShownFor = '';
+function showMarkedRow() {
+  const list = document.querySelector('.sidebar-scroll'), row = list?.querySelector('[aria-current="page"]');
+  if (!row || sideShownFor === location.hash) return;
+  sideShownFor = location.hash;
+  const box = list.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (r.bottom > box.bottom) list.scrollTop += r.bottom - box.bottom + 8;
+  else if (r.top < box.top) list.scrollTop -= box.top - r.top + 8;
 }
 // Phone bottom bar (ORCH-73, master UI.tabbar): Home, Tickets, Review with the one needs-you number, More = the side menu.
 // Shown only up to 720 px (master CSS); the top bar comes back while the side menu is open.
@@ -1083,6 +1135,8 @@ main.addEventListener('keydown', event => {
 });
 // A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
 main.addEventListener('change', event => {
+  const pick = event.target.closest?.('input[data-pick]');  // ORCH-2034: a tick in the Tickets list
+  if (pick) { pickTicket(pick.dataset.pick, pick.checked); return; }
   const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
   if (radio) addonRadio(radio);
 });
@@ -1090,14 +1144,12 @@ main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
+  const convSend = event.target.closest('[data-conv-send]');
+  if (convSend) { convSendClick(convSend); return; }
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
   // checked id, the fingerprint that was shown and the name typed beside it.
-  const acceptControl = event.target.closest('[data-contact-accept]');
-  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
-  const withdrawControl = event.target.closest('[data-contact-withdraw]');
-  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
@@ -1143,6 +1195,7 @@ main.addEventListener('click', async event => {
   if (action.startsWith('people-')) { await peopleAction(action, control); return; }
   if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
   if (action === 'away-set') { await reviewSwitch('away'); return; }
+  if (action === 'reviewer-mode-set') { await reviewSwitch('propose'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'update-check-report') { reportOpen(); return; }
@@ -1199,6 +1252,7 @@ main.addEventListener('click', async event => {
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'relay-connect') { await relayConnect(); return; }
+  if (action === 'relay-note') { await relayNote(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
@@ -1224,10 +1278,10 @@ main.addEventListener('click', async event => {
       const result = await addonUninstall(addon.name);
       settingsBusy.delete('addon-' + addon.name);
       window.orch.toast(result.ok ? 'Removed.' : result.text, result.ok ? 'ok' : 'error');
-      if (result.ok) location.hash = '#settings/addons';
+      if (result.ok) { settingsBack = null; location.hash = '#settings/addons'; }
       render();
     };
-    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
+    settingsConfirm('Remove ' + addonRowLabel(addon) + '?', 'It is turned off and removed. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {
@@ -1244,6 +1298,8 @@ main.addEventListener('click', async event => {
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
+  if (action === 'bulk-set') { await bulkAction(control); return; }  // ORCH-2034: pick several (pages/tickets.js)
+  if (action === 'bulk-clear') { picked.clear(); render(); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
     ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';
@@ -1290,7 +1346,7 @@ main.addEventListener('click', async event => {
     if (settingsBusy.has('test-' + n)) return;
     agentTests[n] = {ok:false, reason:'Trying…'};
     const result = await settingsSend('config.agent.test', {name:n}, 'test-' + n);
-    agentTests[n] = result.ok && result.state?.test ? result.state.test : {ok:false, reason:result.text || 'Could not try it.'};
+    agentTests[n] = result.ok && result.state?.test ? result.state.test : {ok:false, reason:result.text || 'Could not try it. Try again.'};
     render();
   }
   if (action === 'addon-more') { const n = control.dataset.name; if (addonOpen.has(n)) addonOpen.delete(n); else addonOpen.add(n); render(); }
@@ -1314,8 +1370,9 @@ main.addEventListener('click', async event => {
     render();
   }
 });
-window.addEventListener('hashchange', async () => {
+window.addEventListener('hashchange', async event => {
   if (document.querySelector('.sidebar')?.dataset.open === 'true') setMenu(false);
+  noteSettingsBack(event?.oldURL, location.hash);  // D6: an add-on's settings go back to the page they were opened from
   // a dialog in the keep place (the layer) stays open across the page change (pages/soft.js)
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   soft?.hold(true);
@@ -1328,12 +1385,20 @@ document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
 }, true);
-// Pin / Unpin and Show more in the menu (ORCH-1184). The keyboard stays on the button pressed; an add-on unpinned while
-// Show more is closed moves under it, so the keyboard lands on Show more.
+// More / Fewer, Change this list / Done and the In the list switches in the menu (ORCH-1184, D2 A). The keyboard stays
+// on the button pressed.
 document.getElementById('side-addons')?.addEventListener('click', event => {
-  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more');
-  if (!pin && !more) return;
-  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a.dashboard.panel !== 'phone');  // as render() lists them
+  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more'), change = event.target.closest?.('.nav-change');
+  if (!pin && !more && !change) return;
+  const pages = menuPages();  // as render() lists them
+  if (change) {
+    navEditing = !navEditing;
+    if (!navEditing) navWrite(NAV_MORE, 'closed');  // Done: the list as chosen, the rest under More again
+    if (navEditing && sideClosed()) setSide(false);
+    render();
+    (document.querySelector('#side-addons .nav-change') || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
+    return;
+  }
   if (pin) {
     navPinned(pages);  // writes the first choice when there is none yet
     const names = navList(NAV_PINS) || [], name = pin.dataset.pin, on = names.includes(name);  // keeps pins of add-ons turned off now
@@ -1343,7 +1408,7 @@ document.getElementById('side-addons')?.addEventListener('click', event => {
     (again || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
     return;
   }
-  // Show more on the closed menu (icons only) opens the menu with the list unfolded
+  // More on the closed menu (icons only) opens the menu with the list unfolded
   if (sideClosed()) { navWrite(NAV_MORE, 'open'); setSide(false); }
   else navWrite(NAV_MORE, navMoreOpen() ? 'closed' : 'open');
   render();

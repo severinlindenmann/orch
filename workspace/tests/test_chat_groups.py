@@ -78,6 +78,18 @@ def mid(tag):
     return "m_" + hashlib.sha256(tag.encode()).hexdigest()[:16]
 
 
+@pytest.fixture(name="run")
+def group_run(run):
+    """Group clicks in these relay scenarios come from the signed-in dashboard."""
+
+    def invoke(*argv):
+        if argv[:2] == ("relay", "group") and "--by" not in argv:
+            argv = (*argv, "--by", "human:test")
+        return run(*argv)
+
+    return invoke
+
+
 @pytest.fixture
 def host(proj, run, rel):
     """Connected host with Home and Bank in the directory, a phone, and one open ticket."""
@@ -2735,21 +2747,28 @@ def test_real_ids_and_times_pass_the_member_side_shapes(proj, run, rel, host):
         assert cg.WS_RE.fullmatch(m["body"]["by"])
 
 
-def test_ordinary_allow_answers_with_the_old_words_still_work(proj, run, rel):
+@pytest.mark.parametrize(
+    "words",
+    [
+        ("Allow once", "Always", "Ignore"),
+        ("Allow this task", "Always allow tasks from Finance", "Decline"),
+    ],
+)
+def test_ordinary_allow_answers_with_the_old_words_still_work(proj, run, rel, words):
     from orch import relay as relay_mod
 
     rel.snapshot["workspaces"]["workspaces"] = [entry(FIN, "Finance", "bank", "teal")]
     run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)
-    for n, (word, mode) in enumerate([("Allow once", "once"), ("Always", "permanent"), ("Ignore", None)]):
+    for n, (word, mode) in enumerate(zip(words, ("once", "permanent", None), strict=True)):
         d = {"schema": "orch.msg/1", "id": mid(f"plain{n}"), "from": FIN, "to": WS, "type": "delegate",
              "created_at": "2026-11-08T10:03:00Z", "body": {"title": f"Plain {n}", "text": "x"}}  # fmt: skip
         inbox(run, rel, d)
         t = next(t for t in tickets.list_all(proj) if t["questions"] and f"Plain {n}" in t["title"])
         assert t["questions"][0]["options"] == [
-            "Allow once",
-            "Always",
-            "Ignore",
-        ]  # not a group: the old words
+            "Allow this task",
+            "Always allow tasks from Finance",
+            "Decline",
+        ]  # New questions use RP4 words; old answers remain valid.
         rel.sent.clear()
         run("answer", t["id"], "q1", word, "--via", "cli")
         relay_mod.apply_allow_answers(proj)

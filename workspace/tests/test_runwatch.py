@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import runs, runwatch, tickets
+from orch import runs, runwatch, ticketindex, tickets
 
 AGENT = 100
 TABLE = [  # (pid, ppid, seconds, command): a live agent with MCP servers and one tool shell watching CI
@@ -100,7 +100,19 @@ def test_waiting_on_ci_is_not_idle(proj, new_ticket, child):
 
 def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run, child):
     tid = new_ticket()
-    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    run(
+        "ask",
+        tid,
+        "Which colour?",
+        "--option",
+        "red",
+        "--option",
+        "blue",
+        "--recommend",
+        "red",
+        "--by",
+        "agent:helper",
+    )
     rec = _live(proj, tid, "attention", child)
     whats = [w["what"] for w in runwatch.waiting_on(proj, rec, tickets.load(proj, tid), [])]
     assert whats == ["an answer from the person", "the person's OK on the screen"]
@@ -122,7 +134,9 @@ def _transcript(path, command, description=None, answered=False):
             "transcript_path": str(path)}  # fmt: skip
 
 
-def test_permission_prompt_shows_the_command_it_waits_on(proj, new_ticket, run, child, tmp_path, monkeypatch):
+def test_permission_prompt_shows_the_command_it_waits_on(
+    proj, new_ticket, run, child, tmp_path, monkeypatch, collect_claude
+):
     """ORCH-1808 (report r-1123-1145-ws): a helper waited for a Yes on a terminal permission prompt and the
     ticket page only said Needs you / Your OK on the screen. The waiting command now stands next to it."""
     from orch import runs_live
@@ -189,6 +203,10 @@ def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch
     a, b = new_ticket("A"), new_ticket("B")
     _live(proj, a, "idle", child, agent_pid=AGENT)
     monkeypatch.setattr(runwatch, "_table", lambda: TABLE)
+    # The ticket index is a cache `run list` may bring up to date. Whether ticket B's own command already did
+    # depends on the clock: history.sync_enabled keeps its "no" while the .orch folder times stay put, and
+    # where file times move in 4 ms steps (orch edge, Linux 6.12) B can land in A's step. Refresh it first.
+    ticketindex.rows(proj, include_hidden=True)
     before = _files(proj)
     code, out, err = run("run", "list", "--json")
     assert code == 0, err
@@ -320,7 +338,19 @@ def test_working_helper_with_several_commands_says_each_activity_once():
 
 def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run, monkeypatch, child):
     tid = new_ticket()
-    run("ask", tid, "Which colour?", "--option", "red", "--option", "blue", "--by", "agent:helper")
+    run(
+        "ask",
+        tid,
+        "Which colour?",
+        "--option",
+        "red",
+        "--option",
+        "blue",
+        "--recommend",
+        "red",
+        "--by",
+        "agent:helper",
+    )
     _live(proj, tid, "idle", child)
     monkeypatch.setattr(runwatch, "_table", lambda: [])
     data = json.loads(run("run", "status", tid, "--json")[1])
@@ -656,6 +686,25 @@ def test_rows_drop_the_prompt_frame():
     rows, hint = runwatch._rows(text, 40)
     assert rows == ["did the work", "ran 3 tests"]
     assert hint is None
+
+
+def test_rows_drop_the_tools_right_aligned_update_notice():
+    # report r-1127-0540-ws-2: Live showed the notice with its long run of spaces
+    pad = " " * 60
+    text = "\n".join(
+        [
+            "did the work",
+            pad + "Update installed \u00b7 /restart to apply",
+            "ran 3 tests" + pad + "Update installed",
+        ]
+    )
+    rows, _ = runwatch._rows(text, 40)
+    assert rows == ["did the work", "ran 3 tests"]
+
+
+def test_rows_keep_a_line_that_only_mentions_an_update():
+    rows, _ = runwatch._rows("Update installed, tests pass", 40)
+    assert rows == ["Update installed, tests pass"]
 
 
 def test_rows_keep_typed_prompt_text():

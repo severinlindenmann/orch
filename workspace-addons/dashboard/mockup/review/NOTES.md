@@ -22,7 +22,7 @@
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
 - 17 Nov (ORCH-79): Settings > General has the switch "Put new versions live without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
-- 17 Nov (ORCH-183, persona test): Send back on a Check result opens the "What should change?" box (it never goes
+- 17 Nov (ORCH-183, persona test): Send back on a Test results card opens the "What should change?" box (it never goes
   out without words) and the separate Comment button is left out there; an answer waits 6 s before it is saved, so
   Undo takes it back for real (after that Undo is off and the toast says it is already saved); the "What was done"
   box is as tall as its words, with the result's own pictures, pages and PDFs as tiles under it; the card gives up
@@ -127,6 +127,16 @@
   focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
 
 
+## Visual polish (25 Nov 2026, ORCH-2094)
+
+- The mockup draws the page as the product does: the rail first (`stack review-rail`: Auto Reviewer, All cards, What the
+  Reviewer did), then `review-main` (tabs, deck, answered); All cards is the kit's own list (`deck.drawList`).
+- The card lines up with the heading and the tabs, and has 24 px inside every edge. A rail with nothing to show (one card,
+  no Auto Reviewer, nothing the Reviewer did) is hidden and the card column starts at the page edge.
+- One card says "1 thing waits on you." (no "most urgent first").
+- `review.html?empty=1`: nothing waits. The master empty page (`UI.pageEmpty`, D4) "You're up to date" sits in the card column with one next
+  step, See answers; the heading line keeps "Nothing waits for you." so no sentence shows twice.
+
 ## Nothing to review (25 Nov 2026, ORCH-2024)
 
 `review.html?empty=1` is the product's empty Review page: subtitle "Nothing waits for you.", the Waiting / Answered
@@ -141,3 +151,54 @@ column pushed both to the right). Master rule in `widgets.css`, no page CSS.
 rail the page is one column; the switch and the card line up with the heading (before: an empty left column pushed
 both to the right at 1280 to 1920). Two or more cards show the list in the left column as before. Same master rule in
 `widgets.css` as ORCH-2024, no longer tied to the empty state.
+- 26 Nov (ORCH-2182, Focused review A): `review.html?decide=1` shows the decision-first card (kit deck option
+  `decisionFirst`, product switch `orch config set workflow.decision_first on`): "You decide:" the question, "If you
+  wait:" (`orch ask --if-wait`), one "What matters" box with up to 4 facts (`--fact`), the answers in the bar, and the
+  card's links and Open ticket in one More menu. Empty fields are left out; with the switch off the card is as before.
+  The run card "Turn on the Reviewer's second look?" carries both fields.
+- 26 Nov (ORCH-2183, Focused review B): with `?decide=1` the run card also shows what the person said, one line under
+  "What matters": "You said on 21 Nov: “…” · open" (open = the ticket beside the card). orch copies the words from a
+  stable reference the helper names (`orch ask --said m_…|history:<time>|rules:<line>`): "You said" for your chat line,
+  "You wrote" for your comment, "<name> wrote", "Team rule, <day>:" for `.orch/ask-when.md`. When the words or the
+  ticket's goal changed after the quote: "This may be out of date"; words taken away or changed are not shown, and the
+  card has no filled answer (it asks again).
+- 26 Nov (ORCH-2184, Focused review C): with `?decide=1` and more than 5 cards, three tiles sit over the deck: "Pick
+  where to start", Quick look / Short decision / Take your time (kit `UI.attentionTiles`, each card's group from
+  `orch review list` `attention`). A tile counts its cards, says how many hold up work, and the tile with the next
+  deadline (`orch ask --due`) says "Next deadline: <card> · <time>"; an empty one says "Nothing waits here". A tile
+  starts a round of up to 5 (the All cards list shows only those); the bar names the group with "Back to the start"
+  and the keys line. Keys: 1 2 3 the answers (digits on the buttons), J next card, K card before, M More, U undo, Esc
+  back to the start. The round ends on "What you decided", "Still waiting: …", "Next N in <group>" and "Back to the
+  start". Motion: the kit's page enter (`orch.enter`) for the tiles, a new card and the round's end. No minutes.
+- 26 Nov (ORCH-2186, Focused review E): with `?decide=1` the card "Which content ideas should the helper work out?"
+  (Take your time) is an ideas card (`orch ask --idea`, 2 to 12): one row per idea with Keep / Later / No (a second tap
+  takes it back), "Ideas you do not sort stay here for later." under them, and Save in the bar ("Save, N left for
+  later" when some stay; nothing sorted: "Sort at least one idea, then save."). The answer reads "2 kept, 1 no, 2 for
+  later"; orch asks the rest again as a smaller card that never holds up the ticket. Switch off: the ideas are a plain
+  list with Looks good (keeps them all).
+
+- 26 Nov (ORCH-2173 merge repair): Test results retains the master check icon for both the current `test_results` card kind and older `check_result` data. No layout or wording change.
+- 27 Nov (ORCH-2185, Focused review D): with `?decide=1`, the panel beside the card (`&ticket=<id>`) has the tabs
+  Ticket / Chat / What the helper does in place of its "Ticket" heading ("Terminal" with `&term=1`: the plain
+  terminal's typing setting is on), and "Open full page" is a small icon (on Chat it opens the whole chat). The card's
+  More has "Ask about this" (opens Chat with "About: <the decision>" in the box) and "Watch the helper" (only while a
+  helper with a live screen works on the ticket). `&tab=chat`, `&tab=helper` (the helper's screen, watching until Let
+  me type), `&tab=helper&none=1` (no helper works on this now). Run it on a sign-in card shows the plain terminal in
+  the helper tab beside the card; a phone keeps the live view. Words: owner, 26 Nov ("take the recommended").
+
+## Gaps against the approved Review drafts (26 Nov 2026, ORCH-2316)
+
+The Fable walk of PR #3204 compared the build with the owner's picks of 25 Nov (R2 A, R3 B, R4 A, R6 A, drafts in
+`proposals/review-overhaul` on #3192). Now as drawn there: the list is **Needs you**, the sub line "N things need you.
+M hold up work now.", the groups Holds up work now / Put it live / Try it yourself / Look at the result (Run it sits
+with Try it yourself), and every row has a second line (why it waits · ticket). Old and new wording side by side is
+**Changed words** and never zooms. A release says **Put it live** with **See the changes**. **Comment** is on every
+card (results and Try it yourself too) and turns on pointing: "Comment is on. Click a picture or a paragraph, or write
+about the whole card." with Whole card and Done. A finished result says "Everything you asked for is done and tested."
+and folds the steps under "What the helper did: N steps, each with its evidence"; a part still open reads "You asked
+for: … You got: …" on top.
+
+## Required-check fix (27 Nov 2026, ORCH-2185)
+
+The shared card links sit above the title through 480 px, including 390 px phones. The mockup uses the same
+master rule as the product. This preserves the 24 px clearance from the pinned answer bar with Linux font wrapping.

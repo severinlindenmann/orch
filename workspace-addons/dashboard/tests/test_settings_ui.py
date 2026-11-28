@@ -14,9 +14,9 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Phone link'",
+        "'Connection'",
         "function addonDetailPage(addon)",
-        "'About this add-on'",
+        "'Remove ' + label",  # D6: one list ends with Remove and what stays (no 'About this add-on')
         "OrchLook?.settingsSection()",
         "agent-card",
         "role:'status', className:'meta test-note'",
@@ -337,7 +337,7 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
     ]
 
     def run(binary, args, root):
-        return rows if args == ["addon", "list", "--json"] else None
+        return rows if args == ["addon", "list", "--catalog", "--json"] else None
 
     monkeypatch.setattr(data, "run_orch", run)
     out = data.load_settings(ws, "orch")
@@ -358,7 +358,9 @@ def test_settings_rows_say_what_can_be_removed_and_the_label_is_never_lower_case
         {"name": "insights", "installed": False, "active": False, "description": "I"},
     ]
     monkeypatch.setattr(
-        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+        data,
+        "run_orch",
+        lambda b, args, root: rows if args == ["addon", "list", "--catalog", "--json"] else None,
     )
     out = data.load_settings(ws, "orch")
     assert {a["name"]: a["removable"] for a in out["addons"]} == {"relay": False, "factory": True}
@@ -389,49 +391,22 @@ def test_catalogue_dialog_adds_several_in_one_run_and_never_sends_again():
     assert "innerHTML" not in src[src.index("// --- the page ---") : src.index("function addonJobBanner")]
 
 
-def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
+def test_the_publish_tab_shows_before_it_is_connected(tmp_path, monkeypatch):
+    """ORCH-2170 (RP2): the Publish page is where a person connects it (paste box), so its tab is there as soon as
+    the add-on is on, connected or not, and a failing publish server never hides it (ORCH-601)."""
     from orch_dashboard import data
 
     rows = [
         {
             "name": "publish",
             "active": True,
-            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
-        },
-        {"name": "other", "active": True, "dashboard": {"label": "Other", "icon": "link", "panel": None}},
-    ]
-    monkeypatch.setattr(data, "publish_set_up", lambda root: False)
-    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
-    assert {a["name"]: bool(a["dashboard"]) for a in out} == {"publish": False, "other": True}
-    monkeypatch.setattr(data, "publish_set_up", lambda root: True)
-    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
-    assert all(a["dashboard"] for a in out)
-
-
-def test_shared_links_tab_stays_when_the_sharing_server_is_unreachable(tmp_path, monkeypatch):
-    """ORCH-601: the tab follows the saved connection on disk; a failing `publish whoami` never hides it."""
-    import json
-
-    from orch_dashboard import data
-
-    rows = [
-        {
-            "name": "publish",
-            "active": True,
-            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
+            "dashboard": {"label": "Publish", "icon": "link", "panel": "links"},
         }
     ]
-    sec = tmp_path / ".orch" / "secrets"
-    sec.mkdir(parents=True)
-    (sec / "publish.json").write_text(
-        json.dumps({"url": "https://x.example", "workspace": "w", "token": "t"})
-    )
     monkeypatch.setattr(data, "run_orch", lambda *a, **k: None)  # the server and the CLI both fail
-    out = data.hide_unset_sharing(data.load_addons(tmp_path, "orch", rows), tmp_path, "orch")
-    assert out[0]["dashboard"]
-    (sec / "publish.json").unlink()
-    out = data.hide_unset_sharing(data.load_addons(tmp_path, "orch", rows), tmp_path, "orch")
-    assert not out[0]["dashboard"]
+    out = data.load_addons(tmp_path, "orch", rows)
+    assert out[0]["dashboard"]["panel"] == "links"
+    assert not hasattr(data, "hide_unset_sharing")
 
 
 def test_there_is_no_focus_preview_switch_any_more(ws, monkeypatch):
@@ -477,6 +452,7 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("terminal-typing.set", {"on": 1})
     assert "Let me type into the plain terminal" in server.TERMINAL_OFF and "is off" in server.TERMINAL_OFF
+    assert "Settings \u2192 People" in server.TERMINAL_OFF  # ORCH-1684: the owner's switch is in People
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
     assert data.load_settings(ws, "orch")["terminal_typing_on"] is False
     # ORCH-1656: answered at once with the Settings values read again, like every switch on that page; a full build
@@ -485,3 +461,16 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
         op for op in actions.OPS if op.endswith(".set") and op.split(".")[0] in ("typing", "terminal-typing")
     ]
     assert switches and all(op in server.SETTINGS_OPS for op in switches)
+
+
+def test_only_the_owner_turns_the_plain_terminal_switch(ws):
+    """ORCH-1684: a plain terminal is a shell with the owner's logins and keys: a token-login browser (never the owner)
+    cannot turn its typing on or off; nothing runs."""
+    from orch_dashboard import actions
+
+    actions.REQUEST_PERSON.set("Lea")
+    try:
+        with pytest.raises(actions.NeedsPerson, match="Only the owner"):
+            actions.run_op(ws, "orch-does-not-exist", "terminal-typing.set", {"on": True}, session=True)
+    finally:
+        actions.REQUEST_PERSON.set(None)

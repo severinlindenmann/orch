@@ -82,7 +82,7 @@ def test_a_security_problem_stays_with_the_owner_and_the_card_leads_with_it(proj
 def test_a_card_of_any_other_ticket_is_unchanged(proj, run, new_ticket):
     tid = _review_ticket(proj, run, new_ticket, title="Fix the stale run record")
     card = review.check_card(tickets.load(proj, tid), proj)
-    assert card["why"] == "The helper says this is ready for your check."
+    assert card["why"] == "Everything you asked for is done and tested."  # R6 A: every part has its evidence
     assert not any(c.get("text") == "Problem found" for c in card["preview"].get("chips") or [])
 
 
@@ -184,7 +184,22 @@ def test_an_ok_held_by_an_open_question_is_written_once(proj, run, new_ticket, o
     tid = _review_ticket(proj, run, new_ticket)
     _keeper(proj, tid)
     _verdict(proj, "ok", "nothing High or Medium")
-    assert run("ask", tid, "Ship it?", "--option", "yes", "--option", "no", "--by", "agent:claude")[0] == 0
+    assert (
+        run(
+            "ask",
+            tid,
+            "Ship it?",
+            "--option",
+            "yes",
+            "--option",
+            "no",
+            "--recommend",
+            "yes",
+            "--by",
+            "agent:claude",
+        )[0]
+        == 0
+    )
     tickets.set_status(proj, tid, "review", "human:tester")  # asking moved it to Waiting
     reviewer.run(proj)
     reviewer.run(proj)

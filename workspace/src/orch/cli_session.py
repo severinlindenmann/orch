@@ -100,7 +100,9 @@ def dispatch(args, root: Path) -> bool:
         d = sessions.interrupt(root, args.kind)
         name = d.get("title", args.kind)
         if not d.get("interrupted"):
-            raise Refused(f"The {name} is not open, so there is no step to stop.")
+            raise Refused(
+                f"The {name} is not open, so there is no step to stop. Open it: orch session new {args.kind}"
+            )
         _out(args, d, f"Stopped the current step of the {name}. It stays open; send it a message to go on.")
     else:
         rows = sessions.listing(root)

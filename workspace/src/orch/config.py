@@ -15,6 +15,7 @@ import tomllib
 import unicodedata
 from pathlib import Path
 
+from orch import procs
 from orch.errors import Refused
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
@@ -82,7 +83,7 @@ def approve_agent(root: Path, name: str, e: dict) -> None:
         tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
         try:
             tmp.write_text(json.dumps(data[-500:] + [k]), encoding="utf-8")
-            os.replace(tmp, p)
+            procs.replace(tmp, p)
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -230,7 +231,7 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)  # private
         with os.fdopen(fd, "wb") as f:
             f.write(json.dumps(doc, indent=1).encode("utf-8"))
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
     return value
@@ -291,7 +292,7 @@ def _copies_set(root: Path, key: str, value) -> None:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(json.dumps(doc, indent=1).encode("utf-8"))
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -668,6 +669,34 @@ def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+# Reviewer mode (owner, 25 Nov 2026, review overhaul R1): "accept" (default) = the Reviewer accepts complete
+# work and sends open work back, each with its own Undo; "propose" = nothing closes by itself: the Reviewer
+# only writes its verdict and the person accepts or sends back with one click.
+REVIEWER_MODES = ("accept", "propose")
+
+
+def reviewer_mode(root: Path | None) -> str:
+    """[workflow] reviewer_mode: "accept" (default) or "propose". A bad hand-edited value = "propose"
+    (fail safe: nothing closes by itself)."""
+    if root is None:
+        return "accept"
+    try:
+        table = read(root).get("workflow") or {}
+    except (Refused, OSError):
+        return "propose"
+    v = table.get("reviewer_mode", "accept") if isinstance(table, dict) else "propose"
+    return v if v in REVIEWER_MODES else "propose"
+
+
+def set_reviewer_mode(root: Path, value: str) -> str:
+    if value not in REVIEWER_MODES:
+        raise Refused(
+            "Choose accept (the Reviewer accepts for you) or propose (it only proposes, you click)."
+        )
+    set_key(root, "workflow", "reviewer_mode", value)
+    return value
+
+
 # ORCH-645 (owner 18 Nov): the kinds of tickets the Reviewer may accept by itself. Bug fixes by default (owner
 # 18 Nov: "bug fixes and follow-up problems ok"); a draft, mockup or design never (ORCH-582).
 REVIEWER_KINDS_DEFAULT = ("bug", "small_bug")
@@ -783,6 +812,20 @@ def release_merge_on(root: Path | None) -> bool:
 
 def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "release_merge", value)
+    return value
+
+
+def decision_first_on(root: Path | None) -> bool:
+    """[workflow] decision_first (default off, ORCH-2182, Focused review A): Review cards put "You decide",
+    "If you wait" and the "What matters" box first, and fold the card's links into one More menu. Only the
+    look of the card; nothing is answered or closed differently."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "decision_first", False) is True
+
+
+def set_decision_first(root: Path, value: bool) -> bool:
+    set_key(root, "workflow", "decision_first", value)
     return value
 
 
@@ -1238,7 +1281,7 @@ def set_key(root: Path, table: str, key: str, value: str | int | bool | None) ->
     tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
     try:
         tmp.write_text(text, encoding="utf-8", newline="\n")
-        os.replace(tmp, p)
+        procs.replace(tmp, p)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -1312,7 +1355,12 @@ def first_use_notice(command: str) -> str | None:
         return None
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(seen[-200:] + [key]), encoding="utf-8")
+        tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(json.dumps(seen[-200:] + [key]), encoding="utf-8")
+            procs.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
     except OSError:
         pass
     return f"Using agent command from this folder's settings: {command}"

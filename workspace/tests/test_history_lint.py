@@ -50,6 +50,10 @@ ALLOW = {
     ): "file marks, no author",
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "add_artifact_marks"): "links, no author",
     (
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "_drop_addon_names",
+    ): "drops the add-on name, no author",
+    (
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
@@ -113,6 +117,7 @@ SHOWN = {
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
     ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
+    ("workspace/src/orch/tickets.py", "new_answers"): "ticket = history.shown_ticket(root, ticket) first",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
@@ -134,6 +139,10 @@ SHOWN = {
         "workspace-addons/pull-requests/src/orch_pull_requests/broken.py",
         "answers",
     ): "tk = history.shown_ticket(root, raw) first; `raw` only for the proof (history.answer_proven)",
+    (
+        "workspace-addons/pull-requests/src/orch_pull_requests/runner.py",
+        "approved_merges",
+    ): "t = history.shown_ticket(root, raw) first: only a proven person's Merge counts (ORCH-1118)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person

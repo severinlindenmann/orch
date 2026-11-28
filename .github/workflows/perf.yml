@@ -3,15 +3,22 @@ name: perf
 # (e2e/perf/seed.py), then e2e/perf/check_limits.py measures `orch ticket list`, `orch needs`, every dashboard page and
 # an idle minute on Home, and fails when one is slower or costlier than the owner's limit (e2e/perf/limits.json:
 # commands under 1 s, pages usable under 2 s, an idle Home minute under 200 KB). The table goes in the job summary.
-# Nightly and by hand for now, not a required check yet: develop is still over several limits (ORCH-525, measured
-# 22 Nov), and a required check would turn every queue group red. ci.yml calls it (workflow_call) once develop passes.
+# Nightly and by hand on develop: the owner's limits decide, and the numbers are kept as develop's (artifact perf-10000).
+# Merge queue groups that touch orch call it from ci.yml with against_develop (ORCH-1609, R8.3): there the limits are
+# only shown, and it fails only when a row is more than 30% slower than develop's newest numbers
+# (check_limits.py --against). No develop numbers yet: it passes and says so.
 on:
   schedule:
     - cron: "41 2 * * *"
   workflow_call:
+    inputs:
+      against_develop:
+        type: boolean
+        default: false
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read  # against_develop: reads develop's numbers from its newest perf run
 jobs:
   limits:
     runs-on: ubuntu-latest
@@ -47,9 +54,25 @@ jobs:
           npm install --silent --prefix "$RUNNER_TEMP/pw" playwright@1.64.1
           (cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps chromium)
           echo "PW_DIR=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+      - name: develop's numbers (its newest finished perf run)
+        if: inputs.against_develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$RUNNER_TEMP/perf-develop"
+          echo "AGAINST=$dir/limits.json" >> "$GITHUB_ENV"
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow perf.yml --branch develop --status completed \
+              --limit 10 --json databaseId -q '.[].databaseId'); do
+            rm -rf "$dir"
+            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n perf-10000 -D "$dir" && [ -s "$dir/limits.json" ]; then
+              echo "develop's numbers: perf run $id"
+              exit 0
+            fi
+          done
+          echo "No finished perf run on develop with numbers: nothing to compare with."
       - name: Seed 10,000 tickets and check the limits
         timeout-minutes: 20
-        run: python3 e2e/perf/check_limits.py "$PERF_BASE"
+        run: python3 e2e/perf/check_limits.py "$PERF_BASE" ${AGAINST:+--against "$AGAINST"}
       - if: always()
         uses: actions/upload-artifact@v4
         with:

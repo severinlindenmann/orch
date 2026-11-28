@@ -216,3 +216,49 @@ test('ORCH-1797: a one-step helper (Windows has no live screen) shows its log un
   win.api.liveTermApply(chat.b, {id: 't_b', mode: 'oneshot', lines: ['x']});
   assert.equal(note2.hidden, true, 'the Chat view keeps its own look');
 });
+
+test('ORCH-2203: liveTermSend types the text without Enter into a shown terminal, helper or plain', async () => {
+  for (const plain of [false, true]) {
+    const {api, streams, posts, ctx} = load();
+    const {b} = body('s1', {dataset: {liveKind: plain ? 'terminal' : ''}});
+    ctx.liveLayerFill = () => api.liveTermApply(b, {});
+    ctx.liveViewOf = () => 'term'; ctx.liveViewSet = () => {};
+    const done = api.liveTermSend('s1', 'npm test', {plain, wait: 2000});
+    await new Promise(r => setTimeout(r, 50));
+    streams[0].emit('hello', JSON.stringify({page: 'p1', typing_allowed: true}));
+    const r = await done;
+    assert.equal(r.ok, true);
+    assert.deepEqual(posts.at(-1), ['/api/term/input', {ticket: 's1', data: 'npm test', page: 'p1'}]);
+    assert.ok(!/[\r\n]/.test(posts.at(-1)[1].data));
+  }
+});
+
+test('ORCH-2203: liveTermSend says what to do when the terminal does not open', async () => {
+  const {api, ctx} = load();
+  ctx.liveLayerFill = () => {};
+  const r = await api.liveTermSend('s2', 'ls', {plain: true, wait: 150});
+  assert.equal(r.ok, false);
+  assert.match(r.text, /try again/i);
+});
+
+// ORCH-2185 (Focused review D): Review's side panel shows a session's terminal in its own host, the same one terminal
+// and stream as a live pane's; a terminal a pane shows now stays there; the tick closes it once the panel is gone.
+test('the side panel mounts the one terminal of a session, never takes it from a pane, and closes it when gone', () => {
+  const {api, made, streams} = load();
+  const host = new N(); host.attached = true;
+  assert.equal(api.liveTermMount(host, '../x', 'Helper'), false, 'only a session id');
+  assert.equal(api.liveTermMount(host, 't_abcdef', 'Helper'), true);
+  assert.equal(made.length, 1); assert.equal(streams.length, 1);
+  assert.equal(made[0].el.parentNode, host);
+  assert.match(streams[0].url, /ticket=t_abcdef$/);
+  assert.equal(api.liveTermMount(host, 't_abcdef', 'Helper'), true, 'drawn again: the same terminal');
+  assert.equal(made.length, 1); assert.equal(streams.length, 1, 'one stream per session');
+  const {b} = body('t_pane01');
+  api.liveTermApply(b, {id: 't_pane01'});
+  const other = new N(); other.attached = true;
+  assert.equal(api.liveTermMount(other, 't_pane01', 'Helper'), false, 'a pane shows it: it stays there');
+  assert.equal(made[1].el.parentNode, b);
+  host.attached = false;
+  api.liveTermTick();
+  assert.equal(streams[0].closed, true, 'no page shows it: the stream closes');
+});

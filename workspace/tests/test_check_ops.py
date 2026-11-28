@@ -1009,3 +1009,47 @@ def test_failed_run_names_the_task_and_says_run_it_again(proj, run, new_ticket):
     assert code == 0 and "that run failed: fix it, then run it again" in out and "close the task" not in out
     shown = run("ticket", "show", tid)[1]
     assert "1 task failed (c1: tests pass)" in shown
+
+
+# ---- R2.2/R2.7: a step done without evidence gets a ready-to-run `orch check done` line
+
+
+def _done_without_evidence(proj, tid):
+    tickets.apply_op(proj, tid, lambda t: t["checklist"][0].update(done=True), by=tickets.SYSTEM)
+
+
+def test_done_without_evidence_prints_a_ready_line_per_step(proj, run, new_ticket):
+    tid = with_checks(proj, run, new_ticket, n=2)
+    tickets.apply_op(proj, tid, lambda t: [c.update(done=True) for c in t["checklist"]], by=tickets.SYSTEM)
+    key = tickets.load(proj, tid).get("key") or tid
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:claude")
+    assert code == 2 and "c1, c2 is checked without evidence" in err
+    for cid in ("c1", "c2"):  # no git, no PR: a note to fill in
+        assert f'orch check done {key} {cid} --note "<what shows it is done>"' in err
+    assert "suggestion" not in err
+
+
+def test_evidence_line_suggests_the_last_commit(proj, run, new_ticket):
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@x"}  # fmt: skip
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "x"], cwd=proj, check=True, env=env)
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=proj, capture_output=True, text=True
+    ).stdout.strip()
+    tid = with_checks(proj, run, new_ticket, n=1)
+    _done_without_evidence(proj, tid)
+    key = tickets.load(proj, tid).get("key") or tid
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:claude")
+    assert code == 2 and f"orch check done {key} c1 --commit {sha}" in err and "check it fits" in err
+    assert not tickets.load(proj, tid)["checklist"][0].get("evidence")  # a suggestion only, nothing added
+
+
+def test_evidence_line_suggests_the_linked_pull_request(proj, run, new_ticket):
+    url = "https://github.com/o/r/pull/12"
+    tid = with_checks(proj, run, new_ticket, n=1)
+    assert run("ref", "add", tid, url)[0] == 0
+    _done_without_evidence(proj, tid)
+    key = tickets.load(proj, tid).get("key") or tid
+    code, _, err = run("ticket", "status", tid, "done", "--by", "agent:claude")
+    assert code == 2 and f"orch check done {key} c1 --pr {url}" in err

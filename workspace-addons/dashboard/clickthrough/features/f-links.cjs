@@ -1,18 +1,18 @@
-// Shared links with a stand-in sharing server (server.py, on 127.0.0.1): the person turns Shared links on and
-// connects it here, shares a small file from the Shared links page, reloads and sees it in the list, extends it by a
+// Publish with a stand-in sharing server (server.py, on 127.0.0.1): the person turns Publish on and
+// connects it here, shares a small file from the Publish page, reloads and sees it in the list, extends it by a
 // week, then stops sharing it (confirms) and sees it gone after a reload. Nothing leaves this computer.
 const fs = require('node:fs');
 const path = require('node:path');
 
 module.exports = {
-  name: 'Shared links: share a file, extend it, stop sharing',
+  name: 'Publish: share a file, extend it, stop sharing',
   covers: ['link.share', 'link.extend', 'link.stop'],
   async run({ page, open, reload, act, must, text, orch, standins, home, until, addonOff }) {
     const p = standins.publish;
     orch('addon', 'add', 'publish', '--yes');
     orch('publish', 'connect', p.url, '--workspace', p.workspace, '--token', p.token);
     await open('#home');
-    await until(s => (s.addons || []).some(a => a.name === 'publish'), 'Shared links turned on and connected');
+    await until(s => (s.addons || []).some(a => a.name === 'publish'), 'Publish turned on and connected');
     await open('#addon/publish');
     await page.getByRole('button', { name: 'Share a file' }).waitFor({ timeout: 30000 })
       .catch(async () => { throw new Error('no Share a file button:\n' + (await text()).slice(0, 400)); });

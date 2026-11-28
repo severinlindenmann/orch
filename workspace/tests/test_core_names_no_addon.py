@@ -2,6 +2,7 @@
 
 import ast
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 CORE = [*sorted((ROOT / "workspace/src/orch").rglob("*.py")), ROOT / "workspace/src/orch_entry.py"]
 ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "src").is_dir())
+ADDON_MODULES = {
+    package.name
+    for name in ADDONS
+    for package in (ROOT / "workspace-addons" / name / "src").iterdir()
+    if (package / "__init__.py").is_file()
+}
+DISTRIBUTIONS = {
+    tomllib.loads((ROOT / "workspace-addons" / n / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "name"
+    ]
+    for n in ADDONS
+}
 
 # file (relative to workspace/src) -> {literal: reason / issue}. Everything else must be clean.
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
@@ -28,19 +41,11 @@ EVERYWHERE = {
 }
 ALLOW = {
     "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
-    "orch/cli.py": {
-        "dashboard": _MANIFEST,
-        "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
-        "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
-    },
+    "orch/cli.py": {"dashboard": _MANIFEST},
     "orch/selfcheck.py": {"dashboard": _MANIFEST},
     "orch/cli_leave.py": {
         "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
         "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)",
-    },
-    "orch/releasekeeper.py": {
-        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
-        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
     "orch/whoami.py": {
@@ -53,16 +58,12 @@ ALLOW = {
     "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
-        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
-        "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
-        "of the name)",
     },
     "orch/pagesession.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
     "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},
-    "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/keystart.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
@@ -110,12 +111,12 @@ def test_core_imports_no_addon_package():
             mods = [a.name for a in node.names] if isinstance(node, ast.Import) else []
             if isinstance(node, ast.ImportFrom) and node.module:
                 mods.append(node.module)
-            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in {f"orch_{n}" for n in ADDONS}]
+            bad += [f"{f.name}: {m}" for m in mods if m.split(".")[0] in ADDON_MODULES]
     assert not bad, bad
 
 
 def test_core_has_no_addon_name_literals():
-    names = set(ADDONS) | {f"orch_{n}" for n in ADDONS}
+    names = set(ADDONS) | ADDON_MODULES | DISTRIBUTIONS
     bad = []
     for f in CORE:
         rel = f.relative_to(ROOT / "workspace/src").as_posix()

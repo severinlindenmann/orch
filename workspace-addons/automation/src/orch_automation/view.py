@@ -117,7 +117,8 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
         if m.isdigit():
             return "Every hour" if int(m) == 0 else f"Every hour at {int(m)} past"
     if dom == mon == dow == "*" and m.isdigit() and h.startswith("*/") and h[2:].isdigit():
-        return f"Every {int(h[2:])} hours"
+        n = int(h[2:])
+        return "Every hour" if n == 1 else f"Every {n} hours"  # "0 */1 * * *" (report r-1127-0539-ws-3)
     if m.isdigit() and h.isdigit() and mon == "*" and (ln := local_next(expr, tz, now, local)):
         here, shift = ln
         at = here.strftime("%H:%M")
@@ -497,7 +498,9 @@ def _schedules(
                     "cells": {
                         "schedule": _name(t),
                         "repeats": "Once",
-                        "next": "Paused" if not running else clean(f"{_day(at)}, {at:%H:%M}", 40),
+                        "next": "Paused"
+                        if not running
+                        else clean(f"{_day(at)}, {at:%H:%M} {_basis(at)}", 40),
                         "last": "Not yet",
                     },
                     "link": t["id"],
@@ -717,11 +720,14 @@ def build(root: Path, now: datetime | None = None) -> dict:
             if first.month == last.month
             else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
         )
+        # the times on the calendar are this computer's: the heading names that zone once (ORCH-1969), both
+        # names when the week crosses a change to or from summer time
+        bases = dict.fromkeys(_basis((now + timedelta(days=n)).astimezone()) for n in (0, 6))
         week = {
             "type": "calendar",
             "title": "Coming up",
             "compact": True,
-            "meta": span,
+            "meta": f"{span} \u00b7 {' / '.join(bases)}",
             "days": days,
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
@@ -875,7 +881,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     if pid:
         nxt = events[0][0] if events else None
         if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)
-            line = f"On. Next: {_soon(nxt, now)}"
+            line = f"On. Next: {_soon(nxt, now)} {_basis(nxt.astimezone())}"
             if ran >= 5:
                 line += f". Ran {ran} times today"
             view.update(notice=line, notice_tone="good")

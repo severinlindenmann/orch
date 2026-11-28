@@ -26,6 +26,16 @@ actor MockRelay: RelayAPI {
     func queueUploadFailures(_ s: [Int]) { uploadFailures = s }
     func queueSendFailures(_ s: [Int]) { sendFailures = s }
     private(set) var uploadCalls = 0
+    /// Every answer request that reached the relay, duplicates included (ORCH-2126: a retry carries the original id and body).
+    private(set) var answerRequests: [AnswerRequest] = []
+    /// Test hooks (ORCH-2126): `holdAnswers` stores an answer, then keeps its reply back until `releaseAnswers`;
+    /// `loseNextAnswerReply` stores the next answer and then fails like a dropped connection.
+    private var holdAnswers = false, loseNextAnswerReply = false
+    private var heldReplies: [CheckedContinuation<Void, Never>] = []
+    var heldAnswerCount: Int { heldReplies.count }
+    func setHoldAnswers(_ v: Bool) { holdAnswers = v }
+    func releaseAnswers() { let h = heldReplies; heldReplies = []; for c in h { c.resume() } }
+    func setLoseNextAnswerReply() { loseNextAnswerReply = true }
     /// Review stack: every verdict the relay accepted (question message id, verdict, plain answer), for tests.
     private(set) var verdicts: [(question: String, verdict: ReviewVerdict, answer: String)] = []
     /// The workspace's result for a verdict: `-mockReviewResult changed|applied` (nothing when unset: the card stays "Sent").
@@ -133,6 +143,10 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
         if let state = UserDefaults.standard.string(forKey: "mockToolAlert") { received.append(Self.toolAlert(state)) }
         if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
+        if UserDefaults.standard.bool(forKey: "mockEarlier") {
+            for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            received += Self.earlierDays()
+        }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
     }
@@ -363,6 +377,20 @@ actor MockRelay: RelayAPI {
                  text("m_cd_t2", 540, mine: false, "Your car tax is due on 30 Nov.", by: Self.pilatus, day: today)])
     }
 
+    /// Test hook `-mockEarlier YES` (with `-mockGroups YES`): Finance's Chat has three earlier days; "car tax" is only in a
+    /// finished group's title, never in these messages.
+    static func earlierDays(now: Date = Date()) -> [PhoneMessage] {
+        let f = ISO8601DateFormatter()
+        let lines = [(3, "The 2025 invoice from the garage is filed."), (3, "I added it to the household folder."),
+                     (2, "Reminder: renew the parking permit."), (1, "Insurance renewal is due in December.")]
+        return lines.enumerated().map { i, line in
+            let at = now.addingTimeInterval(-Double(line.0) * 86_400)
+            var body = TextBody(text: line.1, general: true); body.by = GroupMock.finance; body.via = "helper"; body.day = ChatDay.key(for: at)
+            return PhoneMessage(message: TextMessage(id: String(format: "m_earlier%05d", i), from: GroupMock.finance, to: "ph_iphone0001", type: "text",
+                                                     createdAt: f.string(from: at), ticket: nil, body: body), workspaceName: "Finance")
+        }
+    }
+
     /// Simulator and test hook: a workspace writes to the phone after launch (a text push arrived).
     func deliverText(from workspace: String, text: String) {
         counter += 1
@@ -497,6 +525,7 @@ actor MockRelay: RelayAPI {
         try await check()
         // Simulator evidence hook `-mockFailAnswers YES`: reads work, sending an answer fails like no network (the card stays "Saved on this phone").
         if UserDefaults.standard.bool(forKey: "mockFailAnswers") { throw URLError(.notConnectedToInternet) }
+        answerRequests.append(r)
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
         guard all.contains(where: { $0.id == r.questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
         // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.
@@ -535,6 +564,8 @@ actor MockRelay: RelayAPI {
             let mode = reviewResultOverride ?? reviewResult
             if let mode { deliverReviewResult(q, mode: mode, summary: r.answer) }
         }
+        if loseNextAnswerReply { loseNextAnswerReply = false; throw URLError(.networkConnectionLost) }
+        if holdAnswers { await withCheckedContinuation { heldReplies.append($0) } }
         return SendReceipt(id: id, clientId: r.clientId)
     }
     /// A workspace result text for a phone verdict (never pushed; the phone's "Received").

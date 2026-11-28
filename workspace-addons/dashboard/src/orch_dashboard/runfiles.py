@@ -325,12 +325,16 @@ def command(pid: int) -> str:
     if os.name == "nt":
         return ""
     try:
+        # UTF-8 locale: without one (launchd, `env -i`) ps prints "ü" as "M-CM-<", and a process started in a
+        # folder with an umlaut would never be recognised again
         r = _run(
             ["ps", "-ww", "-o", "command=", "-p", str(pid)],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

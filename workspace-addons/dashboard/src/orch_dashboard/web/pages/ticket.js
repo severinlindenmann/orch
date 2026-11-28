@@ -219,7 +219,7 @@ async function startLinkAdd(control) {
         select.append(new Option('Choose a result', ''));
         array(data.files).forEach(f => select.append(new Option(f.name, 'artifact:' + f.name)));
         select.onchange = () => { target = select.value; addBtn.disabled = !target; };
-      } catch (_) { err.textContent = 'The results could not be loaded.'; }
+      } catch (_) { err.textContent = 'The results could not be loaded. Close this and try again.'; }
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
@@ -276,7 +276,7 @@ async function showProjectFile(url, heading) {
     if (!r.ok) { stage.textContent = await r.text(); return; }
     if ((r.headers.get('Content-Type') || '').startsWith('image/')) { const img = el('img'); img.src = url; img.alt = 'Reference'; stage.append(img); }
     else { const pre = el('pre'); pre.textContent = await r.text(); stage.append(pre); }
-  } catch (_) { stage.textContent = 'This file could not be loaded.'; }
+  } catch (_) { stage.textContent = 'This file could not be loaded. Close it and open it again.'; }
 }
 async function refreshLinks(control) {
   const lock = 'link-refresh-' + control.dataset.ticket;
@@ -284,7 +284,7 @@ async function refreshLinks(control) {
   locks.add(lock); control.disabled = true; control.classList.add('busy');
   const result = await act('addon.act', {addon:control.dataset.addon, verb:'refresh', target:control.dataset.ticket});
   locks.delete(lock); control.disabled = false; control.classList.remove('busy');
-  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work. Try again.', 'error'); return; }
   const r = result.state?.act_result, t = ticketOf(control.dataset.ticket);
   const key = typeof t?.key === 'string' ? t.key + ': ' : '';
   window.orch.toast(key + (clean(r?.say) || (r?.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'Nothing to update.')), 'ok');
@@ -639,7 +639,7 @@ function ticketShareButton(t, file) {
       actions.append(button('Cancel', 'ghost', () => window.orch.close(d)), button('Share anyway', 'primary', async () => { window.orch.close(d); share(true); }));
       window.orch.open(d); return;
     }
-    window.orch.toast(clean(result.text) || 'Could not share the file.', 'error');
+    window.orch.toast(clean(result.text) || 'Could not share the file. Try again.', 'error');
   };
   return ticketButton('Share with group', 'ghost sm', () => share(false), {'data-key':'file-share-group-' + file.name});
 }
@@ -786,7 +786,7 @@ function sortedEntries(list) {
   return list.slice().sort(by[filesUI.sort] || by.newest);
 }
 function fileThumb(t, f) {
-  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
+  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind, 'aria-hidden':'true'});
   if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
@@ -801,8 +801,9 @@ function fileTile(t, f) {
   // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
-  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
+  // The name is the words on the card after a hidden "Preview"; the picture is decoration (label in name, #2243)
+  const link = h('button', {type:'button', className:'file-preview-link', 'data-key':'file-open-' + f.kind + '-' + f.name},
+    h('span', {className:'sr-only'}, 'Preview '), fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
@@ -1060,19 +1061,6 @@ function phoneEntry(tid, entry) {
   return h('div', {className:'phone-entry'}, p.text ? h('p', {}, clean(p.text)) : null, body);
 }
 // Ticket-only controls bind properties: the shared h() serializes attributes.
-// The header Answer button (ORCH-234): it only scrolled to the question card, which stands above every tab and so was
-// in view already, and focused it without a ring: nothing a person could see. It now opens the same answer window as
-// Answer in the ticket list (openNeed). Without a waiting question for this ticket it brings the card to the middle
-// and focuses its first answer (no fade: the page never animates needs-you, see test_views).
-function focusTicketAnswer(id, trigger) {
-  const need = (typeof needsList === 'function' ? needsList() : []).find(n => n && n.ticket === id && window.DashHelpers.needAction(n).kind === 'answer');
-  if (need) { openNeed(need, trigger); return 'window'; }
-  const card = main.querySelector('.next-question');
-  if (!card) return '';
-  card.scrollIntoView({block:'center', behavior:'smooth'});
-  card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button')?.focus({preventScroll:true});
-  return 'card';
-}
 function ticketButton(label, cls, click, attrs = {}) {
   const node = h('button', {type:'button', className:'btn ' + cls, 'data-key':'ticket-button-' + label, ...attrs}, label);
   node.onclick = click;
@@ -1098,7 +1086,7 @@ function ticketBringBackDialog(t) {
     go.disabled = true;
     const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
     window.orch.close(d);
-    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work. Try again.', r.ok ? 'success' : 'error');
   });
   actions.append(go); d.append(...body, actions); window.orch.open(d);
   return d;
@@ -1114,25 +1102,27 @@ function ticketChangesDialog(t) {
   const {d, actions} = dialog('What the copy changed');
   const body = el('div', 'stack'), diffBox = el('pre', 'preserve-lines copy-diff');
   diffBox.hidden = true; diffBox.tabIndex = 0;
-  body.append(el('p', 'meta', 'Reading the copy…'));
   const showDiff = async file => {
     diffBox.hidden = false; diffBox.textContent = 'Loading…';
     try {
       const r = await fetch('/api/copy-changes?t=' + encodeURIComponent(t.id) + '&path=' + encodeURIComponent(file.path), {cache:'no-store'});
       const data = r.ok ? await r.json() : null;
       diffBox.replaceChildren();
-      if (!data) { diffBox.textContent = 'This file could not be shown.'; return; }
+      if (!data) { diffBox.textContent = 'This file could not be shown. Choose it again to retry.'; return; }
       String(data.diff).split('\n').forEach(line => {
         const row = el('span', /^\+(?!\+\+)/.test(line) ? 'diff-add' : /^-(?!--)/.test(line) ? 'diff-del' : '', line + '\n');
         diffBox.append(row);
       });
       if (data.cut) diffBox.append(el('span', 'meta', '\n(The rest of this file is not shown.)'));
-    } catch (_) { diffBox.textContent = 'This file could not be shown.'; }
+    } catch (_) { diffBox.textContent = 'This file could not be shown. Choose it again to retry.'; }
   };
-  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : {files:[]}).catch(() => ({files:[]})).then(data => {
-    const files = array(data.files);
+  const loadFiles = () => {
+  body.replaceChildren(window.UI?.state ? window.UI.state({kind:'loading'}) : el('p', 'meta', 'Reading the copy…'));
+  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     body.replaceChildren();
-    if (!files.length) { body.append(el('p', 'muted', 'No changed files could be listed.')); return; }
+    if (!data) { body.append(stateNote('The changes did not load', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:loadFiles})); return; }
+    const files = array(data.files);
+    if (!files.length) { body.append(stateNote('Nothing changed in the copy', 'When your helper changes a file in the copy, it is listed here.')); return; }
     const list = el('ul', 'copy-files');
     files.forEach(f => {
       const li = el('li'), b = button('', 'ghost sm copy-file', () => showDiff(f));
@@ -1142,6 +1132,8 @@ function ticketChangesDialog(t) {
     body.append(list);
     if (data.more) body.append(el('p', 'meta', 'and ' + data.more + ' more files'));
   });
+  };
+  loadFiles();
   d.append(body, diffBox, actions);
   actions.firstChild.textContent = 'Close';
   window.orch.open(d);
@@ -1153,7 +1145,7 @@ function ticketBringBackRow(t) {
   if (b.empty) return h('p', {className:'meta', 'data-key':'bring-back'}, clean(b.reason));
   const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask your helper to update', 'ghost sm', async () => {
     const r = await act('copies.ask-update', {ticket:t.id});
-    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work. Try again.', r.ok ? 'success' : 'error');
   }) : null;
   const add = !snapshot && b.tip ? ticketButton('Apply changes', 'primary sm', () => ticketBringBackDialog(t)) : null;
   // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
@@ -1466,7 +1458,7 @@ function ticketTalkText(typed, names, where = 'this ticket') {
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
-const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
+const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent; try again in a moment." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
 // The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
 // feedback: the files of an answer on Review go in the ticket's feedback folder, so the Check card being answered
 // does not change under the answer (its own files are the helper's result; ORCH-420 follow-up).
@@ -1478,7 +1470,7 @@ async function ticketAttachFiles(tid, files, feedback = false) {
   if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
   const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
   const failed = array(added.state?.attached?.failed).filter(n => typeof n === 'string');
-  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '.'};
+  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '. Add them again.'};
   return {ok:true, names:saved.length ? saved : list.map(f => f.name)};
 }
 async function ticketTalkSend(tid, message) {
@@ -1659,7 +1651,15 @@ function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
     h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean((card && card.title) || q.title || 'Your answer'), ticketPhone(q)),
-    h('h2', {}, clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text) : q.text)), typeof questionCommandRows === 'function' ? questionCommandRows(q.text, 'question-' + q.id) : null, card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    h('h2', {}, clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text) : q.text)), typeof questionCommandRows === 'function' ? questionCommandRows(q.text, 'question-' + q.id) : null, card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}),
+    card || snapshot ? null : ticketAfterAnswer(t));
+}
+// ORCH-2140 W3: what happens after the answer, true with and without a running helper.
+function ticketAfterAnswer(t) {
+  const next = array(t.checklist).find(c => !c.done && !c.wont_do);
+  const run = state?.runs?.[t.id], live = !!window.DashHelpers.helperAlive(t, run);
+  const goes = next ? ' goes on with “' + taskTitle(next) + '”' : ' goes on';
+  return h('p', {className:'meta', 'data-key':'after-answer-' + t.id}, 'One click answers, and you can undo it. ' + (live ? 'The helper picks your answer up and' + goes + '.' : 'A helper picks your answer up on its next run and' + goes + '.'));
 }
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
@@ -1908,22 +1908,19 @@ function ticketStripModel(t, run, fresh) {
     const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
     return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
   }
-  if (q) {
-    const ask = clean(window.DashHelpers.questionWords ? window.DashHelpers.questionWords(q.text || '') : q.text || '').replace(/\s+/g, ' ').trim();
-    // who asked: the agent stored on the question, else the agent on the ticket (as Home says it), else "Helper"
-    const asker = window.DashHelpers?.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, (run || state?.runs?.[t.id])?.claim) : 'Helper';
-    return m(asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask));
-  }
+  // ORCH-2140 W3: the question itself shows once, in its card below; the header only says since when it waits
+  if (q) return m('Waiting for your answer' + (at ? ' since ' + at : '') + '.');
   // ORCH-235: a dated or outside wait says what it waits for and until when, never "Needs you"
   if (s.word === 'Waiting') return m((clean(window.DashHelpers.waitWords(t, tickets(), v => localStamp(v))) || 'Waiting, with no date or reason given') + '.');
   if (t.status === 'review') {
     // a person moved it to Check by hand: say who, never that a helper finished
     const moved = ticketMovedBy(t, 'review');
-    if (moved && !/^agent:/.test(moved.by || '') && moved.by !== 'orch') return m('Moved to Check by ' + ticketActor(moved.by) + (moved.at ? ' ' + time(moved.at) : '') + '.');
+    if (moved && !/^agent:/.test(moved.by || '') && moved.by !== 'orch') return m('Moved to Review by ' + ticketActor(moved.by) + (moved.at ? ' ' + time(moved.at) : '') + '.');
     // ORCH-1835: the one plain reason Home shows when the Reviewer left it for the person (whose move it is)
     const left = (typeof needsList === 'function' ? needsList() : []).find(r => r && r.ticket === t.id && r.kind === 'reviewer:unsure');
     const why = left && typeof left.short === 'string' ? clean(left.short).trim() : '';
-    return m('Helper finished' + (at ? ' ' + at : '') + '.' + (why ? ' ' + why : ''));
+    // ORCH-2140 W4: the finish time sits on the Result card; the header says whose turn it is
+    return m('The helper is finished. Your turn: look at the result.' + (why ? ' ' + why : ''));
   }
   if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
   const prep = ticketPrepare(t);
@@ -2001,18 +1998,27 @@ function ticketProgressBeside(t, progress) {
     progress ? h('div', {className:'bview-steps'}, progress) : null,
     h('div', {className:'bview-host', 'data-live-browse':t.id, 'data-key':'bview-host-' + t.id})));
 }
-// The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
+// ORCH-2140 W4 (owner accepted A): one Result card. The result first (in short, the file, more files), then what was
+// done with its evidence, then Looks good / Send back under it; Send back opens its box right here.
 function ticketReviewCard(t) {
   const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
+  const moved = ticketMovedBy(t, 'review'), byHelper = moved && (/^agent:/.test(moved.by || '') || moved.by === 'orch');
+  const head = [byHelper && moved.at ? 'Finished ' + time(moved.at) : '', count ? count + (count === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
+  const list = array(t.checklist), done = list.filter(c => c.done && !c.wont_do).length, open = list.filter(c => !c.wont_do).length;
+  const more = file ? resultFiles(t).filter(x => x.file !== file).slice(0, 3) : [];
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
-    h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
+    h('div', {className:'section-head'}, h('h2', {}, 'Result'), head ? h('span', {className:'meta'}, head) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
-    t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
-    file ? ticketResultFrame(t, found.kind, file) : h('p', {className:'meta'}, array(t.checklist).length ? 'No result file is attached. Each task below shows what was done and how it was checked.' : 'No result file and no tasks are attached.'),
+    t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Review the work, then click Looks good.') : null,
+    file ? ticketResultFrame(t, found.kind, file) : list.length ? null : h('p', {className:'meta'}, 'No result file and no tasks are attached.'),
+    more.map(x => ticketFileRow(t, x.kind, x.file)),
     t.done_when ? h('p', {className:'review-check'}, 'Is this what you asked for? “', linkRefs(t, t.done_when), '”') : null,
-    ticketProofLine(t));
+    list.length ? h('div', {className:'section-head', 'data-key':'review-what-done'}, h('h3', {}, 'What was done'), h('span', {className:'meta'}, done + ' of ' + open + (open === 1 ? ' task' : ' tasks'))) : null,
+    ticketProofLine(t),
+    snapshot ? null : h('div', {className:'stack', 'data-key':'review-actions-' + t.id}, ticketChangesEditor(t),
+      h('p', {className:'meta'}, 'Looks good finishes the ticket. Send back opens a box right here for what should change.')));
 }
-// "What the helper did": the finished tasks as a short plain list (Check and Done); the full list is on the Tasks tab.
+// "What the helper did": the finished tasks as a short plain list on a Done ticket (in Review the Result card holds them); the full list is on the Tasks tab.
 function ticketHelperDid(t) {
   if (!['review', 'done'].includes(t.status)) return null;
   const done = array(t.checklist).filter(c => c.done && !c.wont_do);
@@ -2055,9 +2061,11 @@ function ticketWidgets(t) {
 }
 function ticketWidgetsCard(t) {
   const notes = t.status === 'review' ? [] : completionNotes(t);
-  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+  // a completion note is a result: no "Nothing yet" under it (mockup ticket-done: "Results · 1 note")
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'),
+    notes.length ? h('span', {className:'meta'}, notes.length + (notes.length === 1 ? ' note' : ' notes')) : null),
     notes.map(n => ticketCompletionNote(n, t)),
-    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:notes.length ? '' : 'Nothing yet. Pictures, pages and tables show up here.'}));
 }
 // A change you asked for: what you asked, and that new changes wait for your OK.
 function ticketRequestCard(t) {
@@ -2105,7 +2113,7 @@ function ticketProperties(t, parent) {
     h('dl', {className:'ticket-details ed-list'},
       show('partOf', !!parent) ? field('Part of', snapshot ? h('a', {href:href(parent.id)}, partName(parent)) : partOfField(t, parent), 'part-of') : null,
       show('release', !!t.release) ? field('Release', releaseField(t), 'release') : null,
-      field('Human review needed', humanReviewField(t)),
+      field('I review the result', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
@@ -2197,13 +2205,7 @@ function railScrim(t) {
   scrim.onclick = () => railToggle(t, false);
   return scrim;
 }
-// Narrow screens only: Properties (with how many things it holds) and the owner / due line under the title.
-function railButton(t) {
-  if (snapshot) return null;
-  const n = railCount(t, window.DashHelpers.parentOf(tickets(), t)), open = railOpen.id === t.id;
-  return ticketButton(['Properties', n ? h('span', {className:'chip'}, String(n)) : null], 'ghost sm narrow-only', e => railToggle(t, !open, e?.currentTarget),
-    {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
-}
+// Narrow screens only: the owner / due line under the title (Properties itself opens from Actions, ORCH-2155).
 function railFacts(t) {
   const parts = [hasValue(t, 'owner') ? 'Owner ' + window.DashHelpers.ownerName(t.owner, state) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
   return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
@@ -2269,95 +2271,147 @@ function ticketFocusTalk(tid) {
   host.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
   host.querySelector('textarea, input, button')?.focus({preventScroll:true});
 }
-// The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
+// ORCH-2155 (owner chose draft A "Bar + one Actions menu", 25 Nov): one header in every state, on one left edge. A line
+// above the title (key, kind, the state word that opens Move to), the title, one sentence, then one bar on one grid:
+// Open in Live first, the state's own action (Continue, Stop, Reopen, Answer, Mark Done), Ticket chat, and one Actions
+// menu that holds every other ticket action (Move to, Copy link, Make a copy, Add a sub-ticket, Repeat…). No "⋯".
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
-  const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
+  const m = ticketStripModel(t, run, fresh), main = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
   if (kidsDone) { m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.'; delete m.prepare; }
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
   if (quiet) m.sentence = (/^(Updated |No helper is working on it)/.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: Quiet since replaces Updated (and the no-helper line, ORCH-415)
+  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
+  let filled = false, cost = null;
   if (!snapshot) {
     // Reopen puts it back in To do (ORCH-235): Working is only shown while a helper runs
-    if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
-    else if (t.status === 'review') actions.push(ticketChangesEditor(t));
-    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
-    else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
+    // ORCH-2140: Looks good / Send back sit under the Result card (W4) and a question is answered in its card (W3),
+    // never a second time up here
+    if (t.status === 'done') main.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
+    else if (kidsDone) { filled = true; main.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'})); }
     // ORCH-255: a start is on the page in every state while no helper runs. ORCH-475: it is the one Start button (pages/start.js):
     // Continue when an earlier session can be reopened, else Start helper; the caret opens the Start choice. Never filled (ORCH-415).
-    // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
-    // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
+    // Its cost is a line under the title; next to Reopen or Mark Done it is the plain Start button.
     // While Prepare runs (ORCH-742) Start still shows: the prepare run is not the work.
-    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, actions.length > 0));
-    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
-    const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
-    if (chatBtn) actions.push(chatBtn);
-    actions.push(railButton(t));
-    if (menu) actions.push(menu);
+    // ORCH-2140 W2: with no helper tool set up, the Two ways card below replaces a Start that cannot work; a result to
+    // review goes on with Send back (W4), not with a second start
+    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review' && !(fresh && ticketNoHelperTool())) {
+      const plain = main.length > 0, start = ticketStartPick(t);
+      if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+    }
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
-  if (ticketHelperLive(t, run)) return ticketWorkingStrip(t, run, m, quiet, menu, tabs);
-  return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
+  const pill = m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : ticketStatePill(t, m, icon);
+  const head = [window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), pill].flat().filter(x => x && typeof x !== 'string')
+    .flatMap((x, i) => i ? [h('span', {'aria-hidden':'true'}, '·'), x] : [x]);  // 'ORCH-7 · Epic · To do'
+  return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
-      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(),
+        h('div', {className:'t-meta strip-kicker', 'data-key':'ticket-state-line'}, head),
+        h('h1', {className:'t-title title-clamp'}, inlineField(t, 'title')),
+        h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), cost, railFacts(t),
+        ticketBar(t, run, main, menu, filled))),
     tabs);
 }
-// ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
-// cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
-function ticketStartPick(t, compact = false) {
-  // ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
-  // not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test)
+// The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
+function stripKicker(t, pill, extra, dataKey) {
+  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, ...extra].filter(Boolean);
+  return h('p', {className:'t-meta strip-kicker', 'data-key':dataKey}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+}
+// One top for every page (D1, ORCH-2282): a ticket is a page inside Tickets, so '← Tickets' sits above its name, on the
+// computer and on the phone (the phone had no way back). Not in a shared copy, which has no Tickets page of its own.
+const ticketBack = () => !snapshot && window.UI?.pageBack ? window.UI.pageBack({label:'Tickets', href:'#tickets'}) : null;
+// ORCH-2140 W2: no helper tool is set up (the dashboard knows the list of tools). Unknown while settings load: false.
+const ticketNoHelperTool = () => Array.isArray(state?.settings?.agents) && !!window.StartChoiceState?.tools && !window.StartChoiceState.tools(state.settings.agents).tools.length;
+// ORCH-2140 W2 (owner accepted B): a saved ticket no helper can start yet is no dead end. Two ways: set a helper up
+// here once, or paste one line into the AI tool the person already uses.
+function ticketTwoWays(t) {
+  if (snapshot) return null;
+  const line = 'Work on orch ticket ' + (window.DashHelpers.ticketKey(t) || t.id);
+  const copy = window.UI?.commandCopy ? window.UI.commandCopy(line, {dataKey:'two-ways-line'}) : h('pre', {className:'code-block'}, line);
+  return h('section', {className:'card next-step two-ways', 'data-key':'two-ways-' + t.id},
+    h('h2', {}, 'Nobody works on this ticket yet. Two ways to start:'),
+    h('div', {className:'grid-2'},
+      h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'Let orch start a helper')), h('p', {className:'muted'}, 'Set it up once. After that, Start on a ticket is one click.'),
+        h('div', {className:'row'}, h('a', {className:'btn primary sm', href:'#settings/helper', 'data-key':'two-ways-setup'}, 'Set up a helper'))),
+      h('div', {className:'stack'}, h('p', {}, h('strong', {}, 'You already work with an AI tool')), h('p', {className:'muted'}, 'Open your AI tool in this workspace’s folder and paste this line:'), copy)));
+}
+// The state word above the title opens the same Move to list as Actions (a second way in, draft A). Read only in a snapshot.
+function ticketStatePill(t, m, icon) {
+  const key = 'status-' + t.status + '-' + m.pill;
+  if (snapshot) return h('span', {className:'pill status-change ' + m.pill, 'data-key':key}, icon, m.word);
+  return h('details', {className:'menu ticket-pill-menu', 'data-key':'ticket-pill-menu-' + t.id},
+    h('summary', {className:'pill status-change ' + m.pill, 'data-key':key, 'aria-haspopup':'menu', title:'Move this ticket'}, icon, m.word, iconEl('chevron-down')),
+    h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, h('p', {className:'eyebrow'}, 'Move to'), ticketMoveItems(t, 'pill-move-')));
+}
+// The cost of the start, one quiet line under the sentence (ORCH-415), read with the start button.
+function ticketStartCost(t) {
+  const m = modelChoice(t);
+  return h('p', {className:'t-meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : ''));
+}
+// ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
+// not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test).
+// One start button (owner, ORCH-1466): the cheaper model is picked in the caret's Start choice (Fresh start: Model).
+function ticketStartPick(t) {
   const host = startHost(t, 'ticket-start', {started:x => { if (typeof liveFocusOn === 'function' && liveFocusOn() && window.LiveLayer?.open) window.LiveLayer.open(x.id, true); }});
-  if (compact || !host) return host;
-  const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
-  return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
-    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
-    h('div', {className:'row'}, host));
+  host?.querySelector?.('[data-start="main"]')?.setAttribute('aria-describedby', 'start-cost-' + t.id);  // the cost line under the title
+  return host;
 }
-// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
-// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
-function ticketFocusMenuItem(t, run) {
-  if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
-  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
+// The bar under the title: equal buttons on one grid (4 across on a computer, 2 per row on a phone). Open in Live comes
+// first and is the one filled button unless the state's own action is (Answer, Mark Done).
+function ticketBar(t, run, main, menu, filled) {
+  if (snapshot) return null;
+  const live = ticketHelperLive(t, run);
+  let first = null;
+  if (live) {
+    first = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+    if (first) { first.className = 'btn primary sm'; first.prepend?.(iconEl('target')); }  // the one filled button while a helper runs
+  } else if (typeof liveFocusButton === 'function' && liveFocusButton(t)) {
+    // owner, ORCH-1466: never a second start; this only opens the ticket's pane in the live layer
+    first = ticketButton([iconEl('target'), 'Open in ' + liveLayerName()], (filled ? 'outline' : 'primary') + ' sm', () => window.LiveLayer.open(t.id, true), {'data-key':'ticket-open-layer'});
+  }
+  const chat = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;
+  const cells = [first, ...main, chat, menu].filter(Boolean);
+  return cells.length ? h('div', {className:'btn-bar ticket-bar', role:'group', 'aria-label':'Ticket actions', 'data-key':'ticket-actions'}, cells) : null;
 }
-// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
-// ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
-// bar and no Live session card below it; the box goes, so the page reads calmer.
+// ORCH-70 (owner 16 Nov, as drawn): while a helper runs the line above the title holds key, the ORCH-61 state word,
+// the helper and minutes. The bar: Watch live, Stop, Ticket chat, Actions. No helper bar and no Live session card.
 const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length && !ticketPreparing(t);
 function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
   const minutes = window.DashHelpers.ageWords(run?.age_seconds);  // '18 h', not '1107 min' (ORCH-1836)
-  const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
-  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
-  const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
+  const kicker = stripKicker(t, pill, [agent ? name(agent) : null, minutes], 'ticket-kicker');
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
-  const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs
-  const actions = [focusBtn, typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
+  const idle = ['idle', 'stuck'].includes(helper.state);
+  const stop = ticketButton([iconEl('stop'), idle ? 'Stop idle helper' : 'Stop'], 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'});
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
-      h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
-        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
-      actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
+      h('div', {className:'grow ticket-strip-text'}, ticketBack(), kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t),
+        ticketBar(t, run, [stop], menu, false))),
     tabs);
 }
-// The ⋯ menu items for a running helper: Stop first, then the two terminal commands (Watch is read only, Take over types).
+// "For developers", last in Actions while a helper runs: the two terminal commands (Watch is read only, Take over types).
 function ticketHelperMenuItems(t, run) {
-  if (!ticketHelperLive(t, run)) return null;
-  const helper = window.DashHelpers.helperState(run, t), idle = helper && ['idle', 'stuck'].includes(helper.state);
+  if (!ticketHelperLive(t, run) || run?.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
-  const copy = (label, command, k) => ticketButton([iconEl('copy'), label], 'menu-item', async () => {
+  const copy = (label, command, k) => ticketMenuItem('copy', label, async () => {
     try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
     catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
-  }, {role:'menuitem', title:command, 'data-key':'live-copy-' + k});
-  return [ticketButton(idle ? 'Stop idle helper' : 'Stop', 'menu-item', () => act('run.stop', {ticket:t.id}), {role:'menuitem', 'data-key':'ticket-stop'}),
-    run?.claim?.mode === 'oneshot' ? null : copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'),
-    run?.claim?.mode === 'oneshot' ? null : copy('Copy take-over command', 'orch run attach ' + ref, 'take')];
+  }, 'live-copy-' + k, {title:command});
+  return h('div', {className:'ticket-actions-dev', role:'group', 'aria-label':'For developers'}, h('p', {className:'eyebrow'}, 'For developers'),
+    copy('Copy watch command', 'orch run attach ' + ref + ' --watch', 'watch'), copy('Copy take-over command', 'orch run attach ' + ref, 'take'));
+}
+// One row of a ticket menu: icon, words left aligned; the click closes the menu first.
+function ticketMenuItem(icon, label, click, key, attrs = {}, after = null) {
+  const node = h('button', {type:'button', className:'menu-item', role:'menuitem', 'data-key':key, ...attrs}, iconEl(icon), h('span', {className:'grow'}, label), after);
+  node.onclick = e => { e?.currentTarget?.closest?.('details')?.removeAttribute('open'); return click(e); };
+  return node;
 }
 // ORCH-248: "Show me the plan first" stays visible on the ticket after it was made (the plan card only shows while the plan waits).
 function ticketPlanFirstLine(t, planShown) {
@@ -2366,10 +2420,66 @@ function ticketPlanFirstLine(t, planShown) {
   return h('p', {className:'meta ticket-plan-first', 'data-key':'plan-first-' + t.id}, planned ? 'You asked to see the plan first. You have approved it.' : 'You asked to see the plan first. The helper waits for your OK before work starts.');
 }
 // ORCH-235: the ticket page offers the same places as the board and the list (Waiting asks for a date and a reason,
-// Superseded for the ticket that replaces it); the lane the ticket is in now is left out.
-function ticketMoveItems(t) {
+// Superseded for the ticket that replaces it, so both end in "…"). The lane it is in now is ticked (draft A).
+function ticketMoveItems(t, prefix = 'ticket-move-') {
   const here = window.DashHelpers.laneOf(t, t.status, questions(t).length > 0);
-  return MOVE_CHOICES.filter(([lane]) => lane !== here).map(([lane, label]) => ticketButton(label, 'menu-item', () => moveToLane(t.id, lane), {role:'menuitem', 'data-key':'ticket-move-' + lane}));
+  return MOVE_CHOICES.map(([lane, label]) => {
+    const on = lane === here;
+    const node = h('button', {type:'button', className:'menu-item', role:'menuitemradio', 'aria-checked':String(on), 'data-key':prefix + lane},
+      h('span', {className:'menu-tick', 'aria-hidden':'true'}, on ? iconEl('check') : null), h('span', {className:'grow'}, label + (['blocked', 'superseded'].includes(lane) ? '…' : '')));
+    node.onclick = e => { e?.currentTarget?.closest?.('details')?.removeAttribute('open'); return on ? undefined : moveToLane(t.id, lane); };
+    return node;
+  });
+}
+// The one Actions menu (draft A): "Move to" and "This ticket" side by side; "For developers" under them while a helper runs.
+function ticketActionsMenu(t, run) {
+  if (snapshot) return null;
+  const all = tickets(), parent = window.DashHelpers.parentOf(all, t), kids = window.DashHelpers.childrenOf(all, t);
+  const role = typeof roleOf === 'function' && roleOf(t);
+  const n = railCount(t, parent);
+  const mine = [
+    ticketMenuItem('link', 'Copy link', () => ticketCopyLink(t), 'ticket-copy-link'),
+    ticketMenuItem('copy', 'Make a copy', () => ticketMakeCopy(t), 'ticket-make-copy'),
+    // a step itself gets no steps of its own, as the Sub-tickets card (ticketParts)
+    !role && (!parent || kids.length) ? ticketMenuItem('plus', t.epic || t.release ? 'Add a ticket' : 'Add a sub-ticket', () => ticketAddStep(t), 'ticket-add-sub') : null,
+    repeatsAddon() && !role ? ticketMenuItem('refresh', 'Repeat…', () => repeatsDialog(t.id, repeatsAddon()), 'ticket-repeat') : null,
+    // small screens: the Properties sheet opens from here, so the bar keeps its four buttons
+    // (Esc or Close gives the keyboard back to the Actions button, the item itself is folded away by then)
+    ticketMenuItem('cards', 'Properties', e => railToggle(t, railOpen.id !== t.id, e?.currentTarget?.closest?.('details')?.querySelector('summary')), 'props-open-' + t.id,
+      {className:'menu-item narrow-only', 'aria-haspopup':'dialog', 'aria-expanded':String(railOpen.id === t.id), 'aria-controls':'ticket-rail-' + t.id}, n ? h('span', {className:'chip'}, String(n)) : null)].filter(Boolean);
+  return h('details', {className:'menu ticket-actions', 'data-key':'ticket-menu-' + t.id},
+    h('summary', {className:'btn outline sm', 'aria-haspopup':'menu', 'data-key':'ticket-actions-' + t.id}, 'Actions', iconEl('chevron-down')),
+    h('div', {className:'menu-pop menu-pop-wide ticket-actions-pop', role:'menu', 'aria-label':'Ticket actions'},
+      h('div', {className:'grid-2'},
+        h('div', {role:'group', 'aria-label':'Move to'}, h('p', {className:'eyebrow'}, 'Move to'), ticketMoveItems(t)),
+        h('div', {role:'group', 'aria-label':'This ticket'}, h('p', {className:'eyebrow'}, 'This ticket'), mine)),
+      ticketHelperMenuItems(t, run)));
+}
+// Copy link: the address of this ticket's page, as the browser shows it (works from any computer that signs in).
+async function ticketCopyLink(t) {
+  const url = new URL(href(t.id), location.href).href;
+  try { await navigator.clipboard.writeText(url); window.orch.toast('Link copied', 'ok'); }
+  catch (_) { window.orch.toast('Could not copy. Copy the address from the address bar.', 'error'); }
+}
+// Make a copy: a new ticket in Backlog with the same title (+ "(copy)"), note, Done when, owner, due, Part of and the
+// task texts (all open). Questions, files, history and helper sessions stay with the original. Then the copy opens.
+async function ticketMakeCopy(t) {
+  const src = ticketOf(t.id) || t, parent = window.DashHelpers.parentOf(tickets(), src);
+  const args = {title:(clean(src.title) || 'Ticket') .slice(0, 190) + ' (copy)'};
+  for (const k of ['note', 'done_when', 'owner']) if (src[k] != null && String(src[k]).trim()) args[k] = String(src[k]);
+  if (typeof src.due === 'string' && /^\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?$/.test(src.due)) args.due = src.due.replace('T', ' ');
+  if (parent) args.parent = parent.id;
+  const made = await act('ticket.new', args);
+  if (!made.ok) { window.orch.toast(changeError(made), 'error'); return; }
+  const id = made.state?.created?.id;
+  if (!id) { window.orch.toast('The copy was made. Find it in Backlog.', 'ok'); return; }
+  const failed = [];
+  for (const c of array(src.checklist)) {
+    const text = String(c?.text || '').trim();
+    if (text && !(await act('check.add', {ticket:id, text})).ok) failed.push(text);
+  }
+  window.orch.toast(failed.length ? 'The copy was made. Not copied: ' + failed.length + (failed.length === 1 ? ' task.' : ' tasks.') : 'Copy made', failed.length ? 'error' : 'ok');
+  location.hash = href(id);
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
@@ -2386,9 +2496,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
-  const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, ticketFocusMenuItem(t, run), ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
-      repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+  const menuFor = () => ticketActionsMenu(t, run);
   // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
   if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
   const menu = menuFor();
@@ -2396,23 +2504,25 @@ function detail(t) {
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const story = overviewEntries(t, allArtifactFiles(t)), request = overviewRequest(t, note, story.request);
   const progress = planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run);
-  const results = ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null, resultsFirst = !progress;
+  // ORCH-2140 W4: a result to review is all in the one Result card (no second Results or What the helper did card)
+  const results = t.status === 'review' ? null : ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null, resultsFirst = !progress;
   const overview = [
     ticketBringBackRow(t),
+    fresh && !openQuestions.length && ticketNoHelperTool() ? ticketTwoWays(t) : null,
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
     ticketPlanFirstLine(t, !!planQ),
     ticketReleaseLine(t),
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
-    working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
+    working && !helperLive && !(openQuestions.length && !window.DashHelpers.helperAlive(t, run)) ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
     ticketFound(t),
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     working && helperLive ? sharedFolderLine(t) : null,
     // a Done ticket keeps its result on top; while it is worked on, its files are messages in the history.
     // ORCH-1850: while it is open, what is done and what remains (Progress) reads before Results, which is often empty.
     resultsFirst ? results : null,
-    ticketHelperDid(t),
+    t.status === 'review' ? null : ticketHelperDid(t),
     ticketOutcomeCard(t),
     // the helper's browser, small and live (ORCH-1494): right above the steps, so it shows without scrolling
     typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'ticket') : null,
@@ -2494,7 +2604,7 @@ function releaseField(t) {
 function humanReviewField(t) {
   const on = t.human_review !== false;
   if (snapshot) return el('span', 'ed-ro', on ? 'Yes, nothing is accepted without you' : 'No');
-  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'Human review needed', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'I review the result', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
   sw.onclick = async () => {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
@@ -2565,7 +2675,7 @@ function inlineField(t, field) {
   const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
   if (plain && !setDue) node.append(iconEl('pencil'));
   Object.assign(node, {type:'button', title:MULTILINE.includes(field) ? 'Click to change · Enter saves, Shift+Enter new line' : 'Click to change'});
-  node.setAttribute('aria-label', 'Change ' + FIELD_LABEL[field]);
+  node.append(el('span', 'sr-only', ', change ' + FIELD_LABEL[field]));  // spoken after the words on screen (label in name, #2243)
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);
   return host;
@@ -2724,6 +2834,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 function mountQuestion(host, q, context = {}) {
   let sendAnswer;
   const mounted = window.QuestionCard.mount(host, {...q, title:clean(q.title), text:clean(q.text)}, {
+    plain:context.plain === true,
     send: sendAnswer = async answer => {
       const lock = context.lock || host.dataset.key;
       if (lock) locks.add(lock);

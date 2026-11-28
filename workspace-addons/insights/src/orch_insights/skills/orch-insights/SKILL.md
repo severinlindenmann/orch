@@ -27,6 +27,13 @@ It only reads `orch record counts --json`. It never changes anything and never s
 
     orch record counts --days 30 --json
 
+**The last 7 days: tickets done, stuck now, time to done**
+
+    orch insights week          # plain words; --json for the answer the page reads
+
+Read from ticket history: a ticket counts as done when it moved to Done in the last 7 days (epics and releases
+not counted); time to done is from when the ticket was made to that move. Stuck is the same rule as everywhere.
+
 **The page says "Not measured yet" or shows no runs**
 
 Every helper run orch starts is recorded by itself; nothing needs to be set up. Look at the counts:

@@ -2,6 +2,9 @@ name: addons
 on:
   workflow_call:
     inputs:
+      checks:
+        type: string
+        default: '"ubuntu-latest"'
       mac_jobs_runs_on:
         description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
         type: string
@@ -33,16 +36,17 @@ env:
 jobs:
   dashboard:
     if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.checks) }}
+    # 10, not 5: on orch edge its pytest takes about 4 of them, and the job was cancelled with every step green
+    # (ORCH-1932, run 45906897076).
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: workspace-addons/dashboard
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/edge-job-home
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -55,13 +59,12 @@ jobs:
     # nine runners plus setup and a merge queue group waited up to 10 min for free runners. One step set per add-on
     # (scripts/ci_light.py reads them); each runs even after an earlier one failed, so every red suite shows.
     # The Insights suite includes the check that the bundled counts schema equals the contract (#590).
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/edge-job-home
+      - uses: ./.github/actions/setup-uv
       # The cross-tree scan lives in the workspace tests but also reads workspace-addons/, so it must run on
       # add-on-only changes, where the workspace job is skipped.
       - name: "tool-name-scan"
@@ -170,32 +173,30 @@ jobs:
         run: uv run pytest -q -n 2
   factory:
     if: inputs.suites
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 8
     defaults:
       run:
         working-directory: workspace-addons/factory
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/edge-job-home
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
   sync:
     if: inputs.suites
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 10
     defaults:
       run:
         working-directory: workspace-addons/sync
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/edge-job-home
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -207,7 +208,8 @@ jobs:
       matrix:
         machine: ${{ fromJSON(inputs.linux_runs_on) }}
     name: services${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
-    # Pinned on GitHub: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
+    # Pinned on GitHub to ubuntu-24.04 for the Python Playwright of the SVC-1 click-through. Node Playwright 1.64.1
+    # installs Chromium on ubuntu-latest (26.04) again (page-smoke and dashboard-clickthroughs run there, #1709).
     runs-on: ${{ matrix.machine == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.machine }}
     timeout-minutes: 15
     defaults:
@@ -216,9 +218,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -274,9 +274,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -302,9 +300,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: uv sync
       - uses: actions/cache@v4
         with:
@@ -331,9 +327,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+      - uses: ./.github/actions/setup-uv
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
   page-smoke:
     # Runs whenever this workflow is called, also on a develop push that a green group proved (suites and
@@ -354,7 +348,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: false  # as before on orch mac
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -365,9 +361,12 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      # axe-core on every Focus step and width: a serious or critical finding fails the part (#2420, adds ~25 s)
+      - run: npm install --no-save --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
       - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
         env:
           SMOKE_BUDGET_S: 480
+          AXE_CORE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
   dashboard-clickthroughs:
     if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
@@ -385,7 +384,9 @@ jobs:
         with:
           fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
       - uses: ./.github/actions/mac-job-home
-      - uses: astral-sh/setup-uv@v5
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: false  # as before on orch mac
       - uses: actions/setup-node@v4
         with:
           node-version: 20

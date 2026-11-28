@@ -116,6 +116,18 @@ def test_record_before_send_plain_call_and_offline_recheck(dm, monkeypatch):
     assert chat.dm_send(root, WS, "accepted")["state"] == "delivered"
 
 
+def test_a_queued_message_the_relay_refuses_later_shows_as_failed(dm, monkeypatch):
+    """R3.1: queued while the relay was away, then refused when the outbox went out: Chat says "Not sent."
+    with the relay's reason instead of "Sending…" for ever."""
+    root, _ = dm
+    monkeypatch.setattr(relay, "send_text", lambda *a: {"id": MID, "sent": False})
+    chat.dm_send(root, WS, "hello")
+    assert chat.dm_sync(root, WS)["messages"][0]["state"] == "sending"
+    relay._record_not_sent(root, MID, "Pilatus may not send text to Home.")
+    entry = chat.dm_sync(root, WS)["messages"][0]
+    assert entry["state"] == "failed" and entry["error"] == "Pilatus may not send text to Home."
+
+
 def test_refusal_is_saved_and_cleaned(dm, monkeypatch):
     root, _ = dm
     reason = "No\x1b<!--secret-->" + "x" * 300
@@ -806,3 +818,22 @@ def test_contact_carries_description_and_tags_cleaned(dm):
     assert len(c["tags"]) <= 8 and all(isinstance(t, str) and 0 < len(t) <= 24 for t in c["tags"])
     del row["description"], row["tags"]
     assert "description" not in chat.contacts(root)[0] and "tags" not in chat.contacts(root)[0]
+
+
+def test_unattended_reads_with_the_dashboards_by(dm, monkeypatch, capsys):
+    """The dashboard's server has no terminal and passes the signed-in person as --by: contacts, a thread and
+    a sync read work with it, and stay refused without it (an unattended call is a helper, ORCH-2108)."""
+    from orch import cli_chat
+
+    monkeypatch.undo()  # the real actor default, not the fixture's stand-in
+    monkeypatch.setattr(relay, "_read_dir", lambda root: dm[1])
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    for key in ("ORCH_RUN", "ORCH_AGENT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(tickets, "attended", lambda: False)
+    parse = cli.build_parser(show_all=True).parse_args
+    for command in (["contacts"], ["thread", WS], ["thread", WS, "--sync"], ["sync"], ["sync", WS]):
+        assert cli_chat.dispatch(parse(["chat", *command, "--by", "human:anna", "--json"]), dm[0])
+        assert WS in capsys.readouterr().out
+        with pytest.raises(Refused, match="Only a person"):
+            cli_chat.dispatch(parse(["chat", *command, "--json"]), dm[0])

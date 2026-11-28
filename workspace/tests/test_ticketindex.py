@@ -3,8 +3,14 @@ crash, and `orch ticket list` / `orch needs` answer the same as reading every fi
 
 import json
 import os
+import time
 
 from orch import history, needs, reads, ticketindex, tickets
+
+# File times move in kernel ticks: 4 ms on a Linux kernel with HZ=250 and no fine-grained times
+# (before 6.13), as on the CI edge runners. A test that changes a file and expects a new time
+# waits one tick first; a person's hand edit never comes within milliseconds of orch's own write.
+_TICK = 0.05
 
 
 def _new(run, title, *extra):
@@ -186,6 +192,7 @@ def test_in_place_edit_with_time_set_back_is_seen(proj, run):
     st = p.stat()
     t = json.loads(p.read_text(encoding="utf-8"))
     t["title"] = "Invoice export"[::-1]
+    time.sleep(_TICK)  # so the change time can move
     with open(p, "r+", encoding="utf-8") as f:  # same file, same size
         f.write(json.dumps(t, indent=2, ensure_ascii=False) + "\n")
         f.truncate()
@@ -308,6 +315,32 @@ def test_reuse_looks_at_the_files_once(proj, run, monkeypatch):
     assert len(looks) == 1  # one look for the whole pass, threads with a copy of the context too
     ticketindex.rows(proj)
     assert len(looks) == 2
+    looks.clear()
+    with ticketindex.reuse():
+        ticketindex.rows(proj)
+        with ticketindex.reuse():  # a pass inside a pass joins it (ORCH-2289)
+            ticketindex.rows(proj)
+        ticketindex.rows(proj)
+    assert len(looks) == 1
+
+
+def test_needs_and_the_lists_look_at_the_ticket_files_once(proj, run, monkeypatch):
+    """ORCH-2289: `orch needs` stat'ed every ticket file four times (rows, shown fields, results to review),
+    and an add-on's `ticket list --ext` read twice: at 10,000 tickets that was most of the time."""
+    from orch import reads
+
+    run("init")
+    tid = _new(run, "Invoice export")
+    run("ticket", "status", tid, "review", "--by", "agent:test")
+    looks = []
+    real = ticketindex._look
+    monkeypatch.setattr(ticketindex, "_look", lambda root: looks.append(1) or real(root))
+    assert run("needs")[0] == 0
+    assert len(looks) == 1
+    for argv in (["ticket", "list", "--all"], ["ticket", "list", "--all", "--ext", "x"], ["needs"]):
+        looks.clear()
+        reads.answer(proj, [*argv, "--json"])
+        assert len(looks) == 1, argv
 
 
 def test_hidden_ids_chats_picks_and_accepted_never_read_every_ticket(proj, run, monkeypatch):
@@ -416,6 +449,7 @@ def test_hidden_chat_ticket_stays_out_of_git_through_the_index(proj, run):
     run("init")
     _new(run, "Invoice export")
     assert harness._general_lines(proj) == []
+    time.sleep(_TICK)  # so the folder's time can move
     gid = tickets.ensure_general(proj, "human:test")
     assert harness._general_lines(proj) == [f"tickets/{gid}.json"]
     assert f"tickets/{gid}.json" in (proj / ".orch" / ".gitignore").read_text(encoding="utf-8")

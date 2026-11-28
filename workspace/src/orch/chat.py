@@ -278,13 +278,19 @@ def record(
     phone: str | None = None,
     refs: list[dict] | None = None,
     convo_start: bool = False,
+    files: list[dict] | None = None,
 ) -> dict:
-    """Add one Chat text to its day's file (once per message id). by: "you" or the workspace id."""
+    """Add one Chat text to its day's file (once per message id). by: "you" or the workspace id.
+    files: [{name, size}] attached to the Chat ticket with this message (chat_files checked them)."""
     at = at or tickets.now()
     day = day_key(root, at)
     entry: dict = {"id": mid, "at": at, "by": by, "via": via, "text": str(text)[:MAX_TEXT], "day": day}
     if convo_start:
         entry["convo_start"] = True
+    if files:
+        entry["files"] = [
+            {"name": str(f["name"]), "size": int(f.get("size") or 0)} for f in files[:MAX_SAY_FILES]
+        ]
     if reply_to:
         entry["reply_to"] = reply_to
     if phone:
@@ -375,30 +381,76 @@ def cut_session(root: Path, tid: str, now=None) -> bool:
 # ---------------------------------------------------------------- what the person writes in the dashboard
 
 
-def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict:
+MAX_SAY_FILES = 10  # the dashboard's message box takes up to 10 files (as the ticket page's)
+
+
+def chat_files(root: Path, gid: str, names) -> list[dict]:
+    """The files a person added to a Chat message: names of files already attached to the Chat ticket (the
+    dashboard sends them with `ticket.attach` first). Each must be a plain file in its artifacts folder; a name
+    with a folder in it, a link or a missing file is refused. Returns [{name, size}] for the day file."""
+    names = list(names or [])
+    if len(names) > MAX_SAY_FILES:
+        raise Refused(f"A Chat message takes up to {MAX_SAY_FILES} files.")
+    folder = tickets.artifacts_path(root, gid)
+    out: list[dict] = []
+    for name in names:
+        name = str(name or "")
+        p = folder / name
+        if (
+            not name
+            or name in (".", "..")
+            or "/" in name
+            or "\\" in name
+            or "\x00" in name
+            or p.is_symlink()
+            or not p.is_file()
+        ):
+            raise Refused(f"The file {name[:80]!r} is not in the Chat. Add it again.")
+        if name not in [f["name"] for f in out]:
+            out.append({"name": name, "size": p.stat().st_size})
+    return out
+
+
+def files_line(gid: str, files: list[dict]) -> str:
+    """orch's line after the person's words in the helper's input: which files came with the message."""
+    if not files:
+        return ""
+    names = ", ".join(f["name"] for f in files)
+    what = "a file" if len(files) == 1 else f"{len(files)} files"
+    return f"I added {what} to this chat: {names} (in .orch/tickets/{gid}/artifacts). Read {'it' if len(files) == 1 else 'them'} first."
+
+
+def say(
+    root: Path, text: str, by: str | None = None, new: bool = False, files: list[str] | None = None
+) -> dict:
     """The person writes in Chat from the dashboard: kept in the day file and the General history as theirs
     (by "you", via dashboard), queued as human input so the automation host starts the helper, and sent to
-    the paired phones (only when a relay is connected: otherwise it stays local)."""
+    the paired phones (only when a relay is connected: otherwise it stays local). `files`: names of files
+    already attached to the Chat ticket; the message shows them as file cards and the helper is told."""
     text = (text or "").strip()
-    if not text or len(text) > MAX_TEXT:
+    if (not text and not files) or len(text) > MAX_TEXT:
         raise Refused("A Chat text has 1 to 20000 characters.")
     who = tickets.current_actor(by)
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
     tickets.no_secret(root, {"text": text}, "Chat text")
     gid = tickets.ensure_general(root, who)
+    kept = chat_files(root, gid, files)
+    told = "\n\n".join(x for x in (text, files_line(gid, kept)) if x)
+    # the phones get the words and the file names, never a folder on this computer
+    shown = "\n\n".join(x for x in (text, ", ".join(f["name"] for f in kept)) if x)
     mid = relay.new_id()
-    entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new)
+    entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new, files=kept)
     tickets.apply_op(
-        root, gid, lambda t: tickets.add_history(t, who, text, tickets.PERSON_VIA, chat=True, mid=mid), by=who
+        root, gid, lambda t: tickets.add_history(t, who, told, tickets.PERSON_VIA, chat=True, mid=mid), by=who
     )
-    runs.pending_add(root, gid, who, "message", text, tickets.PERSON_VIA, "p_" + mid[2:])
+    runs.pending_add(root, gid, who, "message", told, tickets.PERSON_VIA, "p_" + mid[2:])
     sent = None
     with contextlib.suppress(Refused, OSError):
         sent = relay.send_text(
             root,
             "phones",
-            text,
+            shown,
             None,
             None,
             None,
@@ -853,7 +905,7 @@ def _given(args, cmd, sub) -> set[str]:
     """The options and arguments that differ from the parser's own default (a store_false flag set to False counts)."""
     from orch import cli
 
-    p = cli.build_parser(show_all=True)
+    p = cli.build_parser(show_all=True, helps=False)
     try:
         for name in (cmd, sub):
             if name is None:
@@ -949,8 +1001,8 @@ def can_of(flags) -> dict:
     }
 
 
-def contacts(root: Path) -> list[dict]:
-    _dm_person()
+def contacts(root: Path, by: str | None = None) -> list[dict]:
+    _dm_person(by)
     return _contacts_list(root)
 
 
@@ -1018,8 +1070,8 @@ def _dm_summary(root: Path, ws: str) -> tuple[int, str]:
     return value
 
 
-def _dm_contact(root: Path, ws: str) -> dict:
-    contact = next((c for c in contacts(root) if c["ws"] == ws), None)
+def _dm_contact(root: Path, ws: str, by: str | None = None) -> dict:
+    contact = next((c for c in contacts(root, by) if c["ws"] == ws), None)
     if contact is None:
         raise Refused(f"You may not message {relay.clean_untrusted(str(ws), 100)}.")
     return contact
@@ -1106,7 +1158,7 @@ def dm_send(
 ) -> dict:
     if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
-    contact = _dm_contact(root, ws)
+    contact = _dm_contact(root, ws, by)
     if not contact["can"]["chat"]:
         raise Refused(f"You may not message {contact['name']}.")
     text = text.strip() if isinstance(text, str) else ""
@@ -1153,15 +1205,15 @@ def dm_send(
     return entry
 
 
-def dm_read(root: Path, ws: str) -> dict:
-    contact = _dm_contact(root, ws)
+def dm_read(root: Path, ws: str, by: str | None = None) -> dict:
+    contact = _dm_contact(root, ws, by)
     data = _dm_read(root, ws)
     return {**contact, "messages": data["messages"][-500:]}
 
 
-def dm_thread(root: Path, ws: str) -> dict:
+def dm_thread(root: Path, ws: str, by: str | None = None) -> dict:
     """Compatibility name for a pure stored-thread read."""
-    return dm_read(root, ws)
+    return dm_read(root, ws, by)
 
 
 def _dm_inbox(root: Path):
@@ -1194,17 +1246,17 @@ def _dm_inbox(root: Path):
 
 def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
     _dm_person(by)
-    contact = _dm_contact(root, ws)
+    contact = _dm_contact(root, ws, by)
     _dm_sync_contacts(root, [contact])
-    return dm_read(root, ws)
+    return dm_read(root, ws, by)
 
 
 def dm_sync_all(root: Path, by: str | None = None) -> list[dict]:
     """Import all contacts with one bounded inbox scan."""
     _dm_person(by)
-    peers = contacts(root)
+    peers = contacts(root, by)
     _dm_sync_contacts(root, peers)
-    return contacts(root)
+    return contacts(root, by)
 
 
 def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
@@ -1263,6 +1315,7 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
             data[ws]["seen"].append(mid)
             changed.add(ws)
         sent_ids = relay.posted_ids(root)
+        refused = relay.not_sent(root)
         for ws, thread in data.items():
             for m in thread["messages"]:
                 rid = m.get("relay_id")
@@ -1272,10 +1325,13 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
                     and not m.get("error")
                     and isinstance(rid, str)
                     and re.fullmatch(r"m_[a-z0-9]{16}", rid)
-                    and rid in sent_ids
                 ):
-                    m["state"] = "delivered"
-                    changed.add(ws)
+                    if rid in sent_ids:
+                        m["state"] = "delivered"
+                        changed.add(ws)
+                    elif rid in refused:  # queued, refused when the outbox went out: no "Sending…" for ever
+                        m.update(state="failed", error=refused[rid])
+                        changed.add(ws)
         for ws in changed:
             _dm_write(root, ws, data[ws])
 

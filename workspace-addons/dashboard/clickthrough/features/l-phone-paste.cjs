@@ -1,11 +1,11 @@
-// The phone link from Settings, no terminal (ORCH-1693): with the relay on but not connected, Settings > Contacts
+// The phone link from Settings, no terminal (ORCH-1693): with the relay on but not connected, Settings > Relay
 // says "Not set up" and asks for the line from the phone link's admin page; the person pastes it, presses Connect,
-// reloads and sees Connected. A line that is not that line is refused with a plain next step.
+// reloads and sees Connected. Text without the connect line is refused with a plain next step (RP1).
 const fs = require('node:fs');
 const path = require('node:path');
 
 module.exports = {
-  name: 'Phone link: paste the line from its admin page and Connect',
+  name: 'Relay: paste the line from its admin page and Connect',
   covers: ['relay.connect'],
   async run({ page, open, reload, act, must, text, orchAsPerson, workspace, standins, until }) {
     const r = standins.relay;
@@ -20,12 +20,12 @@ module.exports = {
 
     await line.fill('not the line');
     await act('relay.connect', () => page.locator('[data-key="phone-relay-connect"]').click(), { refused: true });
-    await page.getByText('That is not the line from your phone link').first().waitFor({ timeout: 10000 });
+    await page.getByText("I can't find the connect line in that text").first().waitFor({ timeout: 10000 });
 
     await line.fill(`orch relay connect ${r.url} --workspace ${r.workspace} --token ${r.token}`);
     await act('relay.connect', () => page.locator('[data-key="phone-relay-connect"]').click());
     await reload();
-    await page.locator('[data-key="phone-relay-status"]', { hasText: 'Connected' }).waitFor({ timeout: 20000 });
+    await page.locator('[data-key="phone-relay-address"]', { hasText: 'Connected' }).waitFor({ timeout: 20000 });
     must(fs.existsSync(path.join(workspace, '.orch', 'secrets', 'relay.json')), 'the connection was not saved');
     must(!(await text()).includes(r.token), 'the token is shown on the page');
   },

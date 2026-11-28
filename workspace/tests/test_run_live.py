@@ -437,10 +437,15 @@ def test_without_tmux_the_run_is_one_turn_at_a_time(proj, run, lab, monkeypatch)
     tid = _ticket(run)
     code, out, err = run("run", "start", tid, "--json")
     assert code == 0 and json.loads(out)["mode"] == "oneshot"
-    _until(lambda: runs.read(proj, tid) is None)
-    code, out, err = run(
-        "run", "start", tid, "--mode", "live", "--json"
-    )  # asked for live: same record, plain note
+    lock = runs.run_dir(proj) / "tickets" / f"{tid}.lock"
+    # Windows: the record is gone a moment before the finished run lets go of its lock file
+    _until(lambda: runs.read(proj, tid) is None and not lock.exists(), what="first run fully ended")
+    end = time.monotonic() + 10
+    while True:  # asked for live: same record, plain note
+        code, out, err = run("run", "start", tid, "--mode", "live", "--json")
+        if code == 0 or time.monotonic() > end:
+            break
+        time.sleep(0.2)
     assert code == 0 and json.loads(out)["mode"] == "oneshot" and "needs tmux" in err, (code, out, err)
     _until(lambda: runs.read(proj, tid) is None)
 
@@ -780,7 +785,20 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
     run("run", "start", tid)
     _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
     qid = json.loads(
-        run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", "--json", "--by", "agent:fake")[1]
+        run(
+            "ask",
+            tid,
+            "Use CHF?",
+            "--option",
+            "Yes",
+            "--option",
+            "No",
+            "--recommend",
+            "Yes",
+            "--json",
+            "--by",
+            "agent:fake",
+        )[1]
     )["id"]
     code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
     assert code == 0 and out.splitlines()[0] == "Answered: Yes"
@@ -792,7 +810,22 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
 
 def test_an_answer_without_a_run_sends_nothing(proj, run):
     tid = _ticket(run)
-    qid = json.loads(run("ask", tid, "Use CHF?", "--json", "--by", "agent:fake")[1])["id"]
+    qid = json.loads(
+        run(
+            "ask",
+            tid,
+            "Use CHF?",
+            "--option",
+            "Yes",
+            "--option",
+            "No",
+            "--recommend",
+            "Yes",
+            "--json",
+            "--by",
+            "agent:fake",
+        )[1]
+    )["id"]
     assert run("answer", tid, qid, "Yes", "--by", "human:anna")[0] == 0
     assert runs.undelivered(proj, tid) == []
 

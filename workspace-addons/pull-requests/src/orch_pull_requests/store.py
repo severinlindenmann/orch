@@ -60,7 +60,7 @@ def canonical(url: str) -> str:
     return f"https://github.com/{repo}/pull/{number}"
 
 
-def read(root: Path, strict: bool = False) -> list[dict]:
+def read(root: Path, strict: bool = False, *, require_file: bool = False) -> list[dict]:
     """The entries. No file yet: none. A file that cannot be read now (Windows: being replaced) is read again a
     few times; strict (inside change) refuses a damaged file instead of starting over with an empty queue."""
     for i in range(20):
@@ -68,6 +68,8 @@ def read(root: Path, strict: bool = False) -> list[dict]:
             text = _file(root).read_text(encoding="utf-8")
             break
         except FileNotFoundError:
+            if require_file:
+                raise
             return []
         except OSError:
             if i == 19:
@@ -84,6 +86,11 @@ def read(root: Path, strict: bool = False) -> list[dict]:
             ) from None
         return []
     rows = data.get("entries") if isinstance(data, dict) else None
+    if require_file and (
+        not isinstance(rows, list)
+        or not all(isinstance(r, dict) and isinstance(r.get("url"), str) for r in rows)
+    ):
+        raise Refused("The merge queue entries cannot be read. Check the queue file.")
     return [r for r in rows or [] if isinstance(r, dict) and isinstance(r.get("url"), str)]
 
 

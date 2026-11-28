@@ -24,6 +24,7 @@ from test_chat_groups import (  # noqa: F401  (fixtures are used by name)
     from_host,
     gout,
     group_msg,
+    group_run,
     grp,
     host,
     inbox,
@@ -463,8 +464,8 @@ def test_a_member_that_leaves_by_itself_gets_none_of_the_copies_still_waiting(
     assert HOME in {m["to"] for m in _outbox(proj)}
     up()
     monkeypatch.setattr(
-        relay, "resend_outbox", lambda root: {"sent": [], "waiting": [], "dropped": [], "failed": []}
-    )  # keep the outbox as it is until the leave is handled
+        relay, "_flush_outbox", lambda root: ({"sent": [], "waiting": [], "dropped": [], "failed": []}, {})
+    )  # keep the outbox as it is until the leave is handled (every send flushes older ones first)
     leave = group_msg(HOME, gid, host, MEMBERS, {"text": "Left", "leave": True, "update": {"kind": "note"}})
     leave["id"] = mid("leave1")
     inbox(run, rel, leave)

@@ -185,7 +185,7 @@ function liveMsgComposer(sess) {
   const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
   const g = liveGroupOf(liveGroups(), sess.id), main = g ? g.members.find(x => x && x.id === sess.id)?.main : false;
   const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
-    label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:!g ? 'Message the helper' : main ? 'Message the main helper' : 'Message only this helper', attachLabel:'Add files',
+    label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:!g ? (sess.kind === 'manager' ? 'Message the Manager' : 'Message the helper') : main ? 'Message the main helper' : 'Message only this helper', attachLabel:'Add files',
     sendStyle:'outline',  // a pane keeps one filled button: a question's first choice, the page's own (draft D, ORCH-1357)
     maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
     emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',

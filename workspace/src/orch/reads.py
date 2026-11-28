@@ -12,11 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from orch import history, review, ticketindex, tickets
 from orch.errors import Refused
+
+_EXT_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}")  # an add-on name as `ticket list --ext` is asked here
 
 
 class NotHere(LookupError):
@@ -147,9 +150,20 @@ def _plain(root: Path, data):
     return json.loads(json.dumps(history.shown_json(root, data), ensure_ascii=False))
 
 
+_LISTS = (["ticket", "list"], ["review", "list"], ["chat", "list"], ["needs"])
+
+
 def answer(root: Path, argv: list[str]):
     """The parsed JSON `orch <argv>` would print. Refused when the command would refuse (exit 2), NotHere when
-    this argv is not one of the reads above."""
+    this argv is not one of the reads above. A list is one read-only pass, so it looks at the ticket files
+    once (ORCH-2289: the rows and their shown fields each stat'ed every ticket file)."""
+    if list(argv[:2]) in _LISTS or list(argv[:1]) in _LISTS:
+        with ticketindex.reuse():
+            return _answer(root, argv)
+    return _answer(root, argv)
+
+
+def _answer(root: Path, argv: list[str]):
     a = list(argv)
     if not a or a[-1] != "--json":
         raise NotHere(" ".join(a))
@@ -158,6 +172,14 @@ def answer(root: Path, argv: list[str]):
         return _plain(root, ticket_rows(root, all_=True))
     if a == ["ticket", "list"]:
         return _plain(root, ticket_rows(root))
+    if (
+        a[:2] == ["ticket", "list"]
+        and a[-2:-1] == ["--ext"]
+        and a[2:-2] in ([], ["--all"])
+        and _EXT_NAME.fullmatch(a[-1])
+    ):  # an add-on's own tickets (Factory's page and watcher): at 10,000 tickets about 800, several MB
+        # through the read worker's pipe and parsed twice took about a second (ORCH-2288)
+        return _plain(root, ticket_rows(root, all_=a[2:-2] == ["--all"], ext=a[-1]))
     if a[:2] == ["ticket", "show"] and len(a) == 3 and tickets._ID_RE.fullmatch(a[2]):
         from orch.cli import visible
 
@@ -189,10 +211,10 @@ def answer(root: Path, argv: list[str]):
         from orch import ticketchats
 
         return _plain(root, ticketchats.chats(root, a[3] if len(a) == 4 else None))
-    if a == ["addon", "list"]:  # asked every round by Automation and every poll by the dashboard (ORCH-1295)
+    if a in (["addon", "list"], ["addon", "list", "--catalog"]):
         from orch import addons
 
-        return _plain(root, addons.listing(root))
+        return _plain(root, addons.listing(root, catalog="--catalog" in a))
     if a == ["chat", "id"]:  # asked every Automation round (ORCH-1295)
         from orch import chat
 

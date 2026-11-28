@@ -13,7 +13,7 @@ def read(proj, tid):
     return json.loads((proj / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
 
 
-def test_two_processes_race_both_land(proj, run, new_ticket):
+def test_two_processes_race_both_land(proj, run, new_ticket, child_trust):
     tid = new_ticket()
     for i in (1, 2, 3, 4):
         assert run("check", "add", tid, f"step {i}")[0] == 0

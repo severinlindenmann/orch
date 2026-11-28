@@ -4,6 +4,7 @@
   const prefix = document.documentElement.dataset.prefix || '';
   const view = document.getElementById('factory-view');
   const notices = document.getElementById('notices');
+  const said = document.getElementById('factory-said');  // says once where an update moved you (ORCH-2046)
   const validId = id => typeof id === 'string' && /^t_[a-z0-9]{6,16}$/.test(id);
   const validVersion = value => /^[1-9][0-9]*$/.test(String(value)) && Number.isSafeInteger(Number(value));
   const array = value => Array.isArray(value) ? value : [];
@@ -114,11 +115,28 @@
     for (const value of values) el.append(node('li', value));
     return el;
   }
+  // One top for every page (owner D1, ORCH-2282): the master page top (kit components.css .page-top, as UI.pageTop draws
+  // it): the name and one sentence, the buttons on the right. A page inside another page has '← <parent>' above its name.
   function heading(title, subtitle, ...actions) {
     document.title = text(title) + ' · Factory';
     const h1 = node('h1', title); h1.tabIndex = -1;
-    return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
+    const top = group('page-heading page-top', group('page-top-text', h1, node('p', subtitle, 'muted')));
+    if (actions.length) top.append(group('page-heading-actions', ...actions));
+    return top;
   }
+  // D6 (ORCH-2315): Factory's one Settings button, the master's (kit widgets.js UI.settingsButton), first on the right of
+  // its own top. It moves the dashboard (target _top) to Settings › Add-ons › Factory.
+  const settingsButton = () => window.UI?.settingsButton ? [window.UI.settingsButton({href: '/#settings/addons/factory', top: true})] : [];
+  function inner(top, label, href) {
+    const a = node('a', null, 'page-back'); a.href = href; a.dataset.key = 'page-back';
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('class', 'ic'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    path.setAttribute('d', 'M19 12H5m6-6-6 6 6 6'); svg.append(path);
+    a.append(svg, node('span', label));
+    top.querySelector('.page-top-text')?.prepend(a);
+    return top;
+  }
+  const toOrder = (top, order) => validId(order?.id) ? inner(top, text(order.title) || 'Order', '#/order/' + order.id) : inner(top, 'Factory', '#/');
   // The questions your helper asked on the order (the draft's open questions): one card each, its options and its
   // suggestion shown, the answer given in the dashboard's own question card (the page never answers).
   function questionCards(order) {
@@ -274,7 +292,8 @@
     const stop = array(order.line).find(x => x.stop && x.state !== 'done');
     if (!stop) return null;
     const need = yourTime(order.owner_min);
-    return meta('Next pause: ' + stageLabel(stop) + (need ? ' · ' + need : ''));
+    const at = order.next_stop_at ? 'around ' + when(order.next_stop_at) : '';
+    return meta(['Next pause: ' + stageLabel(stop), at, need].filter(Boolean).join(' · '));
   }
   // Plain title for an open question, from the structured stop/change data.
   function openTitle(order, open) {
@@ -316,7 +335,7 @@
       ...(b.warn ? [meta('The time limit is nearly used up. Open the order to decide what happens next.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
-  // The page never writes by itself. "Ask me at every pause" goes to your helper in Chat as typed text (you press Send
+  // The page never writes by itself. "Change in Chat" (Pauses) opens Chat with a suggestion in the draft (you press Send
   // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
   // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
@@ -436,75 +455,104 @@
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
       fallback.hidden = false;
     });
-    el.append(field, count, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
+    // D4 (26 Nov): the idea box is the master's empty-page look (.page-empty): one sentence, the first step right there.
+    const step = group('page-empty-step'); step.append(field, count, group('row', go, fallback), status);
+    el.append(step); el.classList.add('f-idea', 'page-empty'); return el;
   }
   // One idea box for the whole page: it is on screen before the order list has been read, and what you type in it
   // stays when the list arrives.
   let idea = null;
   const theIdea = () => idea || (idea = ideaBox());
+  // Pauses (ORCH-2065): the row says what the record says today and saves nothing. Change in Chat only opens Chat with
+  // a suggestion; the dashboard keeps a draft you already typed there (then the suggestion is not added) and never sends.
+  // An active Autopilot has limits (routine pauses only, its own orders and end date; never putting it live or
+  // anything that can't be undone), so the row never says an order runs without pauses.
   function askRow(auto) {
-    const asks = !auto?.on, row = group('setting-row f-ask');
-    const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every pause');
-    const word = node('span', asks ? 'On' : 'Off', 'meta');
-    input.addEventListener('change', () => { input.checked = asks; toChat(asks ? 'Factory: run to the end with Autopilot' : 'Factory: ask me at every stop again'); });
-    const label = node('label', null, 'row'); label.append(word, input);
-    row.append(node('div', 'Ask me at every pause', 'row-label'),
-      group('row-value', document.createTextNode('Factory waits for your OK after each step'), meta('Turn off to let it run to the end.')),
-      group('row-action', label));
+    const on = !!auto?.on, row = group('setting-row f-pauses');
+    const hint = meta('Opens Chat. Nothing is sent until you press Send.'); hint.id = 'f-pauses-hint';
+    const value = on
+      ? group('row-value', p('Autopilot may answer routine pauses until ' + when(auto.until) + '.'),
+        meta("Putting it live, and anything that can't be undone, still waits for your OK."), hint)
+      : group('row-value', p('Factory waits for your OK at every pause.'), hint);
+    let change;
+    if (embedded()) {
+      change = node('button', 'Change in Chat', 'btn outline sm f-btn'); change.type = 'button';
+      change.addEventListener('click', () => toChat(on ? 'Factory: I would like to be asked at every pause again.'
+        : 'Factory: I would like Autopilot to answer routine pauses. What would it cover?'));
+    } else change = link('Change in Chat', '/#chat');
+    change.setAttribute('aria-describedby', hint.id);
+    row.append(node('div', 'Pauses', 'row-label'), value, group('row-action', change));
     return group('card', row);
+  }
+  // Every card of one order on home carries its id, so a background update can find your place again, and its
+  // actions say which order they are for ("Open order: Online booking page"), not only "Open order" (ORCH-2046).
+  function of(o, el) {
+    if (!validId(o.id)) return el;
+    el.dataset.order = o.id;
+    const title = text(o.title).trim();
+    for (const x of el.querySelectorAll('a.btn, button.btn')) {
+      const words = x.textContent.trim();
+      if (words && !x.hasAttribute('aria-label') && !words.includes(title)) x.setAttribute('aria-label', words + ': ' + title);
+    }
+    return el;
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
+    // D3 B (ORCH-2284): one name, Factory, and the words every page uses: Needs you
     view.append(heading('Factory', needing.length
-      ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing in Factory waits for you right now.'));
+      ? plural(needing.length, 'thing in Factory needs you', 'things in Factory need you') + '.' + (minutes ? ' About ' + minutes + ' min of your time.' : '')
+      : 'Turn an idea into finished work, step by step.', ...settingsButton()));
     // What waits for you comes first, in one block; a kind with nothing in it gets no section of its own (owner
     // 16 Nov, ORCH-72): the missing kinds are named once in a quiet line at the end, not as a wall of empty sections.
     const kinds = [
       ['drafts', orders.filter(draftWaiting), o => {
         const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
           tail(orderLink(o, 'Read draft', '/draft')), draftActions(o, render));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['proposals', orders.filter(o => o.phase === 'proposed'), o => {
         const need = yourTime(o.owner_min);
         const c = card(o.title, meta('Your helper planned the run. Read it, then start it or say not now.'),
           ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
       ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
         const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false),
           tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
-        c.classList.add('f-attention'); return c;
+        c.classList.add('f-attention'); return of(o, c);
       }],
-      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
+      ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))],
     ];
     const waiting = kinds.flatMap(([, rows, paint]) => rows.flatMap(paint));
     if (waiting.length) {
       const block = node('section', null, 'f-section f-waits');
-      const mark = badge('Waits for you'); mark.classList.add('attn');
-      block.setAttribute('aria-label', 'Waits for you'); block.append(mark, ...waiting); view.append(block);
+      const mark = badge('Needs you'); mark.classList.add('attn');
+      block.setAttribute('aria-label', 'Needs you'); block.append(mark, ...waiting); view.append(block);
     }
-    view.append(theIdea(), askRow(auto));
+    // D4: with nothing in Factory yet the idea box IS the page: no switch, no lines about what is missing.
+    const empty = !orders.length && !auto?.on;
+    const box = theIdea(), boxTitle = box.querySelector('h2');
+    if (boxTitle) boxTitle.textContent = empty ? 'No ideas yet. Start with one' : 'Start with an idea';
+    if (empty) { view.append(box); return; }
+    view.append(box, askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
         meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
-        meta('Your helper answers routine pauses. Putting it live still asks you.'),
         tail(link('What it decided', '#/autopilot')));
       autoCard.classList.add('f-autopilot'); view.append(autoCard);
     } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
     const primary = group('stack'), secondary = group('stack');
     const section = (parent, title, rows, paint) => {
       if (!rows.length) return;
-      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(paint)); parent.append(el);
+      const el = node('section', null, 'f-section'); el.append(node('h2', title), ...rows.map(o => of(o, paint(o)))); parent.append(el);
     };
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
       ? card(o.title, meta('Autopilot order'), p('Your helper answers routine pauses. Putting it live still asks you.'), tail(link('What it decided', '#/autopilot')))
-      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
+      : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.next_stop_at ? [meta('Next pause around ' + when(o.next_stop_at))] : []), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
     section(secondary, 'Shipped', shipped, o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))));
@@ -567,7 +615,7 @@
   }
   function proposal(order) {
     const data = order.proposal;
-    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
+    view.append(toOrder(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')), order));
     if (!data) { view.append(card('No plan yet', p('Your helper is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
@@ -627,7 +675,7 @@
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', active: 'working', waiting: 'waiting', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
-    view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
+    view.append(inner(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')), 'Factory', '#/'));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Your helper answers routine pauses. Putting it live still asks you.'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
@@ -692,6 +740,38 @@
     return figure;
   }
   const picturesOf = item => [item.before, item.after].filter(imageName);
+  // Look options at a taste item (#949): 2-3 pictures side by side in the kit's decision tiles, each opens big in the
+  // kit's result overlay. The pick is the helper's plain question on the order whose options are the look titles:
+  // "Choose a look" opens the dashboard's own question card for it (the page never answers).
+  function lookQuestion(order, looks) {
+    const titles = looks.map(l => l.title);
+    return array(order.questions).find(x => validQuestion(x?.q) && titles.every(t => array(x.options).includes(t))) || null;
+  }
+  function lookCards(order, item) {
+    const looks = array(item.looks).filter(l => l && typeof l.title === 'string' && l.title).slice(0, 3);
+    if (looks.length < 2) return [];
+    const grid = group('decision-shown');
+    const big = [];
+    for (const [i, look] of looks.entries()) {
+      const name = 'Look ' + 'ABC'[i] + ': ' + look.title;
+      if (!validId(order.id) || !imageName(look.picture)) { grid.append(group('stack', node('b', name), meta('Picture unavailable.'))); continue; }
+      const raw = prefix + '/api/order/' + order.id + '/file/' + look.picture.split('/').map(encodeURIComponent).join('/');
+      const src = window.OrchFrame ? window.OrchFrame.url(raw) : raw;
+      const index = big.push({type: 'picture', name, src, alt: name}) - 1;
+      const shot = node('button', null, 'decision-shot'); shot.type = 'button';
+      shot.setAttribute('aria-label', 'Open big · ' + name);
+      const thumb = node('span', null, 'opt-thumb');
+      const img = node('img'); img.alt = name; img.src = src;
+      img.addEventListener('error', () => thumb.replaceChildren(meta('Picture unavailable.')), {once: true});
+      thumb.append(img); shot.append(thumb, node('b', name));
+      shot.addEventListener('click', () => { if (window.UI?.resultOverlay) window.UI.resultOverlay(big, index); });
+      grid.append(shot);
+    }
+    const q = lookQuestion(order, looks);
+    const out = [node('h3', 'Pick a look'), grid];
+    out.push(q ? tail(decide(order, 'Choose a look', false, q.q)) : meta('Say which look you want when you answer this pause.'));
+    return out;
+  }
   const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', partial: 'Partly sent', closed: 'Closed'};
   const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', partial: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
   // "Maya says" / "Design's helper says": text from another workspace is data, shown as plain text and cut to a few lines.
@@ -729,10 +809,29 @@
     const ticks = items.map((item, i) => {
       const n = picturesOf(item).length;
       const box = node('input'); box.type = 'checkbox'; box.checked = true;
-      const label = node('label', null, 'check-label'); label.append(box, document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
-      return {box, label, i, text: label.lastChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : ''};
+      // one text block, so a "not sent" note added later flows with the item's words instead of a column of its own
+      const words = node('span'); words.append(document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
+      const label = node('label', null, 'check-label'); label.append(box, words);
+      return {box, label, words, i, name: text(item.title), text: words.firstChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '', pictures: n};
     });
     const checked = meta('Checking for passwords and keys…');
+    const excluded = group('stack');
+    const selected = meta('');
+    // one status region: the check's result, the items it kept here and what is still ticked, read out when it changes
+    const status = group('stack', checked, excluded, selected); status.setAttribute('role', 'status');
+    // a long item name is shown whole on its tick box; the summary lines keep it short
+    const short = name => '“' + (name.length > 60 ? name.slice(0, 59).trimEnd() + '…' : name) + '”';
+    const quoted = items => items.map(t => short(text(t)));
+    const names = list => list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+    const showSelected = () => {
+      const on = ticks.filter(t => t.box.checked);
+      // zero items is not zero content: the card title, the line and the question still go
+      selected.textContent = on.length
+        ? 'Still sent: ' + (on.length <= 3 ? names(quoted(on.map(t => t.name))) + ' (' + on.length + ' of ' + plural(ticks.length, 'item', 'items') + ')' : on.length + ' of ' + plural(ticks.length, 'item', 'items')) + ', plus the title, the line and the question above.'
+        : 'No items ticked. Send still sends the title, the line and the question above.';
+    };
+    for (const t of ticks) t.box.addEventListener('change', showSelected);
+    showSelected();
     const preview = group('stack', meta('Reading what will be sent…'));
     const problem = p(''); problem.hidden = true; problem.setAttribute('role', 'alert');
     const cancel = node('button', 'Cancel', 'btn'); cancel.type = 'button'; cancel.addEventListener('click', () => d.close());
@@ -740,20 +839,28 @@
     const close = node('div', null, 'row between'); close.append(node('h2', 'Ask another workspace'));
     close.firstChild.id = 'ask-title';
     d.append(close, who, node('h3', 'What leaves this computer'), preview, ...ticks.map(t => t.label),
-      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), checked, problem, group('actions actions-end', cancel, send));
-    // the check runs when the dialog opens, before Send: a file with a hit is shown unticked and disabled with its reason
+      p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), status, problem, group('actions actions-end', cancel, send));
+    // the check runs when the dialog opens, before Send: an item with a picture that has a hit, or that could not be
+    // checked, is unticked and disabled; the status says which item stays here, why, and what is still ticked
     read('/api/order/' + order.id + '/stop/' + stop.n + '/scan').then(scan => {
-      const hits = [];
+      let kept = 0;
       // exactly what the add-on sends, built by the one function that sends it: card title, line, question, item texts
       preview.replaceChildren(node('strong', text(scan.title)), p('“' + text(scan.line) + '”'), meta('Question: ' + text(scan.question)));
-      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) t.text.nodeValue = ' ' + text(row.check) + t.suffix; }
+      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) { t.name = text(row.check); t.text.nodeValue = ' ' + t.name + t.suffix; } }
       for (const row of array(scan.items)) {
         const t = ticks[row.i]; const bad = array(row.files).filter(f => f.ok === false);
         if (!t || !bad.length) continue;
+        kept += 1;
         t.box.checked = false; t.box.disabled = true;
-        for (const f of bad) { hits.push(f.name); t.label.append(node('strong', ' · not sent: ' + text(f.name) + ' ' + text(f.why || 'could not be checked'))); }
+        // a known hit (the scan found something) reads differently from a picture that could not be checked at all
+        const found = bad.some(f => f.found === true);
+        t.words.append(node('strong', found ? ' · not sent: password or key found' : ' · not sent: could not check'));
+        const why = bad.map(f => text(f.name) + ' ' + (f.why ? text(f.why) : 'could not be checked') + '.');
+        const rest = t.pictures > 1 ? 'The item and its ' + plural(t.pictures, 'picture', 'pictures') + ' stay here.' : 'The item and its picture stay here.';
+        excluded.append(group('banner attn', group('grow', node('strong', (found ? 'Password or key found' : 'Could not check') + ' · ' + short(t.name) + ' is not sent'), p(why.join(' ') + ' ' + rest))));
       }
-      checked.textContent = hits.length ? 'Found in a picture: untick it or remove the password first.' : 'Checked for passwords and keys: nothing found.';
+      checked.textContent = 'Checked for passwords and keys: nothing found.'; checked.hidden = kept > 0;
+      showSelected();
       send.disabled = false;
     }).catch(() => { checked.textContent = 'Could not check for passwords and keys now. Send checks again before anything leaves.'; send.disabled = false; });
     send.addEventListener('click', async () => {
@@ -775,10 +882,11 @@
     const canAsk = stop.state === 'open' && embedded() && reach.length > 0 && validId(order.id);
     const ask = canAsk ? node('button', 'Ask another workspace', 'btn outline sm f-btn') : null;
     if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
-    view.append(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
+    view.append(toOrder(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), order), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
+      const looks = item.tag === 'taste' ? lookCards(order, item) : [];
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
-      const c = card(item.title, badge(tagWord(item.tag)), compare);
+      const c = card(item.title, badge(tagWord(item.tag)), ...(looks.length && !item.before && !item.after ? [] : [compare]), ...looks);
       if (imageName(item.before) && imageName(item.after)) {
         const label = node('label', 'Compare before / after', 'stack');
         const range = node('input', null, 'f-range'); range.type = 'range'; range.min = '15'; range.max = '85'; range.value = '50';
@@ -797,7 +905,7 @@
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
-    view.append(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'));
+    view.append(inner(heading('Autopilot', 'What your helper may decide on its own. Putting it live still asks you.'), 'Factory', '#/'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
       node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
@@ -836,44 +944,101 @@
     box.dataset.key = 'factory-stopped';
     return box;
   }
+  // The notices are a live region: they are replaced only when their words change, so an update never says them again.
   function showNotices(homeData, ...data) {
-    notices.replaceChildren();
-    if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
-    if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
-    if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
+    const next = [];
+    if (homeData.day_limit?.warning) next.push(node('p', homeData.day_limit.warning, 'f-banner'));
+    if (homeData.watcher === false) next.push(stopped(homeData.workspace));
+    if ([homeData, ...data].some(d => d?.stale === true)) next.push(node('p', 'This may not show the latest changes yet. It updates by itself when Factory answers again.', 'f-banner'));
+    if (next.map(n => n.textContent).join('\n') !== [...notices.children].map(n => n.textContent).join('\n')) notices.replaceChildren(...next);
   }
-  async function render() {
+  // Your place on the page (ORCH-2046): the focused action, the order card and part of the page it is in, and where it
+  // sits on screen. A background update draws the page anew and puts you back on the same action, where it was.
+  const partOf = el => { const s = el.closest('section.f-section'); return s ? s.getAttribute('aria-label') || s.querySelector('h2')?.textContent || '' : ''; };
+  const orderOf = el => el.closest('[data-order]')?.dataset.order || '';
+  const actionOf = el => [el.tagName, el.getAttribute('aria-label') || '', el.textContent.trim()].join('\n');
+  const sameAction = (a, b) => actionOf(a) === actionOf(b) && (a.getAttribute('href') || '') === (b.getAttribute('href') || '');
+  const FOCUSABLE = 'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea';
+  function placeNow() {
+    const el = document.activeElement, y = window.scrollY;
+    if (!el || !view.contains(el) || el === view || el.tagName === 'H1') return {y};
+    const boxes = [...view.querySelectorAll('[data-order]')], box = el.closest('[data-order]');
+    const twins = [...view.querySelectorAll(el.tagName)].filter(x => sameAction(x, el) && orderOf(x) === orderOf(el) && partOf(x) === partOf(el));
+    const r = el.getBoundingClientRect();
+    return {y, el, nth: twins.indexOf(el), order: orderOf(el), part: partOf(el), at: boxes.indexOf(box), orders: boxes.map(b => b.dataset.order),
+      top: r.bottom > 0 && r.top < window.innerHeight ? r.top : null};
+  }
+  function putBack(place, before) {
+    window.scrollTo(0, place.y);
+    if (!place.el) return;
+    const old = place.el, all = sel => [...view.querySelectorAll(sel)];
+    const usable = x => x && !x.matches(':disabled') && !x.closest('[hidden]');
+    // 1 the same action of the same order in the same part, 2 the same action of that order anywhere on the page
+    const same = all(old.tagName).filter(x => sameAction(x, old) && orderOf(x) === place.order);
+    const here = same.filter(x => partOf(x) === place.part);
+    let target = [here[Math.min(place.nth, here.length - 1)], ...here, ...same].find(usable), words = '';
+    if (!target && place.order) {
+      // 3 it is gone: the order that came after it (or else before it), on the same action when it has one
+      const near = [...place.orders.slice(place.at + 1), ...place.orders.slice(0, Math.max(place.at, 0)).reverse()].filter(id => id !== place.order);
+      for (const id of near) {
+        const box = view.querySelector('[data-order="' + CSS.escape(id) + '"]');
+        if (!box) continue;
+        const links = [...box.querySelectorAll(FOCUSABLE)].filter(usable);
+        target = links.find(x => x.tagName === old.tagName && x.textContent.trim() === old.textContent.trim()) || links[0];
+        if (target) { words = '“' + text(before.get(place.order)) + '” is no longer here. You are on “' + text(titles.get(id)) + '”.'; break; }
+      }
+      if (!target) words = '“' + text(before.get(place.order)) + '” is no longer here. You are at the top of the page.';
+    } else if (!target) words = 'This part of the page changed. You are at the top of the page.';
+    target = target || view.querySelector('h1');
+    if (!target) return;
+    target.focus({preventScroll: true});
+    if (target.tagName === 'H1') target.scrollIntoView({block: 'nearest'});
+    else if (place.top !== null) window.scrollBy(0, target.getBoundingClientRect().top - place.top);
+    if (words) said.textContent = words;  // said once; an update that keeps your place says nothing
+  }
+  let titles = new Map(), following = false;
+  // render() is a deliberate visit (a link, Back, Try again): the loading frame, the motion, focus on the heading.
+  // render(true) is a background update: the page stays as it is while it reads, then changes in place (ORCH-2046).
+  async function render(quiet) {
+    quiet = quiet === true;
     const serial = ++request;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     const controllerForRequest = controller;
     const timeout = setTimeout(() => controllerForRequest.abort(), 15000);
-    view.setAttribute('aria-busy', 'true'); notices.replaceChildren();
-    const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
-    if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
-      // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
-    } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
+    following = quiet;
+    if (!quiet) {
+      view.setAttribute('aria-busy', 'true'); notices.replaceChildren(); said.textContent = '';
+      const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
+      if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
+        // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
+        view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      } else view.replaceChildren(group('f-loading', node('p', 'Loading…'), ...skeletons(['title','thumb','thumb'])));
+    }
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
       if (serial !== request) return;
-      lastHome = JSON.stringify({...homeData, generated_at: null});
-      showNotices(homeData);
+      const seen = JSON.stringify({...homeData, generated_at: null});
+      // a visit shows the notices at once; an update shows them with the page, when it really draws
+      let noticeData = [homeData];
+      const showNoticesNow = (...d) => { noticeData = d; if (!quiet) showNotices(...d); };
+      if (!quiet) lastHome = seen;
+      showNoticesNow(homeData);
       const hash = location.hash || '#/';
       let draw;
       if (hash === '#/' || hash === '#content') draw = () => home(homeData);
       else if (hash === '#/autopilot') {
         const data = await read('/api/autopilot', signal);
         if (serial !== request) return;
-        showNotices(homeData, data); draw = () => autopilot(data);
+        showNoticesNow(homeData, data); draw = () => autopilot(data);
       } else {
         const match = /^#\/order\/(t_[a-z0-9]{6,16})(?:\/(proposal)|\/(stop)\/([1-9][0-9]*)|\/(draft)(?:\/([1-9][0-9]*))?)?$/.exec(hash);
         if (!match || !validId(match[1]) || (match[4] && !validVersion(match[4])) || (match[6] && !validVersion(match[6]))) throw new Error('Unknown route');
         const order = await read('/api/order/' + match[1], signal);
         if (serial !== request) return;
         if (order.id !== match[1]) throw new Error('Order reference mismatch');
-        showNotices(homeData, order);
+        showNoticesNow(homeData, order);
         if (match[2]) draw = () => proposal(order);
         else if (match[3] === 'stop') {
           const reach = await read('/api/reach', signal).catch(() => []);  // empty when the relay is off: no button then
@@ -886,23 +1051,34 @@
           const version = match[6] || String(newest || 1);
           const draft = await read('/api/order/' + match[1] + '/draft/' + version, signal);
           if (serial !== request) return;
-          showNotices(homeData, order, draft);
+          showNoticesNow(homeData, order, draft);
           // an empty draft says so in words, never an empty box (bug hunt 17 Nov)
           const body = typeof draft.text === 'string' && draft.text.trim() ? node('pre', draft.text, 'card f-draft') : card('This draft is empty', meta('Nothing has been written in this version yet.'));
-          draw = () => view.append(heading(order.title, 'Draft · version ' + version, orderLink(order)), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
+          draw = () => view.append(toOrder(heading(order.title, 'Draft · version ' + version, orderLink(order)), order), draftTabs(order, version), ...questionCards(order), body, ...(draft.truncated ? [meta('This draft is too long to show in full here. The end is cut off.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;
-      view.replaceChildren(); draw(); view.classList.add('page-enter');
-      if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+      const before = titles;
+      titles = new Map(array(homeData.orders).filter(o => validId(o?.id)).map(o => [o.id, o.title]));
+      if (!quiet) {
+        view.replaceChildren(); draw(); view.classList.add('page-enter');
+        if (serial > 1) view.querySelector('h1')?.focus({preventScroll:true});
+        return;
+      }
+      // an update waits while you type, write or have a dialog open (you may have started while it read): next tick
+      if (busy()) { titles = before; return; }
+      const place = placeNow();
+      lastHome = seen; showNotices(...noticeData);
+      view.replaceChildren(); draw();  // no loading frame, no entry motion, no focus on the heading
+      putBack(place, before);
     } catch (error) {
-      if (serial !== request) return;
+      if (serial !== request || quiet) return;  // an update that could not read keeps the page as it is; the next tick tries again
       const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', render);
       const box = card('Factory could not load this page', p('Factory did not answer in time, or this page no longer exists. Try again, or go back to Factory.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
       view.replaceChildren(box);
     } finally {
       clearTimeout(timeout);
-      if (serial === request) view.setAttribute('aria-busy','false');
+      if (serial === request) { view.setAttribute('aria-busy','false'); following = false; }
     }
   }
   document.querySelector('.skip-link').addEventListener('click', event => {
@@ -915,10 +1091,11 @@
   const busy = () => asked.size > 0 || ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)
     || [...view.querySelectorAll('textarea')].some(t => t.value.trim()) || !!document.querySelector('dialog[open]');
   async function follow() {
-    if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
+    if (document.visibilityState !== 'visible' || busy() || following || view.getAttribute('aria-busy') === 'true') return;
     try {
       const data = await read('/api/home');
-      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+      // a link or button with focus never holds an update back: the update keeps you on it (ORCH-2046)
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy() && !following && view.getAttribute('aria-busy') !== 'true') render(true);
     } catch (_) { /* the next tick tries again */ }
   }
   setInterval(follow, 15000);

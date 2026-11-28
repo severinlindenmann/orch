@@ -131,6 +131,18 @@
   "hex": 0,
   "style": 0
  },
+ "workspace-addons/dashboard/mockup/errors/addon-off.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/errors/addon-slow.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/errors/addon-stopped.html": {
+  "hex": 1,
+  "style": 0
+ },
  "workspace-addons/dashboard/mockup/errors/not-found.html": {
   "hex": 1,
   "style": 0

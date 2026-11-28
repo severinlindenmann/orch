@@ -1,0 +1,5 @@
+{"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "build",
+ "items": [{"title": "Booking page colour", "tag": "taste",
+            "looks": [{"title": "Calm", "picture": "s1/calm.png"}, {"title": "Bold", "picture": "s1/bold.png"},
+                      {"title": "Warm", "picture": "s1/warm.png"}]}],
+ "checked": ["Phone layout 390 px"], "not_checked": ["Safari"]}

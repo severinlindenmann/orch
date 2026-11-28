@@ -326,7 +326,7 @@ def detect(root: Path, tid: str, value: str, kind=None, title=None, kinds=(), *,
         raise Refused("Choose a project file outside .orch and .git.")
     full = Path(value) if absolute else (root / path)
     if check_exists and not full.exists():
-        raise Refused("That is not a web address, a ticket or a file in this folder.")
+        raise Refused("That is not a web address, a ticket or a file in this folder. Check it and try again.")
     out = dict(kind="file", path=str((root / path).absolute()) if local and not absolute else path)
     if line is not None:
         out["line"] = line
@@ -369,7 +369,7 @@ def local_path(root: Path, tid: str) -> Path:
     from orch import safefile
 
     if not isinstance(tid, str) or not safefile._ID_RE.fullmatch(tid):
-        raise Refused("That is not a ticket id.")
+        raise Refused("That is not a ticket id. See your tickets with: orch ticket list")
     return root / ".orch" / "local" / "refs" / f"{tid}.json"
 
 

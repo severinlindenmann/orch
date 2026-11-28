@@ -95,7 +95,9 @@ lookreview.queue(root, tid, "the look of a page changed")`, pr);
     // "If you approve" stands in the pinned answers bar under the card (ORCH-477)
     const bar = () => page.locator('[data-key="review-host"] .swipe-bar-then').first();
     await bar().getByText('although pull request #7 is not merged yet').waitFor({ timeout:20000 });  // the card is drawn anew once the state has the reference
-    must((await bar().innerText()).includes("The Reviewer's second look is not needed then."), 'the card does not say the second look is still to come');
+    // the reference and the second look are two writes: the state may show the first one alone for a poll
+    await bar().getByText("The Reviewer's second look is not needed then.").waitFor({ timeout:20000 })
+      .catch(() => must(false, 'the card does not say the second look is still to come'));
     await act('review.answer', async () => { await okButton().click(); await open('#ticket/' + pr); });
     must(status(pr) === 'done', 'Looks good did not make the ticket with an open pull request Done');
 

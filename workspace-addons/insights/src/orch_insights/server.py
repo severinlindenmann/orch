@@ -9,6 +9,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +23,7 @@ from .lists import KINDS, build_list
 from .models import build_models, build_week
 from .overview import build_overview, retries_view
 from .settings import build_settings
+from .weekly import view as build_weekly
 
 DEFAULT_PORT = 8431
 MAX_BODY = 4096
@@ -65,9 +68,41 @@ def chosen_person(root):
     return " ".join(name.split())[:40] if isinstance(name, str) and name.strip() else None
 
 
+COUNTS_FRESH = 5.0  # seconds one counts answer serves every read of it (the page asks up to four at once)
+_COUNTS: dict[tuple, tuple[float, object]] = {}
+_COUNTS_LOCK = threading.Lock()
+_COUNTS_ASKING: dict[tuple, threading.Lock] = {}
+_FORGOTTEN = [0]  # how many times a click forgot the counts
+
+
 def read_counts(root, orch_bin=None):
-    """Read only the CLI answer, using this interpreter's orch unless a test injects an executable."""
-    return read_json(root, orch_bin, ["record", "counts", "--days", "30", "--json"])
+    """Read only the CLI answer, using this interpreter's orch unless a test injects an executable. The page asks
+    for it up to four times at once when it opens (overview, skills, connections, keys): one read answers them
+    all, and stays the answer for a few seconds (ORCH-2288: four commands side by side at 10,000 tickets)."""
+    key = (str(root), str(orch_bin))
+    with _COUNTS_LOCK:
+        asking = _COUNTS_ASKING.setdefault(key, threading.Lock())
+    with asking:  # a read already on its way: wait for its answer instead of starting another
+        hit = _COUNTS.get(key)
+        if hit and time.monotonic() - hit[0] < COUNTS_FRESH:
+            return hit[1]
+        generation = _FORGOTTEN[0]
+        got = read_json(root, orch_bin, ["record", "counts", "--days", "30", "--json"])
+        with _COUNTS_LOCK:
+            if got is None or generation != _FORGOTTEN[0]:
+                # a failed read is never kept, nor one that began before a click forgot the counts
+                _COUNTS.pop(key, None)
+            else:
+                _COUNTS[key] = (time.monotonic(), got)
+        return got
+
+
+def forget_counts():
+    """A click may change what the counts say (a setting, a proposal): the next read asks again, and a read
+    already on its way when the click ended is not kept."""
+    with _COUNTS_LOCK:
+        _FORGOTTEN[0] += 1
+        _COUNTS.clear()
 
 
 def read_ticket_titles(root, orch_bin=None):
@@ -83,6 +118,11 @@ def read_ticket_titles(root, orch_bin=None):
     return read_json(root, orch_bin, ["ticket", "list", "--all", "--json"])
 
 
+# Reads that take seconds at 10,000 tickets (`tokens` reads every ticket of 30 days): they run as a process of
+# their own, so they never hold one of the few read workers the overview waits for on a first open (ORCH-2288).
+OWN_PROCESS = frozenset({"tokens"})
+
+
 def read_json(root, orch_bin, argv):
     """One read-only CLI answer as JSON, or None when it fails. Runs with the same cleaned environment as a
     write (M6); when that environment can not be built the read fails (and so counts as unknown)."""
@@ -95,6 +135,10 @@ def read_json(root, orch_bin, argv):
         env = actions.human_env(root, actions.real_bin(orch_bin))
     except actions.Unavailable:
         return None
+    if orch_bin in (None, actions.SELF) and argv[:1] and argv[0] not in OWN_PROCESS:
+        got = _by_worker(root, argv, env)
+        if got is not _MISS:
+            return got
     try:
         result = subprocess.run(
             [*command, *argv],
@@ -108,6 +152,29 @@ def read_json(root, orch_bin, argv):
         return json.loads(result.stdout) if result.returncode == 0 else None
     except (OSError, ValueError, RecursionError, subprocess.TimeoutExpired):
         return None
+
+
+_MISS = object()
+
+
+def _by_worker(root, argv, env):
+    """The read answered by this interpreter's orch (orch.reads.call: in this process or by one long-lived read
+    worker), with the same cleaned environment, instead of a new Python process per read (ORCH-2288: the page
+    started six at once when it opened). _MISS: the worker could not answer; the command runs as before."""
+    try:
+        from orch import reads
+    except ImportError:
+        return _MISS
+    if not hasattr(reads, "call"):
+        return _MISS
+    try:
+        got = reads.call(Path(root), list(argv), timeout=10, environ=env)
+    except Exception:  # noqa: BLE001 - whatever went wrong: the command gets its chance
+        return _MISS
+    if got is None:
+        return _MISS
+    code, value = got
+    return value if code == 0 else None
 
 
 def _web(name):
@@ -231,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self._marked(view))
         if path == "/api/week":
             return self._json({"week": build_week(self._read("usage", "list", "--json"))})
+        if path == "/api/weekly":  # the same answer `orch insights week` prints (R4.3)
+            return self._json(build_weekly(self._read("insights", "week", "--json")))
         if path == "/api/models":
             return self._json(
                 build_models(self._read("tokens", "--days", "30", "--json"), chosen_person(self.root))
@@ -358,6 +427,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, str(e).encode())
         except actions.Unavailable as e:
             return self._send(503, str(e).encode())
+        forget_counts()
         if code != 200:
             return self._send(code, text.encode())
         return self._json({"result": result})

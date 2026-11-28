@@ -17,7 +17,19 @@ def tk(proj, run):
 
 def _ask(run, tid, text="Which format?", *extra):
     code, out, err = run(
-        "ask", tid, text, "--option", "CSV", "--option", "XLSX", *extra, "--json", "--by", "agent:x"
+        "ask",
+        tid,
+        text,
+        "--option",
+        "CSV",
+        "--option",
+        "XLSX",
+        "--recommend",
+        "CSV",
+        *extra,
+        "--json",
+        "--by",
+        "agent:x",
     )
     assert code == 0, out + err
     return json.loads(out)

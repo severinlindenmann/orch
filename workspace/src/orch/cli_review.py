@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 from orch import (
+    attention,
+    cardkinds,
     dashshots,
     ghmerge,
     history,
@@ -56,6 +58,16 @@ def add_parsers(sub, common) -> None:
     s = r.add_subparsers(dest="sub", metavar="<command>")
     x = s.add_parser("list", parents=[common], help="what waits for an answer (or --answered)")
     x.add_argument("--answered", action="store_true", help="the answers already given, newest first")
+    x.add_argument(
+        "--group",
+        choices=("quick", "short", "time"),
+        help="only Quick look, Short decision or Take your time",
+    )
+    x.add_argument(
+        "--week",
+        action="store_true",
+        help="this week's undos, work sent back after an accept and missed deadlines",
+    )
 
     x = s.add_parser("answer", parents=[common], help="answer one card")
     x.add_argument("ticket")
@@ -131,7 +143,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
     )
-    x.add_argument("--phone", action="store_true", help="also send the list to your phones (relay)")
+    x.add_argument("--phone", action="store_true", help=argparse.SUPPRESS)  # relay add-on, see its skill
 
 
 def _ticket(root: Path, args) -> dict:
@@ -167,17 +179,55 @@ def _when(at) -> str:
 # ------------------------------------------------------------------ cards for `orch ask`
 
 
-def _read_small(root: Path, tid: str | None, src: str) -> bytes | None:
+TEXT_MAX = 64 * 1024  # a text or glance card shows at most this much of its file
+
+
+def _read_small(root: Path, tid: str | None, src: str, where: str = "file") -> bytes:
     """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
-    and pages are), anything else a file in the workspace. None when missing, too large or not allowed."""
+    and pages are), anything else a file in the workspace. The path `orch ticket artifacts-dir` prints
+    (.orch/tickets/<this ticket>/artifacts/<name>, also with backslashes) counts as artifacts/<name>
+    (ORCH-1777); any other .orch or .git path is refused. Each refusal names its cause and the next step."""
+    path = src.strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    own = f".orch/tickets/{tid}/artifacts/" if tid else None
+    if own and path.startswith(own) and len(path) > len(own):
+        path = "artifacts/" + path[len(own) :]
+    shown = src[:120]
+    parts = safefile._parts(path)
+    if parts is None:
+        raise Refused(
+            f"{where}: '{shown}' is not a plain path inside the workspace; "
+            "give it like docs/x.md or artifacts/<name>."
+        )
+    inside = next(
+        (p.rstrip(". ").lower() for p in parts if p.rstrip(". ").lower() in (".orch", ".git")), None
+    )
+    if inside:
+        raise Refused(
+            f"{where}: '{shown}' is inside a {inside} folder a card does not read; "
+            "give a file of this ticket as artifacts/<name>."
+        )
     try:
-        if src.startswith("artifacts/"):
+        if parts[0] == "artifacts" and len(parts) > 1:
             if tid is None:
-                return None
-            return safefile.read_ticket_file(root, tid, "artifacts", src[len("artifacts/") :], 64 * 1024)
-        return safefile.open_file_ref(root, src, 64 * 1024)
+                raise Refused(f"{where}: artifacts/<name> needs a ticket; give the ticket id to `orch ask`.")
+            checked = f".orch/tickets/{tid}/{path}"
+            data = safefile.read_ticket_file(root, tid, "artifacts", "/".join(parts[1:]), TEXT_MAX)
+        else:
+            checked = path
+            data = safefile.open_file_ref(root, path, TEXT_MAX)
     except safefile.TooLarge:
-        return None
+        raise Refused(
+            f"{where}: '{shown}' is over the {TEXT_MAX // 1024} KB limit for a text card; "
+            "shorten it or show it as a page (.html)."
+        ) from None
+    if data is None:
+        raise Refused(
+            f"{where}: '{shown}' was not found (checked {checked}); "
+            f"put the file there or check the name with `orch ticket artifacts-dir {tid or '<ticket>'}`."
+        )
+    return data
 
 
 def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> dict:
@@ -186,20 +236,22 @@ def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> d
     if kind in ("img", "page"):
         return {"type": kind, "src": src}
     if ext in (".md", ".txt"):
-        data = _read_small(root, tid, src)
-        if data is None:
-            raise Refused(f"{where}: '{src}' was not found or is too large for a text card.")
+        data = _read_small(root, tid, src, where)
         text = data.decode("utf-8", "replace")
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()][:50]
-        return {"type": "doc", "heading": Path(src).name, "paras": [p[:2000] for p in paras]}
+        return {
+            "type": "doc",
+            "heading": re.split(r"[\\/]", src.strip())[-1],
+            "paras": [p[:2000] for p in paras],
+        }
     if ext == ".json":  # a glance card (ORCH-329): headline, progress, chips, flow, chart, diff, details
-        data = _read_small(root, tid, src)
+        data = _read_small(root, tid, src, where)
         try:
-            pv = json.loads(data.decode("utf-8")) if data is not None else None
+            pv = json.loads(data.decode("utf-8"))
         except ValueError:
             pv = None
         if not isinstance(pv, dict):
-            raise Refused(f"{where}: '{src}' was not found or is not a JSON object.")
+            raise Refused(f"{where}: '{src}' is not a JSON object; a card file holds one {{...}} object.")
         return {"type": "doc", **pv}
     raise Refused(f"{where}: show an image, a page (.html), a text file (.md, .txt) or a card (.json).")
 
@@ -485,6 +537,10 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         shown=shown,
         group=getattr(args, "group", None),
         links=links,
+        if_wait=getattr(args, "if_wait", None),
+        facts=getattr(args, "fact", None),
+        due=getattr(args, "due", None),
+        said=getattr(args, "said", None),
     )
 
 
@@ -554,7 +610,20 @@ def _answered(root: Path, limit: int | None = None) -> list[dict]:
     return out if limit is None else out[:limit]
 
 
+def _week(args, root: Path) -> None:
+    w = attention.week(root)
+    _out(
+        args,
+        w,
+        f"Last 7 days: {w['undos']} taken back, {w['sent_back_later']} sent back after an accept, "
+        f"{w['missed_deadlines']} missed deadline{'' if w['missed_deadlines'] == 1 else 's'}.\n"
+        "Next: if these grow, answer Quick look cards one at a time: orch review list --group quick",
+    )
+
+
 def _list(args, root: Path) -> None:
+    if getattr(args, "week", False):
+        return _week(args, root)
     if args.answered:
         rows = _answered(root)
         lines = [
@@ -565,15 +634,25 @@ def _list(args, root: Path) -> None:
         _out(args, rows, "\n".join(["Answered (newest first)", *lines]) if rows else "Nothing answered yet.")
         return
     cards = review.stack(root)
+    group = getattr(args, "group", None)
+    if group:  # ORCH-2184: the same groups the Review page's tiles show
+        cards = [c for c in cards if (c.get("attention") or {}).get("group") == group]
     n = len(cards)
-    lines = [
-        f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{c['kind']}]  {c['card'].get('title', '')}"
-        for c in cards
-    ]
+    lines, lane = [], None
+    for c in cards:  # grouped as on the Review page (R2 A): what holds up work first, then by what you do
+        ck = c.get("card_kind") or {}
+        if ck.get("lane") != lane:
+            lane = ck.get("lane")
+            lines.append(cardkinds.LANES.get(lane, ""))
+        name = ck.get("name") or c["kind"]
+        lines.append(
+            f"  {c['ticket_key'] or c['ticket']}  {c['key']}  [{name}]  {c['card'].get('title', '')}"
+        )
+    where = f" in {attention.GROUPS[group]}" if group else ""
     text = (
-        "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.", *lines])
+        "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you{where}.", *lines])
         if cards
-        else "Nothing waits for you."
+        else f"Nothing waits for you{where}."
     )
     _out(args, {"workspace": root.name, "cards": cards}, text)
 
@@ -606,13 +685,9 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("changed", "This card changed or can't be checked. Look at it again.")
     if given is not None and given != current:
         raise ReviewError("changed", f"{key} changed after it was shown. Look at it again, then answer.")
-    if tickets.agent_tool() or (args.by or "").startswith(
-        "agent:"
-    ):  # an answer on a card is a person's, never an agent's (a label check)
+    who = tickets.acting_by(args)
+    if not who.startswith("human:"):
         raise ReviewError("needs_person", review_server.AGENT_REFUSED)
-    who = tickets.current_actor(
-        args.by
-    )  # the person chosen in orch (--by human:<name>), else the computer's user
     if q is not None and q.get("answer") is not None and given is not None:
         # ORCH-921: a card the page showed open, answered meanwhile in the terminal, on the phone or in
         # another tab. Its digest still matches (it is what was shown, not whether it was answered): say
@@ -641,7 +716,7 @@ def _answer(args, root: Path) -> None:
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
-        runs_live.pass_answer(root, tid, entry, who)
+        runs_live.pass_answer(root, tid, entry, who, wait=False)
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
 
 
@@ -667,8 +742,8 @@ def _run(args, root: Path) -> None:
 
         with contextlib.suppress(Refused, KeyError):
             q = next(x for x in tickets.load(root, t["id"])["questions"] if x["id"] == args.key)
-            runs_live.pass_answer(root, t["id"], {"id": args.key, "answer": q.get("answer"),
-                                                  "decision": q.get("decision")}, who)  # fmt: skip
+            entry = {"id": args.key, "answer": q.get("answer"), "decision": q.get("decision")}
+            runs_live.pass_answer(root, t["id"], entry, who, wait=False)
     words = res.get("error") or res["output"][-300:]
     _out(args, res, ("Ran it: " if res["ok"] else "It did not work: ") + words)
     if not res["ok"]:
@@ -777,16 +852,17 @@ def _accepted(args, root: Path) -> None:
 def _undo(args, root: Path) -> None:
     from orch import autoreview
 
-    if tickets.agent_tool() or (args.by or "").startswith("agent:"):
+    who = tickets.acting_by(args)
+    if not who.startswith("human:"):
         raise Refused("Only a person can undo what the Reviewer did.")
     tid = _ticket(root, args)["id"]
     q = args.question
     if q is not None and not re.fullmatch(r"q[0-9]{1,4}", q):
         raise Refused("Give the question like q3.")
-    res = autoreview.undo(root, tid, tickets.current_actor(args.by), q)
+    res = autoreview.undo(root, tid, who, q)
     said = {
-        "accept": "back in Review for you, with Human review needed on",
-        "back": "back in Review for you, with Human review needed on; the helper's new task is gone",
+        "accept": "back in Review for you, with “I review the result” on",
+        "back": "back in Review for you, with “I review the result” on; the helper's new task is gone",
         "answer": f"{q} waits for your answer again; the helper was told",
     }[res["undone"]]
     _out(args, res, f"{res['key']}: undone: {said}.")

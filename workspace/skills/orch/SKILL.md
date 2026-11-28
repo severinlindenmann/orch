@@ -46,6 +46,7 @@ ask; its list replaces the one above.
     orch ticket list --waiting            # waiting on a person (a question); --blocked: on a time, a ticket or the outside
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
+    orch ticket export <id>               # the ticket as markdown to paste into another agent (secrets refused)
     orch ticket status <id> active
     orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
@@ -55,6 +56,7 @@ ask; its list replaces the one above.
                                         # files, no new command or setting, no look or words); owner / due only where
                                         # their text says them (their title stays in the history)
     orch ticket kind <id> <kind>          # change the kind later; a kind a person set only a person changes
+    orch changes --since <date|tag>       # release notes: done tickets by kind, with their evidence links
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
@@ -79,7 +81,7 @@ New information for a running or idle helper always goes with `orch run send <id
 Every run at once: `orch run list` (signal `idle` = at its prompt with nothing running, `waiting` = on a person, a time or a command such as a CI watcher); the last lines of a live screen: `orch run screen <id>` (read-only).
 Look after every helper in one pass (for a script that repeats): `orch run tend` ends sessions whose ticket is finished or only waits, sends on a helper that stopped with open steps within a minute (the second time the ticket moves up to Opus), reminds any other helper idle 20 minutes once, starts it fresh when it is still idle 10 minutes later, and starts tickets waiting in line; `--dry-run` only says what it would do. Put a ticket in line with a priority: `orch run start <id> --priority high|normal|low` (used when every slot is taken).
 The dispatcher (only when the owner turned on `workflow.dispatcher`): the same pass starts more helpers up to a target that follows the weekly budget pace and the computer's load (`workflow.dispatcher_helpers` while on pace), high priority tickets first and low last, then Factory run work, Ready, then Backlog tickets; tickets with a question, a wait, a schedule or a person as owner are left alone.
-The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`.
+The Reviewer (for a script that repeats, only when the person turned on `workflow.reviewer`): `orch review tend` marks a ticket in Review Done for the person when its pull requests are merged with green checks, every task has evidence and the change is small; bigger changes, or a part of Done when that no task covers, stay in Review with one line why; `--dry-run` only says it. When the person also turned on `workflow.reviewer_answers`, the same pass answers a plain question for them with your recommended option after 30 minutes, unless it names concept, words, look, money, production or something that cannot be undone; so recommend the option you would pick. What it accepted and answered: `orch review accepted [--since yesterday]`. In Reviewer mode "propose" (`workflow.reviewer_mode`, set by the person) nothing closes by itself: the pass writes "The Reviewer proposes to accept" or "... to send it back" and the person clicks on Review.
 Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 The Auto Reviewer and Away mode (only when the person turned on `workflow.auto_reviewer` or `workflow.away`, on the Review page): the same pass checks finished work by its kind (screen, campaign, data, code), writes the points in the history and accepts it or sends it back once; Away also answers plain questions and choice or plan cards with your recommendation at once. Both leave every ticket with Human review needed on alone, and never answer words, names, money, deploy, delete or keys: so put pictures at 1280, 1920 and 390 px, the campaign file or the data file on the ticket as evidence, and recommend the option you would pick. The person undoes any of it: `orch review undo <ticket> [q3]`.
 Drafts are the person's alone: a `--draft` card, a `--choose` card whose options show files, and the ticket that carries one are answered and accepted only by the person themselves, signed in, never by a program or a helper. The Reviewer, its second look, its routine answers and `orch answer` / `orch review answer` from a script or your shell are refused for them; `orch review accepted` lists them under "Waiting for your pick".
@@ -174,7 +176,11 @@ switches when its turn ends.
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A
-    orch ask <id> "<question>" --check <c>        # tie it to a step
+    orch ask <id> "<question>" --option A --option B --recommend A --check <c>  # tie it to a step
+    orch ask <id> "<question>" ... --if-wait "<what happens while nobody answers>" --fact "<a fact that decides it>"  # optional, one line each, up to 4 --fact
+    orch ask <id> "<question>" ... --said <m_... | history:<time> | rules:<line>>  # quote the person: their chat line id, the time of their line, or a line of .orch/ask-when.md; orch copies the words (never type a quote)
+    orch ask <id> "<question>" ... --due 2026-12-01T09:00  # optional: when the answer is needed; Review shows it as the next deadline
+    orch ask <id> "<which ones should I work out?>" --idea "<idea>" --idea "<idea>" ...  # 2 to 12 ideas, no --option: the person sorts each (Keep, Later or No); work on the kept ones, the rest comes back as its own card
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
     orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 
@@ -182,7 +188,7 @@ Every question for the person goes on the ticket this way, never only in your re
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
-- Offer short answer options a person can click. Keep the question to one sentence or two.
+- Offer at least two short answer options a person can click and recommend one with `--recommend` (the person can still answer in their own words). Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - When the person must run one command (a setting only a person may change, an install), make it a run card: `orch ask <id> "Turn on release walks?" --run "orch config set github.release_walks install,services" --option "Leave it off for now"` (the other answer is one of: Not now, Leave it off for now, Leave it as it is, Skip it, Do it later). The card shows the command with Copy and Run it now; one click runs it for the person and answers I ran it, with what it printed. orch writes what it changes and how to undo it, never you. Only some orch settings, the commands an add-on that is on offers for cards (its skill names them) and `brew install|uninstall|upgrade <plain names>` get Run it now; any other command (and a sign-in such as `codex login`) still gets the card, with Copy only, and the person runs it in their own terminal. You never answer a run card yourself.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
@@ -190,13 +196,14 @@ Write the question for a person who has not seen your work, in plain words:
 **To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
 
     orch ask <id> "Home: which layout?" --choose "Home layout" --option "A=As today:files/a.png" --option "B=Recent first:files/b.png" --suggest B --then "I build the one you pick."
-    orch ask <id> "New intro text" --draft "Intro" --file files/intro.md --then "I use it." --ok "Use it"
+    orch ask <id> "New intro text" --draft "Intro" --file artifacts/intro.md --then "I use it." --ok "Use it"
     orch ask <id> "Before or after?" --draft "Header" --before files/old.png --after files/new.png --then "I ship the new one."
     orch review wait <id>        # wait until the card is answered
     orch ticket show <id>        # "What applies now" and the answers, in the owner's words
     orch review list             # what still waits for the owner
     orch review link             # the address of the review page, to send the owner
 
+A card file is a project path or `artifacts/<name>`: the file in this ticket's own folder (`orch ticket artifacts-dir`).
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 The question text is shown on the card in full: write the Now / Proposal there, keep `--why` to one line. Mark what you
 recommend: `--suggest <option>` on a choice, `--suggest ok` or `--suggest no` on another card. A choice can show how it
@@ -204,6 +211,24 @@ is today beside the options: `--choose ... --before files/today.png`. Several ca
 review): give each the same `--group "<short name>"`; the person sees them as one set with its own count.
 Links to look at beside the card (a mockup, an issue): `--ref "Mockup=http://…"` (up to 5). A line under one option of
 a choice: `--describe "A=Keeps the menu as it is"`.
+
+**Which card the person gets** (owner, 25 Nov). orch picks the card from what you attach; you never name it. The same
+rules hold for any work: taxes, a campaign, a trip, a website. Ask yourself what you need from the person:
+
+| You need | You attach | The person sees |
+|---|---|---|
+| an answer | 2 to 4 `--option`, one `--recommend` | Question (Decide, on top: it holds up work) |
+| a pick between ways they must see | `--choose` with a picture or line per option, `--suggest` | Choice |
+| a look at a result | `--before`/`--after`, pictures, a document, changed words (`diff`), numbers (`chart`, a table), what a check found (`status`, chips) | Before and after, Pictures, Document, Changed words, Numbers or Test results (Look at the result) |
+| a click only they may make | `--link --open <address>` (with `--merge` for a release), `--run "<orch setting>"` | Put it live or Run it |
+| them to do something in person | `--run "<a sign-in or a command only they can run>"` | Try it yourself |
+| nothing: you only report | nothing | no card: `orch ticket summary` |
+
+- The question is one short sentence (at most 40 words). Steps and details go in the ticket summary or a file on a card.
+- Finished work is never asked about: set the ticket to Review. The Reviewer looks first; only what it leaves reaches
+  the person (in Reviewer mode "propose" it proposes and the person clicks).
+- `orch ask` refuses a question longer than 40 words and a report of a state ("the helper is offline", "for your
+  information"): write those in the ticket summary. Stuck cards are made by orch alone.
 
 **Cards are short and visual, never a text wall** (owner 17 Nov: "I will never read reviews like that"). A headline is one sentence; everything long goes in `details`, which sits behind one click. Pick the format that fits the news, as in the style guide (`/styleguide`, "Review card formats"):
 - Work finished: a Check card (orch builds it: headline, progress bar, chips, short steps). Put your result in the ticket summary: its FIRST sentence is the headline, so make it say the outcome.

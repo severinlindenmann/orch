@@ -116,11 +116,14 @@ def test_review_answer_from_a_script_is_refused_on_a_draft_whatever_via_says(pro
     assert _q(proj, tid, q["id"])["answer"] is None
 
 
-def test_plain_answer_from_a_script_is_refused_on_a_draft(proj, run, new_ticket):
+def test_plain_answer_from_a_script_is_refused_on_a_draft(proj, run, new_ticket, monkeypatch):
     tid = new_ticket()
     q = _choose(proj, run, tid)
     code, out, err = run("answer", tid, q["id"], "A", "--via", "dashboard", "--by", ME)
     assert code == 2 and "Only a person picks a draft" in out + err, out + err
+    monkeypatch.setattr(tickets, "attended", lambda: False)  # an unattended script
+    code, out, err = run("answer", tid, q["id"], "A")
+    assert code == 2 and "waits for the owner" in out + err
     assert _q(proj, tid, q["id"])["answer"] is None
 
 
@@ -173,7 +176,7 @@ def test_plain_cards_and_questions_answer_from_the_terminal_as_before(proj, run,
     q = _choose(proj, run, tid, pictures=False)
     code, out, err = run("review", "answer", tid, q["id"], "--verdict", "ok", "--picked", "A", "--by", ME)
     assert code == 0, out + err
-    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     code, out, err = run("answer", tid, "q2", "Yes", "--by", ME)
     assert code == 0, out + err
 
@@ -359,7 +362,7 @@ def test_an_unneeded_grant_is_used_up_and_never_reaches_a_child(proj, run, new_t
     from orch import renew
 
     tid = new_ticket()
-    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     person_grant(proj)
     code, out, err = run("answer", tid, "q1", "Yes", "--by", ME)
     assert code == 0, out + err
@@ -373,7 +376,7 @@ def test_human_review_needed_blocks_only_the_auto_reviewer_and_away_mode(proj, r
     tid = _finished(proj, run, new_ticket, "Fix the stale run record")
     t = tickets.load(proj, tid)
     assert tickets.human_review(t)  # on by default
-    with pytest.raises(Refused, match="Human review needed is on"):
+    with pytest.raises(Refused, match="I review the result” is on"):
         ownerpick.refuse_auto(t)
     tickets.set_human_review(proj, tid, False, "human:tester")
     ownerpick.refuse_auto(tickets.load(proj, tid))  # switch off, no draft: the Auto Reviewer may look

@@ -230,6 +230,45 @@ def test_crew_start_refusals(ws, run):
     assert not (ws / "runs.jsonl").exists()
 
 
+def test_a_failed_run_start_is_not_recorded_and_the_retry_starts_once(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    run("crew", "add", order, "booking-form")
+    (ws / "fail-run").write_text("No agent.")
+    assert run("crew", "start", order, "booking-form", code=2)["code"] == "not_available"
+    assert "crew-started" not in [r["type"] for r in Store(ws).journal_read()]
+    (ws / "fail-run").unlink()
+    assert run("crew", "start", order, "booking-form")["agent"] == "codex"
+    assert "crew-started" in [r["type"] for r in Store(ws).journal_read()]
+    assert len((ws / "runs.jsonl").read_text().splitlines()) == 1
+
+
+def test_crew_start_needs_the_crew_ticket_an_approved_task_and_waits_for_an_open_stop(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    assert run("crew", "start", order, "booking-form", code=2)["code"] == "invalid"  # no crew ticket yet
+    assert run("crew", "start", order, "not-approved", code=2)["code"] == "not_allowed"
+    run("crew", "add", order, "booking-form")
+    ask_stop(ws, run, order, "build")
+    refused = run("crew", "start", order, "booking-form", code=2)
+    assert refused["code"] == "not_allowed" and "answer" in refused["error"]
+    assert not (ws / "runs.jsonl").exists()
+
+
+def test_a_shipped_order_takes_no_more_crew_and_a_draft_needs_an_order(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    core(ws, "answer", order, ask_stop(ws, run, order, "build"), "Continue", "--by", "human:anna")
+    finish_crew(ws, run, order, "release")
+    core(ws, "answer", order, ask_stop(ws, run, order, "ship"), "Ship it", "--by", "human:anna")
+    run("ship", order)
+    assert run("crew", "add", order, "release", code=2)["code"] == "not_allowed"
+    assert run("ship", order, code=2)["code"] == "not_allowed"
+    plain = core(ws, "ticket", "new", "Plain")
+    assert run("draft", plain["id"], "--file", "-", data=b"x", code=2)["code"] == "invalid"
+
+
 def test_crew_start_before_start_refused(ws, run, proposal):
     order = run("idea", "Booking")["order"]
     run("propose", order, "--file", "-", data=proposal)
@@ -1215,3 +1254,13 @@ def test_a_newer_change_takes_back_the_older_one(ws, run):
     assert [q["id"] for q in run("show", order)["questions"] if q["kind"] == "factory:change"] == [second]
     run("change", order, "--file", "-", data=change_file(adds_min=40))  # the same change again: nothing more
     assert sum(q["answer"] is None for q in core(ws, "ticket", "show", order)["questions"]) == 1
+
+
+def test_a_crew_ticket_tells_its_agent_to_use_the_workspace_look_by_default(ws, run):
+    """#952: built apps use the workspace's own branding unless the order says otherwise; the agent reads the look
+    itself with plain orch commands, so a later change of the look counts."""
+    order, _ = started(ws, run)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    note = core(ws, "ticket", "show", tid)["note"]
+    assert note == flow.CREW_NOTE
+    assert "orch look show" in note and "orch look list" in note and "What the order says wins" in note

@@ -115,3 +115,31 @@ def test_check_card_keeps_more_than_six_result_files():
     t = {"id": "t_9", "title": "Shop photos", "checklist": [step]}
     files = review.check_card(t)["files"]
     assert [f["name"] for f in files] == [f"photo-{i}.png" for i in range(8)]
+
+
+def test_result_card_says_everything_is_done_and_tested():
+    """ORCH-2316 (R6 A, owner 25 Nov): every part done with its evidence, no failed check: one plain line."""
+    t = _ticket()
+    t["checklist"] = t["checklist"][:1]
+    card = review.check_card(t)
+    assert card["why"] == "Everything you asked for is done and tested."
+    assert "open_parts" not in card
+
+
+def test_result_card_names_the_open_part_as_asked_for_and_got():
+    """ORCH-2316 (R6 A): an open part sits on top as You asked for / You got; the rest is done and tested."""
+    t = _ticket()
+    t["checklist"][1]["evidence"] = [{"type": "note", "ref": "only two widths"}]
+    card = review.check_card(t)
+    assert card["why"] == "Everything else you asked for is done and tested."
+    assert card["open_parts"] == [{"asked": "Ship it", "got": "only two widths"}]
+    assert card["blocked"]  # Looks good stays off (ORCH-548)
+
+
+def test_result_card_keeps_the_plain_line_when_a_check_failed_or_a_step_has_no_evidence():
+    t = _ticket()
+    failed = [{"type": "command", "ref": "pytest", "exit": 1}]
+    t["checklist"] = [{"text": "Write it", "done": True, "evidence": failed}]
+    assert review.check_card(t)["why"] == "The helper says this is ready for your check."
+    t["checklist"] = [{"text": "Write it", "done": True}]
+    assert review.check_card(t)["why"] == "The helper says this is ready for your check."

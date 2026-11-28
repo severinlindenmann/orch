@@ -352,3 +352,36 @@ def test_title_long_session_counts_work_after_the_turns_read(tmp_path, monkeypat
         {"id": "c1", "text": "Write the summary", "done": True, "evidence": [{"at": "2026-11-18T20:59:00Z"}]}
     ]
     assert session_history.sessions(_ticket(steps), env)[0]["title"] == "Write the summary"
+
+
+def test_reading_sessions_does_no_cleanup(proj, run, new_ticket, monkeypatch):
+    """`run history` and `run session` only read: no idle cleanup, no start of the waiting line before them.
+    The dashboard reads `run history` per ticket through three read workers; with the cleanup in front it took
+    12-54 s on a busy computer and every other page waited (report r-1127-0535-ws)."""
+    from orch import runs_live
+
+    calls = []
+    monkeypatch.setattr(runs_live, "cleanup", lambda root: calls.append(root) or [])
+    tid = new_ticket()
+    code, out, err = run("run", "history", tid, "--json")
+    assert code == 0, err
+    code, out, err = run("run", "session", tid, "--agent", "claude", "--json")
+    assert code == 0, err
+    assert calls == []
+    run("run", "status", tid, "--json")  # a run command that is not a plain read still cleans up first
+    assert calls
+
+
+def test_last_keeps_the_newest_turns(tmp_path):
+    """ORCH-2204: the Focus chat reads the newest turns of a long conversation, not the first ones."""
+    env = _env(tmp_path)
+    f = tmp_path / "c" / "projects" / "-Users-a-ws" / f"{SID}.jsonl"
+    rows = [{"type": "assistant", "message": {"content": f"turn {i}"}} for i in range(450)]
+    MAX = 450
+    _w(f, rows)
+    h = session_history.read("claude", SID, env, last=3)
+    assert [t["text"] for t in h["turns"]] == [f"turn {MAX - 3}", f"turn {MAX - 2}", f"turn {MAX - 1}"]
+    assert h["more"] is True
+    assert session_history.read("claude", SID, env, last=500)["more"] is False
+    first = session_history.read("claude", SID, env)
+    assert len(first["turns"]) == session_history.MAX_TURNS and first["turns"][0]["text"] == "turn 0"

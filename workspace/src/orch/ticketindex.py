@@ -38,7 +38,10 @@ def reuse():
     """Inside (and in threads run with a copy of this context): the ticket files are looked at once per
     workspace and every later call answers from that look (ORCH-1621: a dashboard state build read the index
     and stat'ed every ticket file seven times). Only for one read-only pass: a change made inside is not
-    seen."""
+    seen. Inside another reuse() it joins that one: the outer pass keeps its single look."""
+    if _REUSE.get() is not None:
+        yield
+        return
     token = _REUSE.set({"lock": threading.Lock(), "files": {}})
     try:
         yield
@@ -161,10 +164,10 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     out. "Shows sync" is history.doc_shows_sync of whatever JSON the file holds, as history.tickets_show_sync
     reads it (a file over 64 MB counts as not showing it there, so here too). "Broken": the file holds no
     valid JSON (a hand typo, an empty file), which the person has to fix (ORCH-2019)."""
-    from orch import history
+    from orch import history, tickets
 
     try:
-        text = p.read_text(encoding="utf-8")
+        text = tickets.read_text(p)
     except UnicodeDecodeError:
         return None, False, True
     except OSError:
@@ -180,10 +183,10 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     if not isinstance(t, dict) or t.get("id") != tid:
         return None, sync, False
     m = _NEWER_RE.match(str(t.get("schema", "")))
-    if m and int(m.group(1)) > 1:
+    if (m and int(m.group(1)) > 1) or tickets.shape_problem(t):
         return None, sync, False
     try:
-        return _row(t), sync, False
+        return _row(tickets.fill_missing(t)), sync, False
     except (TypeError, AttributeError, ValueError, KeyError):
         return None, sync, False  # odd field shapes (a list that is no list): no row, never a broken listing
 

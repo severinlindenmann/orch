@@ -15,6 +15,7 @@
 //   node e2e/focus_insights_smoke.cjs                  everything (exit 0 = all clean)
 //   node e2e/focus_insights_smoke.cjs --part pages     the screens, the UX checks and the dashboard tests
 //   node e2e/focus_insights_smoke.cjs --part focus-1   the first half of the Focus click-through (focus-2: the second)
+// AXE_CORE_JS=<axe.min.js>: the Focus click-through also runs axe-core and fails on a serious or critical finding.
 // SMOKE_BUDGET_S=<seconds>: stop with the page, test or click-through step that was running when the time is up, before
 // the CI job's own limit cancels it without a word (a cancelled job gives develop no verdict).
 'use strict';
@@ -115,6 +116,8 @@ async function screens() {
     at(`UX checks of the master gallery${extra.length ? ' (self-test)' : ''}`);
     if (await run([ux, ...extra]) !== 0) return false;
   }
+  at('Dialog close lifecycle (ORCH-2060): Cancel, Escape, nested, trigger gone, next dialog, file viewer');
+  if (await run([path.join(__dirname, '../workspace/src/orch_ui/tests/dialog_close.cjs')]) !== 0) return false;
   return true;
 }
 
@@ -122,7 +125,9 @@ async function screens() {
 async function focus(shard) {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-'));
   at(`Focus click-through${shard ? ` part ${shard}` : ''}`);
-  const code = await run([path.join(__dirname, 'focus_d', 'clickthrough.cjs'), '--out', out, ...(shard ? ['--shard', shard] : [])]);
+  // AXE_CORE_JS (CI sets it): axe-core on every step and width too, a serious or critical finding fails (#2420)
+  const axe = process.env.AXE_CORE_JS ? ['--axe', process.env.AXE_CORE_JS] : [];
+  const code = await run([path.join(__dirname, 'focus_d', 'clickthrough.cjs'), '--out', out, ...(shard ? ['--shard', shard] : []), ...axe]);
   fs.rmSync(out, { recursive: true, force: true });
   return code === 0;
 }

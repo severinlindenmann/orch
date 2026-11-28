@@ -404,7 +404,7 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
 
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = webjs.all_js()
-    assert "working-now" in src and "Getting started…" in src
+    assert "openCard('in-progress', 'In progress'" in src and "Getting started…" in src
     assert "needsYou(needCount)" in src  # 5A: the badge says what it counts
 
 
@@ -503,7 +503,7 @@ def test_first_run_note_is_not_shown_as_an_answer():
         ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
-        ("review", "Check"),
+        ("review", "Review"),
         ("done", "Done"),
     ],
 )
@@ -573,7 +573,7 @@ def test_the_move_to_control_is_a_visible_labelled_button():
         "To do",
         "Working",
         "Waiting",
-        "Check",
+        "Review",
         "Done",
         "Won't do",
         "Superseded",
@@ -630,7 +630,9 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert "working.length ? card('working-now', 'Working now'" in src  # empty section is hidden
+    assert (
+        "if (!list.length) return null;" in src
+    )  # an empty In progress or Not started card is hidden (ORCH-2140)
     assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
@@ -676,7 +678,7 @@ def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
         "To do",
         "Working",
         "Needs you",
-        "Check",
+        "Review",
         "Done",
     ]
     assert "question needs you" not in src and "questions need you" not in src
@@ -703,7 +705,7 @@ def test_one_label_per_status_single_sourced():
     src = webjs.all_js()
     for word in ("Ready to start",):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
-    for pair in ("open:'Backlog'", "ready:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
+    for pair in ("open:'Backlog'", "ready:'To do'", "active:'Working'", "review:'Review'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")
     assert words["open"] == "Backlog" and words["ready"] == "To do" and words["waiting"] == "Needs you"
@@ -730,11 +732,7 @@ def test_review_ticket_without_run_offers_no_start():
     assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
     src = webjs.all_js()
     assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
-    # the helper bar only shows while the ticket is being worked on (never on review/done)
-    assert (
-        "!['done', 'review'].includes(t.status)" in src
-        and "working && !helperLive ? agentBar(t) : null" in src
-    )
+    # Helper-bar visibility is checked on rendered tickets in ticketstrip.test.js.
 
 
 def test_ui2_small_bugs_in_markup_and_css():
@@ -762,7 +760,9 @@ def test_ui2_small_bugs_in_markup_and_css():
 @node
 def test_history_line_shows_names_not_actor_ids():
     line = call("historyLine", {"text": "agent:claude finished the work and moved it to Review"}, [])
-    assert line == "Claude finished the work and sent it to Check"
+    assert line == "Claude finished the work and sent it to Review"
+    old = call("historyLine", {"text": "agent:claude finished the work and sent it to Check"}, [])
+    assert old == "Claude finished the work and sent it to Review"
 
 
 @node
@@ -804,7 +804,7 @@ def test_footer_shows_the_relay_connection():
         ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
-        ("review", "Check"),
+        ("review", "Review"),
         ("done", "Done"),
         ("dropped", "Won't do"),
     ],
@@ -825,7 +825,7 @@ def test_board_lanes_in_the_owners_words():
         "Working",
         "Needs you",
         "Waiting",
-        "Check",
+        "Review",
         "Done",
         "Won't do",
         "Superseded",

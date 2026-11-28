@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import shlex
 import struct
 import tarfile
 import tomllib
@@ -97,8 +98,76 @@ def connect(root: Path, url: str, workspace: str, token: str) -> dict:
     return net.connect_service(root, "publish", "orch-publish", url, workspace, token, "orp_")
 
 
+def _words(line: str) -> list[str]:
+    try:
+        return shlex.split(line)
+    except ValueError:  # an unbalanced quote from a copy: plain words still work
+        return line.split()
+
+
+def parse_connect_text(text: str) -> tuple[str, str, str]:
+    """The (address, workspace, token) in the text a person pastes from the admin: orch finds the
+    `orch publish connect <address> --workspace <id> --token <token>` line itself and ignores the rest
+    (the curl and PowerShell lines, the greeting). Nothing here is ever sent or printed back."""
+    found = False
+    for line in str(text).splitlines():
+        m = re.search(r"\borch\s+publish\s+connect\b(.*)", line)
+        if not m:
+            continue
+        found = True
+        url = ws = tok = None
+        words = [w.strip("`'\"") for w in _words(m.group(1))]
+        for i, w in enumerate(words):
+            for flag in ("--workspace", "--token"):
+                if w == flag and i + 1 < len(words):
+                    val = words[i + 1]
+                elif w.startswith(flag + "="):
+                    val = w.split("=", 1)[1]
+                else:
+                    continue
+                val = val.strip("`'\"")
+                if flag == "--workspace":
+                    ws = val
+                else:
+                    tok = val
+            if url is None and re.match(r"https?://", w):
+                url = w
+        if url and ws and tok:
+            return url, ws, tok
+    if found:
+        raise Refused(
+            "The connect line in that text is cut off (it needs the address, the workspace and the token). "
+            "Ask your admin to send the text again and paste all of it."
+        )
+    if re.search(r"\borch\s+relay\s+connect\b", str(text)):
+        raise Refused("That text is for the relay, not for publish. Paste it on the Relay page instead.")
+    raise Refused(
+        "orch did not find a connect line in that text. Paste everything your admin sent you, "
+        "from “Connect this workspace” to the end."
+    )
+
+
+def connect_text(root: Path, text: str) -> dict:
+    """`orch publish connect --paste` and the Publish page: the same connect, from the admin's whole text."""
+    return connect(root, *parse_connect_text(text))
+
+
 def _cfg(root: Path) -> dict:
-    return net.load_service(root, "publish")
+    try:
+        return net.load_service(root, "publish")
+    except Refused:
+        raise Refused(
+            "Publish isn't connected yet. Your admin gives you a short text: paste it on the Publish page "
+            "of the dashboard, or run: orch publish connect --paste"
+        ) from None
+
+
+GATEWAY = (502, 503, 504)
+
+
+def unreachable(e: Exception) -> bool:
+    """The server gave no answer (or a proxy said it could not reach it), as opposed to a refusal."""
+    return getattr(e, "status", 0) is None or getattr(e, "status", 0) in GATEWAY
 
 
 INVITE_RIGHTS = {"files": True, "apps": True, "permanent": False, "public": False}
@@ -114,9 +183,19 @@ def invite(root: Path, name: str, folder: str, admin_url: str, token: str) -> di
     return {**r, "rights": body["rights"]}
 
 
-def _api(root: Path, method: str, path: str, body=None, timeout: float = 120):
+def _api(root: Path, method: str, path: str, body=None, timeout: float = 120, retry: bool = True):
     cfg = _cfg(root)
-    return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)[1]
+    try:
+        return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout, retry=retry)[1]
+    except Refused as e:
+        if getattr(e, "status", 0) is None and not getattr(e, "blocked", False):
+            err = Refused(
+                "Publish can't be reached right now. People may not be able to open your links until it is "
+                "back. Try again in a few minutes."
+            )
+            err.status = None
+            raise err from None
+        raise
 
 
 def whoami(root: Path) -> dict:
@@ -152,6 +231,100 @@ def _names_path(root: Path) -> Path:
 
 def _tokens_path(root: Path) -> Path:
     return net.secrets_dir(root) / "apps" / "view-tokens.json"
+
+
+def _ledger_path(root: Path) -> Path:
+    return _keys_path(root).with_name("shares.json")
+
+
+def _now_iso() -> str:
+    import datetime as dt
+
+    return dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ledger(root: Path) -> dict:
+    """What this workspace shared, kept on this computer next to the keys: {"synced_at", "files": {id: {name,
+    note, ticket, shared_at, expires_at, size}}}. It is what the Publish page lists when publish can't be
+    reached. No key and no secret in it; a missing or odd file reads as empty."""
+    d = net.read_json(_ledger_path(root), {})
+    files = d.get("files") if isinstance(d, dict) else None
+    return {
+        "synced_at": d.get("synced_at") if isinstance(d, dict) else None,
+        "files": {k: v for k, v in files.items() if isinstance(v, dict)} if isinstance(files, dict) else {},
+    }
+
+
+def _remember(root: Path, ident: str, **fields) -> None:
+    led = _ledger(root)
+    row = {**led["files"].get(ident, {}), **{k: v for k, v in fields.items() if v is not None}}
+    if led["files"].get(ident) != row:
+        led["files"][ident] = row
+        net.write_json(_ledger_path(root), led, True)
+
+
+def _forget(root: Path, ident: str) -> None:
+    led = _ledger(root)
+    if led["files"].pop(ident, None) is not None:
+        net.write_json(_ledger_path(root), led, True)
+
+
+def _sync_ledger(root: Path, files: list) -> None:
+    """The server's list is the truth: the record follows it (new files in, stopped or ended files out)."""
+    import datetime as dt
+
+    led, names = _ledger(root), net.read_json(_names_path(root), {})
+    rows = {}
+    for f in files:
+        if not isinstance(f, dict) or not re.fullmatch(r"f_[a-z0-9]+", str(f.get("id"))):
+            continue
+        old = led["files"].get(f["id"], {})
+        rows[f["id"]] = {
+            **old,
+            "name": names.get(f["id"]) or f.get("name") or old.get("name"),
+            "size": f.get("size", old.get("size")),
+            "expires_at": f.get("expires_at"),
+        }
+    last = led["synced_at"]
+    try:
+        fresh = last and (dt.datetime.now(dt.UTC) - dt.datetime.fromisoformat(last)).total_seconds() < 60
+    except ValueError:
+        fresh = False
+    if rows != led["files"] or not fresh:
+        net.write_json(_ledger_path(root), {"synced_at": _now_iso(), "files": rows}, True)
+
+
+def _is_past(iso) -> bool:
+    import datetime as dt
+
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (t if t.tzinfo else t.replace(tzinfo=dt.UTC)) <= dt.datetime.now(dt.UTC)
+
+
+def local_files(root: Path) -> list:
+    """The shared files this computer knows of, without asking the server: the record, plus files only the key
+    file knows (shared before the record existed). Ended links are left out."""
+    led, keys = _ledger(root), net.read_json(_keys_path(root), {})
+    names = net.read_json(_names_path(root), {})
+    out = []
+    for ident in [*led["files"], *[k for k in keys if k not in led["files"]]]:
+        if not re.fullmatch(r"f_[a-z0-9]+", str(ident)):
+            continue
+        row = led["files"].get(ident, {})
+        if row.get("expires_at") and _is_past(row["expires_at"]):
+            continue
+        f = {"id": ident, "name": names.get(ident) or row.get("name"), "size": row.get("size", 0)}
+        f["expires_at"] = row.get("expires_at")
+        for k in ("note", "ticket", "shared_at"):
+            if row.get(k):
+                f[k] = row[k]
+        if ident in keys:
+            f["key"] = keys[ident]
+        out.append(f)
+    return out
 
 
 BUNDLE_TYPE = "application/vnd.orch.bundle"
@@ -202,9 +375,39 @@ CHUNK = secretscan.MAX_BYTES // 2
 OVERLAP = 16384  # longer than any token pattern; a PEM block over this is still caught by its header line
 
 
-def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
-    """Refuse the upload when any text file holds a secret (secretscan, the one scanner). Runs on the plain
-    bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
+def scan_names(root: Path | None, names: list[str], outer: str | None = None, what: str = "file") -> None:
+    """R5.2: the names a recipient sees (the shared file, folder or app name and every path inside) go through
+    the one scanner before upload. A hit names the kind and where, never the name itself."""
+    texts = ([outer] if outer is not None else []) + list(names)
+    if not texts:
+        return
+    starts, lines = [], 1
+    for t in texts:
+        starts.append(lines)
+        lines += t.count("\n") + 1
+    try:
+        found = secretscan.find("\n".join(texts), root, strict=False)
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            "orch could not check the names for secrets, so nothing was shared. Try again."
+        ) from None
+    if not found:
+        return
+    first = found[0]
+    idx = max(i for i, s in enumerate(starts) if s <= first["line"])
+    kind = secretscan.WORDS.get(first["kind"], "a secret")
+    more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
+    where = f"The {what}'s name" if outer is not None and idx == 0 else f"A file or folder name in the {what}"
+    raise Refused(f"Nothing was shared: {where} has {kind}{more}. Rename it and share again.")
+
+
+def scan_files(
+    root: Path | None, items: list[tuple[str, bytes]], outer: str | None = None, what: str = "file"
+) -> None:
+    """Refuse the upload when any name or text file holds a secret (secretscan, the one scanner). Runs on the
+    names and plain bytes that are about to be encrypted and sent. Names are checked first, so a content
+    refusal only ever quotes a clean name; it names the kind, the file and the line, never the value."""
+    scan_names(root, [n for n, _ in items], outer, what)
     hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
         for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
@@ -245,8 +448,11 @@ def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -
             if SECRET_NAMES.match(f):
                 skipped.append(rel)
                 continue
-            files.append((_bundle_path(rel), p))
-    files.sort()
+            files.append((rel, p))
+    # the names first: a refusal below quotes a name, and the folder's own name goes into the file header
+    outer = folder.resolve().name
+    scan_names(root, [r for r, _ in files], outer, "folder")
+    files = sorted((_bundle_path(r), p) for r, p in files)
     if report is not None:
         report["files"], report["skipped"] = [r for r, _ in files], sorted(skipped)
     pages = [r for r, _ in files if r.lower().endswith((".html", ".htm"))]
@@ -257,7 +463,7 @@ def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -
     if sum(p.stat().st_size for _, p in files) > MAX_FILE:
         raise Refused("The folder is bigger than 100 MB.")
     datas = [p.read_bytes() for _, p in files]
-    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)])
+    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)], outer, "folder")
     index = {
         "v": 1,
         "entry": "index.html" if "index.html" in pages else pages[0],
@@ -277,6 +483,24 @@ def _note(note: str | None) -> str | None:
     return note or None
 
 
+def _ticket_of(root: Path, ref: str | None, path: Path) -> str | None:
+    """The ticket a shared file belongs to: the one named with --ticket (key or id), else the ticket whose
+    files folder the file sits in. Stored as the ticket id; the Publish page shows its key and title."""
+    from orch import tickets
+
+    if ref:
+        tid = tickets.resolve(root, ref)
+        if not isinstance(tid, str) or not re.fullmatch(r"t_[a-z0-9]+", tid):
+            raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
+        tickets.load(root, tid)  # refuses an id that is not a ticket here
+        return tid
+    try:
+        parts = path.resolve().relative_to((root / ".orch" / "tickets").resolve()).parts
+    except (ValueError, OSError):
+        return None
+    return parts[0] if len(parts) > 1 and re.fullmatch(r"t_[a-z0-9]+", parts[0]) else None
+
+
 def _file_id(ident: str) -> str:
     if not re.fullmatch(r"f_[a-z0-9]+", ident):
         raise Refused("A file id looks like f_8c2kq0z4m1x7b3na. Find it with: orch publish list")
@@ -290,8 +514,10 @@ def share_file(
     permanent: bool,
     note: str | None = None,
     replace: str | None = None,
+    ticket: str | None = None,
 ) -> dict:
     note = _note(note)
+    tid = _ticket_of(root, ticket, path)
     if note:  # R5.2: the note leaves inside the file header; the one scanner first, like the file itself
         secretscan.refuse_if_secret_in(root, {"text": note}, "note")
     key = None
@@ -317,7 +543,7 @@ def share_file(
         raise Refused("The file is bigger than 100 MB.")
     else:
         content = path.read_bytes()
-        scan_files(root, [(path.name, content)])
+        scan_files(root, [(path.name, content)], path.name)
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     name = path.resolve().name if path.is_dir() else path.name
     if replace:
@@ -335,6 +561,17 @@ def share_file(
     names = net.read_json(_names_path(root), {})
     names[res["id"]] = name
     net.write_json(_names_path(root), names, True)
+    # the record the Publish page lists (note and ticket stay on this computer; a replaced file keeps its own)
+    _remember(
+        root,
+        res["id"],
+        name=name,
+        size=res.get("size", len(content)),
+        expires_at=res.get("expires_at"),
+        note=note,
+        ticket=tid,
+        **({} if replace else {"shared_at": _now_iso()}),
+    )
     res["link"] = f"{res['url']}#k={k}"
     res["name"] = name
     if path.is_dir():
@@ -352,14 +589,16 @@ def extend(root: Path, ident: str, days: int) -> dict:
             raise Refused("This link has expired.") from None
         raise
     res["name"] = net.read_json(_names_path(root), {}).get(ident)
+    if res.get("expires_at"):
+        _remember(root, ident, expires_at=res["expires_at"])
     return res
 
 
-def _all_files(root: Path, timeout: float = 120) -> list:
+def _all_files(root: Path, timeout: float = 120, retry: bool = True) -> list:
     files, after = [], None
     for _ in range(1000):  # a hard stop: 100 000 files
         q = "/v1/files?limit=100" + (f"&after={after}" if after else "")
-        page = _api(root, "GET", q, timeout=timeout)
+        page = _api(root, "GET", q, timeout=timeout, retry=retry)
         files += net.items(page)
         after = page.get("next") if isinstance(page, dict) else None
         if not after:
@@ -367,16 +606,36 @@ def _all_files(root: Path, timeout: float = 120) -> list:
     return files
 
 
-def list_all(root: Path, timeout: float = 120) -> dict:
-    files = _all_files(root, timeout)
+def list_all(root: Path, timeout: float = 120, quick: bool = False) -> dict:
+    """The shared files and apps. `quick`: one short try, and when publish gives no answer the answer is what
+    this computer recorded ({"unreachable": True, "as_of": when the record was last in step with the server}),
+    never an error and never a wait of many seconds."""
+    try:
+        files = _all_files(root, timeout, retry=not quick)
+        apps = net.items(_api(root, "GET", "/v1/apps", timeout=timeout, retry=not quick))
+    except Refused as e:
+        if not quick or not unreachable(e):
+            raise
+        led = _ledger(root)
+        seen = [v["shared_at"] for v in led["files"].values() if v.get("shared_at")]
+        return {
+            "files": local_files(root),
+            "apps": [],
+            "unreachable": True,
+            "as_of": led["synced_at"] or max(seen, default=None),
+        }
     keys = net.read_json(_keys_path(root), {})
     names = net.read_json(_names_path(root), {})
+    _sync_ledger(root, files)
+    mine = _ledger(root)["files"]
     for f in files:
         if f["id"] in keys:
             f["key"] = keys[f["id"]]
         if f["id"] in names:
             f["name"] = names[f["id"]]
-    apps = net.items(_api(root, "GET", "/v1/apps", timeout=timeout))
+        for k in ("note", "ticket", "shared_at"):
+            if mine.get(f["id"], {}).get(k):
+                f[k] = mine[f["id"]][k]
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
         if ("auth" in a and a["auth"] or "auth" not in a and not a.get("public")) and a["name"] in tokens:
@@ -401,52 +660,117 @@ def _expires(iso) -> str:
     return f"Expires {t.day} {t:%b %Y, %H:%M}"
 
 
+def ends(iso) -> tuple[str, bool]:
+    """('Ends in 7 days', False): when a link stops working, in plain words. A link ending within a day is
+    ('Ends today' | 'Ends tomorrow', True) so the page can mark it. No end date: it stays until deleted."""
+    import datetime as dt
+
+    if not iso:
+        return "Kept until you delete it", False
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return "Ends later", False
+    t = t if t.tzinfo else t.replace(tzinfo=dt.UTC)
+    left = (t - dt.datetime.now(dt.UTC)).total_seconds()
+    if left <= 0:
+        return "Ended", False
+    if left <= 86400:
+        same_day = t.astimezone().date() == dt.datetime.now().astimezone().date()
+        return ("Ends today" if same_day else "Ends tomorrow"), True
+    days = -(-int(left) // 86400)
+    return f"Ends in {days} days", False
+
+
+def _ticket_label(root: Path, tid) -> str | None:
+    """'MAR-1 Spring campaign landing page' for the ticket a file was shared on; None when it is gone."""
+    from orch import tickets
+
+    if not isinstance(tid, str):
+        return None
+    try:
+        t = tickets.load(root, tid)
+    except Exception:  # noqa: BLE001 - a deleted or unreadable ticket: the row simply has no ticket
+        return None
+    return _plain(f"{t.get('key') or ''} {t.get('title') or ''}".strip() or tid)
+
+
+CANT_REACH = "Publish can't be reached. People may not be able to open your links until it is back."
+LINK_NOTE_WORDS = (
+    "Stopping sharing closes the link and keeps your original file. "
+    "orch checks each file for passwords and keys first and stops if it finds one."
+)
+
+
 def view(root: Path) -> dict:
     """`orch publish view --json` (addon-view.schema.json): read-only, links without any key.
-    One compact row per shared file: name, who can open it, when it ends, and fixed ops on its id."""
+    One compact row per shared file: name and your note, the ticket, when it ends, and fixed ops on its id.
+    When publish gives no answer the rows come from the workspace's local record, at once, with a notice."""
     import datetime as dt
 
     from orch.cli_clients import _exp
 
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         net.load_service(root, "publish")
     except Refused:  # no publish server yet: nothing is shared, which is an empty page, not an error
         return {
             "schema": "orch.addon-view/1",
-            "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at": stamp,
+            # the dashboard draws the paste box for this button (op link.connect: `publish connect --paste`)
+            "header": {
+                "status": {"label": "Not connected yet", "tone": "neutral"},
+                "button": {"label": "Connect", "action": {"op": "link.connect"}},
+            },
             "blocks": [
                 {
                     "type": "list",
-                    "title": "Shared",
+                    "title": "Shared now",
                     "compact": True,
                     "items": [],
                     "more": 0,
                     "empty": {
-                        "title": "No shared links yet",
-                        "text": "To share a file by private link, this workspace first needs a publish "
-                        "server. Ask whoever runs it for a setup prompt and paste it into your agent.",
+                        "title": "Publish isn't connected yet",
+                        "text": (
+                            "Your admin gives you a short text. Paste it here to connect, then share a file."
+                        ),
                     },
                 }
             ],
         }
-    r = list_all(root, VIEW_TIMEOUT)
+    r = list_all(root, VIEW_TIMEOUT, quick=True)
+    down = r.get("unreachable") is True
     cap = 50
-    files = [
-        {
-            "title": _plain(f.get("name") or "(unnamed file)"),
-            "meta": [
-                "Anyone with the link",
-                _expires(f["expires_at"]) if f.get("expires_at") else "Kept until you delete it",
-            ],
-            "actions": [
-                {"label": "Copy link", "action": {"op": "link.copy", "args": {"id": f["id"]}}},
-                {"label": "Extend", "action": {"op": "link.extend", "args": {"id": f["id"]}}},
-                {"label": "Stop sharing", "action": {"op": "link.stop", "args": {"id": f["id"]}}},
-            ],
-        }
-        for f in r["files"]
-        if re.fullmatch(r"f_[a-z0-9]+", str(f.get("id")))
-    ]
+    shown = [f for f in r["files"] if re.fullmatch(r"f_[a-z0-9]+", str(f.get("id")))]
+    newest: dict = {}
+    for f in shown:  # the same name shared twice: the older rows say so
+        n = f.get("name")
+        if f.get("shared_at") and f["shared_at"] > newest.get(n, ""):
+            newest[n] = f["shared_at"]
+    files = []
+    for f in shown:
+        end, soon = ends(f.get("expires_at"))
+        note = _plain(f["note"]) if f.get("note") else None
+        if note:
+            sub = f"\u201c{note}\u201d"
+        elif f.get("shared_at") and newest.get(f.get("name")) not in (None, f["shared_at"]):
+            sub = f"Shared {net.when(f['shared_at'])}, an older copy"
+        else:
+            sub = "No note"
+        ticket = _ticket_label(root, f.get("ticket"))
+        files.append(
+            {
+                "title": _plain(f.get("name") or "(unnamed file)"),
+                "subtitle": sub,
+                "meta": [ticket or " "] + ([] if soon else [end]),
+                **({"chips": [{"label": end, "tone": "warn"}]} if soon else {}),
+                "actions": [
+                    {"label": "Copy link", "action": {"op": "link.copy", "args": {"id": f["id"]}}},
+                    {"label": "Extend", "action": {"op": "link.extend", "args": {"id": f["id"]}}},
+                    {"label": "Stop sharing", "action": {"op": "link.stop", "args": {"id": f["id"]}}},
+                ],
+            }
+        )
     apps = [
         {
             "title": _plain(a["name"]),
@@ -463,15 +787,27 @@ def view(root: Path) -> dict:
         }
         for a in r["apps"]
     ]
+    if down:
+        as_of = f"As of {net.when(r['as_of'])}" if r.get("as_of") else "From this workspace's record"
+        count = None
+        empty = {
+            "title": "Nothing recorded on this computer",
+            "text": (
+                "orch can only list what it knows when publish can't be reached. Try again in a few minutes."
+            ),
+        }
+    else:
+        count = f"{len(files)} link{'s' if len(files) != 1 else ''} \u00b7 anyone with the link can open them"
+        empty = {"title": "No shared links", "text": "Share a file to create a private link."}
     blocks: list = [
         {
             "type": "list",
-            "title": "Files",
-            **({"meta": f"{len(files)} link{'s' if len(files) != 1 else ''}"} if files else {}),
+            "title": "Shared now",
+            **({"meta": as_of if down else count} if (down or files) else {}),
             "compact": True,
             "items": files[:cap],
             "more": max(0, len(files) - cap),
-            "empty": {"title": "No shared links", "text": "Share a file to create a private link."},
+            "empty": empty,
         }
     ]
     if apps:
@@ -487,17 +823,22 @@ def view(root: Path) -> dict:
     blocks.append(
         {
             "type": "footnote",
-            "text": "Stopping sharing closes the link and keeps your original file."
+            "text": LINK_NOTE_WORDS
             + (" To stop, restart or delete an app, ask a helper on a ticket." if apps else ""),
-            "link": {"label": "Shared link settings", "to": "app:settings/addons"},
+            "link": {"label": "Publish settings", "to": "app:settings/addons"},
         }
     )
-    return {
+    out = {
         "schema": "orch.addon-view/1",
-        "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": stamp,
         "header": {"button": {"label": "Share a file", "action": {"op": "link.share"}}},
         "blocks": blocks,
     }
+    if down:
+        out["notice"] = CANT_REACH
+        out["notice_tone"] = "warn"
+        out["button"] = {"label": "Try again", "action": {"op": "addon.refresh"}}
+    return out
 
 
 def delete(root: Path, ident: str) -> str:
@@ -509,6 +850,7 @@ def delete(root: Path, ident: str) -> str:
         names = net.read_json(_names_path(root), {})
         if names.pop(ident, None) is not None:
             net.write_json(_names_path(root), names, True)
+        _forget(root, ident)
         return "file"
     _app_name(ident)
     _api(root, "DELETE", f"/v1/apps/{ident}")
@@ -585,8 +927,15 @@ _MANIFEST_FLAGS = re.compile(
 )
 
 
-def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root: Path | None = None) -> bytes:
-    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it)."""
+def pack(
+    folder: Path,
+    reach: str | None = None,
+    auth: bool | None = None,
+    root: Path | None = None,
+    name: str | None = None,
+) -> bytes:
+    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it).
+    `name`: the app name, scanned with the paths inside."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
@@ -608,7 +957,7 @@ def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root:
                 info.size = len(raw)
                 scanned.append((rel, _MANIFEST_FLAGS.sub(b"", raw) if rel == "app.toml" else raw))
                 tar.addfile(info, io.BytesIO(raw))
-    scan_files(root, scanned)
+    scan_files(root, scanned, name, "app")
     data = buf.getvalue()
     if len(data) > MAX_APP:
         raise Refused("The app folder is bigger than 100 MB.")
@@ -661,7 +1010,7 @@ def deploy(
         root,
         "PUT",
         f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""),
-        pack(folder, reach, auth, root),
+        pack(folder, reach, auth, root, m["name"]),
     )
     needs_link = auth if auth is not None else manifest_auth(m)
     res.setdefault("reach", reach or m.get("reach", "public"))

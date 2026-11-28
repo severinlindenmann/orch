@@ -3,7 +3,7 @@
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
 // `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
-// ORCH-524: a Check result's file as the ticket lists it (its time and size, when known here), so its link names
+// ORCH-524: a Test results card's file as the ticket lists it (its time and size, when known here), so its link names
 // its version and the browser keeps the picture; unknown: a plain link that asks again by content hash.
 function reviewFileStamp(tid, kind, name) {
   const t = array(state?.tickets).find(x => x?.id === tid);
@@ -69,7 +69,7 @@ function reviewStuckStep(t) {
 }
 function reviewStuckHint(row) {
   if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
-  if (row.kind === 'reviewer:unsure') return 'Open the ticket to check the result yourself.';
+  if (row.kind === 'reviewer:unsure') return 'Open the ticket to review the result yourself.';
   if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
   return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
 }
@@ -133,13 +133,17 @@ function reviewSubtitle() {
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
   // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
   const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
-  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
+  if (!n) return 'Nothing waits for you.';
+  // ORCH-2316 (R2 A, draft r2-a): "10 things need you. 2 hold up work now." (the second sentence only when any does)
+  const laneOf = window.UI?.review?.laneOf || (c => c?.card_kind?.lane), held = reviewCards().filter(c => laneOf(c) === 'holds_up').length;
+  return n + (n === 1 ? ' thing needs you.' : ' things need you.') + (held ? ' ' + held + (held === 1 ? ' holds up work now.' : ' hold up work now.') : '');
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
   const it = answer.item || {}, note = answer.note || {};
   const own = Array.isArray(it.answers) && it.answers.find(x => x.picked === note.picked);
   if (answer.verdict === 'ok' && own) return own.label;
+  if (answer.verdict === 'ok' && note.ideas && window.UI?.ideasWord) return window.UI.ideasWord(note.ideas, (it.ideas || []).length);  // ORCH-2186
   if (answer.verdict === 'ok') return note.picked ? 'Use ' + note.picked : it.okLabel || 'Looks good';
   if (answer.verdict === 'no') return it.preview?.type === 'options' ? 'None' : it.kind === 'check' ? 'Sent back' : "Don't do";
   return 'Sent back';
@@ -191,30 +195,34 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   if (r.ok) {
     const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
     if (res.ok && res.in_terminal) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
-      runCardTerminal(res.terminal);  // the card itself says what to do: no toast
+      runCardTerminal(res.terminal, ticket);  // the card itself says what to do: no toast
       return res;
     }
     if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
     return res;
   }
   if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
-  return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+  return {ok:false, error:String(r.text || 'Could not run it. Try again.').slice(0, 300)};
 }
 // Opens the plain terminal's session in the live layer (a sign-in card's terminal, ORCH-865); the sessions list is read
 // again first, so a terminal that was just started is there.
-async function runCardTerminal(id) {
+async function runCardTerminal(id, ticket = '') {
   if (typeof id !== 'string' || !/^t_[a-z0-9]{6,16}$/.test(id)) return;
+  // ORCH-2185: on Review with the side panel, Run it shows the terminal in the panel's helper tab beside the card
+  if (reviewPanelRun(id, ticket)) return runCardWantTypingIn(id);
   try { await window.LiveSessions?.refresh?.(); } catch (e) { /* the layer still opens it */ }
   if (typeof window.LiveLayer?.open !== 'function') return;
   window.LiveLayer.open(id);
   // a phone: the sign-in takes the whole screen; Leave full screen (and Esc) goes back to the ticket
   if (typeof liveLayerPhone === 'function' && liveLayerPhone()) window.LiveLayer.place('full');
-  // the person turned typing on with the card's switch before the terminal was there: typing in its pane once it shows
-  if (runCardWantTyping && window.LiveTerm) {
-    runCardWantTyping = false;
-    for (let i = 0; i < 25 && !window.LiveTerm.has(id); i++) await new Promise(r => setTimeout(r, 200));
-    window.LiveTerm.want(id);
-  }
+  return runCardWantTypingIn(id);
+}
+// the person turned typing on with the card's switch before the terminal was there: typing in its pane once it shows
+async function runCardWantTypingIn(id) {
+  if (!runCardWantTyping || !window.LiveTerm) return;
+  runCardWantTyping = false;
+  for (let i = 0; i < 25 && !window.LiveTerm.has(id); i++) await new Promise(r => setTimeout(r, 200));
+  window.LiveTerm.want(id);
 }
 let runCardWantTyping = false;  // the card's typing switch was clicked while no terminal was open yet
 // The plain terminal's session id (a sign-in card's terminal), from the page's sessions.
@@ -275,7 +283,7 @@ function reviewApi() {
       if (typeof c?.ticket !== 'string') return '';
       const m = /^reviewed\/([0-9a-f]{12})\/([^/]+)$/.exec(String(ref || ''));
       if (m) return '/api/file?t=' + encodeURIComponent(c.ticket) + '&k=reviewed&n=' + encodeURIComponent(m[1] + '/' + m[2]);
-      // a Check result's own files (ORCH-183): a picture or PDF through /api/file, a web page in its sandboxed /view frame
+      // a Test results card's own files (ORCH-183): a picture or PDF through /api/file, a web page in its sandboxed /view frame
       const f = /^(evidence|artifacts)\/((?:[^/\\]+\/){0,3}[^/\\]+)$/.exec(String(ref || ''));
       if (!f || f[2].split('/').some(p => p === '..' || p === '.' || p.startsWith('.'))) return '';
       return /\.html?$/i.test(f[2])
@@ -285,7 +293,7 @@ function reviewApi() {
     // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
     attach: async ({ticket, files}) => {
-      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
+      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here. Add them on the ticket page.'}};
       const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
       return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
     },
@@ -349,7 +357,7 @@ async function reviewSendBack(a, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
   const r = await act('ticket.changes', {ticket:a.ticket, text});
-  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) reviewSentBack.add(a.ticket);
   return r.ok;
 }
@@ -366,7 +374,7 @@ async function reviewUndo(a) {
   const args = {ticket:a.ticket};
   if (a.undo === 'answer' && a.question) args.question = a.question;
   const r = await act('review.undo', args);
-  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) { reviewUndone.add(reviewRowKey(a)); render(); }
   return r.ok;
 }
@@ -428,9 +436,12 @@ function reviewAcceptedCard() {
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with “I review the result” on wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
-    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
+    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'},
+  // Reviewer mode (owner, 25 Nov 2026): off = the Reviewer accepts complete work and sends open work back (each with Undo)
+  propose:{op:'reviewer_mode.set', field:'reviewer_propose_on', action:'reviewer-mode-set', title:'Nothing closes by itself',
+    meta:'The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.'}
 };
 const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
 function reviewSwitchRow(key, where = 'review') {
@@ -442,12 +453,12 @@ function reviewSwitchRow(key, where = 'review') {
 }
 // One set of rows for both places (R4.3): the Review card and Settings > General.
 function reviewAutoRows(where = 'review') {
-  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where),
+  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where), reviewSwitchRow('propose', where),
     h('div', {className:'card-row', 'data-key':where + '-auto-note'}, h('p', {className:'meta'}, REVIEW_AUTO_NOTE))];
 }
 function reviewAutoOn() {
   const s = state?.settings;
-  return !!s && (s.auto_reviewer_on === true || s.away_on === true);
+  return !!s && (s.auto_reviewer_on === true || s.away_on === true || s.reviewer_propose_on === true);
 }
 function reviewAutoCard() {
   if (!reviewAutoOn()) return null;
@@ -484,11 +495,13 @@ function reviewExtraRows() {
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
-    if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
-    if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
+    // work that stopped is Home's row (#2385), never "A result to check"; its stuck card is the card (carded above). The core
+    // can count a stop Home has no row for (ORCH-2339): that one is listed here, so the badge and the heading still add up
+    if (!it.question && it.stopped) { add(t, 'stopped', 'Work stopped. Open the ticket to see where.'); continue; }
+    if (!it.question && n.fromCore) add(t, 'result', 'A result to review.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
-  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to check.'));
+  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to review.'));
   return out;
 }
 // ORCH-1643: a question with two or three choices (a helper's on its screen too, when its ticket carries it) is answered in its row with one click: the same question card as the
@@ -505,7 +518,7 @@ function reviewExtraCard() {
   const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
   const act = r => r.what === 'screen' && live
     ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
-    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : r.what === 'failed' ? 'Open' : 'Answer');
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Review' : r.what === 'failed' ? 'Open' : 'Answer');
   return card('review-extra', 'Also waiting for you', '',
     rows.map(r => reviewOneClick(r)
       ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
@@ -528,34 +541,146 @@ function reviewTicketId() {
   const part = reviewQuery().find(p => p.startsWith('ticket=')), id = part ? part.slice(7) : '';
   return REVIEW_TICKET.test(id) ? id : '';
 }
-// the Review address with this ticket beside the deck ('' = closed); the card the page opened on (?card=) stays
-function reviewTicketHref(id) {
-  const rest = reviewQuery().filter(p => !p.startsWith('ticket='));
-  if (REVIEW_TICKET.test(String(id || ''))) rest.push('ticket=' + id);
+// the Review address with this ticket beside the deck ('' = closed); the card the page opened on (?card=) stays.
+// ORCH-2185: tab (chat | helper, the Ticket tab is the plain address) and term (a plain terminal Run it started)
+function reviewTicketHref(id, tab = '', term = '') {
+  const rest = reviewQuery().filter(p => !/^(ticket|tab|term)=/.test(p));
+  if (REVIEW_TICKET.test(String(id || ''))) {
+    rest.push('ticket=' + id);
+    if (REVIEW_TABS.includes(tab) && tab !== 'ticket') rest.push('tab=' + tab);
+    if (tab === 'helper' && REVIEW_TICKET.test(String(term || ''))) rest.push('term=' + term);
+  }
   return '#review' + (rest.length ? '?' + rest.join('&') : '');
+}
+// ---- ORCH-2185 (Focused review D, behind workflow.decision_first): the panel beside the card has three tabs ----
+// Ticket (the ticket page, as before), Chat (the ticket's chat with its message box; "Ask about this" in the card's
+// More opens it with "About: <the decision>" in the box) and "What the helper does" (the helper's live screen,
+// watching until "Let me type"; "Terminal" when the plain terminal's typing setting is on). It follows the card on
+// screen and keeps its tab. Run it on a sign-in card shows the plain terminal there. A phone keeps the live layer.
+const REVIEW_TABS = ['ticket', 'chat', 'helper'];
+const reviewPanelTabsOn = () => !snapshot && state?.settings?.decision_first_on === true;
+const reviewQueryPart = k => { const p = reviewQuery().find(x => x.startsWith(k + '=')); return p ? p.slice(k.length + 1) : ''; };
+function reviewPanelTab() {
+  const tab = reviewQueryPart('tab');
+  return reviewPanelTabsOn() && REVIEW_TABS.includes(tab) ? tab : 'ticket';
+}
+const reviewPanelTerm = () => { const id = reviewQueryPart('term'); return REVIEW_TICKET.test(id) ? id : ''; };
+const reviewHelperWord = () => state?.settings?.terminal_typing_on === true ? 'Terminal' : 'What the helper does';
+// a helper with a live screen works on this ticket now (a one-step helper has none)
+const reviewHelperLive = t => { const run = t ? state?.runs?.[t.id] : null; return !!(run?.running && run.claim?.mode !== 'oneshot'); };
+const reviewChatDrafts = new Map();  // ticket id -> the words in the panel's message box
+let reviewChatFocus = '';            // the panel's box gets the cursor once it shows (Ask about this)
+let reviewCurrentTicket = '';        // the ticket of the card on screen (Run it opens its panel)
+function reviewTabsNav(id, tab) {
+  return h('nav', {className:'segmented review-ticket-tabs', 'aria-label':'Show', 'data-key':'review-ticket-tabs'},
+    [['ticket', 'Ticket'], ['chat', 'Chat'], ['helper', reviewHelperWord()]].map(([k, word]) =>
+      h('a', {className:'btn sm', href:reviewTicketHref(id, k, k === 'helper' && tab === 'helper' ? reviewPanelTerm() : ''), 'aria-current':k === tab ? 'true' : null, 'data-key':'review-tab-' + k}, word)));
+}
+// Chat: the ticket's chat lines (pages/ticketchat.js draws each), its questions as plain lines (the card beside
+// answers them), and the one message box; sending is the Chats page's own send (tcSay).
+function reviewPanelChat(t) {
+  if (typeof tcItems !== 'function') return h('p', {className:'meta'}, 'The chat is not here.');
+  const items = tcItems(t), g = typeof tcGroupOf === 'function' ? tcGroupOf(t) : null;
+  const row = (item, prev) => item.kind === 'line' ? tcLine(item, prev, g) : item.kind === 'answer' ? tcAnswer(item, prev, g)
+    : item.kind === 'event' ? h('div', {className:'chat-system', 'data-key':'review-chat-' + item.key}, item.text)
+    : tcLineShell(item, prev, g, h('div', {className:'thread-line-text'}, clean(item.q.text)));
+  const closed = ['done', 'dropped'].includes(t.status);
+  return h('div', {className:'review-panel-chat', 'data-key':'review-chat-' + t.id},
+    h('div', {className:'review-panel-log', role:'log', 'aria-live':'polite', 'aria-label':'Ticket chat', 'data-key':'review-chat-log-' + t.id},
+      items.length ? items.map((item, i) => row(item, items[i - 1])) : h('p', {className:'meta', 'data-key':'review-chat-empty'}, 'No messages yet. Write to your helper below.')),
+    closed ? h('p', {className:'meta', 'data-key':'review-chat-closed'}, 'This ticket is closed · you can read, not reply')
+      : h('div', {className:'review-panel-box', 'data-review-chat-box':t.id, 'data-key':'review-chat-box-' + t.id}));
+}
+// What the helper does: the helper's live screen (or the plain terminal Run it started), mounted after the paint.
+function reviewPanelHelper(t) {
+  const term = reviewPanelTerm();
+  if (term) return h('div', {className:'review-panel-term', 'data-review-term':term, 'data-review-plain':'yes', 'data-key':'review-term-' + term});
+  if (reviewHelperLive(t)) return h('div', {className:'review-panel-term', 'data-review-term':t.id, 'data-key':'review-term-' + t.id});
+  return h('div', {className:'empty-state', 'data-key':'review-helper-none'},
+    h('strong', {}, 'No helper works on this now'),
+    h('p', {}, 'What it did is on the Ticket tab. Write in Chat and a helper starts and reads it.'),
+    h('a', {className:'btn outline sm', href:reviewTicketHref(t.id, 'chat'), 'data-key':'review-helper-chat'}, 'Open Chat'));
+}
+// "Ask about this" and "Watch the helper" in a decision-first card's More menu (UI.swipeDeck o.moreItems)
+function reviewMoreItems(it) {
+  const id = String(it?.ticketId || '');
+  if (!reviewPanelTabsOn() || !REVIEW_TICKET.test(id)) return [];
+  const out = [{label:'Ask about this', icon:'comment', key:'review-ask-' + id, href:reviewTicketHref(id, 'chat'), onClick:() => reviewAsk(it)}];
+  if (reviewHelperLive(ticketOf(id))) out.push({label:'Watch the helper', icon:'code', key:'review-watch-' + id, href:reviewTicketHref(id, 'helper')});
+  return out;
+}
+// Ask about this: the panel's message box starts with "About: <the decision>" (never over words already typed)
+function reviewAsk(it) {
+  const id = it.ticketId, q = clean(it.text || it.title || '').replace(/\s+/g, ' ').trim();
+  const words = 'About: ' + (q.length > 160 ? q.slice(0, 159) + '…' : q) + '\n';
+  if (!String(reviewChatDrafts.get(id) || '').trim()) reviewChatDrafts.set(id, words);
+  reviewChatFocus = id;
+  const field = typeof document === 'object' && document.querySelector ? document.querySelector('[data-review-chat-box="' + id + '"] textarea') : null;
+  if (field) { if (!field.value.trim()) { field.value = reviewChatDrafts.get(id); field.dispatchEvent(new Event('input', {bubbles:true})); } field.focus(); reviewChatFocus = ''; }
+}
+// Run it on Review with the panel: the terminal shows in the panel's helper tab beside the card (true), not on a phone
+function reviewPanelRun(term, ticket) {
+  const id = REVIEW_TICKET.test(String(ticket || '')) ? ticket : reviewCurrentTicket;
+  if (!reviewPanelTabsOn() || !REVIEW_TICKET.test(String(id || '')) || typeof route !== 'function' || route().kind !== 'review') return false;
+  if (typeof liveLayerPhone === 'function' && liveLayerPhone()) return false;
+  location.hash = reviewTicketHref(id, 'helper', term);
+  return true;
+}
+// After the paint: the panel's message box and terminal (each once per host; the paint leaves a mounted host alone)
+function mountReviewPanel(main) {
+  main.querySelectorAll('[data-review-chat-box]').forEach(host => {
+    if (mounts.has(host) || !window.UI?.composer) return;
+    const id = host.dataset.reviewChatBox, t = ticketOf(id), shared = typeof tcShared === 'function' && typeof tcGroupOf === 'function' && tcShared(tcGroupOf(t));
+    const label = shared ? 'Message everyone in this chat' : 'Message your helper about this ticket';
+    host.id = 'review-chat-box-' + id;
+    const composer = window.UI.composer(host, {voice:false, layout:'box', attach:false, interrupt:false, enterSends:true, sendLabel:'Send', hint:'Enter to send',
+      label, placeholder:label, maxLength:2000, emptyError:'Write something first.', sendingText:'', sendAttrs:{'data-key':'review-chat-send'},
+      draft:reviewChatDrafts.get(id) || '', onDraft:v => { reviewChatDrafts.set(id, v); },
+      onSend:async m => {
+        const now = ticketOf(id), text = String(m?.text || '').trim();
+        if (!now || typeof tcSay !== 'function') return {ok:false, text:'Not sent. Open the ticket and try again.'};
+        const r = await tcSay(now, text, []);
+        if (r.ok) reviewChatDrafts.delete(id);
+        return r;
+      }});
+    mounts.set(host, {destroy() { composer?.destroy?.(); }});
+    if (reviewChatFocus === id) { reviewChatFocus = ''; const f = host.querySelector('textarea'); if (f) { f.focus(); f.setSelectionRange?.(f.value.length, f.value.length); } }
+  });
+  main.querySelectorAll('[data-review-term]').forEach(host => {
+    if (mounts.has(host)) return;
+    const id = host.dataset.reviewTerm, plain = host.dataset.reviewPlain === 'yes';
+    mounts.set(host, {destroy() {}});
+    const shown = window.LiveTerm?.mount ? window.LiveTerm.mount(host, id, plain ? 'Plain terminal' : 'the helper', plain) : false;
+    if (!shown) host.append(h('p', {className:'meta', 'data-key':'review-term-elsewhere'}, window.LiveTerm?.mount ? 'This screen is open in the live view. Close it there to watch it here.' : 'The live screen is not here.'));
+  });
 }
 function reviewTicketPanel(id) {
   if (!id || snapshot || typeof detail !== 'function') return null;
   const t = ticketOf(id), body = t ? detail(t) : typeof missingTicket === 'function' ? missingTicket(id) : null;
   // one h1 on the page (Review's): the ticket's own title reads as a heading inside the panel
   body?.querySelectorAll?.('h1').forEach(n => n.setAttribute('aria-level', '2'));
-  return h('aside', {className:'card review-ticket', 'data-key':'review-ticket', 'aria-label':'Ticket'},
-    h('div', {className:'review-ticket-h'}, h('h2', {}, 'Ticket'),
-      h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'review-ticket-full'}, 'Open full page'),
+  const tabs = reviewPanelTabsOn() && t, tab = tabs ? reviewPanelTab() : 'ticket';
+  const shown = tab === 'chat' ? reviewPanelChat(t) : tab === 'helper' ? reviewPanelHelper(t) : body;
+  return h('aside', {className:'card review-ticket', 'data-key':'review-ticket', 'aria-label':'Ticket', 'data-tab':tabs ? tab : null},
+    h('div', {className:'review-ticket-h'}, tabs ? reviewTabsNav(id, tab) : h('h2', {}, 'Ticket'),
+      // with the tabs a small icon (the row is full); on Chat it opens the whole chat
+      tabs ? h('a', {className:'btn ghost icon sm', href:(tab === 'chat' ? '#chat/' : '#ticket/') + encodeURIComponent(id), 'aria-label':'Open full page', title:'Open full page', 'data-key':'review-ticket-full'}, iconEl('external'))
+        : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'review-ticket-full'}, 'Open full page'),
       h('a', {className:'btn ghost icon sm', href:reviewTicketHref(''), 'aria-label':'Close ticket', title:'Close', 'data-key':'review-ticket-close'}, iconEl('x'))),
-    h('div', {className:'review-ticket-b', 'data-key':'review-ticket-' + id}, body));
+    h('div', {className:'review-ticket-b', 'data-key':'review-ticket-' + id + (tab === 'ticket' ? '' : '-' + tab)}, shown));
 }
 // the panel follows the card on screen: a new card (answered, Later, a click in All cards) shows its own ticket
 function reviewTicketFollow(deck) {
   const open = reviewTicketId(), it = deck && !deck.picking ? array(deck.items)[deck.index] : null;
+  if (it && !deck.answers?.[it.id] && REVIEW_TICKET.test(String(it.ticketId || ''))) reviewCurrentTicket = it.ticketId;
   if (!open || !it || deck.answers?.[it.id] || !REVIEW_TICKET.test(String(it.ticketId || '')) || it.ticketId === open) return false;
-  history.replaceState(history.state, '', reviewTicketHref(it.ticketId));
+  history.replaceState(history.state, '', reviewTicketHref(it.ticketId, reviewPanelTab()));  // the same tab (ORCH-2185)
   setTimeout(render, 0);
   return true;
 }
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
+  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'Needs you'},
     reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
   const open = snapshot ? '' : reviewTicketId();
   return fragment(
@@ -591,9 +716,10 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id)});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
+  mountReviewPanel(main);
 }
 // Answer on a helper that asks on its screen: its session opens in the live layer over the Review page
 if (typeof document !== 'undefined' && document.addEventListener) {

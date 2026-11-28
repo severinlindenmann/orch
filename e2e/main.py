@@ -79,9 +79,9 @@ class E:
         return rc, out, err
 
     def person(self, ws, *args, ok=True):
-        """A person's action (answer, ticket done, relay connect ...), no --by. plain CLI action since #799."""
-        root = self.path_of(ws)
-        rc, out, err = self.orch(root, *args, ok=False)
+        """A person's action (answer, ticket done, relay connect ...), no --by, at a terminal: an unattended
+        caller is a helper (ORCH-2108)."""
+        rc, out, err = self.at_terminal(["orch", *args], cwd=self.path_of(ws))
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
@@ -312,7 +312,7 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
 
 # The short set that runs on every pull request (e2e-smoke.yml, under 5 minutes): the core CLI and ticket flow, add-ons and
 # the v2 workspace scenarios. No relay/publish server and no agent, so no cargo build; those have their own PR jobs.
-SMOKE = ["W0", "W3", "W4", "W5", "W5T", "A0", "A4", "A7", "A8", "A9", "A10", "V2-C1", "V2-T1"]
+SMOKE = ["W0", "W3", "W4", "W5", "W5T", "W8", "W9", "W10", "A0", "A4", "A7", "A8", "A9", "A10", "V2-C1", "V2-T1", "V2-E1"]
 # smoke-offline: the same set without W0, the one that downloads develop's installer and uv from the internet (it
 # checks GitHub's develop, not the code under test). The merge queue's local group check runs this (ORCH-1124): on
 # 22 Nov W0 alone turned a green group red when GitHub dropped the connection.
@@ -328,7 +328,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue, scenarios_people  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue, scenarios_people, scenarios_msgsig  # noqa: F401,E401
 
     if a.what == "smoke":
         ids = list(SMOKE)

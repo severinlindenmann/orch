@@ -10,12 +10,13 @@ function context(fetch) {
     replaceChildren(...nodes){this.children = nodes.flat(Infinity).filter(c => c != null);},
     addEventListener(){}, querySelector(){return null;}, get textContent(){return JSON.stringify(this.children);}});
   let dialogNode = null, now = 1000;
-  const c = vm.createContext({setTimeout:() => 1, clearTimeout(){}, Date:{now:() => now}, h, fragment:(...children) => h('fragment', {}, ...children),
+  const c = vm.createContext({iconEl:() => null, setTimeout:() => 1, clearTimeout(){}, Date:{now:() => now}, h, fragment:(...children) => h('fragment', {}, ...children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), state:{}, snapshot:false,
     CSS:{supports:() => false}, time:() => '', date:() => '', ticketOf:() => null,
     location:{hash:'#chat'}, history:{replaceState(){}}, route:() => ({kind:'chat'}), render(){},
     MutationObserver:class {observe(){}}, document:{documentElement:{}, querySelector:() => null},
     window:{orchAct:async () => ({ok:true}), addEventListener(){}, orch:{open(){}, close:async () => {}, toast(){}}}, fetch,
+    stateNote:(title, text, kind, action) => h('state', {kind}, title, text, action ? action.label : null),
     dialog:() => (dialogNode = {d:h('dialog'), actions:h('div')})});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   c.shown = () => JSON.stringify(dialogNode.d);

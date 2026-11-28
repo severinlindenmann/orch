@@ -1,7 +1,10 @@
 'use strict';
 // The chat view of a ticket's session in Focus (ORCH-687, draft D feature 5): the helper's messages and the ticket's
 // events as one plain conversation, oldest first, with the waiting question answered right above the message box.
-// No transcript exists: everything comes from the ticket the page already polls.
+// The helper's own words come from its real conversation where the tool keeps one (ORCH-2204, GET /api/talk/<ticket>:
+// the newest turns of the session in use); the ticket adds the steps, questions, events and your messages around them.
+// Where no conversation can be read, everything comes from the ticket the page already polls, and the chat says it is
+// a summary, with Open terminal for the real screen.
 //   step events     a done step ("Step 2 done: <its words>") at the time of its newest evidence
 //   helper messages the one-line summary of a done step, with its links (pull request, address); a question the
 //                   helper asked; a Chat or group line an agent wrote (chat_message)
@@ -61,10 +64,46 @@ function liveChatMine(run, local) {
   const said = new Set(kept.map(m => clean0(m.text)));
   return [...kept, ...(Array.isArray(local) ? local : []).filter(m => m && !said.has(clean0(m.text)))];
 }
+// Commands in a helper's words (ORCH-2203, draft D a): a ``` block of one line, a line that is only `code`, and a line
+// starting with "!" (the helper's own way to say "run this in a shell"). Each gets "Run in terminal" in the chat. A
+// block of several lines stays plain text: typing it would press Enter in the middle.
+const LIVE_CMD_MAX = 1000;
+const liveCmdOk = c => c.length > 0 && c.length <= LIVE_CMD_MAX && !/[\x00-\x1f\x7f]/.test(c);
+// [{t:'text', text} | {t:'cmd', text}] in order; a message with no command is one text part.
+function liveChatParts(text) {
+  const out = [], buf = [];
+  const flush = () => { const t = buf.join('\n').trim(); buf.length = 0; if (t) out.push({t:'text', text:t}); };
+  const lines = String(text ?? '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i], line = ln.trim();
+    const fence = /^```/.test(line);
+    if (fence) {
+      const end = lines.findIndex((x, j) => j > i && /^```\s*$/.test(x.trim()));
+      if (end < 0) { buf.push(ln); continue; }
+      const inner = lines.slice(i + 1, end).map(x => x.trim()).filter(Boolean);
+      flush();
+      if (inner.length === 1 && liveCmdOk(inner[0])) out.push({t:'cmd', text:inner[0]});
+      else if (inner.length) out.push({t:'text', text:inner.join('\n')});
+      i = end;
+      continue;
+    }
+    const code = /^`([^`]+)`$/.exec(line), bang = /^!\S/.test(line);
+    const cmd = code ? code[1].trim() : bang ? line : '';
+    if (cmd && liveCmdOk(cmd)) { flush(); out.push({t:'cmd', text:cmd}); } else buf.push(ln);
+  }
+  flush();
+  return out;
+}
+// What is typed: into a plain terminal a "!command" is just the command; the helper takes the "!" itself. Never Enter.
+function liveCmdTyped(cmd, plain) { return plain ? String(cmd).replace(/^!\s*/, '') : String(cmd); }
+const LIVE_TALK_TEXT = 2000;    // characters of one turn of the real conversation (the server cuts it too)
 // rows: {w: 'e' | 'h' | 'y', text, at, who?, links?}; me: the person looking ("human:<name>"), whose lines say You.
-function liveChatModel(t, me = '', sent = []) {
+// talk: the real conversation ({available, turns:[{w, text, at}]}): its turns are the helper's words, so a step's
+// one-line summary is left out (its links and results stay).
+function liveChatModel(t, me = '', sent = [], talk = null) {
   if (!t || typeof t !== 'object') return [];
   const rows = [], mine = by => !!by && by === me;
+  const real = liveTalkReal(talk);
   const steps = Array.isArray(t.checklist) ? t.checklist.filter(c => c && typeof c === 'object') : [];
   steps.forEach((c, i) => {
     if (c.done !== true) return;
@@ -76,7 +115,8 @@ function liveChatModel(t, me = '', sent = []) {
     const links = liveChatLinks(ev);
     // a file the step proved or a check run is a result too: it shows as a widget inside the message (ORCH-687, ORCH-697)
     const made = ev.some(v => (v.type === 'file' && /^\.orch\/tickets\/[^/]+\/(evidence|artifacts)\//.test(String(v.ref || ''))) || (v.type === 'command' && (typeof v.exit === 'number' || v.output_tail)));
-    if (said || links.length || made) rows.push({w:'h', text:said ? liveChatCut(said.summary) : '', at, links, step:typeof c.id === 'string' ? c.id : ''});
+    const text = said && !real ? liveChatCut(said.summary) : '';
+    if (text || links.length || made) rows.push({w:'h', text, at, links, step:typeof c.id === 'string' ? c.id : ''});
   });
   for (const q of Array.isArray(t.questions) ? t.questions : []) {
     if (!q || typeof q !== 'object' || q.answer == null) continue;  // the open one is the question card
@@ -105,9 +145,18 @@ function liveChatModel(t, me = '', sent = []) {
     const part = liveChatSplit(m.text), who = m.by && !mine(m.by) ? liveChatWho(m.by) : '';
     rows.push({w:'y', text:liveChatCut(part.text), at:m.at, sent:true, ...(who ? {who} : {}), ...(part.files.length ? {files:part.files} : {})});
   }
+  if (real) for (const x of talk.turns) {
+    if (!x || (x.w !== 'h' && x.w !== 'y') || !clean0(x.text) || !Number.isFinite(liveChatTime(x.at))) continue;
+    const s = String(x.text).trim();
+    rows.push({w:x.w, text:s.length > LIVE_TALK_TEXT ? s.slice(0, LIVE_TALK_TEXT - 1).trimEnd() + '…' : s, at:x.at, talk:true});
+  }
   // oldest first; at the same moment the step goes before what the helper said about it (the order pushed)
   return rows.map((r, n) => [r, n]).sort((a, b) => (liveChatTime(a[0].at) - liveChatTime(b[0].at)) || (a[1] - b[1]))
     .map(x => x[0]).slice(-LIVE_CHAT_MAX);
+}
+// The real conversation counts when orch could read it and it has turns; else the chat is the ticket's summary.
+function liveTalkReal(talk) {
+  return !!(talk && talk.available === true && Array.isArray(talk.turns) && talk.turns.length);
 }
 // Chat or Terminal per session, kept per browser: {<session id>: 'term'}; chat is the default and is not stored.
 function liveViewRead(store) {
@@ -122,6 +171,20 @@ function liveViewWrite(store, views) {
 // --- the page ---
 let liveViews = null;
 const liveChatSent = new Map();  // messages sent from this page, per session, until the page reloads
+const liveTalk = new Map();      // ticket id -> {at, data, busy}: the real conversation, read again every few seconds
+const LIVE_TALK_EVERY = 4000;
+function liveTalkLoad(id, box) {
+  const hit = liveTalk.get(id);
+  if (hit && (hit.busy || Date.now() - hit.at < LIVE_TALK_EVERY)) return;
+  // only a ticket id has a conversation to read (the server answers 404 to anything else): the chat is the summary
+  if (!/^t_[a-z0-9]{6,16}$/.test(String(id))) { liveTalk.set(id, {at:Date.now(), data:{available:false, turns:[]}, busy:false}); return; }
+  liveTalk.set(id, {at:Date.now(), data:hit?.data || null, busy:true});
+  fetch('/api/talk/' + encodeURIComponent(id)).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    // a failed read keeps what the chat shows; the first one shows the summary
+    liveTalk.set(id, {at:Date.now(), data:data && typeof data === 'object' ? data : hit?.data || {available:false}, busy:false});
+    if (box.isConnected && !box.hidden) liveChatFill(box);
+  });
+}
 function liveViewsNow() {
   if (!liveViews) liveViews = liveViewRead(typeof liveLayerStore === 'function' ? liveLayerStore() : null);
   return liveViews;
@@ -132,6 +195,31 @@ function liveViewSet(id, view) {
   if (view === 'term') v[id] = 'term'; else delete v[id];
   liveViews = v;
   liveViewWrite(typeof liveLayerStore === 'function' ? liveLayerStore() : null, v);
+}
+// "Run in terminal" (ORCH-2203): types the command into the helper of this pane, into an open plain terminal (a new one
+// when none is open) or into a new plain terminal; the person presses Enter. Every refusal says what to do.
+const liveTermsOpen = () => (Array.isArray(state?.sessions) ? state.sessions : []).filter(x => x && x.kind === 'terminal' && x.open === true && typeof x.id === 'string');
+async function liveRunIn(to, tid, cmd) {
+  const say = (t, kind) => window.orch?.toast?.(t, kind);
+  if (!window.LiveTerm?.send) return say('The terminal is not ready. Reload the page and try again.', 'error');
+  let id = tid, plain = false;
+  if (to === 'helper') {
+    const live = typeof liveLayerSession === 'function' ? liveLayerSession(tid) : null;
+    if (live && live.running === false) return say('This helper is not running. Start it, then run the command.', 'error');
+  } else {
+    plain = true;
+    const was = liveTermsOpen().map(x => x.id);
+    if (to === 'new' || !was.length) {
+      const r = await act('session.new', {kind:'terminal'}, {quiet:true});
+      if (!r.ok) return say(r.text || 'The terminal did not start. Try again.', 'error');
+      await window.LiveSessions?.refresh?.();
+      id = liveTermsOpen().map(x => x.id).find(x => !was.includes(x)) || '';
+    } else id = was[0];
+    if (!id) return say('The new terminal is not listed yet. Open it from New and try again.', 'error');
+  }
+  const r = await window.LiveTerm.send(id, liveCmdTyped(cmd, plain), {plain});
+  if (r.ok) say('Typed into ' + (plain ? 'the plain terminal' : 'the helper') + '. Press Enter to run it.', 'ok');
+  else if (r.text && !r.status) say(r.text, 'error');
 }
 function liveChatNote(id, text) {  // shows at once; orch's own list takes over on the next poll
   const list = liveChatSent.get(id) || [];
@@ -162,6 +250,13 @@ function liveChatFiles(tid, names) {
       h('span', {className:'live-chat-fname'}, n));
   }));
 }
+// A suggested command with its "Run in terminal" menu: it types the command, the person presses Enter.
+function liveCmdBlock(cmd, tid) {
+  const item = (to, word) => h('button', {type:'button', className:'btn ghost sm', role:'menuitem', 'data-live-run':to, 'data-ticket':tid, 'data-cmd':cmd, 'data-key':'live-run-' + to}, word);
+  return h('div', {className:'live-cmd'}, h('code', {}, cmd),
+    h('details', {className:'menu live-run'}, h('summary', {className:'btn primary sm', 'data-key':'live-run'}, 'Run in terminal ▾'),
+      h('div', {className:'menu-pop', role:'menu', 'aria-label':'Where to type it'}, item('helper', 'This helper'), item('plain', 'Plain terminal'), item('new', 'New plain terminal'))));
+}
 function liveChatRow(r, tid = '') {
   const stamp = typeof time === 'function' ? time(r.at) : '';
   if (r.w === 'e') return h('p', {className:'live-ev meta'}, h('span', {'aria-hidden':'true'}, '✓'), ' ' + r.text + (stamp ? ' · ' + stamp : ''));
@@ -170,26 +265,37 @@ function liveChatRow(r, tid = '') {
   const links = widgets ? [] : (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
-    r.text ? h('p', {}, r.text) : null,
+    ...(r.w === 'h' && r.text ? liveChatParts(r.text) : r.text ? [{t:'text', text:r.text}] : []).map(p => p.t === 'cmd' ? liveCmdBlock(p.text, tid) : h('p', {}, p.text)),
     liveChatFiles(tid, r.files),
     links.length ? h('div', {className:'live-links'}, links) : null,
     widgets ? resultsHost(tid, {key:'chat-results-' + tid + '-' + r.step, step:r.step, cls:'live-results', label:'Results of this step'}) : null);
+}
+// The small label above a chat that is the ticket's summary, not the helper's conversation: Open terminal shows the
+// real screen (the Chat | Terminal switch's own click, below).
+function liveChatSrc(id) {
+  return h('p', {className:'meta live-chat-src', 'data-key':'live-chat-src'}, h('span', {}, 'Summary from the ticket'),
+    h('button', {type:'button', className:'btn ghost xs', 'data-live-view':'term', 'data-session':id, 'data-key':'live-chat-open-term'}, 'Open terminal'));
 }
 // Written only when the rows change, so the scroll and a selection stay; follows the end while it is at the end.
 function liveChatFill(box) {
   const id = box.dataset.liveChat, t = typeof ticketOf === 'function' ? ticketOf(id) : null;
   const st = typeof state === 'object' && state ? state : {};
-  const rows = liveChatModel(t, st.me || '', liveChatMine(st.runs?.[id], liveChatSent.get(id)));
-  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), (r.files || []).join('/'), r.step || ''].join('\u0001'));
+  if (typeof fetch === 'function') liveTalkLoad(id, box);
+  const talk = liveTalk.get(id)?.data || null;
+  const rows = liveChatModel(t, st.me || '', liveChatMine(st.runs?.[id], liveChatSent.get(id)), talk);
+  // the label says the chat is a summary once orch knows it cannot read the real conversation (not while it asks)
+  const src = talk && !liveTalkReal(talk) ? 'summary' : '';
+  const sigs = [src, ...rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), (r.files || []).join('/'), r.step || ''].join('\u0001'))];
   const was = box.liveChatSigs, sig = sigs.join('\u0002');
   if (was && was.join('\u0002') === sig && box.dataset.sig) return;
   const end = !box.dataset.sig || box.scrollHeight - box.scrollTop - box.clientHeight < 8;
   box.dataset.sig = '1';
   box.liveChatSigs = sigs;
   // new rows at the end only: they are added, so a focused link or a selection in the older rows stays
-  if (was && was.length && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length)) box.append(liveChatRow(r, id));
+  if (was && was.length > 1 && sigs.length > was.length && was.every((x, i) => x === sigs[i])) for (const r of rows.slice(was.length - 1)) box.append(liveChatRow(r, id));
   else {
     box.textContent = '';
+    if (src) box.append(liveChatSrc(id));
     if (!rows.length) box.append(h('p', {className:'meta live-chat-empty'}, 'No messages yet. Steps the helper finishes and its questions show here.'));
     else for (const r of rows) box.append(liveChatRow(r, id));
   }
@@ -245,6 +351,8 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   document.addEventListener('click', e => {
     const f = e.target.closest?.('#live-dock [data-live-file]');
     if (f && typeof previewFile === 'function') { previewFile(f.dataset.ticket, 'artifacts', f.dataset.liveFile); return; }
+    const run = e.target.closest?.('#live-dock [data-live-run]');
+    if (run) { run.closest('details')?.removeAttribute('open'); if (typeof liveRunIn === 'function') liveRunIn(run.dataset.liveRun, run.dataset.ticket, run.dataset.cmd); return; }
     const b = e.target.closest?.('#live-dock button[data-live-view]');  // the pane body carries data-live-view too
     if (!b) return;
     const id = b.dataset.session, view = b.dataset.liveView === 'term' ? 'term' : 'chat';

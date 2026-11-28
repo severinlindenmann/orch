@@ -27,6 +27,15 @@ dock-side, full-screen, full-exit.
   numbers do not fit, needs you stays and the rest becomes one More count (fold 4), so nothing is cut at 320 wide.
 - New, Open and Where Focus sits come with the layer; the bar keeps an empty `.lbar-end` slot for them.
 
+## One Helpers menu (ORCH-2198, 26 Nov, owner pick J b: "calmer")
+
+- The bar holds the name, one **Helpers ▾** button and New: no chips, no counts. A ◆ on the button when something needs
+  you (no number; the number is on the Review badge). `chipsHTML` draws that button; `?list=helpers` opens the menu.
+- The menu groups every session as Needs you, Working and Quiet (in line, idle) with their counts (`.lbar-gh`); each
+  row has Open and More and opens its pane. Built the same in `pages/livebar.js`.
+- The menu opens inside the window: above the bar at the bottom, below it in full screen where the bar sits at the
+  top (before, the list opened above the top edge and could not be seen).
+
 ## The split, built (ORCH-339, 17 Nov)
 
 focus-v4d.html stays the source of truth; nothing in the draft changed. In the new Focus the layer now holds
@@ -66,7 +75,7 @@ focus-v4d.html stays the source of truth; nothing in the draft changed. The bar 
 sessions (GET /api/sessions, pages/livesessions.js) instead of the tickets and runs: status (needs you, working, in
 line, idle, closed), what it waits on, the open question, the last lines of its screen, tool and model, open time and
 when it closes for being idle. A pane shows what the session does now, its last lines and draft D's meta line
-("Helper · Opus · open 38 min · stays warm while it works"), updated in place every 3 s. The wall builds on the same
+("Helper · Opus · open 38 min · stays open while it works"), updated in place every 3 s. The wall builds on the same
 list and the same words (liveNow, liveMeta). Master: `.live-now`, `.live-lines`, `.live-meta` in widgets.css (style
 guide: Live layer); click-through step 16.
 
@@ -112,6 +121,14 @@ draft has a separate zoom view on the page), so full screen, split and Esc are t
 the layer, then the wall. Not in this task: the pin button on a tile and renaming (pin and rename task), the New
 session buttons and Runs on (start tasks). Master: `.wall-*` in widgets.css (style guide: Live wall); click-through
 steps 4, 5, 8 and 11.
+
+## A search reaches a folded band (ORCH-2063, 25 Nov)
+
+The draft and the wall now agree on a search with folded bands: a folded band that holds a match opens by itself while
+the search runs (its chevron and `aria-expanded` follow what is on screen), so the match is visible and the next Tab
+stops on it. A fold click during the search counts for that search only; clearing the search brings back the folds the
+person saved, and their saved choice never changes. A long one-line title ends in an ellipsis instead of running over
+the line. No new control, no second search field.
 
 ## Pin and rename, built (ORCH-361, 18 Nov)
 
@@ -161,3 +178,41 @@ An idle or no-session entry that asks carries the ◆ needs-you mark, as the sum
 buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
 a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
 same order); click-through steps 4, 5, 8, 30.
+
+## Focus after ship: Open chips, words on the phone bar, plain words (ORCH-1684, 25 Nov)
+
+The product bar now has the Open group of this draft: every session open in the layer that has no chip of its own
+(not needs you, not pinned) gets a chip, also a pane with no room in the panel (Add beside at 1280, or a quiet pane
+folded while the page has cards to answer; its tooltip "Not in sight in the panel: click to show it"). The "Room for 2
+sessions here, so … waits on the bar" line is said to a screen reader only, no toast over the page's cards. On a phone
+and beside the right dock each count keeps a short word ("2 need you", "3 working", "1 in line"); only the narrowest
+fold is the numbers alone (`BL` 4 here, `data-fold` 5 in the product, each still named). Words: "stays open while it
+works", "closed, you can continue it later" (no "stays warm", no "the conversation is kept").
+Since ORCH-2198 (owner pick J b on ORCH-2188, 26 Nov) the bar has one Helpers menu instead of these chips and
+counts; the plain words stay.
+
+## Header-only panes, free splits, ticket beside Focus (ORCH-2199, ORCH-2200, ORCH-2202, 26 Nov)
+
+Owner picks of ORCH-2188 (A a, B a, F a, G a, H a, I a, M a; drawings in the ticket). focus-v4d.html now draws a pane
+as its header only above the screen: status pill (its popover: model, step, open time, how long it stays, Open ticket),
+key, title, Chat | Terminal, Copy, full screen, split right, split down, pin, close, More (Stop, End session, History,
+Where Focus sits with Bar only). No meta row, no Watching bar, no Let me type switch: a click into the screen types
+(brand edge), Esc twice or a click outside stops. Split right / down asks Chat with… / Terminal / Plain terminal. The
+mockup keeps its panes side by side; the built layer also nests them (helper left, terminal and Manager stacked right)
+with 1 px dividers to drag, and folds the side menu to its rail beside a ticket at 1280.
+
+## Chat shows the real talk or says it is a summary (ORCH-2204, 26 Nov)
+
+The Chat view shows the helper's real conversation (the newest turns of the session in use, read from the tool's own
+saved conversation) with the ticket's steps, questions and your messages around it. Where orch cannot read the
+conversation (a tool that keeps none, or the file is not on this computer), the chat is the ticket's summary and one
+small line at its top says so: "Summary from the ticket" with Open terminal (`.live-chat-src`). Here ORCH-232 shows it.
+The terminal opens without WebGL too: xterm's normal renderer draws it.
+
+## The OK card: a helper waits for your OK on its screen (ORCH-2197, 26 Nov)
+
+Owner pick C a on ORCH-2188, with the owner's comment "should show the command by default". ORCH-240 in the demo waits
+at a hook confirm: its pane shows the OK card (Helper asks to run a command, the reason, the command shown, Allow once /
+Don't allow / Open terminal) in Chat and in Terminal view (there beside the terminal, no Open terminal). The product
+draws the two answers only for a prompt it recognised on the screen and answers exactly that prompt; any other wait
+shows the card with Open terminal only. Master: `.live-ok-t`, `.live-ok-cmd` (with `.code-block`) in widgets.css.

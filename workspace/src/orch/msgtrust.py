@@ -10,9 +10,16 @@ The receiver is the decisive gate. It never trusts the relay's own check:
   bytes with a key a person accepted, checks that the outer fields equal the signed ones, the `to`, freshness
   and
   the replay list, and for a group copy the author's own signature.
-- First contact is held: a valid signature from a key nobody accepted yet is kept inert in the guarded home
-  until a person presses Accept (`accept`). A wrong, missing or changed signature is never held: refused,
-  counted and shown as Not valid.
+- First contact is trusted (RP3 A, 25 Nov 2026): the relay delivers only between workspaces the admin paired,
+  so a valid signature from the key the relay lists for a workspace nobody accepted yet is accepted
+  on the spot (by `relay-pairing`) and the message goes through the same checks. The key that is pinned is
+  the one `orch relay refresh` took straight from the relay's answer and kept in the guarded home
+  (`listed.json`, ORCH-2349), never the copy in the workspace folder (workspaces.json), which helpers and
+  other tools can write: when the two differ, or no kept copy exists yet, the message is held and the next
+  refresh settles it. A key that CHANGES later,
+  or a contact a person took back (`withdraw`), is still held inert in the guarded home until a person
+  presses Accept (`accept`). A wrong, missing or invalid signature is never held:
+  refused, counted and shown as Not valid.
 - Everything lives in the guarded orch home (keys/<workspace>/trust.json and held/), outside the workspace
   folder, so no helper, sync or relay can change who is accepted. Seen ids are kept 30 days.
 
@@ -46,7 +53,9 @@ REFUSED_KEEP = 100
 # Made by the relay itself, never signed: a closed list (relay-api.md). None of them is an allow, a person's
 # answer, a start or a trust change (test_msgtrust.py checks each).
 RELAY_MADE_TYPES = ("refresh-hint", "webhook", "control")
-PERSON_ACTIONS = ("allow", "answer")  # a held one is never run by itself on Accept
+# a held one is never run by itself on Accept: the sender sends it again (start and delegate start work, so
+# they count too; outside review, ORCH-1206)
+PERSON_ACTIONS = ("allow", "answer", "start", "delegate")
 # a refusal that means "forged or changed on the way": counted and shown as Not valid on the contact
 NOT_VALID_CODES = {
     "bad_signature",
@@ -188,23 +197,68 @@ def set_refuse_unsigned(root: Path, on: bool, by: str) -> dict:
 # ---------------------------------------------------------------- keys: accepted and hinted
 
 
+def _entry_key(w: dict) -> bytes | None:
+    """The usable ed25519 key of one directory entry, else None."""
+    sk = w.get("signing_key")
+    if not isinstance(sk, dict) or sk.get("alg") != "ed25519":
+        return None
+    try:
+        raw = msgsig.b64url_decode_strict(sk.get("public_key"))
+    except ValueError:
+        return None
+    return raw if msgsig.public_key_ok(raw) else None
+
+
 def _hint_key(root: Path, peer: str) -> bytes | None:
     """The key the relay lists for `peer` (workspaces.json signing_key). A HINT: only to tell a valid first
-    contact (held) from a forgery (refused), and as the key a person accepts after seeing its fingerprint."""
+    contact (held) from a forgery (refused), and as the key a person accepts after seeing its fingerprint.
+    It is never pinned by itself: the file is in the workspace folder (see `_listed_key`)."""
     from orch import relay
 
     for w in relay._directory(root):
-        if w.get("id") != peer:
-            continue
-        sk = w.get("signing_key")
-        if not isinstance(sk, dict) or sk.get("alg") != "ed25519":
-            return None
-        try:
-            raw = msgsig.b64url_decode_strict(sk.get("public_key"))
-        except ValueError:
-            return None
-        return raw if msgsig.public_key_ok(raw) else None
+        if w.get("id") == peer:
+            return _entry_key(w)
     return None
+
+
+LISTED = "listed.json"  # in the key folder of the guarded home: {schema, at, keys: {<peer>: <hex>}}
+LISTED_SCHEMA = "orch.listed/1"
+
+
+def _listed_key(root: Path, peer: str) -> bytes | None:
+    """The key the relay listed for `peer` at the last refresh, from the copy in the guarded home. The only
+    key first contact pins (ORCH-2349). None: no copy yet, an unreadable one, or no key for this peer."""
+    from orch import home as orch_home
+
+    try:
+        data = json.loads(orch_home._read_guarded(_dir(root) / LISTED).decode("utf-8"))
+        raw = bytes.fromhex(data["keys"][peer])
+    except (OSError, ValueError, KeyError, TypeError, Refused):
+        return None
+    return raw if data.get("schema") == LISTED_SCHEMA and msgsig.public_key_ok(raw) else None
+
+
+def keep_listed(root: Path, directory: dict) -> list[dict]:
+    """Called by `orch relay refresh` with the directory exactly as the relay answered it (not read back from
+    the workspace folder): keep every listed signing key in the guarded home, replacing the last copy. Then
+    the first-contact messages that waited for this (held as not_accepted) are checked again from the start.
+    Returns the release notes."""
+    from orch import home as orch_home
+
+    keys = {}
+    for w in [*(directory.get("workspaces") or []), *(directory.get("phones") or [])]:
+        if isinstance(w, dict) and _PEER.fullmatch(str(w.get("id", ""))):
+            raw = _entry_key(w)
+            if raw is not None:
+                keys[w["id"]] = raw.hex()
+    d = _dir(root)
+    with orch_home._key_lock(d):
+        rec = {"schema": LISTED_SCHEMA, "at": _iso(_now_ms()), "keys": keys}
+        orch_home._write_private(d / LISTED, json.dumps(rec, sort_keys=True) + "\n")
+    notes = []
+    for peer in sorted({x["peer"] for x in held(root) if x["why"] == "not_accepted" and x["peer"] in keys}):
+        notes += release(root, peer, only="not_accepted")
+    return notes
 
 
 def _accepted(st: dict, peer: str) -> list[bytes]:
@@ -335,12 +389,48 @@ class Verdict:
         return f"Verdict({self.kind!r}, {self.code!r})"
 
 
+def _same_json(a, b) -> bool:
+    """Equal as JSON, type for type: Python's True == 1 and 1.0 == 1 never count as the same value."""
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
 def _outer_matches(m: dict, s: dict) -> bool:
     """relay-api.md: outer id, from, type, ticket, reply_to, body and a string `to` equal the signed ones."""
     for k in ("id", "from", "type", "ticket", "reply_to", "body"):
-        if m.get(k) != s.get(k):
+        if not _same_json(m.get(k), s.get(k)):
             return False
     return not isinstance(s["to"], str) or m.get("to") == s["to"]
+
+
+# Fields the signed bytes speak for: what is delivered is the signed value, never the relay's outer copy, and
+# an outer copy the signed bytes do not have is dropped (outside review, ORCH-1206).
+_SIGNED_SAYS = (
+    "v",
+    "id",
+    "from",
+    "type",
+    "ticket",
+    "reply_to",
+    "body",
+    "question_id",
+    "question_sha256",
+    "expires_ms",
+    "files",
+    "origin",
+    "created_ms",
+)
+
+
+def _from_signed(m: dict, s: dict, me: str) -> dict:
+    out = dict(m)
+    for k in _SIGNED_SAYS:
+        if k in s:
+            out[k] = s[k]
+        else:
+            out.pop(k, None)
+    # a string `to` was compared above; a group's signed `to` names the group, so the copy here is ours
+    out["to"] = s["to"] if isinstance(s.get("to"), str) else me
+    return out
 
 
 def _check(root: Path, st: dict, m: dict, env, keys: dict[str, list[bytes]], now_ms: int, me: str) -> dict:
@@ -527,23 +617,46 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
         try:
             s = _check(root, st, m, env, {frm: _accepted(st, frm)}, now_ms, me)
         except msgsig.SigError as e:
-            if e.code == "unknown_key":
-                why = _try_hint(root, st, m, env, frm, now_ms, me)
-                if why is not None:
-                    return Verdict("held", why, m, frm)
-            return _refuse(st, m, e.code)
+            if e.code != "unknown_key":
+                return _refuse(st, m, e.code)
+            why = _try_hint(root, st, m, env, frm, now_ms, me)
+            if why is None:
+                return _refuse(st, m, e.code)
+            if why != "not_accepted":
+                return Verdict("held", why, m, frm)  # a changed key or a withdrawn contact stays held
+            # First contact: the admin paired the two workspaces on the relay (the relay delivers only between
+            # paired ones), so the key it lists is trusted at once (RP3 A, 25 Nov 2026). The signature was
+            # just verified with that key; the same checks (to, freshness, replay) run on it below.
+            # Pinned is only the key refresh kept in the guarded home (ORCH-2349): a workspaces.json that
+            # says another key, or no kept copy yet, holds the message until the next refresh.
+            hint = _listed_key(root, frm)
+            if hint is None or hint != _hint_key(root, frm):
+                return Verdict("held", "not_accepted", m, frm)
+            c = _contact(st, frm)
+            c["keys"] = [
+                {"pub": hint.hex(), "accepted_at": _iso(now_ms), "by": "relay-pairing", "via": "pairing"}
+            ]
+            c["accepted_after_bad"] = int(c.get("not_valid", 0))
+            try:
+                s = _check(root, st, m, env, {frm: [hint]}, now_ms, me)
+            except msgsig.SigError as e2:  # pragma: no cover - verified a moment ago by _try_hint
+                return _refuse(st, m, e2.code)
         signed = msgsig.read_envelope(env).signed
         digest = hashlib.sha256(signed).hexdigest()
-        out = dict(m)
+        out = _from_signed(m, s, me)
         out["created_at"] = _iso(s["created_ms"])
         out["signed"] = {"origin": s["origin"], "created_ms": s["created_ms"], "key_id": env.get("key_id")}
         if "expires_ms" in s:
             out["signed"]["expires_ms"] = s["expires_ms"]
+        if s["type"] == "answer":  # the question it answers, by id and signed bytes (relay._answer_asked)
+            out["signed"]["question_id"] = s.get("question_id")
+            out["signed"]["question_sha256"] = s.get("question_sha256")
         key = f"{frm}/{s['id']}"
         old = st["seen"].get(key)
         if old is not None:
             if old[1] == digest:
-                return Verdict("duplicate", "seen", out, frm)  # the relay sent it again (a lost ack)
+                # the relay sent it again (a lost ack); "dropped": a held person action that is never run
+                return Verdict("duplicate", "dropped" if old[3:] == ["dropped"] else "seen", out, frm)
             return _refuse(st, m, "replayed")
         ga = _group_author(root, st, m, now_ms)
         if ga is not None:
@@ -622,10 +735,11 @@ def held(root: Path, peer: str | None = None) -> list[dict]:
     return sorted(out, key=lambda x: (x["at"], x["id"]))
 
 
-def release(root: Path, peer: str) -> list[dict]:
+def release(root: Path, peer: str, only: str | None = None) -> list[dict]:
     """After Accept: every held message of `peer` is checked again from the start (signature, to, freshness,
     replay). The ones that pass are saved to .orch/inbox for the normal handling; a held person action (an
-    allow or an answer) is dropped, never run by itself: the sender sends it again. Returns notes."""
+    allow or an answer) is dropped, never run by itself: the sender sends it again. Returns notes.
+    only: just the ones held for this reason (a refresh settles first contacts, nothing a person must see)."""
     from orch import home as orch_home
     from orch import net
 
@@ -637,11 +751,19 @@ def release(root: Path, peer: str) -> list[dict]:
             rec = json.loads(orch_home._read_guarded(f).decode("utf-8"))
         except (OSError, ValueError, Refused):
             continue
-        m = rec.get("message") or {}
-        author = ((m.get("body") or {}).get("origin") or {}).get("from")
+        m = rec.get("message") if isinstance(rec, dict) else None
+        if not isinstance(m, dict):
+            continue
+        # body and body.origin are the sender's JSON: any shape, never a crash of another contact's Accept
+        body = m.get("body") if isinstance(m.get("body"), dict) else {}
+        origin = body.get("origin") if isinstance(body.get("origin"), dict) else {}
+        author = origin.get("from")
         if rec.get("peer") != peer and author != peer:
             continue
-        if m.get("type") in PERSON_ACTIONS:
+        if only is not None and rec.get("why") != only:
+            continue
+        # settled by a refresh a moment after it came (only): the same as pinned on arrival, nothing is stale
+        if only is None and m.get("type") in PERSON_ACTIONS:
             _tombstone(root, m)  # the same signed bytes sent again later are a duplicate, never run
             f.unlink(missing_ok=True)
             notes.append(
@@ -677,7 +799,7 @@ def _tombstone(root: Path, m: dict) -> None:
     now = _now_ms()
     with _state(root) as st:
         st["seen"].setdefault(
-            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now]
+            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now, "dropped"]
         )
 
 
@@ -779,7 +901,7 @@ def _kept_fp(c: dict) -> str | None:
 def contacts(root: Path) -> list[dict]:
     """Every workspace and phone we know (directory + trust store): id, name, fingerprint (of the key the
     relay
-    lists, or of the accepted key), state, held count. For `orch relay contacts` and the Contacts page."""
+    lists, or of the accepted key), state, held count. For `orch relay contacts` and the Relay page."""
     from orch import relay
 
     st = _load(root)
@@ -804,6 +926,7 @@ def contacts(root: Path) -> list[dict]:
                 "relay_name": relay_name,
                 "kind": "phone" if peer.startswith("ph_") else "workspace",
                 "accepted_at": keys[0].get("accepted_at"),
+                "accepted_by": keys[0].get("by"),  # relay-pairing: taken in on first contact (RP3 A)
                 "withdrawn_at": (c.get("withdrawn") or {}).get("at"),
                 "fingerprint": msgsig.fingerprint(shown) if shown else None,
                 "accepted_fingerprint": msgsig.fingerprint(acc[0]) if acc else _kept_fp(c),
@@ -840,5 +963,5 @@ def require_person_via(what: str, root: Path | None = None, by: str | None = Non
         or any(os.environ.get(k) for k in renew.RUN_MARKS)  # inside a helper run, a terminal is no proof
         or not _is_tty()
     ):
-        raise Refused(f"Only a person can do this ({what}), on the Contacts page or at a terminal.")
+        raise Refused(f"Only a person can do this ({what}), on the Relay page or at a terminal.")
     return False

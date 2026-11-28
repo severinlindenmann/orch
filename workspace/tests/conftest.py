@@ -358,6 +358,15 @@ def pytest_sessionfinish(session, exitstatus):
             pass
 
 
+@pytest.fixture(autouse=True)
+def _attended_by_default(monkeypatch):
+    """pytest's stdin is never a terminal: tests speak as the person at a terminal unless they say otherwise;
+    the unattended ones set tickets.attended to False (ORCH-2108)."""
+    from orch import tickets as _tickets
+
+    monkeypatch.setattr(_tickets, "attended", lambda: True)
+
+
 @pytest.fixture
 def proj(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -380,13 +389,72 @@ def proj(tmp_path, monkeypatch):
     monkeypatch.setattr(winfinish, "needed", lambda: False)
     # An answer starts the asking agent again (fb9). Only the tests that set up a fake agent let that happen
     # (fixture `auto_resume`); anywhere else it would start the real agent tool found on this machine.
-    from orch import runs_live
+    from orch import runs_live, tickets
 
     monkeypatch.setattr(runs_live, "resume_after_answer", lambda *a, **k: None)
+    # An answer command hands that start to a detached `orch run _resume` (runs_live.resume_soon); tests run
+    # it in-process, through the (stubbed) resume_after_answer above. test_cli_review.py checks the detached
+    # path.
+    monkeypatch.setattr(
+        runs_live,
+        "resume_soon",
+        lambda root, tid, qid, by: runs_live.resume_after_answer(
+            root, tid, next(x for x in tickets.load(root, tid)["questions"] if x["id"] == qid), by
+        ),
+    )
     # `orch needs` may start a detached look at a ticket's pull request (stuck.py): never the real GitHub
     monkeypatch.setenv("ORCH_NO_PULL_LOOK", "1")
     monkeypatch.setenv("ORCH_NO_HEALTH_CHECK", "1")  # never the real tool logins (test_health.py checks it)
     return tmp_path
+
+
+@pytest.fixture
+def install_collector(tmp_path, monkeypatch):
+    """Expose the shipped collector package and its entry point without changing the test interpreter."""
+    import tomllib
+
+    folder = CONTRACTS.parent / "workspace-addons" / "insights"
+    metadata = tomllib.loads((folder / "pyproject.toml").read_text())["project"]
+    [(name, package)] = metadata["entry-points"]["orch.addons"].items()
+
+    def install(root):
+        site = tmp_path / "provider"
+        info = site / f"{package}-{metadata['version']}.dist-info"
+        info.mkdir(parents=True)
+        (info / "entry_points.txt").write_text(f"[orch.addons]\n{name} = {package}\n")
+        for path in (folder / "src", site):
+            monkeypatch.syspath_prepend(str(path))
+        addons._save_registry([{"name": name, "source": "built-in", "version": metadata["version"]}])
+        addons._save_active(root, {name: {}})
+        addons.record_consent(root, name)
+        return os.pathsep.join((str(site), str(folder / "src")))
+
+    return install
+
+
+@pytest.fixture
+def collect_claude(proj, install_collector):
+    install_collector(proj)
+    module = adapters.collector("claude", proj)
+    assert module is not None
+    return module
+
+
+@pytest.fixture
+def queue_manifest(monkeypatch, proj):
+    """The real provider contract/reader, running only against the temporary workspace."""
+    folder = CONTRACTS.parent / "workspace-addons" / "pull-requests"
+    manifest = addons.folder_manifest(folder)
+    sources = [folder / "src", CONTRACTS.parent / "workspace" / "src"]
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, sources)))
+    monkeypatch.setattr(addons, "discover", lambda: {manifest["name"]: manifest})
+    return manifest
+
+
+@pytest.fixture
+def queue_on(queue_manifest, monkeypatch):
+    monkeypatch.setattr(addons, "active", lambda root: {queue_manifest["name"]: {}})
+    return queue_manifest
 
 
 @pytest.fixture
@@ -403,6 +471,43 @@ def subprocess_home(proj, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(d))
     yield d
     shutil.rmtree(d, ignore_errors=True)
+
+
+_CHILD_TRUST = '''\
+"""TEST-ONLY (tests/conftest.py child_trust): a child orch of the test suite uses its ORCH_HOME as the orch
+home, like _legacy_trust does in the test process. Its workspace sits in pytest's temp folder, which the real
+pairing refuses for a test install; without this the child cannot read its saved keys and evidence refuses."""
+import os
+
+if os.environ.get("ORCH_TEST_CHILD_TRUST") == "1" and os.environ.get("ORCH_HOME"):
+    from pathlib import Path
+
+    from orch import home as _orch_home
+    from orch import winacl as _winacl
+
+    def _test_home(root):
+        home = Path(os.environ["ORCH_HOME"])
+        home.mkdir(parents=True, exist_ok=True)
+        os.chmod(home, 0o700)
+        _winacl.allow_home(home)
+        return home
+
+    _orch_home.guarded_home = _test_home
+'''
+
+
+@pytest.fixture
+def child_trust(proj, tmp_path_factory, monkeypatch):  # after proj, which clears unknown env
+    """For tests whose child processes (python -m orch, a fake agent that calls orch) write evidence: the
+    child gets the same test home as _legacy_trust gives this process, through a sitecustomize.py on
+    PYTHONPATH that only acts with ORCH_TEST_CHILD_TRUST=1. No product code has a switch for it. Returns the
+    folder, for a test that builds its own PYTHONPATH."""
+    d = tmp_path_factory.mktemp("childtrust")
+    (d / "sitecustomize.py").write_text(_CHILD_TRUST, encoding="utf-8")
+    old = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(d), *([old] if old else [])]))
+    monkeypatch.setenv("ORCH_TEST_CHILD_TRUST", "1")
+    return d
 
 
 @pytest.fixture

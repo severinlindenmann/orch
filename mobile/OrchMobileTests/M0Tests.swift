@@ -418,7 +418,7 @@ final class ConversationTests: XCTestCase {
         let o = OutboxItem(clientId: "c0", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T09:59:00Z", general: true, text: "queued")
         d.outbox = [o]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .queued)
-        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed("no"))
+        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed(NotSentNote.generic))
         d.outbox = []
         d.messages = [text("m_a", from: me, to: ws, at: "2026-11-06T10:00:00Z", body: TextBody(text: "a", clientId: "c1", general: true), cid: "c1")]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .sent)
@@ -779,6 +779,51 @@ final class AppModelV3Tests: XCTestCase {
         XCTAssertTrue(m.outbox.items.isEmpty)
         XCTAssertEqual(m.messages.filter { $0.message.body.text == "later" && $0.clientId == item.clientId }.count, 1)
     }
+    /// ORCH-2125: a message is promised as waiting only once its index write landed; a failed write keeps the composer's copy.
+    func testFailedIndexWriteOfflineIsNotPromisedAndTheRetrySurvivesARelaunchOnce() async throws {
+        var m: AppModel? = await paired()
+        await m!.mock!.setOffline(true)
+        let scratch = dir.appendingPathComponent("scratch"); try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let target = SendTarget.general(workspace: MockRelay.pilatus)
+        let draft = MessageDraft(text: "the plan", files: [DraftFile(url: file(scratch, "plan.pdf", bytes: 300), kind: .file, name: "plan.pdf", mime: "application/pdf")])
+        func folders() -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.count == 36 }   // item folders are client ids
+        }
+        m!.outbox.failIndexWrites = true
+        do { _ = try await m!.send(draft, to: target); XCTFail("a message that is not saved is not reported as queued") }
+        catch { XCTAssertEqual(error as? Outbox.SaveProblem, .notSaved); XCTAssertTrue(error.localizedDescription.contains("Send again")) }
+        XCTAssertTrue(m!.outbox.items.isEmpty, "not shown as waiting")
+        XCTAssertNotEqual(m!.announcement, "No connection. The message waits on this phone.")
+        XCTAssertNotNil(m!.outbox.lastSaveError)
+        let original = folders(); XCTAssertEqual(original.count, 1, "the copied attachment is kept for the retry")
+
+        m!.outbox.failIndexWrites = false                                   // space freed: Send again with the same draft
+        let item = try await m!.send(draft, to: target)
+        XCTAssertEqual([item.clientId], original, "the retry keeps the original client id and files")
+        XCTAssertNil(item.sentMessageId); XCTAssertEqual(m!.outbox.items.map(\.clientId), [item.clientId])
+        XCTAssertNil(m!.outbox.lastSaveError)
+
+        m!.persistForBackground(); Outbox.flushAllWrites(); m = nil        // killed while offline
+        let again = AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: dir, speechCache: dir.appendingPathComponent("sp"), systemAudioControls: false)
+        XCTAssertEqual(again.outbox.items.map(\.clientId), [item.clientId], "exactly one item, with its original id")
+        let restored = try XCTUnwrap(again.outbox.items.first)
+        XCTAssertEqual(restored.files.map(\.name), ["plan.pdf"])
+        XCTAssertEqual(try Data(contentsOf: again.outbox.fileURL(restored, restored.files[0])).count, 300, "the attachment is intact")
+        await again.refresh()
+        let sent = await again.mock!.requests
+        XCTAssertEqual(sent.map(\.clientId), [item.clientId])
+    }
+    func testAChangedDraftAfterAFailedWriteReplacesTheHeldCopy() async throws {
+        let m = await paired()
+        await m.mock!.setOffline(true)
+        let target = SendTarget.general(workspace: MockRelay.pilatus)
+        m.outbox.failIndexWrites = true
+        do { _ = try await m.send(MessageDraft(text: "frist"), to: target); XCTFail("not saved") } catch {}
+        m.outbox.failIndexWrites = false
+        let item = try await m.send(MessageDraft(text: "first"), to: target)
+        XCTAssertEqual(m.outbox.items.map(\.text), ["first"], "only the newest copy from the composer is queued")
+        let saved = await m.outbox.waitUntilSaved(item.clientId); XCTAssertTrue(saved)
+    }
     func testSettingsMuteRemoveAndInvitation() async throws {
         let m = await paired()
         XCTAssertEqual(m.settings, PhoneSettings())
@@ -787,7 +832,8 @@ final class AppModelV3Tests: XCTestCase {
         await m.setMute(MockRelay.pilatus, .forever); XCTAssertTrue(m.workspace(MockRelay.pilatus)!.isMuted())
         await m.setMute(MockRelay.pilatus, .off); XCTAssertFalse(m.workspace(MockRelay.pilatus)!.isMuted())
         let added = await m.redeemInvitation(PairingLink.sample.link); XCTAssertEqual(added.map(\.id), ["ws_home000001"]); XCTAssertEqual(m.workspaces.count, 3)
-        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty); XCTAssertNotNil(m.message)
+        let again = await m.redeemInvitation(PairingLink.sample.link); XCTAssertTrue(again.isEmpty)
+        XCTAssertEqual(m.message, "This invitation has expired or was already used. Ask the person who invited you for a new one.", "a used link names who can replace it")
         await m.removeWorkspace(MockRelay.reports)
         XCTAssertNil(m.workspace(MockRelay.reports)); XCTAssertTrue(m.messages.allSatisfy { $0.workspaceId != MockRelay.reports })
     }

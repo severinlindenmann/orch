@@ -511,6 +511,11 @@ def test_a_list_row_draws_the_edit_prompt_and_delete_for_an_item_id(tmp_path):
     assert prompt[0]["data"]["value"].startswith("Run the web tests") and prompt[0]["text"] == "Edit"
     rm = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonAct")]
     assert [(n["data"]["verb"], n["data"]["target"]) for n in rm] == [("rm", "l_k2m9q4"), ("rm", "l_a1b2c3")]
+    # the row with a source ticket opens (the ticket link sits inside, ORCH-2099); the row with nothing to open
+    # shows its buttons at the end of the row, no accordion to expand first (#863)
+    assert sum(n["tag"] == "details" for n in nodes) == 1
+    acts = [n for n in nodes if n["cls"] == "row-acts"]
+    assert [[k["text"] for k in a["kids"]] for a in acts] == [["Edit", "Delete"]]
 
 
 @node
@@ -924,3 +929,26 @@ def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
     assert check_view(page) is not None
     page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
     assert check_view(page) is None
+
+
+def test_conversations_block_is_checked_by_the_view_contract():
+    from orch_dashboard import views
+
+    msg = {
+        "id": "m_1",
+        "who": "you",
+        "at": "today 18:09",
+        "text": "Hi",
+        "state": {"label": "Not sent yet", "tone": "warn"},
+    }
+    conv = {
+        "id": "ws_abcde12345",
+        "name": "Sales",
+        "messages": [msg],
+        "offline": "Not sent yet: 1 message to Sales.",
+    }
+    base = {"schema": "orch.addon-view/1", "generated_at": "2026-11-25T10:00:00Z"}
+    ok = views.check_view({**base, "blocks": [{"type": "conversations", "items": [conv]}]})
+    assert ok and ok["blocks"][0]["items"][0]["messages"][0]["state"]["label"] == "Not sent yet"
+    bad = {**conv, "messages": [{**msg, "text": "<b>x</b>"}]}
+    assert views.check_view({**base, "blocks": [{"type": "conversations", "items": [bad]}]}) is None

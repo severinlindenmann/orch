@@ -14,8 +14,8 @@ module.exports = {
     await page.getByText('Collect the allergy list').first().click();
     await page.getByRole('button', { name: 'Change title' }).waitFor();
 
-    await page.getByLabel('More ticket actions').click();
-    await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Check', exact: true }).click());
+    await page.locator('summary[data-key^="ticket-actions-"]').click();
+    await act('ticket.patch', () => page.getByRole('menuitemradio', { name: 'Review', exact: true }).click());
     // the box is one line until it is selected (ORCH-777): click into it, then Send back shows
     await page.getByPlaceholder(/Write what is new/).last().click();
     await page.getByRole('button', { name: 'Send back with this' }).waitFor();

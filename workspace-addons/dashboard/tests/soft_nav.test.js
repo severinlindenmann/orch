@@ -148,3 +148,25 @@ test('many page changes keep only the last places, not one per change forever (O
 test('a page change always lets scrolls be remembered again, even when the page was not drawn yet', () => {
   assert.match(app, /render\(\);\n {2}soft\?\.hold\(false\);/);
 });
+
+test('a new page takes the keyboard place at its heading and says its title once (#1350)', () => {
+  const {soft} = load(false);  // also without Focus: every dashboard page change
+  const live = {textContent:'old'};
+  const doc = {getElementById: id => (id === 'page-said' ? live : null)};
+  const h1 = {attrs:{}, hasAttribute(k) { return k in this.attrs; }, setAttribute(k, v) { this.attrs[k] = v; }, focus(o) { this.focused = o; }};
+  const main = {querySelector: s => (s === 'h1' ? h1 : null), focus(o) { this.focused = o; }};
+  assert.equal(soft.arrive(main, 'Tickets', doc), h1);
+  assert.equal(h1.focused.preventScroll, true, 'focus without a jump: the scroll is set after');
+  assert.equal(h1.attrs.tabindex, '-1', 'a heading can take focus but stays out of the Tab order');
+  assert.equal(live.textContent, 'Tickets');
+  const bare = {querySelector: () => null, focus(o) { this.focused = o; }};
+  assert.equal(soft.arrive(bare, 'Chat', doc), bare, 'no heading yet: <main> takes the focus');
+  assert.equal(live.textContent, 'Chat');
+  assert.equal(soft.arrive(null, 'x', doc), null);
+});
+
+test('the router moves focus on a page change of another kind or when the focus went with the old page', () => {
+  const render = app.slice(app.indexOf('function render('), app.indexOf("document.addEventListener('pointerover'"));
+  assert.match(render, /changed && !document\.querySelector\('dialog\[open\]'\) && \(r\.kind !== renderedKind \|\| lost\)\) soft\.arrive\(main, title\)/);
+  assert.match(index, /<p id="page-said" class="sr-only" role="status" aria-live="polite"><\/p>\s*<main id="content"/, 'one polite status line outside <main>, so a redraw never clears it');
+});

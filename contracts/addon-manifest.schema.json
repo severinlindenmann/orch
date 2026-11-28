@@ -19,6 +19,7 @@
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
     "description": { "$ref": "#/$defs/text", "maxLength": 120, "description": "One plain sentence for `orch addon list` and `orch --help`." },
     "run": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$", "description": "Top-level Python module. `orch <name> <args>` runs `<orch's python> -m <run> <args>` as a subprocess (addon-manifest.md, CLI contract)." },
+    "event_formats": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]{1,40}/[0-9]{1,3}$" }, "description": "Adapter event formats handled by this package's collector.py." },
     "skill": { "$ref": "#/$defs/path", "description": "Folder with SKILL.md (frontmatter name: orch-<name>). Copied to .agents/skills/orch-<name>/." },
     "agents_block": { "$ref": "#/$defs/path", "description": "Markdown body of the AGENTS.md block. Default: <skill>/AGENTS-block.md." },
     "api-credits": {
@@ -108,6 +109,13 @@
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
     },
     "needs": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> needs --json` (rows of needs.schema.json) for `orch needs`." },
+    "merge_queue": {
+      "type": "object", "required": ["read", "add"], "additionalProperties": false,
+      "properties": {
+        "read": { "$ref": "#/properties/selfcheck/items/properties/args" },
+        "add": { "$ref": "#/properties/selfcheck/items/properties/args" }
+      }
+    },
     "before_start": { "type": "boolean", "default": false, "description": "true = the add-on has `orch <name> before-start --json` (before-start.schema.json): the core asks it before every helper start which tool, model and account to use, or to wait." },
     "ticket_links": {
       "type": "array", "maxItems": 16,

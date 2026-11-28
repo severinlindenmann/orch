@@ -726,7 +726,9 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         try:
             data = safefile.open_file_ref(Path(root), "/".join(parts), FILE_MAX + 1)
         except safefile.TooLarge:
-            raise Refused("The file is bigger than 25 MB, so it was not shared") from None
+            raise Refused(
+                "The file is bigger than 25 MB, so it was not shared. Share a smaller file."
+            ) from None
         if data is None:
             raise Refused(f"{path} can't be shared (not a plain file of this workspace).")
         return data
@@ -747,7 +749,7 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
         if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
             raise Refused(f"{path} changed while it was read.")
         if st.st_size > FILE_MAX:
-            raise Refused("The file is bigger than 25 MB, so it was not shared")
+            raise Refused("The file is bigger than 25 MB, so it was not shared. Share a smaller file.")
         with os.fdopen(os.dup(fd), "rb") as f:
             return f.read(FILE_MAX + 1)
     finally:
@@ -1208,7 +1210,7 @@ def check_file(data: bytes, name: str, allow_unchecked: bool = False, host_side:
     """The mime of an allowed file, else Refused with the plain line. Unchecked when the file can't
     be scanned; allow_unchecked is only for a person's click that saw the warning."""
     if len(data) > FILE_MAX:
-        raise Refused("The file is bigger than 25 MB, so it was not shared")
+        raise Refused("The file is bigger than 25 MB, so it was not shared. Share a smaller file.")
     mime = sniff(data, name)
     if mime not in FILE_TYPES:
         raise Refused(ONLY_THESE)
@@ -1590,7 +1592,7 @@ def add_member(
         if cur and cur.get("left_at") and cur.get("reason") == "removed":
             # a person's removal is not undone by an agent
             tickets.require_human(
-                f"Add {cur.get('name') or ws} back to the group?", "adding a removed workspace again"
+                f"Add {cur.get('name') or ws} back to the group?", "adding a removed workspace again", by
             )
         if len(_active(g, True)) >= MAX_MEMBERS:
             raise Refused("A group has at most 8 members.")
@@ -1635,6 +1637,7 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         if reason == "removed":
             g["members"][ws]["removed_by"] = _changed_by(by, g["host"])  # chat info: who removed it
         notify = _active(g) + ([ws] if reason == "removed" else [])
+        before = _queued_for(root, g, ws)  # the event's send flushes the outbox and may drop some itself
         # the removal and the send intent of its member_left event are saved in ONE write (the event's seq is
         # saved before it is sent): a crash after it still tells everyone on the next sync (replay_pending),
         # and the removed workspace gets nothing new (stale_copy, _gone)
@@ -1649,7 +1652,8 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
             reason=reason,
             removed_by=_changed_by(by, g["host"]) if reason == "removed" else None,
         )
-        dropped = _drop_queued(root, g, ws)
+        _drop_queued(root, g, ws)
+        dropped = len(before - _queued_for(root, g, ws))
     _mirror_by_id(root, "grp_" + tid, by)
     return {"group": "grp_" + tid, "ws": ws, "reason": reason, "dropped": dropped}
 
@@ -1670,6 +1674,21 @@ def _drop_queued(root: Path, g: dict, ws: str) -> int:
         root, lambda m: m.get("to") == ws and _copy_of(g, m) and not _own_leave_news(m, ws)
     )
     return len(gone)
+
+
+def _queued_for(root: Path, g: dict, ws: str) -> set[str]:
+    """Ids of this group's copies for ws still waiting in the outbox (not the news of its own removal)."""
+    from orch import relay
+
+    out = set()
+    for x in relay.outbox_list(root):
+        try:
+            m = json.loads((relay._outbox(root) / f"{x['id']}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(m, dict) and m.get("to") == ws and _copy_of(g, m) and not _own_leave_news(m, ws):
+            out.add(x["id"])
+    return out
 
 
 def _own_leave_news(m: dict, ws: str) -> bool:
@@ -2348,7 +2367,7 @@ def say(
     if (
         via == tickets.PERSON_VIA
     ):  # "by you" is the person at this dashboard: an agent can't write as the person
-        tickets.require_human("Write into the group as yourself?", "writing as the person")
+        tickets.require_human("Write into the group as yourself?", "writing as the person", by)
     gid = ensure_group(root, tid, by)
     me = _me(root)
     origin = tickets.PERSON_VIA if via == tickets.PERSON_VIA else me
@@ -2480,7 +2499,7 @@ def delegate(
                 raise Refused("This group has used up its message numbers.")
             msg = _send(root, ws, "delegate", body, tid, mid=mid)
             if msg is None:  # not sent: nothing is recorded, the caller may still send a plain delegate
-                raise Refused("The task could not be sent to the group.")
+                raise Refused("The task could not be sent to the group. Try again.")
             sent = True
             g["delegates"].setdefault(ws, []).append(mid)  # recorded only after a successful send (G9)
             g["tasks"][mid] = {"ws": ws, "status": "waiting_start", "title": body["title"]}
@@ -2540,14 +2559,14 @@ def share_file(
         raise Refused("A person has to click to share a picture.")
     mime = _checked(data, path.name, by_click, confirm)
     if by_click:
-        tickets.require_human("Share this file with the group?", "sharing a file")
+        tickets.require_human("Share this file with the group?", "sharing a file", by)
     gid = ensure_group(root, tid, by)
     name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
     ttl = _line(title or name, 120) or name
     blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
     sha = hashlib.sha256(data).hexdigest()
     if blob.get("sha256") != sha or blob.get("size") != len(data):
-        raise Refused("The relay stored something different from the file. Not sent.")
+        raise Refused("The relay stored something different from the file. Not sent; try again.")
     errors: list = []
     with _state(root) as st:
         g = st["hosted"][gid]
@@ -3976,13 +3995,14 @@ def share_member(
     by_click: bool = False,
     confirm=None,
     expect_sha: str | None = None,
+    by: str | None = None,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay
 
     if not by_click:
         raise Refused("A person has to click to share a file from this workspace.")
-    tickets.require_human("Share this file with the group?", "sharing a file")
+    tickets.require_human("Share this file with the group?", "sharing a file", by)
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
     if expect_sha is not None and hashlib.sha256(data).hexdigest() != expect_sha:
@@ -3997,7 +4017,7 @@ def share_member(
         blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
         sha = hashlib.sha256(data).hexdigest()
         if blob.get("sha256") != sha or blob.get("size") != len(data):
-            raise Refused("The relay stored something different from the file. Not sent.")
+            raise Refused("The relay stored something different from the file. Not sent; try again.")
         name = relay.safe_name(phone_view.redact(path.name))[:120] or "file"
         ttl = _line(title or name, 120) or name
         body = {

@@ -80,8 +80,14 @@ class W:
         return self
 
     def person(self, *args, ok=True, env=None, input=None):
-        """A person's action (answer, ticket done, relay connect ...): a plain CLI action, no --by."""
-        return self.o(*args, ok=ok, by=None, env=env, input=input)
+        """A person's action (answer, ticket done, relay connect ...): no --by, at a terminal (an unattended
+        caller is a helper, ORCH-2108). With `input` the text goes on stdin instead (no terminal)."""
+        if input is not None:
+            return self.o(*args, ok=ok, by=None, env=env, input=input)
+        rc, out, err = self.e.at_terminal(["orch", *args], cwd=self.root, env={**self.env, **(env or {})})
+        if ok and rc != 0:
+            raise Fail(f"orch {' '.join(args)[:70]} (as the person) exit {rc}: {(err or out).strip()[-240:]}")
+        return rc, out, err
 
     def add_agent(self, name: str, command: str, interactive: str | None = None):
         """`orch config agent add` and `config set workspace.agent` are a person's actions with no test-human proof:
@@ -240,7 +246,7 @@ def c1(e):
     check(w.load(tid)["status"] == "done", "the parent was not closed (warning only)")
     # needs: nothing, then a question, then nothing again
     check("Nothing needs you" in w.o("needs")[1], "needs not empty")
-    w.o("ask", kid, "Which order?", "--option", "A", "--option", "B")
+    w.o("ask", kid, "Which order?", "--option", "A", "--option", "B", "--recommend", "A")
     rows = w.j("needs")
     check(len(rows) == 1 and rows[0]["source"] == "core" and rows[0]["kind"] == "question" and rows[0]["ticket"] == kid, f"needs rows {rows}")
     qid = w.load(kid)["questions"][0]["id"]
@@ -483,7 +489,7 @@ def n1(e):
     rc, out, err = w.sh(["orch", "addon", "add", str(addon), "--yes"], timeout=600)
     check(rc == 0, f"addon add: {(err or out)[-300:]}")
     tid = w.ticket("Needs a person")
-    w.o("ask", tid, "Go ahead?", "--option", "Yes", "--option", "No")
+    w.o("ask", tid, "Go ahead?", "--option", "Yes", "--option", "No", "--recommend", "Yes")
     row = {"id": "needs-addon:r1", "source": "needs-addon", "kind": "needs-addon:thing", "ticket": None, "title": "Fixture",
            "text": "Look at this", "tone": "warn", "since": "2026-11-05T08:00:00Z"}
     (w.root / "rows.json").write_text(json.dumps([row]))
@@ -647,6 +653,68 @@ def t2(e):
     kids = [t for t in rows if t.get("parent") == parent]
     check(len(kids) == 2, f"list does not show both children: {rows}")
     check(next(t for t in rows if t["id"] == parent)["children"] == {"total": 2, "closed": 0, "open": 2}, "list counts of the parent")
+
+
+@scenario("V2-E1")
+def e1_f2(e):
+    """F2 end to end with the fake agent, in a folder with spaces and umlauts (R3.4, R2.1-R2.6, ORCH-2069): every
+    `orch check done` evidence flag and the refusal without one; then ticket -> checklist -> the agent asks and works on
+    while it waits (waiting_on) -> the person's answer starts it again -> it finishes with the answer -> Check -> Done."""
+    w = W(e, "V2-E1", root=e.tmp / "v2" / "F2 Büro Übung").init()
+    # evidence flags: no evidence is refused; each kind is kept on its item; a file in a spaced umlaut folder is copied
+    flags = w.ticket("Belege prüfen", *(f"item {i}" for i in range(1, 8)))
+    rc, _, err = w.o("check", "done", flags, "c1", ok=False, by="agent:fake")
+    check(rc == 2 and err.startswith("Refused:") and "evidence" in err, f"done without evidence: rc={rc} {err!r}")
+    check(not w.load(flags)["checklist"][0]["done"], "an item was checked without evidence")
+    (w.root / "Berichte Ü").mkdir()
+    (w.root / "Berichte Ü" / "Q4 Bericht.txt").write_text("Umsatz ok\n", encoding="utf-8")
+    kinds = {"c1": ("--note", "read it twice"), "c2": ("--commit", "abc1234"), "c3": ("--url", "https://example.com/ü"),
+             "c4": ("--pr", "https://github.com/o/r/pull/7"), "c5": ("--command", "pytest -q"),
+             "c6": ("--file", "Berichte Ü/Q4 Bericht.txt")}
+    for cid, (flag, value) in kinds.items():
+        w.o("check", "done", flags, cid, flag, value, by="agent:fake")
+    w.o("check", "record", flags, "c7", "--cmd", "echo ok", "--exit", "0", by="agent:fake")
+    items = {c["id"]: c for c in w.load(flags)["checklist"]}
+    for cid, (flag, value) in kinds.items():
+        ev = items[cid]["evidence"]
+        check(items[cid]["done"] and len(ev) == 1 and ev[0]["type"] == flag[2:], f"{flag} evidence on {cid}: {items[cid]}")
+        check(flag == "--file" or ev[0]["ref"] == value, f"{flag} ref: {ev[0]}")
+    copy = w.root / items["c6"]["evidence"][0]["ref"]
+    check(copy.read_text(encoding="utf-8") == "Umsatz ok\n", f"evidence file not copied to {copy}")
+    check(items["c7"]["evidence"][0]["type"] == "command" and not items["c7"]["done"], f"record: {items['c7']}")
+    w.o("check", "done", flags, "c7", "--note", "the recorded run is it", by="agent:fake")
+    check(all(c["done"] and c["evidence"] for c in w.load(flags)["checklist"]), "an item has no evidence")
+
+    # the loop: the fake agent asks, finishes what does not wait for the answer, and stops (R2.6)
+    question = "Soll der Brief heute raus?"
+    w.agent(f"--ask {shlex.quote(question)}")
+    tid = w.ticket("Kundenbrief Übersicht", "Entwurf schreiben", "nach der Antwort senden")
+    w.j("run", "start", tid)
+    w.wait_done(tid)
+    t = w.load(tid)
+    check(t["status"] == "waiting" and t["waiting_on"] == {"kind": "question", "ref": "q1"}, f"not waiting: {t['status']} {t.get('waiting_on')}")
+    q = t["questions"][0]
+    check(q["text"] == question and q["options"] == ["yes", "no"] and q["recommended"] == "yes" and q["answer"] is None, f"question {q}")
+    c1, c2 = t["checklist"]
+    check(c1["done"] and c1["evidence"] and not c2["done"], f"the agent did not work on while waiting: {t['checklist']}")
+    rows = w.j("needs")
+    check([(r["ticket"], r["kind"]) for r in rows] == [(tid, "question")], f"needs rows {rows}")
+    rc, _, err = w.o("ticket", "status", tid, "review", ok=False, by="agent:fake")
+    check(rc != 0, "the agent sent a ticket with an open question to Check")
+    # the person's answer clears waiting_on and starts the agent again; it picks the answer up and finishes
+    w.person("answer", tid, "q1", "no")
+    check(w.load(tid)["waiting_on"] is None, "waiting_on not cleared by the answer")
+    check(wait_for(lambda: w.load(tid)["status"] == "review" and not w.claim_file(tid).exists(), 40),
+          f"the agent did not finish after the answer: {w.load(tid)['status']} {w.claim(tid)}")
+    t = w.load(tid)
+    check(all(c["done"] for c in t["checklist"]) and t["checklist"][1]["evidence"][0]["ref"] == "answer was no",
+          f"the answer is not in the evidence: {t['checklist']}")
+    check(len(w.lines("prompt")) == 2, f"two runs expected: {w.lines('prompt')}")
+    w.person("ticket", "status", tid, "done")
+    t = w.load(tid)
+    texts = [h["text"] for h in t["history"]]
+    check(t["status"] == "done" and "Asked q1, waiting" in texts and "Answered q1: no" in texts, f"history {texts}")
+    return f"{len(kinds) + 1} evidence kinds; ask -> waiting -> answer -> 2nd run -> Check -> Done in {w.root.name!r}"
 
 
 # ------------------------------------------------------------------------------------------------ servers

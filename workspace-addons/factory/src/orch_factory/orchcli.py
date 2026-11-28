@@ -8,6 +8,17 @@ from pathlib import Path
 
 from .store import Refused
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 READS = {"here": 0, "process": 0}  # reads answered without a new process (ORCH-634), and commands started
 
 
@@ -15,13 +26,14 @@ def _here(root, args):
     """A read answered by the core in this process or by its one read worker (orch.reads.call), when ORCH_BIN is
     this very orch: (code, value), or None to start the command as before (a test's fake orch, an older core)."""
     try:
-        from orch import reads
+        from orch import procs, reads
     except ImportError:
         return None
     if not hasattr(reads, "call"):
         return None
-    orch_bin = os.environ.get("ORCH_BIN") or shutil.which("orch")
-    if not reads.same_orch(orch_bin):
+    cmd = _orch_cmd()
+    orch_bin = shutil.which(cmd[0]) if cmd == ["orch"] else cmd[0]
+    if cmd != procs.orch_python_argv() and not reads.same_orch(orch_bin):
         return None
     try:
         return reads.call(Path(root), [*args, "--json"])
@@ -33,7 +45,10 @@ def _value(code, value):
     if code:
         if not isinstance(value, dict):
             raise Refused("Orch refused the request.", "refused")
-        error = Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
+        code = value.get("code")
+        if code is None and "changed_by" in value and "revision" in value:
+            code = "conflict"  # core's stale-edit refusal (--if-revision) carries no code; callers retry on "conflict"
+        error = Refused(value.get("error", "Orch refused the request."), code or "refused")
         error.found = value.get("found")  # `orch secret scan`: what it found (kind and line, never the text)
         raise error
     if value is None:
@@ -50,7 +65,7 @@ def call(root, *args, write=False, by=None, data=None):
             READS["here"] += 1
             return _value(*got)
     READS["process"] += 1
-    cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"]
+    cmd = [*_orch_cmd(), *args, "--json"]
     if write:
         cmd += ["--by", by or "agent:factory"]
     env = dict(os.environ, ORCH_ROOT=str(root))

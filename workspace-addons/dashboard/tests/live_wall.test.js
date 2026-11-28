@@ -5,6 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const wall = require('../src/orch_dashboard/web/pages/livewall.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
@@ -60,6 +61,8 @@ test('the peek: the last three lines that say something; none while a question w
   assert.equal(wall.liveWallPeek(sess('b', 'B', 'in-line', {lines:[]})), '');
   assert.equal(wall.liveWallPeek(sess('c', 'C', 'working', {lines:null})), '');
   assert.equal(wall.liveWallPeek(null), '');
+  // report r-1127-0540-ws-2: a right-aligned terminal line keeps no long run of spaces; the indent stays
+  assert.equal(wall.liveWallPeek(sess('d', 'D', 'working', {lines:['  done' + ' '.repeat(60) + 'Update installed']})), '  done  Update installed');
 });
 
 test('folded bands are kept per workspace in this browser; broken or foreign data reads as nothing folded', () => {
@@ -152,13 +155,13 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   const busy = wall.liveWallBands([{id:'t1', status:'working'}], ['t1'], '', null);
   assert.equal(wall.liveWallEmpty('need', 'x', busy), 'Nothing needs you outside Pinned.');
   // a ticket that needs you without a session joins the wall from the needs-you number and sits in the Needs you band
-  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Check'}, {id:'t3', title:'Has a session'}]);
+  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Review'}, {id:'t3', title:'Has a session'}]);
   assert.equal(joined.length, 3, 'a ticket with a session keeps its own entry');
   assert.equal(JSON.stringify(wall.liveWallBands(joined, ['s1'], '', null).need.map(s => s.id)), JSON.stringify(['t2', 't3']));  // the one that asks first
-  assert.equal(joined[2].word, 'Check');
+  assert.equal(joined[2].word, 'Review');
   // #1801: an idle session whose ticket the number counts (no needs flag from the server) moves to Needs you too
   const idle = {id:'t4', status:'idle', title:'In Review'};
-  const flagged = wall.liveWallWithNeeds([idle, {id:'t5', status:'idle'}], [{id:'t4', word:'Check'}]);
+  const flagged = wall.liveWallWithNeeds([idle, {id:'t5', status:'idle'}], [{id:'t4', word:'Review'}]);
   const fb = wall.liveWallBands(flagged, [], '', null);
   assert.deepEqual(fb.need.map(s => s.id), ['t4']);
   assert.deepEqual(fb.idle.map(s => s.id), ['t5']);
@@ -210,9 +213,62 @@ test('with a filter, a band without a match is left out and the filter is a plai
   assert.match(src, /filter\(\(\[id\]\) => b\[id\]\.length \|\| !ui\.f\.trim\(\)\)/);
   // typing only filters what is drawn: no form to submit, no action, no start
   const input = src.slice(src.indexOf("document.addEventListener('input'"), src.indexOf("document.addEventListener('click'"));
-  assert.match(input, /liveWallState\(\)\.f = e\.target\.value;\s*liveWallRepaint\(\);/);
+  assert.match(input, /(liveWallState\(\)|ui)\.f = e\.target\.value;[\s\S]*?liveWallRepaint\(\);/);
   assert.doesNotMatch(input, /fetch|act\(|start|submit/i);
   assert.doesNotMatch(src, /<form|h\('form'/);
+});
+
+// ORCH-2063: the page itself, drawn with a stand-in h(): 120 sessions with long, alike titles, Idle and no session folded
+// and saved; a search for one key shows its line in that band without touching the saved fold.
+test('ORCH-2063: a search opens a folded band that holds the match, for that search only', () => {
+  const mem = new Map([['orch.live.wall', JSON.stringify({Pilatus:{col:{idle:true}}})]]), on = {};
+  const h = (tag, attrs, ...children) => ({tag, attrs:attrs || {}, dataset:{}, querySelector:() => null, children:children.flat(Infinity).filter(x => x != null && x !== false)});
+  const word = {working:'Working', idle:'Idle', closed:'No session'};
+  const list = Array.from({length:120}, (_, i) => {
+    const n = 5001 + i, status = i < 10 ? 'working' : i < 100 ? 'idle' : 'closed';
+    return {id:'t_' + n, key:'ORCH-' + n, status, word:word[status], lines:[],
+      title:('Quarterly partner newsletter for the northern region: check every figure against the sales sheet, part ' + n + ' ').padEnd(200, 'x')};
+  });
+  const c = vm.createContext({h, state:{workspace:'Pilatus'}, ticketOf:() => null, array:v => Array.isArray(v) ? v : [], iconEl:n => h('svg', {'data-icon':n}),
+    liveName:s => s.title, liveNow:s => s.word, liveTool:() => '', liveWarm:() => '', liveMeta:() => [],
+    window:{addEventListener() {}, localStorage:{getItem:k => mem.get(k) ?? null, setItem:(k, v) => mem.set(k, String(v))},
+      LiveSessions:{ready:true, list, pins:['t_5003']}},
+    document:{addEventListener:(type, fn) => { on[type] = fn; }, querySelector:() => null}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8'), c);
+  const all = (node, ok, out = []) => { if (node && typeof node === 'object') { if (ok(node.attrs || {})) out.push(node); (node.children || []).forEach(x => all(x, ok, out)); } return out; };
+  const band = id => {
+    const root = vm.runInContext('liveWall()', c), sec = all(root, a => a['data-band'] === id)[0];
+    return {root, sec, open:sec && all(sec, a => a['data-wall-fold'] === id)[0].attrs['aria-expanded'], ids:sec ? all(sec, a => 'data-wall-open' in a).map(x => x.attrs['data-wall-open']) : []};
+  };
+  const type = value => on.input({target:{matches:() => true, value}});
+  const fold = (id, open) => on.click({target:{closest:sel => sel === '[data-wall-fold]' ? {dataset:{wallFold:id}, getAttribute:() => String(open)} : null}});
+  const saved = mem.get('orch.live.wall');
+  let b = band('idle');
+  assert.deepEqual(b.root.children.map(x => x.attrs['data-key']), ['wall-head', 'wall-tools', 'wall-body'], 'summary, filter, bands: Tab goes from the filter to the bands');
+  assert.equal(b.open, 'false');
+  assert.deepEqual(b.ids, [], 'folded: no lines');
+  type('ORCH-5087');
+  b = band('idle');
+  assert.equal(b.open, 'true', 'aria-expanded says what is on screen');
+  assert.deepEqual(b.ids, ['t_5087'], 'the one match is drawn in the folded band');
+  assert.match(JSON.stringify(all(b.sec, a => a['data-wall-fold'] === 'idle')[0]), /Idle and no session \(1\)/);
+  assert.equal(mem.get('orch.live.wall'), saved, 'the saved fold is not changed');
+  fold('idle', true);
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'a fold click during the search folds it for this search');
+  assert.equal(mem.get('orch.live.wall'), saved, 'and is not saved');
+  type('');
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'cleared: the saved fold is back');
+  type('ORCH-5099');
+  assert.deepEqual(band('idle').ids, ['t_5099'], 'the next search starts from the saved choice, not the old click');
+  type('ORCH-5003');
+  assert.deepEqual(band('pin').ids, ['t_5003'], 'a pinned match stays in Pinned');
+  type('zzqx nothing');
+  assert.match(JSON.stringify(band('idle').root), /No session matches “zzqx nothing”/, 'a true zero-result search says so');
+  type('');
+  fold('idle', false);
+  assert.deepEqual(JSON.parse(mem.get('orch.live.wall')).Pilatus.col, {}, 'outside a search a fold click is saved as before');
 });
 
 // Focus polish: the wall says when it is loading, when the sessions did not load, when there are none and when the
@@ -235,4 +291,31 @@ test('a session without a live helper that asks shows the needs-you mark, as the
     assert.equal(wall.liveWallMark(sess('t_1', 'ORCH-1', status, {needs:true})), 'needs-you', status);
     assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
   }
+});
+
+test('ORCH-2271: a band draws its first 24 entries and the Tickets list mark for the rest', () => {
+  const list = Array.from({length: 480}, (_, i) => ({id: 't_' + i}));
+  assert.equal(wall.liveWallCut('need', list).shown.length, 480, 'without the paging of the Tickets page every entry shows');
+  const marks = [];
+  const caps = new Map();
+  global.IntersectionObserver = function () {};
+  global.capOf = (key, step) => caps.get(key) || step;
+  global.moreMark = (key, hidden, fetchMore, step) => { marks.push([key, hidden, step]); caps.set(key, (caps.get(key) || step) + step); return {mark: key}; };
+  try {
+    const cut = wall.liveWallCut('need', list);
+    assert.equal(cut.shown.length, wall.LIVE_WALL_FIRST);
+    assert.deepEqual(marks, [['wall-need', 480 - 24, 24]]);
+    assert.equal(wall.liveWallCut('need', list).shown.length, 48, 'each step brings 24 more');
+    assert.deepEqual(cut.more, {mark: 'wall-need'});
+    assert.equal(wall.liveWallCut('pin', list.slice(0, 3)).more, null, 'a short band has no mark');
+  } finally { delete global.capOf; delete global.moreMark; delete global.IntersectionObserver; }
+  const src = fs.readFileSync(path.join(WEB, 'pages', 'livewall.js'), 'utf8');
+  assert.match(src, /armLoadMore\(document\.querySelector\('main'\)\)/, 'a repaint of the wall arms the mark');
+});
+
+test('the Needs you and working heading carries no number of its own; the other bands keep theirs', () => {
+  // report r-1127-0540-ws-2: '162 need you · 4 working' sat above 'Needs you and working (142)'
+  assert.equal(wall.liveWallBandTitle('need', 'Needs you and working', 142), 'Needs you and working');
+  assert.equal(wall.liveWallBandTitle('queue', 'In line', 5), 'In line (5)');
+  assert.equal(wall.liveWallBandTitle('pin', 'Pinned', 1), 'Pinned (1)');
 });

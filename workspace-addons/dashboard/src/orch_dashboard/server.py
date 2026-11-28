@@ -29,6 +29,7 @@ from . import (
     rolefiles,
     selfupdate,
     sessionlist,
+    sessiontalk,
     ticketfiles,
     tokenlogin,
 )
@@ -81,6 +82,7 @@ SETTINGS_OPS = (
     "prepare.set",
     "auto_reviewer.set",
     "away.set",
+    "reviewer_mode.set",
     "diag.set",
     "typing.set",
     "terminal-typing.set",  # ORCH-1656: the plain terminal's switch showed its old state until the full build
@@ -167,6 +169,11 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
 VIEW_KEYED = re.compile(r"/view/(t_[a-z0-9]{6,16})/k/([0-9a-f]{16})/(artifacts|evidence|files)/(.+)")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
+# Every answer without its own policy: no plug-in content, no <base> that moves the page's scripts, forms post here only.
+DEFAULT_CSP = (
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; "
+    "object-src 'self'; base-uri 'none'; form-action 'self'"
+)
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the
 # dashboard's page secret or reach into the dashboard page; it acts with a frame pass (framepass.py). The same flags
@@ -294,7 +301,7 @@ FILE_STAMP_MAX = 64
 
 TERMINAL_OFF = (
     "Typing into the plain terminal is off. "
-    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+    "The owner turns on 'Let me type into the plain terminal' in Settings \u2192 People."
 )
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
@@ -496,10 +503,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):  # a sandboxed add-on page (origin "null") may read this answer
             self.send_header("Access-Control-Allow-Origin", "null")
             self.send_header("Vary", "Origin")
-        self.send_header(
-            "Content-Security-Policy",
-            csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
-        )
+        if "Referrer-Policy" not in (extra or {}):
+            self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("Content-Security-Policy", csp or DEFAULT_CSP)
         self.end_headers()
         # In slices: the socket timeout (10 s) bounds each send, not the whole body. One write of a big answer had
         # to finish within 10 s and was cut on a slow link while the header kept the full length (ORCH-580:
@@ -801,16 +807,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             return hit[1]
         port = None
-        if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
+        pages = {a["name"] for a in load_addons(self.root, self.orch_bin) if a.get("page")}
+        if name in pages:
+            now = time.monotonic()
             for svc in load_services(self.root, self.orch_bin):
                 m = LOCAL.fullmatch(str(svc.get("url") or ""))
                 if (
-                    svc.get("addon") == name
-                    and svc.get("running") is True
+                    svc.get("running") is True
                     and m
                     and 0 < int(m.group(1)) < 65536
+                    and svc.get("addon") in pages
                 ):
-                    port = int(m.group(1))
+                    if svc["addon"] == name:
+                        port = int(m.group(1))
+                    elif stamp is not None:
+                        # the same look found the other pages' ports: the next page opened does not ask orch
+                        # again (ORCH-2288: about a second per add-on on a first open)
+                        _PORTS[(str(self.root), svc["addon"])] = (now, int(m.group(1)), stamp)
         _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 
@@ -1069,6 +1082,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/term/confirm":  # the helper's confirm prompt for the OK card (ORCH-2197)
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # what the helper's screen shows: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            from . import termsession
+
+            tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
+            prompt = termsession.confirm(self.root, self.orch_bin, tid)
+            return self._send(
+                200,
+                json.dumps({"prompt": prompt}).encode(),
+                "application/json",
+                {"Cache-Control": "no-store"},
+            )
         if (
             path == "/api/term/stream"
         ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
@@ -1266,6 +1296,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 200,
                 json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
+            )
+        m = re.fullmatch(r"/api/talk/(t_[a-z0-9]{6,16})", path)
+        if m:  # the newest turns of the helper's real conversation for the pane's Chat (ORCH-2204), read only
+            return self._send(
+                200, json.dumps(sessiontalk.talk(self.root, m.group(1))).encode(), "application/json"
             )
         m = re.fullmatch(r"/api/role/(t_[a-z0-9]{6,16})", path)
         if m:  # a repeating ticket's runs, results, findings and totals for the role page (ORCH-827)
@@ -1533,6 +1568,36 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         if code != 200:
             return self._send(code, str(out).encode(), "text/plain; charset=utf-8")
         self._send(200, json.dumps(out).encode(), "application/json")
+
+    def _term_confirm(self):
+        """POST /api/term/confirm {ticket, answer: yes|no, digest}: Allow once or Don't allow on the OK card
+        (ORCH-2197). The person's own dashboard session only (cookie + page secret, as /api/term/keys); only the
+        confirm prompt the card showed (its digest, read again from the screen now), only its plain Yes or its No.
+        Not behind the typing setting: a person who only uses Chat must be able to answer it (owner, ORCH-2188 C)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 4096:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "answer", "digest"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import termsession
+
+        code, text = termsession.answer(
+            self.root, self.orch_bin, str(body["ticket"]), body["answer"], body["digest"]
+        )
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
     def _term_keys(self):
         """Type into the live helper session: the person's own dashboard session only (cookie + page secret: the
@@ -1833,7 +1898,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             200,
             json.dumps({"secret": self.session.secret}).encode(),
             "application/json",
-            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie)},
+            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie) + tokenlogin.secure_attr(self)},
         )
 
     def do_POST(self):
@@ -1853,6 +1918,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/term/confirm":
+            return self._term_confirm()
         if path == "/api/browse/stop":
             return self._browse_stop()
         if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)
@@ -1955,7 +2022,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if first:
                 break
             if entry.caller != caller or entry.op != str(op):  # an id is only ever answered to who sent it
-                raise actions.BadRequest("That request could not be read.")
+                raise actions.BadRequest("That request could not be read. Reload the page and try again.")
             if entry.what != what:  # the same id with other contents: never run it as well, never answer it
                 raise actions.BadRequest(
                     "This was already sent with other contents. Close this window and look in the ticket list."
@@ -2071,8 +2138,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             # big workspace and kept "Sending…" on screen), never as the new cache.
             state = dict(self.server.state_cache.get()[0])
         elif state is None and body.get("op") in SETTINGS_OPS:
-            state = patch_settings(self.root, self.orch_bin, self.server.state_cache.get()[0], body.get("op"))
-            self.server.state_cache.quick(state)  # before the reply's own keys are added
+            op = body.get("op")  # the quick copy is stored before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_settings(self.root, self.orch_bin, held, op)
+            )
         elif (
             state is None
             and isinstance(tid, str)
@@ -2081,9 +2150,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):
             # A click on one ticket (accept, answer, save, a task ...): the cached state with that ticket read again,
             # at once; the full build runs in the background (ORCH-102: a click waited seconds for it).
-            state = patch_ticket(self.root, self.orch_bin, self.server.state_cache.get()[0], tid)
-            if state is not None:
-                self.server.state_cache.quick(state)  # before the reply's own keys are added
+            state = self.server.state_cache.patch(
+                lambda held: patch_ticket(self.root, self.orch_bin, held, tid)
+            )
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added

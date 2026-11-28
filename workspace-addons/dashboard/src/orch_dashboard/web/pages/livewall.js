@@ -3,11 +3,12 @@
 // workspace in bands: Pinned, Needs you and working (orange needs-you tiles first), In line, Idle and no session. A
 // working tile shows what its helper does in one sentence and a peek of its last lines, kept current by the live
 // sessions API (pages/livesessions.js, ORCH-359). A filter keeps the matching tiles; a band folds away and stays
-// folded (per workspace, in this browser). Clicking a tile zooms into it: it opens in the layer (pages/live-layer.js);
+// folded (per workspace, in this browser); a search opens a folded band that holds a match (ORCH-2063). Clicking a tile zooms into it: it opens in the layer (pages/live-layer.js);
 // full screen and Esc are the layer's. Pins and own names are kept by orch for the workspace (window.LiveSessions, ORCH-361).
 // Look: the kit's .wall-* rules (widgets.css).
 const LIVE_WALL_KEY = 'orch.live.wall';
 const LIVE_WALL_MANY = 12;  // from this many sessions the long bands scroll inside themselves (draft D, 24 and more)
+const LIVE_WALL_FIRST = 24;  // entries a band draws first; the next ones as its end nears the view (ORCH-2271)
 const LIVE_WALL_PEEK = 3;  // last lines in a tile's peek
 const LIVE_WALL_SYM = {'needs-you':'◆', working:'●', 'in-line':'◷', idle:'◐', closed:'○'};
 const LIVE_WALL_WORD = {'needs-you':'Needs you', working:'Working', 'in-line':'In line', idle:'Idle', closed:'No session'};
@@ -108,7 +109,17 @@ function liveWallPlaces(p) {
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
-  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '')).filter(x => x.trim()).slice(-n).join('\n');
+  // a terminal pads right-aligned text with a long run of spaces: two spaces in a peek (report r-1127-0540-ws-2)
+  return s.lines.map(x => String(x == null ? '' : x).replace(/\s+$/, '').replace(/(\S)[ \t\u00a0]{3,}(?=\S)/g, '$1  ')).filter(x => x.trim()).slice(-n).join('\n');
+}
+// ORCH-2063: is a band shown folded? While a search runs, a band the person folded opens by itself when it holds a
+// match (their saved choice stays as it is). A fold click during the search counts for that search only (ui.sf, never
+// saved) and is dropped when the search is cleared, so the next search starts from the saved choice again.
+function liveWallFolded(id, ui, n) {
+  const col = !!ui?.col?.[id];
+  if (!String(ui?.f || '').trim()) return col;
+  const now = ui?.sf && typeof ui.sf === 'object' ? ui.sf : {};
+  return Object.prototype.hasOwnProperty.call(now, id) ? now[id] === true : col && !n;
 }
 // What is kept per workspace in this browser: the folded bands. The filter is not kept (a fresh visit shows all).
 function liveWallRead(store, ws) {
@@ -129,7 +140,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallFolded, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallBandTitle, liveWallRead, liveWallWrite, liveWallCut, LIVE_WALL_MANY, LIVE_WALL_FIRST};
 }
 
 // --- the page ---
@@ -138,7 +149,7 @@ let liveWallWs = null;
 function liveWallStore() { try { return window.localStorage; } catch { return null; } }
 function liveWallState() {
   const ws = typeof state === 'object' && state ? String(state.workspace || state.settings?.ws_name || '') : '';
-  if (!liveWallUi || liveWallWs !== ws) { liveWallUi = {...liveWallRead(liveWallStore(), ws), f:liveWallUi?.f || ''}; liveWallWs = ws; }
+  if (!liveWallUi || liveWallWs !== ws) { liveWallUi = {...liveWallRead(liveWallStore(), ws), f:liveWallUi?.f || '', sf:{}}; liveWallWs = ws; }
   return liveWallUi;
 }
 function liveWallPins() {
@@ -236,14 +247,27 @@ function liveWallEmpty(id, empty, b) {
   if (id === 'need' && busy) return 'Nothing needs you outside Pinned.';
   return empty;
 }
+// ORCH-2271: a band draws its first LIVE_WALL_FIRST entries and the next ones as its end nears the view (the Tickets
+// list's own "Loading more…" mark, pages/tickets.js). At 10,000 tickets Needs you held about 480 tiles, each reading its
+// ticket's files: the wall took 3.8 s.
+function liveWallCut(id, list) {
+  // the mark draws more only once seen: without an observer every entry shows, as before
+  const paged = typeof moreMark === 'function' && typeof capOf === 'function' && typeof IntersectionObserver === 'function';
+  const cap = paged ? capOf('wall-' + id, LIVE_WALL_FIRST) : list.length;
+  return {shown:list.slice(0, cap), more:paged && list.length > cap ? moreMark('wall-' + id, list.length - cap, null, LIVE_WALL_FIRST) : null};
+}
+// A band's heading with its count. Needs you and working has none: the summary above already says how many need you
+// and how many work, and its tiles (one per ticket) never add up to that number of things to answer (owner, report
+// r-1127-0540-ws-2: '162 need you · 4 working' above 'Needs you and working (142)').
+function liveWallBandTitle(id, title, n) { return id === 'need' ? title : title + ' (' + n + ')'; }
 function liveWallBand(id, title, empty, list, ui, many) {
-  const col = !!ui.col[id], tiles = id === 'pin' || id === 'need';
+  const col = liveWallFolded(id, ui, list.length), tiles = id === 'pin' || id === 'need', cut = liveWallCut(id, list);
   return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
     h('h2', {className:'wall-bh'}, h('button', {type:'button', className:'wall-bt', 'data-wall-fold':id, 'data-key':'wall-fold-' + id, 'aria-expanded':String(!col)},
-      h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), title + ' (' + list.length + ')')),
+      h('span', {className:'wall-chev', 'aria-hidden':'true'}, col ? '▸' : '▾'), liveWallBandTitle(id, title, list.length))),
     col ? null : list.length
       ? h('div', {className:tiles ? 'wall-tiles' : 'wall-lines', 'data-key':'wall-list-' + id, 'data-many':many && list.length > 4 ? '1' : null},
-        list.map(s => tiles ? liveWallTile(s, id === 'pin') : liveWallLine(s, false)))
+        cut.shown.map(s => tiles ? liveWallTile(s, id === 'pin') : liveWallLine(s, false)), cut.more)
       : h('p', {className:'meta wall-none'}, empty));
 }
 // The bands and the summary (repainted in place on every answer of the sessions API).
@@ -254,7 +278,7 @@ function liveWallNeeds() {
   try { n = needsToday(); } catch (e) { return []; }
   const ids = [...array(n.askedItems).map(i => i.ticket), ...array(n.review).map(t => t.id), ...array(n.failed).map(([t]) => t.id)];
   return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
-    word:t.status === 'review' ? 'Check' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
+    word:t.status === 'review' ? 'Review' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
 }
 // One of the master's states (kit UI.state via stateNote) under the filter; its button is caught by the click below.
 function liveWallNote(key, title, text, kind, label, attr) {
@@ -290,7 +314,8 @@ function liveWallBody() {
   if (view === 'wait') return h('div', {className:'wall-tiles', 'data-key':'wall-wait', 'aria-busy':'true'},
     h('p', {className:'sr-only', role:'status'}, 'Loading the sessions…'), [1, 2, 3].map(() => h('div', {className:'skeleton sk-card', 'aria-hidden':'true'})));
   if (view === 'error') return liveWallNote('wall-error', 'The sessions did not load', 'orch did not answer just now. It tries again by itself.', 'error', 'Try again', 'data-wall-retry');
-  if (view === 'empty') return liveWallNote('wall-empty', 'No sessions yet', 'A session shows here as soon as a helper starts work on a ticket.', 'empty');
+  if (view === 'empty') return window.UI?.pageEmpty ? window.UI.pageEmpty({title:'No sessions yet', text:'A session shows here as soon as a helper starts work on a ticket.', dataKey:'wall-empty'})
+    : liveWallNote('wall-empty', 'No sessions yet', 'A session shows here as soon as a helper starts work on a ticket.', 'empty');
   if (view === 'nomatch') return liveWallNote('wall-nomatch', 'No session matches “' + ui.f.trim() + '”', 'Try another word, or show all sessions again.', 'empty', 'Clear filter', 'data-wall-clear');
   return h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
     // with a filter, a band without a match is left out: its "nothing here" line would not be true (ORCH-2045)
@@ -325,6 +350,7 @@ function liveWallRepaint() {
   if (head) reconcile(head, h('div', {}, liveWallHead()));
   reconcile(host, h('div', {}, liveWallBody()));
   if (typeof resultsFillAll === 'function') resultsFillAll(host);
+  if (typeof armLoadMore === 'function') armLoadMore(document.querySelector('main'));  // a band's "Loading more…" mark
   if (moving) for (const el of host.querySelectorAll('[data-tile]')) { const r = moving.get(el.dataset.tile); if (r) window.orch.flip(el, r, {scale:false}); }
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
@@ -332,13 +358,17 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   window.addEventListener('orch:live-pins', liveWallRepaint);
   document.addEventListener('input', e => {
     if (!e.target.matches?.('[data-wall-filter]')) return;
-    liveWallState().f = e.target.value;
+    const ui = liveWallState();
+    ui.f = e.target.value;
+    if (!ui.f.trim()) ui.sf = {};  // a cleared search forgets its own fold clicks (ORCH-2063)
     liveWallRepaint();
   });
   document.addEventListener('click', e => {
     if (e.target.closest?.('[data-wall-retry]')) { window.LiveSessions?.refresh?.(); return; }
     if (e.target.closest?.('[data-wall-clear]')) {
-      liveWallState().f = '';
+      const ui = liveWallState();
+      ui.f = '';
+      ui.sf = {};  // a cleared search forgets its own fold clicks (ORCH-2063)
       const input = document.querySelector('main [data-wall-filter]');
       if (input) input.value = '';
       liveWallRepaint();
@@ -348,8 +378,12 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     const fold = e.target.closest?.('[data-wall-fold]');
     if (fold) {
       const ui = liveWallState(), id = fold.dataset.wallFold;
-      if (ui.col[id]) delete ui.col[id]; else ui.col[id] = true;
-      liveWallWrite(liveWallStore(), liveWallWs, ui);
+      // during a search the click folds or opens what is on screen for this search only; the saved choice stays
+      if (ui.f.trim()) ui.sf = {...ui.sf, [id]:fold.getAttribute('aria-expanded') === 'true'};
+      else {
+        if (ui.col[id]) delete ui.col[id]; else ui.col[id] = true;
+        liveWallWrite(liveWallStore(), liveWallWs, ui);
+      }
       liveWallRepaint();
       document.querySelector('main [data-wall-fold="' + id + '"]')?.focus({preventScroll:true});
       return;

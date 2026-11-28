@@ -1,7 +1,8 @@
 'use strict';
 // The terminal view of a session in the layer (ORCH-744, draft D feature 5): the helper's real screen in the master
-// terminal (kit term.js, UI.term) where the pane shows Terminal. Watching only by default: nothing is typed until the
-// person turns on "Let me type", and the server checks again (the typing setting and the sign-in).
+// terminal (kit term.js, UI.term) where the pane shows Terminal. No switch (ORCH-2199, owner pick B a): a click into the
+// screen types there, Esc twice or a click outside stops; the server checks again (the typing setting and the
+// sign-in). The screen's tools (keyboard icon, Copy) sit in the pane header, so the screen gets the pane's height.
 // The screen comes from the terminal bridge (ORCH-743) as server-sent events, GET /api/term/stream?ticket=<id>:
 // hello {typing_allowed, page}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, typing {by}, end
 // {state}. One page types at a time (ORCH-883): "Let me type" claims it with POST /api/term/typing {ticket, page, on}
@@ -46,8 +47,9 @@ function liveTermFor(id, label, plain) {
   if (t) return t;
   const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
-    label, plain,
-    settingsHref: page ? '#settings/addons/' + encodeURIComponent(page) : null,  // ORCH-1600: the typing switch is there
+    label, plain, toolsOut:true,
+    // ORCH-1600: the typing switch is there; the plain terminal's is the owner's, in People (ORCH-1684)
+    settingsHref: page ? (plain ? '#settings/people' : '#settings/addons/' + encodeURIComponent(page)) : null,
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
     onTyping: async (on, byOther) => {
@@ -68,6 +70,8 @@ const liveTermTold = () => { if (typeof window === 'object' && typeof CustomEven
 if (typeof window === 'object') window.LiveTerm = {
   has: id => liveTerms.has(id),
   typing: id => !!liveTerms.get(id)?.ui.typing(),
+  send: liveTermSend,
+  mount: (host, id, label, plain) => liveTermMount(host, id, label, plain),
   // typing for this session as soon as its stream allows it: now, or after a new hello (the setting was just turned on)
   want(id) {
     const t = liveTerms.get(id);
@@ -77,6 +81,33 @@ if (typeof window === 'object') window.LiveTerm = {
     liveTermClose(t, 0);  // the stream opens again on the next tick and says hello with the new setting
   },
 };
+// Types text (never Enter) into a session's terminal for "Run in terminal" (ORCH-2203): the session's pane shows its
+// terminal (opened or switched to Terminal), and once its stream says hello the text goes the way a key does
+// (/api/term/input: the sign-in and the typing setting are checked there). Resolves {ok, text}.
+async function liveTermSend(id, text, {wait = 6000, plain = false} = {}) {
+  if (!plain && typeof liveViewSet === 'function' && liveViewOf(id) !== 'term') liveViewSet(id, 'term');
+  if (plain && typeof window === 'object') window.LiveLayer?.open?.(id);
+  if (typeof liveLayerFill === 'function') liveLayerFill();
+  const until = Date.now() + wait;
+  let t = liveTerms.get(id);
+  while (!(t && t.es && t.page) && Date.now() < until) { await new Promise(r => setTimeout(r, 100)); t = liveTerms.get(id); }
+  if (!(t && t.es && t.page)) return {ok:false, text:'That terminal is not open yet. Open it and try again.'};
+  const r = await liveTermPost('/api/term/input', {ticket:id, data:text, page:t.page});
+  if (!r.ok) liveTermSay(r);
+  return r;
+}
+// Review's side panel (ORCH-2185, Focused review D): the session's terminal in a host of its own, watching until the
+// person turns on "Let me type". It is the same one terminal and stream per session as a live pane's: a terminal a
+// pane shows now stays there (false: the panel says where it is). liveTermTick closes it once no page shows it.
+function liveTermMount(host, id, label, plain = false) {
+  if (!host || typeof window !== 'object' || !window.UI?.term || !/^t_[a-z0-9]{6,16}$/.test(String(id || ''))) return false;
+  const t = liveTermFor(id, label || 'the helper', plain);
+  if (t.ui.el.parentNode !== host && document.contains(t.ui.el)) return false;
+  t.seen = Date.now();
+  if (t.ui.el.parentNode !== host) { host.append(t.ui.el); t.ui.back(); }
+  liveTermOpen(id, t);
+  return true;
+}
 // Opens the session's stream (once; again after it closed and LIVE_TERM_RETRY passed).
 function liveTermOpen(id, t) {
   if (t.es || typeof EventSource !== 'function' || Date.now() < t.retry) return;
@@ -132,7 +163,7 @@ function liveTermApply(body, live) {
   if (!on) {
     const t = liveTerms.get(id);
     // this body showed it, or the layer drew the pane again and it sits in the old one: out, typing off, stream closed
-    if (t && (t.ui.el.parentNode === body || !document.contains(t.ui.el))) { t.ui.setTyping(false); t.ui.el.remove(); liveTermClose(t); }
+    if (t && (t.ui.el.parentNode === body || !document.contains(t.ui.el))) { t.ui.setTyping(false); t.ui.el.remove(); t.ui.tools?.remove(); liveTermClose(t); }
     return;
   }
   const label = body.closest('.live-pane')?.querySelector('.live-pt')?.textContent || 'the helper';
@@ -143,6 +174,8 @@ function liveTermApply(body, live) {
     t.ui.back();
   }
   if (pre) pre.hidden = true;
+  const slot = body.closest('.live-pane')?.querySelector('[data-live-term-tools]');
+  if (slot && t.ui.tools && t.ui.tools.parentNode !== slot) slot.append(t.ui.tools);
   liveTermOpen(id, t);
 }
 // A terminal no pane shows stops typing and closes its stream; after a while it is dropped.
@@ -158,4 +191,4 @@ function liveTermTick() {
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   setInterval(liveTermTick, LIVE_TERM_EVERY);
 }
-if (typeof module === 'object' && module.exports) module.exports = {liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};
+if (typeof module === 'object' && module.exports) module.exports = {liveTermSend, liveTermMount, liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};

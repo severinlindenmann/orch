@@ -281,6 +281,40 @@ def test_services_with_the_same_name_each_get_their_own_question(cli, fake, ws, 
     assert fake.entries["quick1"]["running"] is False and fake.entries["quick2"]["running"] is True
 
 
+def test_a_question_asked_before_a_crash_is_taken_over_not_asked_again(cli, fake, ws, clock, orch):
+    # #1401: the pass stopped between `orch ask` and saving the id; the next pass (one failure more, so other
+    # words) asked a second question on the ticket
+    _make_failing(cli, fake, clock)
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1"]
+    state = ws / ".orch/addons/services/state/budget.json"
+    d = _state(ws)
+    d["watch"]["question"] = None  # as if the pass had ended right after asking
+    state.write_text(json.dumps(d), encoding="utf-8")
+    clock["t"] = T0 + 240
+    _crash(fake)
+    res = _check(cli)
+    assert res["failing"] is True
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1"] and len(orch.asks()) == 1
+    assert _state(ws)["watch"]["question"]["id"] == "q1"
+    orch.answer("DM1-12", "q1", "Stop")  # the answer to the taken-over question is acted on
+    clock["t"] = T0 + 300
+    assert "Stopped" in _check(cli)["did"] and fake.entries["budget"]["running"] is False
+
+
+def test_an_answered_question_is_not_taken_over(cli, fake, ws, clock, orch):
+    _make_failing(cli, fake, clock)
+    orch.answer("DM1-12", "q1", "Look into it")
+    state = ws / ".orch/addons/services/state/budget.json"
+    d = _state(ws)
+    d["watch"]["question"] = None
+    state.write_text(json.dumps(d), encoding="utf-8")
+    clock["t"] = T0 + 240
+    _crash(fake)
+    _check(cli)
+    assert [q["id"] for q in orch.ticket()["questions"]] == ["q1", "q2"]
+    assert _state(ws)["watch"]["question"]["id"] == "q2"
+
+
 def test_state_and_question_never_carry_log_text(cli, fake, ws, clock, orch):
     log = ws / ".orch/addons/services/logs/budget.log"
     _make_failing(cli, fake, clock)
@@ -596,9 +630,25 @@ def test_only_a_listener_the_probe_reaches_counts():
     from orch_services import watch
 
     text = "p4242\nn[::1]:5173\np9999\nn127.0.0.1:5173\np7000\nn*:5173\np7001\nn192.168.1.5:5173\nn*:80\n"
-    assert watch.parse_lsof(text, 5173) == {9999, 7000}
+    assert watch.parse_lsof(text, 5173) == {9999}  # the exact 127.0.0.1 listener takes the connect
+    assert watch.parse_lsof("p7000\nn*:5173\np7001\nn192.168.1.5:5173\n", 5173) == {7000}
     assert watch.parse_lsof("p1\nn[::]:8000\n", 8000) == {1}
     assert watch.parse_lsof("", 8000) == set()
+
+
+def test_a_service_on_ipv6_only_does_not_answer_for_another_program_on_ipv4():
+    # #2301: lsof shows both wildcards as `*`; the service on IPv6 only made health pass while another program
+    # answered on 127.0.0.1
+    from orch_services import watch
+
+    both = "p4242\nf3\ntIPv6\nn*:5173\np9999\nf4\ntIPv4\nn127.0.0.1:5173\n"
+    assert watch.parse_lsof(both, 5173) == {9999}
+    wild = "p4242\nf3\ntIPv6\nn*:5173\np9999\nf4\ntIPv4\nn*:5173\n"
+    assert watch.parse_lsof(wild, 5173) == {9999}
+    alone = "p4242\nf3\ntIPv6\nn*:5173\n"  # dual stack takes the IPv4 connect when nobody else listens
+    assert watch.parse_lsof(alone, 5173) == {4242}
+    mixed = "p4242\nf3\ntIPv6\nn*:5173\nf4\ntIPv4\nn*:5173\n"  # one process, both families
+    assert watch.parse_lsof(mixed, 5173) == {4242}
 
 
 def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):
@@ -648,3 +698,46 @@ def test_starting_is_not_counted_as_running_fine_again(monkeypatch):
     r = watch.check_one(None, drv, {"id": "web", "name": "Web", "port": 8000}, None)
     assert r["health"]["starting"] is True and r["failing"] is True and r["did"] is None
     assert w["healthy_since"] is None and w["question"] is q
+
+
+# ---------------------------------------------------------------- failing-service impact text, unit edges
+
+
+def test_depends_lines_are_plain_capped_text():
+    from orch_services.watch import depends_of
+
+    assert depends_of({"depends": "Every run"}) == [] and depends_of({}) == []
+    assert depends_of({"depends": ["<b>Demo</b>\n  for   Lea", "", None]}) == ["‹b›Demo‹/b› for Lea"]
+    assert depends_of({"depends": [f"job {i}" for i in range(9)]}) == [f"job {i}" for i in range(6)]
+    assert depends_of({"depends": ["x" * 80]}) == ["x" * 80]
+
+
+def test_affected_text_cuts_only_past_the_limit():
+    from orch_services.watch import AFFECTED_CHARS, affected_text
+
+    assert affected_text([]) == "What it affects is not known."
+    assert affected_text(["Demo for Lea", "Nightly run"]) == "Affected: Demo for Lea, Nightly run."
+    exact = "x" * AFFECTED_CHARS
+    assert affected_text([exact]) == f"Affected: {exact}."
+    cut = affected_text([exact + "y"])
+    assert cut == f"Affected: {'x' * (AFFECTED_CHARS - 1)}…."
+
+
+def test_a_question_without_a_count_or_with_a_bad_check_stamp_still_names_the_impact(
+    cli, fake, ws, clock, orch
+):
+    from orch_services import store, watch
+
+    _make_failing(cli, fake, clock)
+    _depends(ws, ["Demo for Lea"])
+    rec = store.load_all(ws)[0][0]
+    state = watch.read_state(ws, "budget")
+    w = dict(state["watch"])
+    w["checked_at"] = "not a time"
+    w["question"] = dict(w["question"], open=True, suggested="Explode")
+    store.update_state(ws, "budget", watch=w)
+    row = watch.row_extra(ws, rec, None)
+    assert row["stale"] is False
+    assert row["question"]["suggested"] == "Restart"
+    assert row["question"]["text"].startswith("Affected: Demo for Lea.")
+    assert row["question"]["text"].endswith("Suggested: Restart.")

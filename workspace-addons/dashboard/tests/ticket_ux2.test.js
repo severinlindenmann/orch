@@ -51,6 +51,23 @@ test('Tickets toolbar: search and a Person choice when there is more than one ow
   assert.ok(parts.some(n => n.attrs['data-key'] === 'ticket-person'), 'a Person choice');
   assert.ok(!parts.some(n => n.attrs.className === 'btn ghost seg'), 'no All / Mine toggle');
 });
+test('ORCH-2091: the toolbar is layout, filters, search, then the view chips on their own row', () => {
+  const c = listCtx({URLSearchParams, iconEl:() => null, tickets:() => [{id:'a', owner:'anna'}, {id:'b', owner:'ben'}]});
+  const bar = vm.runInContext('viewToggle()', c);
+  assert.deepEqual(bar.children.map(n => n.attrs['data-key'] || n.attrs.className), ['view-toggle', 'ticket-person', 'grow', 'search-field', 'view-chips']);
+});
+test('ORCH-2091: no tickets at all shows the master empty state with one sentence and New ticket, no toolbar', () => {
+  const made = [];
+  const state = o => { made.push(o); const b = h('div', {className:'state'}); b.append = k => b.children.push(k); return b; };
+  const c = listCtx({newButton:() => h('button', {className:'btn primary', 'data-action':'new'}, 'New ticket')});
+  c.window.UI.state = state;
+  const box = c.ticketsEmpty();
+  assert.equal(made[0].title, 'No tickets yet');
+  assert.equal(made[0].text.split(/[.!?](\s|$)/).filter(s => s && s.trim()).length, 1, 'one sentence');
+  assert.equal(box.dataset.key, 'empty');
+  assert.equal(text(box.children.at(-1)), 'New ticket');
+  assert.match(listSrc, /tickets\(\)\.length \? viewToggle\(\) : null/);
+});
 test('Dash 02: rows, board cards and step names carry no ticket key', () => {
   assert.doesNotMatch(listSrc, /t\.key \+ ' '|mono key|part\.key/);
   const c = {clean:String}; vm.createContext(c);
@@ -83,8 +100,8 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start') && /Continue/.test(body) && !/Start helper/.test(body))  // ORCH-475: the one Start button says Continue;
-  // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
-  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start-pick'), 'the start sits in a cost pick');
+  // ORCH-415 (UX D2): a start is outlined, never filled; its cost is one line under the title (ORCH-2155)
+  assert.ok(nodes(all.find(n => n.attrs['data-key'] === 'ticket-actions')).find(n => n.attrs['data-key'] === 'ticket-start'), 'the start sits in the bar (ORCH-2155)');
   assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-start-cost')), /paid helper time|estimate about|used so far/);
   assert.ok(!all.some(n => /\bprimary\b/.test(n.attrs.className || '') && /Continue|Start helper/.test(text(n))), 'no filled start');
   assert.equal(all.filter(n => n.tag === 'h2' && /What (was|you) asked/.test(text(n))).length, 1, 'one heading for the ask');
@@ -299,13 +316,13 @@ test('ORCH-1716: the Needs you button counts tickets like its group, even when o
   const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
   assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
   assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
-  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
+  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Review 1 result');
 });
-test('ORCH-1716: a result to check says Check result on the phone too, not the session Start', () => {
+test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});
-  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Check result');
+  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Test results');
   assert.equal(text(c.shortSide({id:'o', status:'open'}, {}, 'open')), 'Start', 'other rows keep the session button');
-  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Check result', 'the computer row says the same');
+  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Test results', 'the computer row says the same');
 });
 test('ORCH-1716: the Person choice lists each person once; picking one keeps every spelling of them', () => {
   const rows = [{id:'a', owner:'Severin'}, {id:'b', owner:'severin'}, {id:'c', owner:'lume'}, {id:'d', owner:'owner'}, {id:'e', owner:'human:Anna'}, {id:'f', owner:'agent:claude'}];

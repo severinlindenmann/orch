@@ -9,6 +9,7 @@
 .settings details summary,.addon-native summary{min-height:44px;align-content:center;cursor:pointer;color:var(--text-muted)}
 .agent-cards{display:grid;gap:16px}
 .settings .agent-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;align-items:center;gap:12px;border:1px solid var(--border)}
+.settings .agent-card .tap-box{display:grid;place-items:center}
 .settings .agent-card input,.settings .permission-choices input{width:24px;height:24px;margin:0;accent-color:var(--text)}
 .settings .agent-card .test-note{grid-column:2/-1;margin:0;color:var(--text)}
 .settings .agent-card.off{opacity:1}
@@ -21,14 +22,15 @@
 .settings .ad-h>.grow{flex-basis:100%;display:grid;gap:12px}
 .settings .ad-h>.switch{margin-left:auto;width:auto;display:inline-flex;align-items:center;gap:8px}
 .settings .ad-h>.switch::before{flex:none}
-.settings button,.addon-native button,.settings-other button{min-height:44px}
+.settings button,.addon-native button:where(:not(.switch)),.settings-other button:where(:not(.switch)){min-height:44px}
 .addon-native .actions{display:flex;gap:8px;flex-wrap:wrap}
 .shared-link{padding:16px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}
 .shared-link .chip{justify-self:start;align-self:flex-start;width:fit-content}
 @media(max-width:760px){
   .settings-nav>*{flex-shrink:0}
   .settings-addon-grid,.settings .permission-choices{grid-template-columns:minmax(0,1fr)}
-  .settings .agent-card{grid-template-columns:24px minmax(0,1fr) auto}
+  .settings .agent-card{grid-template-columns:var(--touch) minmax(0,1fr) auto}
+  .settings .agent-card .tap-box{width:var(--touch);height:var(--touch);margin:-10px}
   .settings .agent-card>.btn{grid-column:2}
 }
 /* Keep the switch track compact inside a full-height touch target. */
@@ -86,6 +88,7 @@
 .settings .sync-field{display:flex;flex-direction:column;gap:6px}
 .settings .sync-field-line{display:flex;gap:8px;flex-wrap:wrap}
 .settings .sync-field-line .input{flex:1 1 220px;min-width:0;width:auto}
+.card-row>.input.grow[data-key=phone-relay-line]{flex:1 1 200px;min-width:0;width:auto}
 .settings .check-res{display:inline-flex;gap:6px;align-items:center;font-size:12px}
 .settings .check-res.ok{color:var(--success)}
 .settings .check-res.bad{color:var(--danger)}

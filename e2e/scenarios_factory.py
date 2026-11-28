@@ -498,7 +498,12 @@ def _a22_body(e, H, M):
     # test 1: ask with the first item only
     res = fac("ask", order, "1", who, "--item", "0", "--by", "human:tester")
     check(res["state"] in ("delivered", "queued") and res["items"] == 1 and res["pictures"] == 1, f"ask result: {res}")
-    msgs = inbox()
+    def _arrived():  # delivery takes longer on a loaded machine: wait for the card and the question, do not read once
+        got = inbox()
+        has_card = any(isinstance(m.get("body"), dict) and m["body"].get("shared_ticket") for m in got)
+        return got if has_card and any(m["type"] == "question" for m in got) else None
+
+    msgs = wait_for(_arrived, 60, 0.5) or inbox()
     blob = json.dumps(msgs)
     check("Window poster" not in blob and "Leaflet" not in blob, "an unticked item reached the other workspace")
     cards = [m for m in msgs if isinstance(m.get("body"), dict) and m["body"].get("shared_ticket")]

@@ -135,7 +135,7 @@
    "panel": "browser",
    "subtitle": "Each ticket that needs the web gets its own fresh browser, closed when the work is done."
   },
-  "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
+  "description": "Helpers read allowed web pages in a private browser per ticket; it downloads a browser program (.exe on Windows).",
   "docs": "docs.json",
   "docs_pages": [
    {
@@ -153,7 +153,7 @@
     ],
     "steps": [
      {
-      "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it.",
+      "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it. The browser is a separate program (an .exe on Windows); a company computer that blocks new programs blocks this add-on, and the rest of orch works without it.",
       "text": "You turn the add-on on and download the browser once",
       "who": "you"
      },
@@ -396,7 +396,7 @@
   "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Projects",
+   "label": "Factory",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -465,7 +465,7 @@
       "self"
      ]
     },
-    "title": "Projects"
+    "title": "Factory"
    }
   ],
   "gitignore": [],
@@ -473,7 +473,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Projects",
+   "label": "Open Factory",
    "path": "/"
   },
   "recommended": false,
@@ -630,7 +630,8 @@
   "dashboard": {
    "icon": "target",
    "label": "Live",
-   "order": 20
+   "order": 20,
+   "subtitle": "Watch your helpers work and step in when one needs you."
   },
   "description": "Every helper session live: watch them work, answer their questions, send them a message.",
   "docs": "docs.json",
@@ -773,6 +774,10 @@
        "the read-only page"
       ],
       [
+       "orch insights week",
+       "the last 7 days: done, stuck, time to done"
+      ],
+      [
        "orch insights checkup start",
        "run the weekly check-up now"
       ]
@@ -789,6 +794,10 @@
     },
     "title": "Insights"
    }
+  ],
+  "event_formats": [
+   "claude-stream-json/1",
+   "claude-transcript/1"
   ],
   "gitignore": [],
   "name": "insights",
@@ -822,7 +831,8 @@
    "icon": "book",
    "label": "Lessons",
    "order": 50,
-   "place": "settings"
+   "place": "settings",
+   "subtitle": "What helpers learned here, in one list."
   },
   "description": "Helpers remember what they learned here; you see, edit or delete it in one list.",
   "docs": "docs.json",
@@ -1149,6 +1159,16 @@
   "gitignore": [
    ".orch/addons/pull-requests/"
   ],
+  "merge_queue": {
+   "add": [
+    "queue",
+    "add"
+   ],
+   "read": [
+    "queue",
+    "snapshot"
+   ]
+  },
   "name": "pull-requests",
   "needs": false,
   "orch_api": 1,

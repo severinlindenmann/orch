@@ -79,6 +79,7 @@ def today(root: Path, who: Who) -> dict:
                     "title": f"{w['name']}: the way in stopped working",
                     "text": w["problem"] or "Its self-check failed.",
                     "action": "Try again",
+                    "tone": "bad",
                     "fix_ticket": w.get("fix_ticket"),
                 }
             )
@@ -176,6 +177,7 @@ def _calendar_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
                 "title": "Calendar: the way in stopped working",
                 "text": st["problem"] or "Reading the Calendar app failed.",
                 "action": "Try again",
+                "tone": "bad",
             }
         )
         return {"state": "stopped", "status": "Stopped", "line": "Try again."}
@@ -200,6 +202,7 @@ def _calendar_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
         "state": "ok",
         "status": f"{len(view['events'])} today",
         "line": " · ".join(f"{e['start'][11:16]} {e['title']}" for e in nxt) or "Nothing more today.",
+        "events": [{"at": e["start"][11:16], "title": e["title"]} for e in nxt],
         "overlaps": len(view.get("overlaps") or []),
     }
 
@@ -304,7 +307,7 @@ def _meetings_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
         return {
             "state": "empty",
             "status": "No recorder yet",
-            "line": "Add your recorder as a way in and turn it on.",
+            "line": "Meetings come from a recorder on this computer. Turn one on under Ways in; until then nothing arrives.",
         }
     last = items[0] if items else None
     pend = [] if who.helper else meetings_mod.pending(root)
@@ -1387,8 +1390,13 @@ def _use_meeting(root: Path, who: Who, ticket: str, mid: str) -> dict:
 
 
 def _orch_cmd() -> list[str]:
+    """`$ORCH_BIN` (never orch.exe on Windows: orch.procs.orch_cmd, ORCH-2138), else this Python's own orch."""
     orch = os.environ.get("ORCH_BIN")
-    return [orch] if orch else [sys.executable, "-I", "-P", "-m", "orch"]
+    try:
+        from orch import procs
+    except ImportError:
+        return [orch] if orch else [sys.executable, "-I", "-P", "-m", "orch"]
+    return procs.orch_cmd() if orch else procs.orch_python_argv()
 
 
 def _attach(root: Path, ticket: str, name: str, body: str, by: str) -> str:

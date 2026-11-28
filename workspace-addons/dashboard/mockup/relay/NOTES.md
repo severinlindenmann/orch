@@ -61,3 +61,21 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - Recent messages lists what people wrote; automatic status notes sit behind one quiet "Show updates (n)" row.
 - A bare "Tasks:" is never shown: an empty task list reads "No tasks yet".
 - Chat: contact and helper avatars are an initial in a circle (no stray glyph); a sent message reads "Delivered".
+
+## 26 Nov 2026 (ORCH-2169, RP3, RP4, RP5, RP8 B)
+
+- The add-on is called "Relay" on screen (menu, page title, topbar, Settings section); file sharing is "Publish".
+  No "Contacts", no "Shared links" as add-on names.
+- RP3: the fingerprint "Needs your Accept" trust section is gone. Workspaces the admin paired are trusted: no
+  fingerprint, no Accept. Empty state reads "No other workspaces yet. Your admin chooses who you can write to."
+- RP5: the page shows one conversation per workspace (master `.split-view` list and thread, `.thread-line` messages).
+  Own messages say "Sent" or "Not sent yet"; a handed-over task is a small card "Waiting for Marketing".
+- RP4 A: an incoming task is one card "Task from Marketing": their words in quotes, what allowing does, then
+  "Allow this task", "Always allow tasks from Marketing", "Decline". No "Allow once". Mirrors blocks.js and relay_view.py.
+
+## 27 Nov 2026 (ORCH-2348, receipts)
+
+- An own message says what the other workspace's orch reported, in the same quiet line as "Sent": "Passed on to
+  MKT-12" (their ticket), "Passed on to Chat" or "Delivered". Nothing reported yet stays "Sent". A message about an
+  open ticket without an answer for 3 days reads "No answer for 3 days" (warn tone, no tick); the person is asked on
+  the ticket. No new component: the existing `.handoff` line. Mirrors relay_view.py.

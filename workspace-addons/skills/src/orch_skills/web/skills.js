@@ -127,9 +127,28 @@
   const items = k => (model && model[k]) || [];
   const needs = it => (it.problems || []).length > 0;
   // ORCH-1692: a name in plain words ("release-check" -> "Release check"); the file name stays in the panel
-  const plain = name => { const s = String(name || '').replace(/[-_]+/g, ' ').trim(); return s ? s[0].toUpperCase() + s.slice(1) : ''; };
-  // a skill's own description loses its command and id lists in brackets ("(tool:fix-it, /tool:review)")
-  const plainLine = s => String(s || '').replace(/\s*\((?=[^)]*[:/])[^)]*(?:\)|$)/g, '').trim();
+  // report r-1127-0540-ws: words that have their own spelling ("github-links" -> "GitHub links", not "Github links")
+  const WORDS = {github: 'GitHub', gitlab: 'GitLab', openai: 'OpenAI', api: 'API', ui: 'UI', ux: 'UX', cli: 'CLI', mcp: 'MCP',
+    ai: 'AI', pdf: 'PDF', url: 'URL', vps: 'VPS', ssh: 'SSH', css: 'CSS', html: 'HTML', json: 'JSON', e2e: 'E2E', ios: 'iOS',
+    macos: 'macOS', vm: 'VM', pr: 'PR', crm: 'CRM', sql: 'SQL', orch: 'orch'};
+  const word = x => (Object.hasOwn(WORDS, x.toLowerCase()) ? WORDS[x.toLowerCase()] : null);  // "constructor" is a word too
+  const plain = name => {
+    const w = String(name || '').replace(/[-_]+/g, ' ').trim().split(/\s+/).filter(Boolean).map(x => word(x) || x);
+    if (!w.length) return '';
+    if (!word(w[0])) w[0] = w[0][0].toUpperCase() + w[0].slice(1);
+    return w.join(' ');
+  };
+  // a skill's own description is written for helpers: the list shows its first sentence in plain words, without
+  // brackets ("(tool:fix-it, /tool:review)", "(Workspace copy of ...)"), shouting ("ANY") or the "Use when" lead
+  const plainLine = text => {
+    let s = String(text || '').replace(/\s*\([^()]*(?:\)|$)/g, '').replace(/\s+/g, ' ').trim();
+    const end = s.search(/[.!?](\s|$)/);
+    if (end > 0) s = s.slice(0, end + 1);
+    s = s.replace(/\b([A-Z]{3,})\b/g, (m, x) => (word(x) ? m : x.toLowerCase()))
+      .replace(/^Use (?:this )?(?:skill )?(when|for|before|after|while|if) /i, (m, x) => x[0].toUpperCase() + x.slice(1) + ' ')
+      .replace(/\s+([,.;:])/g, '$1');
+    return s;
+  };
   function badge(it) {
     if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
     if (it.removed) return h('span', {className: 'badge paused', text: it.newer ? 'Newer version' : 'Removed'});
@@ -184,11 +203,20 @@
   }
   const when = at => (window.UI?.stamp ? window.UI.stamp(at) : at) || '';
   const checked = () => model?.services_checked_at ? ' Last checked ' + when(model.services_checked_at) + '.' : '';
+  // One master empty state (UI.state) per case, each with its one next step (SX-10, R7.2).
+  const NONE = {
+    skills: {title: 'No skills yet', text: 'A skill teaches your helpers one job, step by step.', action: {label: 'New skill', onClick: () => newSkill()}},
+    instructions: {title: 'No instruction files yet', text: 'Helpers read files such as AGENTS.md here when they start. Add one in your workspace folder.', action: {label: 'Look again', onClick: () => load(true)}},
+    services: {title: 'No connected services yet', text: 'Services you connect in your helper tool show up here.', action: {label: 'Look again', onClick: () => load(true)}},
+    logins: {title: 'No logins yet', text: 'Keys you keep with orch (orch secret add in your terminal) show up here.', action: {label: 'Look again', onClick: () => load(true)}},
+  };
+  function emptyList(o) { const d = h('div', {id: 'list'}); d.append(window.UI.state(Object.assign({kind: 'empty'}, o))); return d; }
+  function clearSearch() { query = ''; draw(); document.querySelector('.list-tools input[type=search]')?.focus(); }
   function drawBin() {
     const list = binRows();
     if (!list.length) {
-      return h('div', {id: 'list', className: 'empty-state'}, h('h3', {text: query ? 'Nothing here' : 'The Bin is empty'}),
-        h('p', {className: 'muted', text: query ? 'No name matches “' + query + '”.' : 'Deleted skills wait here until you restore them. Nothing is removed by itself.'}));
+      return emptyList(query ? {title: 'Nothing matches “' + query + '”', text: 'Try another name.', action: {label: 'Clear search', onClick: clearSearch}}
+        : {title: 'The Bin is empty', text: 'Deleted skills wait here until you restore them. Nothing is removed by itself.', action: {label: 'Show skills', onClick: () => { tab = 'skills'; filter = 'all'; draw(); }}});
     }
     return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'blk-table data-table'},
       h('caption', {className: 'sr-only', text: 'Bin'}),
@@ -207,8 +235,10 @@
     if (tab === 'bin') return drawBin();
     const list = rows();
     if (!list.length) {
-      return h('div', {id: 'list', className: 'empty-state'}, h('h3', {text: filter === 'needs' ? 'Nothing needs a look' : 'Nothing here'}),
-        h('p', {className: 'muted', text: query ? 'No name or words match “' + query + '”.' : (filter === 'all' ? 'Helpers get nothing of this kind here.' : 'Show All to see everything.')}));
+      if (query) return emptyList({title: 'Nothing matches “' + query + '”', text: 'Try another name or word.', action: {label: 'Clear search', onClick: clearSearch}});
+      if (filter !== 'all') return emptyList({title: filter === 'needs' ? 'Nothing needs a look' : filter === 'on' ? 'Nothing is on' : 'Nothing is off',
+        text: 'The whole list is under All.', action: {label: 'Show all', onClick: () => { filter = 'all'; draw(); }}});
+      return emptyList(NONE[tab]);
     }
     return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'data-table switch-table'},
       h('caption', {className: 'sr-only', text: TABS.find(t => t[0] === tab)[1]}),
@@ -216,7 +246,8 @@
         h('th', {scope: 'col', text: 'From'}), h('th', {scope: 'col', text: 'State'}))),
       h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': plain(it.name), onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
         h('td', {}, control(it)),
-        h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)})),
+        h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)}),
+          it.copy ? h('div', {className: 'meta truncate', text: it.copy}) : null),  // in the name cell: From is hidden on a phone
         h('td', {className: 'nowrap', text: from(it)}),
         h('td', {}, badge(it)))))));
   }
@@ -250,6 +281,7 @@
           onclick: e => { d.close(); other(it, v, e.currentTarget); }}))),
       (it.actions || []).includes('check') && it.check_hint ? h('p', {className: 'meta', text: it.check_hint + '.' + checked()}) : null,
       it.manage_in ? h('p', {className: 'meta', text: 'Manage in ' + it.manage_in + ': it is turned on or off there, not here.'}) : null,
+      it.copy ? h('p', {className: 'meta', text: it.copy + '. ' + (it.copy_hint || '')}) : null,
       it.tool_limit ? h('p', {className: 'meta', text: it.tool_limit + '.'}) : null,
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null,
       !it.edit && it.edit_why ? h('p', {className: 'meta', text: 'Edit: ' + it.edit_why + '.'}) : null,

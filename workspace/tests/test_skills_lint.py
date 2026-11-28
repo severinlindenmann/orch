@@ -68,6 +68,7 @@ HUMAN_ONLY = {
     "run stop",
     "run event",
     "run _wrap",
+    "run _resume",  # internal: detached agent start after a person answers (runs_live.resume_soon)
     "publish view",  # feeds the dashboard's Shared tab
     "dev-mark",  # test installs only: the e2e harness marks a demo workspace (never in an agent skill)
     "dev-proof",  # test installs only: the e2e harness's scripted test human (never in an agent skill)
@@ -101,11 +102,19 @@ ADDON_SRC = {
 
 
 def variants(name: str):
-    keys = skillrender.FACTS.get(name, [])
+    if name == "orch-relay":
+        keys = ["connected", "workspaces", "files", "delegate", "start", "phones", "webhooks"]
+    elif name == "orch-publish":
+        keys = ["connected", "files", "apps", "permanent", "public"]
+    else:
+        keys = list((skillrender.description_spec(SKILLS[name]) or {}).get("service_facts", {}))
     for vals in itertools.product([False, True], repeat=len(keys)):
         f = dict(zip(keys, vals, strict=True))
-        if skillrender.possible(name, f):
-            yield f
+        if name in ("orch-relay", "orch-publish") and not f["connected"] and any(f.values()):
+            continue
+        if name == "orch-relay" and not f["workspaces"] and (f["files"] or f["delegate"] or f["start"]):
+            continue
+        yield f
 
 
 def rendered(name: str):
@@ -270,7 +279,7 @@ def _leaves(parser, prefix=()):
 
 def test_every_user_command_is_in_some_skill():
     core = cli.build_parser(show_all=True)
-    text = "\n".join(b + blk for n in SKILLS for _, b, blk in rendered(n) if skillrender.possible(n, _))
+    text = "\n".join(b + blk for n in SKILLS for _, b, blk in rendered(n))
     missing = [
         c
         for c in _leaves(core)
@@ -367,6 +376,45 @@ def test_automation_and_dashboard_follow_the_facts():
     dash = SKILLS["orch-dashboard"]
     assert "--publish" not in skillrender.render_skill(dash, {"publish": False})[0]
     assert "--publish" in skillrender.render_skill(dash, {"publish": True})[0]
+
+
+@pytest.mark.parametrize(
+    ("name", "service", "marker"),
+    [("automation", "relay", "orch relay webhook new"), ("dashboard", "publish", "--publish")],
+)
+def test_external_skill_refresh_lifecycle(proj, monkeypatch, name, service, marker):
+    from orch import addons, harness
+
+    source = SKILLS[f"orch-{name}"]
+    manifest = addons.parse_manifest(source.parents[1] / addons.MANIFEST)
+    installed = {name: manifest}
+    monkeypatch.setattr(addons, "discover", lambda: installed)
+    addons.record_consent(proj, name)
+    addons._activate(proj, name)
+    skill = proj / f".agents/skills/orch-{name}/SKILL.md"
+    rendered = proj / f".orch/harness/skills/orch-{name}/SKILL.md"  # .agents is a copy on Windows
+    assert marker not in skill.read_text(encoding="utf-8")
+    cfg = proj / f".orch/secrets/{service}.json"
+    cfg.parent.mkdir(exist_ok=True)
+    cfg.write_text('{"url":"http://x","workspace":"ws_aaaaaaaaaa","token":"test"}', encoding="utf-8")
+    assert skillrender.refresh_skills(proj) == [name]
+    assert marker in rendered.read_text(encoding="utf-8")
+    if name == "automation":
+        assert "when work arrives from outside" in harness.current_block(proj, name)
+    assert skillrender.refresh_skills(proj) == []
+    installed.clear()
+    cfg.unlink()
+    assert skillrender.refresh_skills(proj) == []  # listed here, but its package is absent
+    assert marker in rendered.read_text(encoding="utf-8")
+    addons.remove(proj, name)
+    installed[name] = manifest
+    assert skillrender.refresh_skills(proj) == []  # installed again, but no longer turned on
+    assert not skill.exists() and not harness.current_block(proj, name)
+
+
+def test_unknown_service_fact_is_rejected(proj):
+    with pytest.raises(ValueError, match="service_facts"):
+        skillrender.facts_for(proj, "orch-example", {"service_facts": {"x": "typo"}})
 
 
 def test_write_atomic_replaces_a_planted_link(tmp_path):

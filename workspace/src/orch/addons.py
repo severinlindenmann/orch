@@ -31,7 +31,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import fields, skillrender, skills, term
+from orch import fields, procs, skillrender, skills, term
 from orch.errors import Refused
 
 DEFAULT_REPO = "https://github.com/severinlindenmann/orch"
@@ -57,7 +57,7 @@ TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
     "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop before_start docs "
-    "api-credits setup run_card".split()
+    "api-credits setup run_card event_formats merge_queue".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -466,7 +466,7 @@ def _trace_command() -> str:
 
         from orch import cli
 
-        p = cli.build_parser()
+        p = cli.build_parser(helps=False)
         for a in sys.argv[1:3]:
             sub = next((x for x in p._actions if isinstance(x, argparse._SubParsersAction)), None)
             if sub is None or a not in sub.choices:
@@ -810,7 +810,7 @@ def _current_registry() -> list[dict]:
 def _save_registry(entries: list[dict]) -> None:
     registry_path().parent.mkdir(parents=True, exist_ok=True)
     entries = sorted(entries, key=lambda e: e["name"])
-    registry_path().write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    _write_atomic(registry_path(), json.dumps(entries, indent=2))
 
 
 def installed_names() -> list[str]:
@@ -1423,6 +1423,13 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         raise _bad("description is one plain sentence (at most 120 characters, no < or >)")
     if not isinstance(m.get("run"), str) or not MODULE_RE.match(m["run"]):
         raise _bad("run is a top-level module name")
+    if "event_formats" in m:
+        formats = m["event_formats"]
+        if not isinstance(formats, list) or not all(
+            isinstance(f, str) and re.fullmatch(r"[a-z0-9-]{1,40}/[0-9]{1,3}", f) for f in formats
+        ):
+            raise _bad("event_formats must list versioned adapter format IDs")
+        _inside(base, "collector.py", "collector.py", "file")
     skill = _inside(base, m.get("skill"), "skill", "dir")
     if not (skill / "SKILL.md").is_file():
         raise _bad("the skill folder has no SKILL.md")
@@ -1474,6 +1481,10 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("dashboard order is 0 to 99")
         d["order"] = order
     _check_selfcheck(m)
+    if "merge_queue" in m:
+        q = m["merge_queue"]
+        if not isinstance(q, dict) or set(q) != {"read", "add"} or not all(map(_args_ok, q.values())):
+            raise _bad("[merge_queue] needs read and add command arguments")
     _check_setup(m)
     _check_run_card(m)
     tv = m.get("ticket_view", [])
@@ -1666,7 +1677,7 @@ def _consents() -> list[dict]:
 
 def _write_consents(items: list[dict]) -> None:
     consent_path().parent.mkdir(parents=True, exist_ok=True)
-    consent_path().write_text(json.dumps(items, indent=2), encoding="utf-8")
+    _write_atomic(consent_path(), json.dumps(items, indent=2))
 
 
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -1812,7 +1823,10 @@ def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
                     if cur is not None:
                         out, done = cur, True
                 except (OSError, NotImplementedError):
-                    pass  # no hard links here: fall through to the replace
+                    # no hard links here (EPERM): a valid id already there still wins (#585)
+                    cur = read_local_id(root)
+                    if cur is not None:
+                        out, done = cur, True
             if not done:
                 try:
                     os.rename(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd)  # POSIX rename replaces
@@ -1855,7 +1869,10 @@ def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
                 if cur is not None:
                     out, done = cur, True
             except OSError:
-                pass  # no hard links here: fall through to the replace
+                # no hard links here (EPERM): a valid id already there still wins (#585)
+                cur = read_local_id(root)
+                if cur is not None:
+                    out, done = cur, True
         if not done:
             try:
                 os.replace(tmp, f)
@@ -1983,8 +2000,9 @@ def _save_active(root: Path, a: dict[str, dict]) -> None:
 
 def active_manifests(root: Path) -> dict[str, dict]:
     """Active add-ons that are also installed here (a switch without a package does nothing)."""
-    found = discover()
-    return {n: found[n] for n in active(root) if n in found}
+    names = active(root)
+    found = discover() if names else {}
+    return {n: found[n] for n in names if n in found}
 
 
 def not_on_message(root: Path, name: str) -> str:
@@ -2162,8 +2180,8 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
     }
 
 
-def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+def listing(root: Path, *, catalog: bool = False) -> list[dict]:
+    """Only the installation catalog includes inactive core clients. Installed add-ons first (sorted), then
     shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
     Never touches the network: the not-installed ones come from the local source folder, else from the bundle
     in the package; one that is in neither is left out of the list (it can still be added by name)."""
@@ -2173,6 +2191,7 @@ def listing(root: Path) -> list[dict]:
     out = [
         _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
         for name, m in sorted(discover().items())
+        if catalog or name not in CORE_ADDONS or name in act
     ]
     for name, m in sorted(shipped_available(fetch=False).items()):
         out.append(_row(name, m, "built-in", False, False, False))
@@ -2859,7 +2878,7 @@ def drop_config_table(root: Path, name: str) -> None:
             skipping = key == name or key.startswith(name + ".")
         if not skipping:
             out.append(line)
-    p.write_text("".join(out), encoding="utf-8", newline="\n")
+    _write_atomic(p, "".join(out))
 
 
 def uninstall(root: Path, name: str) -> None:
@@ -2988,8 +3007,8 @@ def _write_atomic(p: Path, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
     try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, p)
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        procs.replace(tmp, p)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

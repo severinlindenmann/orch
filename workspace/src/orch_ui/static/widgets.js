@@ -50,7 +50,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
  const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
   if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
   setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
-  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('terminal',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'orch did not answer. Try again in a moment.'};setSt('failed',back?'[data-act="run"]':null)})};
  const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
   p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
  const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
@@ -81,7 +81,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
    g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
   if((st==='running'&&!inTerm)||st==='done'||st==='failed')body.push(term());
   if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
-  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
+  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work. Try again.'));e.setAttribute('role','alert');body.push(e);}
   if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
   if(cls!=='copy'&&!inTerm&&(r.changes||r.undo)){const dl=el('dl','run-facts');if(r.changes)fact(dl,'Changes',r.changes);if(r.undo)fact(dl,'Undo',null,r.undo);body.push(dl)}
   if(st!=='done'&&st!=='left'&&st!=='confirm'){const n=btn('outline sm run-leave',noLabel,leave);n.dataset.act='no';if(busy)n.disabled=true;body.push(n)}
@@ -110,17 +110,17 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Review',done:'Done',dropped:"Won't do"};
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
- if(t.status==='review')return {pill:'check',word:'Check',helper:null};
+ if(t.status==='review')return {pill:'check',word:'Review',helper:null};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
- if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:HELPER_WORD[helper.state],helper};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:(helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||'')?helper.word:HELPER_WORD[helper.state],helper};
  if(helper)return {pill:'working',word:'Working',helper:null};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
@@ -162,14 +162,71 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
  if(o.count!=null)b.append(el('span','count',String(o.count)));b.append(UI.chevron());if(o.onToggle)b.addEventListener('click',o.onToggle);h.append(b);sec.append(h);
  if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
  return sec};
+/* Pick several (25 Nov, ORCH-2034): UI.bulkBar({count, busy, actions, clear, label, key}) -> <div class="bulk-bar">, the bar under a
+   list while rows are picked. "N selected", then the actions (nodes, usually details.menu; their menus open upwards), then
+   Clear ({label, onClick} or a node). busy: a short line ("Saving 2 of 5…") with a spinner while the change is saved; the
+   actions wait. role=region with a label; the count is a live status. The page draws the row checkboxes (.row-pick). */
+UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','region');bar.setAttribute('aria-label',o.label||'Selected');bar.setAttribute('data-toast-clear','');if(o.key)bar.dataset.key=o.key;
+ const c=el('span','bulk-count');c.setAttribute('role','status');
+ if(o.busy){bar.setAttribute('aria-busy','true');const s=el('span','spinner');s.setAttribute('aria-hidden','true');c.append(s,document.createTextNode(o.busy))}else c.textContent=(o.count||0)+' selected';
+ const a=el('div','bulk-actions');(o.actions||[]).forEach(n=>{if(n)a.append(n)});bar.append(c,a);
+ let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
+ if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
+/* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
+   then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
+   the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
+   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>'};
+const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
+/* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
+UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
+UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
+ if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
+ const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
+ if(st&&(st.href||st.onClick))acts.push(UI.settingsButton(st));
+ (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
+ if(acts.length){const r=el('div','page-heading-actions');r.append(...acts);head.append(r)}
+ return head};
+/* One look per page state (D4-D6, 26 Nov). Text only (textContent). Every page and add-on page uses these, no own copy.
+   UI.pageEmpty({title, text, step, dataKey}) -> <section class="card page-empty">: what is missing (title), one sentence what
+     will show up here (text), and the first step (step: a node such as the page's own input and button, or
+     {label, href|onClick} for one green button). No step where the helper fills the page: then only the sentence.
+   UI.pageNotice({what, still, action, tone, dataKey}) -> <div class="banner page-notice attn|error" role="status">: what
+     happened (bold), what still works, and one green button ({label, href|onClick|data:{...}}). Goes right under the
+     page name; one per page. tone 'error' for a failure the person must act on (default 'attn').
+   UI.settingsButton({href, label, onClick, dataKey, top}) -> <a class="btn outline sm page-settings settings-btn">: gear +
+     "Settings", the one way to an add-on's settings. UI.pageTop({settings}) draws it first among the top's buttons; this
+     is its only implementation (ORCH-2315). */
+const stepButton=(a,cls)=>{const b=el(a.href?'a':'button','btn primary sm'+(cls?' '+cls:''),a.label);if(a.href)b.href=a.href;else{b.type='button';if(a.onClick)b.onclick=a.onClick}
+ if(a.data)Object.keys(a.data).forEach(k=>{b.dataset[k]=a.data[k]});return b};
+UI.pageEmpty=o=>{o=o||{};const b=el('section','card page-empty');if(o.dataKey)b.dataset.key=o.dataKey;
+ if(o.title)b.append(el('h2','',o.title));if(o.text)b.append(el('p','',o.text));
+ if(o.step){const s=el('div','page-empty-step');s.append(o.step instanceof Node?o.step:stepButton(o.step));b.append(s)}
+ return b};
+UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='error'?'error':'attn'));b.setAttribute('role',o.tone==='error'?'alert':'status');if(o.dataKey)b.dataset.key=o.dataKey;
+ const p=el('p','grow');if(o.what)p.append(el('strong','',o.what));if(o.what&&o.still)p.append(' ');if(o.still)p.append(o.still);b.append(p);
+ if(o.action)b.append(o.action instanceof Node?o.action:stepButton(o.action));
+ return b};
+UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'button','btn outline sm page-settings settings-btn');if(link){a.href=o.href||'#settings/addons';if(o.top)a.target='_top'}else a.type='button';
+ if(o.onClick)a.addEventListener('click',o.onClick);a.dataset.key=o.dataKey||'page-settings';
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),el('span','',o.label||'Settings'));return a};
+/* An add-on page drawn inside the dashboard's frame (Factory, Usage, Files, Skills, Personal, Insights ...) marks the
+   place of its Settings button in its own top: <span data-settings-for="skills"></span>. It becomes the same
+   UI.settingsButton, leading the dashboard (target _top; frame.js hands the move up) to that add-on's part of Settings. */
+UI.fillSettings=root=>{(root||document).querySelectorAll('[data-settings-for]').forEach(s=>{const n=s.dataset.settingsFor;
+ if(/^[a-z][a-z0-9-]{1,31}$/.test(n||''))s.replaceWith(UI.settingsButton({href:'/#settings/addons/'+n,top:true}));else s.remove()})};
+if(typeof document!=='undefined'&&document.querySelectorAll){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>UI.fillSettings());else UI.fillSettings()}
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}})
+   action:{label, href, target} draws the button as a link (another page, e.g. '/#tickets' with target '_top' from an add-on frame). */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
- if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
+ if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
  const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
- if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
+ if(o.action){const link=typeof o.action.href==='string';const a=el(link?'a':'button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);
+  if(link){a.href=o.action.href;if(o.action.target)a.target=o.action.target}else a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
 /* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
    UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
@@ -204,7 +261,8 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
    o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), attach (UI.composer options: accept, maxFiles, maxBytes, voice; the comment sheet takes screenshots, files and a voice note, note.changes.files), onNote(item, text, files)->Promise<{ok,error?}> (adds "Add note" to the Comment sheet: words saved, card stays, no verdict), onUndo(item), onChange(),
-       canUndo(item) (false once the answer is saved for good: Undo is then not offered, ORCH-183)}
+       canUndo(item) (false once the answer is saved for good: Undo is then not offered, ORCH-183),
+       listTitle (the list's heading and the phone's list button, default "All cards"; Review says "Needs you", ORCH-2316)}
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.oneTap (ORCH-1847, a plain reversible question orch marks one_tap): tapping (or Enter on) a named answer answers
        it at once, as on Home; no Use button; Comment, None of these, Later and Undo stay. A deck of one card drops its
@@ -214,6 +272,20 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
        Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
    item.hint: one plain line in the foot saying what the card's own buttons do
+   o.decisionFirst (true, or a function read at each draw; ORCH-2182 Focused review A): the card says "You decide: <the
+       question>" first, then "If you wait: <item.ifWait>" and one "What matters" box with item.facts (up to 4 lines),
+       each only when given; the card's links and Open fold into one More menu. Off: the card as before
+       With it, item.said ({who: you|person|rule, name, src, day, words, stale}, ORCH-2183) draws one line under the box:
+       "You said on 21 Nov: “…” · open" (open = o.ticketLink), "This may be out of date" when stale
+       With it (ORCH-2184, Focused review C) the keys are 1 2 3 (the answers in the bar, left to right, the digits show
+       on the buttons), J next card, K card before, M opens More, U undo, Esc o.onEscape (a round: back to the start);
+       the arrow keys stay. A new card comes in with the kit's page motion (orch.enter). o.endView(): the element shown
+       when every card is answered, in place of the summary (a round's "What you decided")
+       With it (ORCH-2186, Focused review E), item.ideas (2 to 12 lines) draws one row per idea with Keep / Later / No in
+       place of the preview; the ok answer is "Save" ("Save, N left for later" when some stay) and answers ok with
+       note.ideas = {keep:[n], no:[n], later:[n]} (numbers from 1). Nothing sorted: Save asks to sort one first
+       With it (ORCH-2185, Focused review D), o.moreItems(item) gives the page's own rows for the More menu
+       ([{label, icon, href, onClick(item, event), key}]; the Review page: Ask about this, Watch the helper)
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -249,6 +321,9 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(p.foot)d.append(el('p','doc-foot',p.foot));
  if(Array.isArray(p.details)&&p.details.length){const dt=el('div','doc-details');p.details.forEach(x=>dt.append(el('p','meta',x)));d.append(dt)}
  return d};
+/* ORCH-2186: an ideas card's answer in a few words ("2 kept, 1 no, 5 for later"); the deck, the round end and the
+   dashboard's answered list say the same */
+UI.ideasWord=(sorted,total)=>{const k=(sorted&&sorted.keep||[]).length,no=(sorted&&sorted.no||[]).length,l=Math.max(0,(total||0)-k-no);return k+' kept, '+no+' no'+(l?', '+l+' for later':'')};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
  let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,ticked=(o.ticked||[]).slice(0,2),pairSide=0,picking=!!o.picking,showing=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
@@ -271,7 +346,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const lone=()=>items.length===1&&!optionRefs(items[0]).length;
  const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone();[count,bar,allBtn,jumpRow].forEach(x=>{x.hidden=one});undoBtn.hidden=one&&undoBtn.disabled;top.hidden=one&&undoBtn.hidden&&note.hidden};
  /* a phone: "All cards · 1 of N" and ← → above the card (the whole list with its ticks is one tap away) */
- const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','','All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
+ const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','',o.listTitle||'All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
  jAll.onclick=()=>openOverview();jPrev.onclick=()=>step(-1);jNext.onclick=()=>step(1);jumpRow.append(jAll,jPrev,jNext);
  top.append(count,note,bar,allBtn,undoBtn,jumpRow);
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
@@ -291,10 +366,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
  const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
+/* R3 (draft r3-b, ORCH-2316): a release only you may make says "Put it live" on its button and "See the changes" on its
+    link; the answer is the same ok (the merge card's own label stays its digest's) */
+ const isLive=it=>!!it&&it.cardKind==='put_live'&&!isOpt(it)&&(!it.okLabel||/^(merge|looks good|publish)$/i.test(it.okLabel));
  const sendsBack=it=>!!it&&(it.kind==='check'||it.noWords===true);/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
- const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
- const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
- const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
+ const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?(words(it)?'Send back with your comment':'Send back'):"Don't do");
+ const okWord=it=>{if(isIdeas(it)){const s=ideaSort(it);return s.keep.length+s.no.length+s.later.length===0||!s.left?'Save':'Save, '+s.left+' left for later'}if(isLive(it))return 'Put it live';if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
+ const ansWord=a=>!a?'':a.verdict==='ok'&&a.note&&a.note.ideas?UI.ideasWord(a.note.ideas,(a.item.ideas||[]).length):a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');let timer;
@@ -307,6 +385,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(p.type==='img'){const i=el('img');i.src=p.src;i.alt=p.alt||it.title;i.draggable=false;f.append(i)}
   else if(p.type==='page')f.append(el('span','preview-wait','Loading the preview…'),frame(p.src,it.title));
   else if(p.type==='table'){const t=el('table','mini-table'),h=el('tr');(p.cols||[]).forEach(c=>h.append(el('th','',c)));const th=el('thead');th.append(h);const tb=el('tbody');(p.rows||[]).slice(0,big?50:7).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(th,tb);f.append(t)}
+  else if(it.kind==='check'&&!big&&!it.blocked&&Array.isArray(p.steps)&&p.steps.length){/* R6 A (ORCH-2316): what changed first; the helper's steps one click away */
+   const d=UI.docBox(Object.assign({},p,{steps:undefined}),'h4'),dt=el('details','doc-steps'),n=p.steps.length;
+   dt.append(el('summary','meta','What the helper did: '+n+(n===1?' step':' steps')+', each with its evidence'));const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));dt.append(ol);
+   dt.addEventListener('pointerdown',e=>e.stopPropagation());d.append(dt);f.append(d)}
   else f.append(UI.docBox(p,'h4'));
   return f};
  /* Before / after. Card: Before · After · Both. Viewer: Slide (drag the handle, or the slider keys) · Side by side · Before · After. */
@@ -314,7 +396,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const ctl=el('div','segmented swipe-cmp-ctl');ctl.setAttribute('role','group');ctl.setAttribute('aria-label','Before and after');
   const set=v=>{w.dataset.view=v;ctl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))};
   const pane=side=>{const d=el('div','cmp-pane '+side);d.dataset.on=side;d.dataset.type=(p[side]||{}).type||'doc';d.append(buildPreview({title:it.title+' '+side,preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));
-   if(!big){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side,it)};d.append(z)}return d};
+   if(!big&&visual(it)){const z=btn('btn icon sm cmp-zoom',[ic('expand',16)],side==='before'?'Make before bigger':'Make after bigger');z.dataset.side=side;z.addEventListener('pointerdown',e=>e.stopPropagation());z.onclick=e=>{e.stopPropagation();openViewer(side,it)};d.append(z)}return d};
   views.forEach(([v,l])=>{const b=btn('btn sm',[l]);b.dataset.v=v;b.onclick=e=>{e.stopPropagation();set(v)};ctl.append(b)});
   ctl.addEventListener('pointerdown',e=>e.stopPropagation());
   w.append(pane('before'),pane('after'),ctl);
@@ -330,6 +412,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
  /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
  const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
+ /* R4 A (owner, 25 Nov): only a picture, a page or a before/after opens large and takes a spot; words are never zoomed */
+ const picSide=x=>!!x&&(x.type==='img'||x.type==='page');/* ORCH-2316: old and new wording side by side is words, never zoomed */
+ const visual=it=>{const p=it&&it.preview;return !!p&&(p.type==='img'||p.type==='page'||(p.type==='compare'&&(picSide(p.before)||picSide(p.after)))||(p.type==='options'&&!plainOpts(it)))};
  /* ORCH-1847: a plain, reversible question (orch marks it one_tap): tapping the named answer answers it, as on Home;
     Undo, Comment, None of these and Later stay. Any other card keeps tap an option, then Use it. */
  const oneTap=it=>!!(it&&it.oneTap===true&&plainOpts(it)&&!it.blocked&&!ans[it.id]&&!ownAnswers(it)&&!isRun(it));
@@ -343,7 +428,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(oneTap(it)?'Answer ':lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
-   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.setAttribute('aria-hidden','true');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */
     if(c&&c===cur&&oneTap(it))return answerPick(it,op.id);/* Enter or Space on the answer */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
@@ -352,10 +437,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   host.querySelectorAll('.swipe-opt').forEach(b=>{const c=b.closest('.swipe-card,.swipe-viewer');if(c&&c.dataset.item===it.id)b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
   host.querySelectorAll('.swipe-pair-ok').forEach(b=>{if(b.dataset.item===it.id)drawOk(b,it)});
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
- const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
+ const words=it=>{const d=it&&drafts[it.id];return !!it&&(pins[it.id]||[]).length>0||!!d&&(!!String(d.text||'').trim()||(d.clips||[]).length>0||(d.files||[]).length>0)};/* a marked spot is a comment too */
+ /* R4 A / R6 A: a comment that waits, or a part still open, makes Send back the filled button: Looks good never sends it along */
+ const sugOf=it=>it&&sendsBack(it)&&(words(it)||it.blocked)?'no':it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
-  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(oneTap(it))okBtn.hidden=true;/* the answers are the buttons */if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked||(isIdeas(it)&&!ideaSort(it).any));okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it)&&it.kind!=='check';thenLine(thenEl,it);/* R4 A: one Comment on every card, a result's too (ORCH-2316) */
+  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(oneTap(it))okBtn.hidden=true;/* the answers are the buttons */if(ownOnly(it))talkBtn.hidden=true;/* a run card keeps Comment (R4 A) */ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
@@ -375,33 +462,79 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   /* title first, then ONE quiet line: type · deadline · ticket key (ORCH-477 round 2: no routine time stamp, no group, no
      "Suggested" here; the one filled answer button is the suggestion) */
-  const h=el('header','swipe-head'),m=metaLine(it);
+  const h=el('header','swipe-head'),m=metaLine(it),df=!layer&&decisionFirst();
   const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once, in the title's place */
-  if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3,m);if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text))}
+  /* ORCH-2182 (Focused review A, behind o.decisionFirst): the decision first ("You decide:" the question, else the
+     title), then "If you wait:" when the helper gave it; the title stays as one quiet line when it says more */
+  if(df){const d=el('h3','swipe-decide'),q=it.text||it.title||'';d.append(el('span','swipe-lead-word','You decide: '),q);d.title=q;h.append(m,d);
+   if(it.text&&it.title&&!cut&&it.text!==it.title)h.append(el('p','swipe-ticket',it.title));
+   if(it.ifWait){const w=el('p','swipe-wait');w.append(el('span','swipe-lead-word','If you wait: '),it.ifWait);h.append(w)}}
+  else if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3,m);if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text))}
   else h.append(el('p','swipe-text swipe-lead',it.text),m);
   /* a one-tap question answers without opening the ticket: say which ticket, as Home does (ORCH-1847) */
   if(oneTap(it)&&it.ticketTitle&&it.ticketTitle!==it.title)h.append(el('p','swipe-ticket',it.ticketTitle));
   if(it.about)h.append(el('p','swipe-about','About: '+it.about));
   if(it.why)h.append(el('p','swipe-why',it.why));
-  const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
-  if(pv){pv.dataset.type=it.preview.type;pv.append(buildPreview(it,false));
-  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
+  if(it.proposal){const p=it.proposal;h.append(el('p','swipe-why',(p.verdict==='accept'?'The Reviewer proposes to accept':'The Reviewer proposes to send it back')+(p.why?': '+p.why:'.')))}/* Reviewer mode "propose": its verdict, your click */
+  if(it.blocked&&it.kind==='check'){const b=el('div','banner slim attn swipe-open'),g=el('div','grow'),op=Array.isArray(it.openParts)?it.openParts:[];/* R6 A: You asked for / You got (ORCH-2316) */
+   g.append(el('strong','',op.length>1?op.length+' parts are still open':op.length?'One part is still open':'Still open'));op.forEach(x=>g.append(el('p','','You asked for: '+x.asked+'. You got: '+(x.got||'nothing yet')+'.')));g.append(el('p','',it.blocked));b.append(g);h.append(b)}/* R6 A: an open part sits on top, never only in the footer */
+  /* ORCH-2182: the facts that decide it, in one box right under the decision; no facts, no box (never a guess) */
+  const fx=df&&Array.isArray(it.facts)&&it.facts.length?factBox(it.facts):null;
+  const ix=!layer&&isIdeas(it)?ideasBox(it):null;/* ORCH-2186: the ideas to sort take the place of their plain list */
+  const pv=!ix&&hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
+  if(pv){pv.dataset.type=it.preview.type;if(!visual(it))pv.classList.add('no-zoom');pv.append(buildPreview(it,false));
+  if(visual(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer(null,it)};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
   const rb=isRun(it)&&!layer?runBox(it):null;
   const ft=el('footer','swipe-foot');/* "If you approve" is in the pinned answers bar (ORCH-477); why Looks good is off stays on the card (ORCH-548) */
-  if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
+  if(it.blocked&&it.kind!=='check'){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
   else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
-  if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  if(it.open){const a=el('a','btn '+(isLive(it)?'outline':'ghost')+' sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),isLive(it)?'See the changes':'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   /* ORCH-1804: o.ticketLink(item) gives the address that shows the card's ticket beside the deck (the Review page's side panel); it takes the place of the plain Open */
   const tl=!layer&&typeof o.ticketLink==='function'?o.ticketLink(it):'';
   if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
+  /* ORCH-2185 (Focused review D): o.moreItems(item) adds the page's own rows to More ({label, icon, href, onClick, key}): Ask about this, Watch the helper */
+  if(df&&!layer&&typeof o.moreItems==='function')(o.moreItems(it)||[]).forEach(m=>{if(!m||!m.label)return;const a=el('a','btn ghost sm swipe-more-item');a.href=m.href||'#';if(m.key)a.dataset.key=m.key;if(m.icon)a.append(ic(m.icon,14));a.append(m.label);a.addEventListener('pointerdown',e=>e.stopPropagation());if(typeof m.onClick==='function')a.addEventListener('click',e=>{if(!m.href)e.preventDefault();m.onClick(it,e)});row.append(a)});
+  if(df)moreMenu(row);/* ORCH-2182: the card's links and Open sit in one More menu; the answers stay in the bar */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
-  c.append(...[h,pv,rb,fl,ft].filter(Boolean));return c};
+  const sd=df&&it.said?saidLine(it):null;/* ORCH-2183: what the person said, copied by orch from its record */
+  c.append(...(it.kind==='check'?[h,fx,sd,fl,pv,rb,ft]:[h,fx,sd,ix,pv,rb,fl,ft]).filter(Boolean));return c};
+ const decisionFirst=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
+ /* ORCH-2183 (Focused review B): "You said on 21 Nov: “…” · open", "<name> wrote ...", "Team rule, 21 Nov: ...";
+    orch copied the words from a chat line, a history line or the team rules file. Out of date: one plain line under
+    it; words taken away or changed are never shown (item.said.words is empty then). */
+ const saidLine=it=>{const s=it.said,b=el('div','swipe-said');
+  const day=s.day||'',who=s.who==='rule'?'Team rule'+(day?', '+day.replace(/^on /,''):'')+':':(s.who==='you'?(s.src==='chat'?'You said':'You wrote'):(s.name||'')+' wrote')+(day?' '+day:'')+':';
+  if(s.words){const p=el('p','swipe-said-q');p.append(el('span','swipe-lead-word',who+' '),'\u201c'+s.words+'\u201d');
+   const tl=typeof o.ticketLink==='function'?o.ticketLink(it):'';
+   if(tl){const a=el('a','swipe-said-open','open');a.href=tl;a.addEventListener('pointerdown',e=>e.stopPropagation());p.append(' \u00b7 ',a)}b.append(p)}
+  if(s.stale)b.append(el('p','swipe-said-stale',s.who==='you'?'This may be out of date: things changed after you said this.':'This may be out of date.'));
+  return b.children.length?b:null};
+ const factBox=fs=>{const b=el('section','swipe-fact');b.setAttribute('aria-label','What matters');b.append(el('p','swipe-fact-h','What matters'));
+  const ul=el('ul','swipe-facts');fs.slice(0,4).forEach(f=>{if(typeof f==='string'&&f.trim())ul.append(el('li','',f))});b.append(ul);return b};
+ /* ORCH-2186 (Focused review E): ideas, one row each with Keep / Later / No (a segmented control; a second tap on the
+    same word takes it back). Saving part of them is fine: what is not sorted stays for later. */
+ const sorts={};/* item id -> {n (from 1): 'keep'|'later'|'no'} */
+ const isIdeas=it=>!!(it&&decisionFirst()&&Array.isArray(it.ideas)&&it.ideas.length>1&&!it.blocked);
+ const IDEA_WORDS=[['keep','Keep'],['later','Later'],['no','No']];
+ const ideaSort=it=>{const m=sorts[it.id]||{},o={keep:[],no:[],later:[]};(it.ideas||[]).forEach((_,i)=>{const w=m[i+1];if(w)o[w].push(i+1)});o.any=o.keep.length+o.no.length+o.later.length>0;o.left=(it.ideas||[]).length-o.keep.length-o.no.length;return o};
+ const ideaNote=it=>{const s=ideaSort(it);return {keep:s.keep,no:s.no,later:s.later}};
+ const ideasBox=it=>{const b=el('section','swipe-ideas');b.setAttribute('aria-label','Ideas');b.addEventListener('pointerdown',e=>e.stopPropagation());const m=sorts[it.id]=sorts[it.id]||{};
+  it.ideas.forEach((idea,i)=>{const n=i+1,row=el('div','swipe-idea'),seg=el('div','segmented swipe-idea-sort');seg.setAttribute('role','group');seg.setAttribute('aria-label',idea);
+   const sync=()=>seg.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(m[n]===x.dataset.v)));
+   IDEA_WORDS.forEach(([v,w])=>{const x=btn('btn sm',[w]);x.dataset.v=v;x.setAttribute('aria-label',w+': '+idea);x.onclick=e=>{e.stopPropagation();if(m[n]===v)delete m[n];else m[n]=v;sync();syncWords()};seg.append(x)});sync();
+   row.append(el('p','swipe-idea-t',idea),seg);b.append(row)});
+  b.append(el('p','meta swipe-idea-left','Ideas you do not sort stay here for later.'));return b};
+ const moreMenu=row=>{const items=[...row.children].filter(x=>x.matches('a'));if(!items.length)return;
+  const d=el('details','dropdown swipe-more'),s=el('summary','btn ghost sm','More'),mn=el('div','menu');s.setAttribute('aria-haspopup','menu');mn.setAttribute('role','menu');
+  items.forEach(a=>{a.className='menu-item';a.setAttribute('role','menuitem');a.addEventListener('click',()=>{d.open=false});mn.append(a)});
+  d.addEventListener('pointerdown',e=>e.stopPropagation());d.addEventListener('keydown',e=>{if(e.key==='Escape'&&d.open){e.stopPropagation();d.open=false;s.focus()}});
+  d.append(s,mn);row.append(d)};/* R6 A: a result shows its pictures first */
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's
     other files, with "Open in new tab" in the viewer (UI.reviewViewer, ORCH-477). A PDF tile shows its first page through
     the browser's own PDF view, small and without its toolbar (FileViewer.thumb); without a PDF view the icon stays. */
@@ -429,12 +562,15 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
   count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';syncTop();
   ticked=ticked.filter(r=>parseRef(r));if(!pairRefs())showing=false;const pr=pairNow();host.classList.toggle('pairing',!!pr);syncJump(pr);
-  if(idx>=n&&!pr){acts.hidden=true;stage.append(summary());change();return}
+  if(idx>=n&&!pr){acts.hidden=true;stage.append(typeof o.endView==='function'?o.endView():summary());change();return}
   /* two side by side: each side has its own answers, the shared bar steps aside (ORCH-477) */
   if(pr){acts.hidden=true;stage.append(pairView(pr));change();return}acts.hidden=false;
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
-  stage.append(cur);syncWords();wire(cur);change()};
+  stage.append(cur);syncWords();numKeys();wire(cur);if(commenting===items[idx].id)markComment(items[idx]);else commenting=null;if(decisionFirst()&&shownId!==items[idx].id&&window.orch&&window.orch.enter)window.orch.enter(cur);shownId=items[idx].id;change()};
+ /* ORCH-2184: with decisionFirst the answers in the bar are 1 2 3 (left to right) and their digits show on them */
+ let shownId=null;const keyed=()=>acts.hidden?[]:[talkBtn,noBtn,okBtn,...(ownRow.hidden?[]:ownRow.children)].filter(b=>!b.hidden&&!b.disabled);
+ const numKeys=()=>{if(!decisionFirst())return;keyed().forEach((b,i)=>{let k=b.querySelector('.act-label kbd');if(!k){k=el('kbd');b.querySelector('.act-label').append(k)}k.textContent=String(i+1)})};
  const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If it looks good: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
@@ -464,7 +600,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(op){const u=btn('btn '+(fill?'primary':'outline'),[ic('check',16),el('span','','Use '+(optLetter(op)||op.title||op.id))]);u.onclick=()=>answerIn(it,'ok',op.id);row.append(u)}
   else{const lt=btn('btn ghost swipe-pair-later',['Later']),ans=el('div','swipe-pair-answers');lt.onclick=()=>answerIn(it,'later');row.append(lt,ans);
    if(own)own.forEach(a=>{const b=btn('btn outline',[a.label]);b.onclick=()=>answerIn(it,'ok',a.picked);ans.append(b)});
-   else{if(!sendsBack(it)){const c=btn('btn ghost',[ic('comment',16),el('span','','Comment')]);c.onclick=()=>answerIn(it,'talk');ans.append(c)}
+   else{if(!sendsBack(it)||it.kind==='check'){const c=btn('btn ghost',[ic('comment',16),el('span','','Comment')]);c.onclick=()=>answerIn(it,'talk');ans.append(c)}
     const no=btn('btn outline',[ic('x',16),el('span','',noWord(it))]);no.onclick=()=>answerIn(it,'no');
     const ok=btn('btn outline swipe-pair-ok',[]);ok.dataset.item=it.id;ok.dataset.fill=fill?'1':'';ok.onclick=()=>answerIn(it,'ok');drawOk(ok,it);ans.append(no,ok)}}
   bar.append(row);return bar};
@@ -506,20 +642,23 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id)});
   c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
-   if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){if(oneTap(items[idx]))return answerPick(items[idx],opt.dataset.opt,t0);pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
-    if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
+   if(dist<8&&dt<400){reset(c);if(commenting===items[idx].id&&start&&pointAt(items[idx],{target:start,clientX:e.clientX,clientY:e.clientY,preventDefault(){},stopPropagation(){}}))return;/* R4 A: Comment is on */const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){if(oneTap(items[idx]))return answerPick(items[idx],opt.dataset.opt,t0);pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
+    if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')&&visual(items[idx])){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}/* words never open large (R4 A) */
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  /* a card's name in that line: its whole title when short; a long one goes by its ticket (PIL-8), never cut mid-word */
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
+  if(verdict==='talk'&&isRun(it))return startComment(it);/* R4 A: a run card answers with its own buttons, Comment stays */
   if((ownOnly(it)||isRun(it))&&verdict!=='later')return;/* its own buttons answer it */
-  if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
+  if(verdict==='talk')return startComment(it);
+  if(verdict==='no'&&sendsBack(it))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,oneTap(it)?'Tap the answer you want.':'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
+  if(verdict==='ok'&&isIdeas(it)&&!ideaSort(it).any)return nudge(c,'Sort at least one idea, then save.');/* ORCH-2186 */
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
-  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
+  setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:isIdeas(it)&&verdict==='ok'?{ideas:ideaNote(it)}:null)},120)};
  /* an answer on one side of Compare: the same words and the same rules as the shared bar (ORCH-477) */
  const answerIn=(it,verdict,pick)=>{if(!it||overlay||busy)return;
   if(verdict==='later')return defer(it);
@@ -548,17 +687,22 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     then "Compare" (filled once two are ticked) opens them side by side and "Cancel" ends picking. A group header is the
     ticket's name, with the count only when more than one waits; a lone card named like its ticket has no header. The
     page's list beside the deck (deck.drawList) and the phone's full list (the overview) draw the same rows. */
- const groupOf=it=>it.group||it.ticketTitle||it.ticket||'';
+ const groupOf=it=>it.laneName||it.group||it.ticketTitle||it.ticket||'';/* a lane (Review: what holds up work first, then by what you do) groups before a set or a ticket */
  const sameName=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
- const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title','All cards'),acts);
+ const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title',o.listTitle||'All cards'),acts);
   if(!picking){const c=btn('btn outline sm review-list-compare',[ic('compare',16),el('span','','Compare')]);c.setAttribute('aria-pressed','false');c.onclick=()=>setPicking(true);acts.append(c);return hd}
   const two=!!pairRefs(),go=btn('btn sm review-list-compare '+(two?'primary':'outline'),[el('span','','Compare')]),no=btn('btn ghost sm review-list-cancel',[el('span','','Cancel')]);
   go.disabled=!two;go.onclick=()=>showPair();no.onclick=()=>setPicking(false);acts.append(no,go);
   hd.append(el('p','meta review-list-hint','Tick two to see them side by side.'));return hd};
+ /* ORCH-2316 (R2 A, draft r2-a): a Review row's second line says why it waits and its ticket ("A helper waits for this ·
+    DEM-4", "3 pictures · DEM-7"); a deck without lanes keeps the deadline alone */
+ const rowSub=it=>{if(!it.laneName)return it.need||'';const pics=(it.files||[]).filter(f=>f.type==='img'||f.type==='page').length;
+  const why=it.need||(it.lane==='holds_up'&&it.kind!=='stuck'?'A helper waits for this':pics?pics+(pics===1?' picture':' pictures'):it.kindLabel||'');
+  return [why,it.ticket].filter(Boolean).join(' · ')};
  const listRow=i=>{const it=items[i],a=ans[it.id],now=i===idx&&!pairNow()&&idx<items.length,r=btn('review-row'+(now?' is-current':'')+(a?' is-done':''),[]);
   r.dataset.item=it.id;r.title=it.title;if(now)r.setAttribute('aria-current','true');
   const ico=el('span','review-row-icon');ico.append(ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
-  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else if(it.need)txt.append(el('span','review-row-sub'+(soon(it)?' soon':''),it.need));
+  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
   r.append(ico,txt);r.onclick=()=>jump(i);
   const li=el('div','review-li');li.setAttribute('role','listitem');
   if(!picking||a){li.append(r);return li}
@@ -588,10 +732,29 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const body=el('div','swipe-viewer-body review-list');
   v.draw=headOnly=>{b.replaceChildren(x,listHead());if(!headOnly)body.replaceChildren(listGroups())};
   v.draw();v.append(b,body);overlayBack=back&&back!==document.body&&back!==host?back:null;openOverlay(v,x);return v};
- const openComment=item=>{const it=item||items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};
+ /* R4 A (owner, 25 Nov; ORCH-2316): Comment turns on pointing. What you can point at lights up: a picture takes a
+    numbered spot (it opens large there), a paragraph takes a comment; "Whole card" writes about all of it. A card with
+    nothing to point at opens the comment box at once. */
+ let commenting=null;
+ const pointables=c=>c?[...c.querySelectorAll('.swipe-preview:not(.plain) .doc p,.swipe-preview:not(.plain) .doc li,.swipe-text')].filter(x=>String(x.textContent||'').trim()):[];
+ const canPoint=(it,c)=>!!c&&(visual(it)||pointables(c).length>0);
+ const commentBar=it=>{const b=el('div','banner slim info swipe-commenting'),g=el('div','grow'),whole=btn('btn outline sm',['Whole card']),fin=btn('btn ghost sm',['Done']);
+  g.append(el('strong','','Comment is on. '),visual(it)?'Click a picture or a paragraph, or write about the whole card.':'Click a paragraph, or write about the whole card.');
+  whole.onclick=e=>{e.stopPropagation();stopComment();openComment(it)};fin.onclick=e=>{e.stopPropagation();stopComment()};b.addEventListener('pointerdown',e=>e.stopPropagation());b.append(ic('comment',16),g,whole,fin);return b};
+ const stopComment=()=>{commenting=null;if(cur){cur.classList.remove('commenting');cur.querySelector('.swipe-commenting')?.remove();pointables(cur).forEach(x=>{x.classList.remove('swipe-point');x.removeAttribute('tabindex')})}syncWords()};
+ const pointAt=(it,e)=>{if(commenting!==it.id||!cur)return false;const t=e.target;if(t.closest('.swipe-commenting,a,button:not(.swipe-opt)'))return false;
+  const para=t.closest('.swipe-point');if(para){e.preventDefault();e.stopPropagation();const txt=para.textContent;stopComment();openComment(it,{on:txt});return true}
+  const pv=visual(it)&&t.closest('.swipe-preview');if(pv){e.preventDefault();e.stopPropagation();const r=pv.getBoundingClientRect(),x=r.width?(e.clientX-r.left)/r.width*100:50,y=r.height?(e.clientY-r.top)/r.height*100:50,
+   pane=t.closest('.cmp-pane'),on=t.closest('[data-on]');stopComment();const v=openViewer(pane?pane.dataset.on:null,it);if(v)v.askPin(Math.max(0,Math.min(100,x)),Math.max(0,Math.min(100,y)),'',on?on.dataset.on:'');return true}
+  return false};
+ const startComment=it=>{if(!it||!cur||!canPoint(it,cur))return openComment(it);if(commenting===it.id)return stopComment();commenting=it.id;markComment(it);live.textContent='Comment is on. Click what you mean, or Whole card.'};
+ const markComment=it=>{if(!cur||commenting!==it.id)return;cur.classList.add('commenting');if(!cur.querySelector('.swipe-commenting'))cur.querySelector('.swipe-head')?.after(commentBar(it));
+  pointables(cur).forEach(x=>{x.classList.add('swipe-point');x.tabIndex=0;x.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();ev.stopPropagation();const txt=x.textContent;stopComment();openComment(it,{on:txt})}}});
+  cur.querySelector('.swipe-commenting .btn')?.focus()};
+ const openComment=(item,at)=>{const it=item||items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};const on=at&&typeof at.on==='string'?at.on.replace(/\s+/g,' ').trim().slice(0,80):'';
   const scr=el('div','swipe-scrim'),sh=el('div','swipe-sheet');sh.setAttribute('role','dialog');sh.setAttribute('aria-label','Comment on '+it.title);
   const grab=el('div','grab');grab.title='Pull down to close; your words are kept';
-  const ttl=el('h2','','What should change?'),sub=el('p','meta',it.title);sub.style.margin='0';
+  const ttl=el('h2','','What should change?'),sub=el('p','meta',on?'On this paragraph: \u201c'+on+(on.length>=80?'\u2026':'')+'\u201d':it.title);sub.style.margin='0';
   /* o.attach (composer options, ORCH-422): the text field is the shared box, so a screenshot pastes, files drop or pick and
      a voice note records into the same tray; Send back and Add note carry them (note.changes.files). */
   let box=null,ta;if(o.attach&&UI.composer){box=el('div');box.id='swipe-box-'+String(it.id).replace(/[^A-Za-z0-9_-]/g,'_');
@@ -620,11 +783,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    back.className=opt?'btn':'btn primary';
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):it.kind==='choice'?'The helper gets your words as the answer.':'The helper gets your words and makes a new version. Nothing is approved.'+(note?' “Add note” only saves your words: the card stays and the work goes on.':'')};
   ta.addEventListener('input',sync);
-  const close=()=>{box&&box.comp.recorder&&box.comp.recorder.stop();closeOverlay();reset(cur)};cancel.onclick=close;
+  const close=()=>{box&&box.comp.recorder&&box.comp.recorder.stop();closeOverlay();reset(cur);syncWords()};cancel.onclick=close;/* kept words make Send back the filled button (R4 A) */
   const leave=(verdict,note)=>{box&&box.comp.recorder&&box.comp.recorder.destroy();closeOverlay();const c=cur;busy=true;if(c&&c.dataset.item===it.id)c.classList.add('leaving');
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note,it)},220)};
   const sent=()=>box?box.comp.files().map(({name,size,type,url})=>({name,size,type,url})):[];
-  const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice(),...(box?{files:sent()}:{})});
+  const words=()=>({text:(on&&ta.value.trim()?'On \u201c'+on+'\u201d: ':'')+ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice(),...(box?{files:sent()}:{})});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
   use.onclick=()=>{picked[it.id]=about.v;leave('ok',{picked:about.v,changes:words()})};
   if(note)note.onclick=async()=>{const text=ta.value.trim(),files=sent();if((!text&&!files.length)||note.disabled)return;note.disabled=back.disabled=use.disabled=true;
@@ -669,19 +832,42 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   (pins[it.id]||[]).forEach((pn,i)=>zm.append(pinEl(pn,i)));
   foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);const cw=zm.querySelector('.swipe-compare');if(side&&cw)cw.view(side);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
  /* keys: only when the deck itself or the card has focus (a focused button keeps its own Space / Enter) */
- host.addEventListener('keydown',e=>{if(e.key==='Tab')return;const t=e.target;
+ const gen=host.__deckGen=(host.__deckGen||0)+1;/* a deck built again on the same host: only the newest one answers keys (ORCH-2184) */
+ host.addEventListener('keydown',e=>{if(host.__deckGen!==gen)return;if(e.key==='Tab')return;const t=e.target;
   if(overlay){if(e.key==='Escape'){e.preventDefault();const wasViewer=overlay.classList.contains('swipe-viewer');closeOverlay();wasViewer?render():reset(cur);return}
    if((e.key==='b'||e.key==='B')&&!t.closest('input,textarea')){const w=overlay.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}return}
   if(e.repeat)return;if(t!==host&&t.closest('button,a,input,textarea,select'))return;
   const k=e.key;/* side by side: the arrows do not answer (which side?); Esc goes back to one card */
   if(pairNow()){if(k==='Escape'){e.preventDefault();compare([])}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}return}
+  if(decisionFirst()){const lk=k.length===1?k.toLowerCase():k;/* ORCH-2184: 1 2 3 J K M U Esc */
+   if(/^[1-9]$/.test(k)){const b=keyed()[+k-1];if(b){e.preventDefault();b.click()}return}
+   if(lk==='j'){e.preventDefault();step(1);return}if(lk==='k'){e.preventDefault();step(-1);return}if(lk==='u'){e.preventDefault();undo();return}
+   if(lk==='m'){const sm=cur&&cur.querySelector('.swipe-more summary');if(sm){e.preventDefault();sm.click();sm.focus()}return}
+   if(k==='Escape'&&typeof o.onEscape==='function'){e.preventDefault();o.onEscape();return}}
   if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
-  else if(k===' '){e.preventDefault();cur&&hasPreview(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
+  else if(k===' '){e.preventDefault();cur&&visual(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
+/* Attention tiles (ORCH-2184, Focused review C; owner's words of 26 Nov). UI.attentionTiles(groups, o) -> .stat-row of three
+   tile buttons (in a .attn-tiles-wrap with the deadline as one line under them on a phone): Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
+   deadline ("Next deadline: <card> · <time>", only on the tile that holds the next one)}]. A tile with nothing in it
+   says "Nothing waits here" and does nothing. o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
+UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken back afterwards.',short:'One clear question each.',time:'Big, public or hard to take back.'};
+ const row=el('div','stat-row attn-tiles');row.setAttribute('role','group');row.setAttribute('aria-label','Pick where to start');
+ (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0),b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
+  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
+  if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
+  if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
+  /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
+  if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
+  b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
+ /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */
+ const due=(groups||[]).find(g=>(g.count|0)>0&&g.deadline),wrap=el('div','attn-tiles-wrap');wrap.append(row);
+ if(due)wrap.append(el('p','attn-tile-line attn-due attn-due-line phone-only',due.name+': '+due.deadline));
+ return wrap};
 })();
 /* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, commands, error, notice}) is the full-page login card
    ("Welcome", one token field, Log in) plus the way in for someone without a token (ORCH-1851): ask the person who

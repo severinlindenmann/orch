@@ -1,4 +1,4 @@
-"""`orch addon add|remove|uninstall|list`."""
+"""`orch addon add|remove|uninstall|list|check`."""
 
 from __future__ import annotations
 
@@ -34,7 +34,12 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--purge", action="store_true", help="also delete its data folder and settings")
     x = a.add_parser("uninstall", parents=[common], help="uninstall an add-on")
     x.add_argument("name")
-    a.add_parser("list", parents=[common])
+    x = a.add_parser("list", parents=[common], help="the add-ons and whether each is on here")
+    x.add_argument("--catalog", action="store_true", help=argparse.SUPPRESS)  # installation choices
+    x = a.add_parser("check", parents=[common], help="check an add-on against the add-on contract")
+    x.add_argument(
+        "name", metavar="NAME|./FOLDER", help="an installed or shipped add-on, or an add-on folder"
+    )
 
 
 def _add_one(args, root: Path, name: str) -> None:
@@ -83,6 +88,9 @@ def _add(args, root: Path) -> None:
             addonjob.detach()
     if args.project_only:
         _out(args, {"ok": True}, f"{names[0]} is turned on in this workspace.")
+    if not args.json and not args.project_only and len(names) == 1 and names[0] in ("relay", "publish"):
+        if not nextstep.configured(root, names[0]):
+            print("It is not connected yet.")
     if not args.json:
         from orch import harness
 
@@ -95,7 +103,7 @@ def dispatch(args, root: Path) -> bool:
         return False
     sub = getattr(args, "sub", None)
     if sub == "list":
-        rows = addons.listing(root)
+        rows = addons.listing(root, catalog=args.catalog)
         have = [r for r in rows if r["installed"]]
         avail = [r for r in rows if not r["installed"]]
         w = addons.name_width(r["name"] for r in rows)
@@ -108,6 +116,13 @@ def dispatch(args, root: Path) -> bool:
                 f"  {r['name']:<{w}}{r['description']}" for r in avail
             )
         _out(args, rows, text)
+    elif sub == "check":
+        from orch import addoncheck
+
+        res = addoncheck.check(args.name)
+        if not res["ok"]:
+            args._exit = 1
+        _out(args, res, addoncheck.text(res))
     elif sub == "add":
         _add(args, root)
     elif sub == "remove":

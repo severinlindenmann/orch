@@ -26,12 +26,12 @@ function ctx(state, extra = {}) {
 test('the page reads cards and decisions from state.review and counts the cards', () => {
   const c = ctx({workspace:'Demo', review:{cards:[CARD, {...CARD, id:'core:review:t_abcdef', key:'review'}], answered:[{id:'x'}]}});
   assert.equal(c.reviewCount(), 2);
-  assert.match(c.reviewSubtitle(), /^2 things wait on you, most urgent first\.$/);
+  assert.match(c.reviewSubtitle(), /^2 things need you\.( .*)?$/);
   const api = c.reviewApi();
   return Promise.all([api.stack(), api.answered()]).then(([s, a]) => { assert.equal(s.length, 2); assert.equal(a.length, 1); assert.equal(api.workspace, 'Demo'); });
 });
 test('one card and none: plain words', () => {
-  assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing waits on you/);
+  assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing needs you\./);
   assert.equal(ctx({}).reviewSubtitle(), 'Nothing waits for you.');
   assert.equal(ctx({}).reviewCount(), 0);
 });
@@ -41,7 +41,7 @@ test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
   for (const bad of ['reviewed/0123456789ab/../x.png', 'reviewed/0123456789ab/a/b.png', 'reviewed/XYZ/x.png', '', null, 'https://evil/x.png', 'artifacts/../x.png', 'evidence/a/../../x.png', 'evidence/.orch/x.png', 'secrets/x.png', 'evidence/a\\b.png']) assert.equal(f(CARD, bad), '', String(bad));
   assert.equal(f({}, 'reviewed/0123456789ab/after.png'), '');
 });
-test('a Check result opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
+test('a Test results card opens its own files: pictures and PDFs through /api/file, a page only in its /view frame (ORCH-183)', () => {
   const f = ctx({}).reviewApi().fileUrl;
   assert.equal(f(CARD, 'evidence/shop photo.png'), '/api/file?t=t_abcdef&k=evidence&n=shop%20photo.png');
   assert.equal(f(CARD, 'artifacts/out/poster.pdf'), '/api/file?t=t_abcdef&k=artifacts&n=out%2Fposter.pdf');
@@ -90,7 +90,7 @@ test('the All cards list is drawn by the kit into the queue, on the left of the 
   const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
   assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
   const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
-  assert.equal(side.attrs['aria-label'], 'All cards');
+  assert.equal(side.attrs['aria-label'], 'Needs you');
   assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
@@ -102,6 +102,15 @@ test('the page keeps its host and side list out of the reconcile (mounted once),
   assert.equal(calls.length, 1, 'mounted once'); assert.equal(calls[0].poll, 3000); assert.equal(typeof calls[0].onChange, 'function');
   assert.ok(c.mounts.has(host) && c.mounts.has(side));
   c.mounts.get(host).destroy(); assert.equal(calls.at(-1), 'destroy');
+});
+test('ORCH-2182: the page passes the decision-first switch to the deck, read from the settings at each draw', () => {
+  const calls = [];
+  const c = ctx({settings:{decision_first_on:false}}, {window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), side = h('aside'), queue = h('div');
+  c.mountReview({querySelectorAll: sel => sel === '[data-review-host]' ? [host] : sel === '[data-review-side]' ? [side] : [], querySelector: () => queue});
+  assert.equal(calls[0].decisionFirst(), false);
+  c.state.settings.decision_first_on = true;
+  assert.equal(calls[0].decisionFirst(), true);
 });
 // ---- Home and ticket ----
 function home(state, tickets = [], rows = []) {
@@ -130,7 +139,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
   const factory = {...CARD, id:'core:q:t_fffaaa:q1', ticket:'t_fffaaa', key:'q1', kind:'choice', card:{kind:'choice', title:"Start 'Services'?"}};
   const c = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2], rows);
   assert.equal(c.needsToday().count, 2);
-  assert.equal(c.reviewSubtitle(), '2 things wait on you, most urgent first.');
+  assert.equal(c.reviewSubtitle(), '2 things need you.');
   // owner 16 Nov: the number is open questions plus results to check, so it equals the cards here. A helper idle at its
   // prompt, or a ticket that only waits for another ticket, has no card and is not counted.
   const idle = {id:'core:stuck:t_ccccdd', source:'core', kind:'stuck:idle', ticket:'t_ccccdd', since:'2026-11-15T11:00:00Z', title:'Docs', text:'The helper waits at its prompt', tone:'warn'};
@@ -139,7 +148,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
   const cards = [CARD, factory, check];
   const more = home({...base, review:{cards, answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}, waits, {id:'t_eeeeff', title:'Report', status:'review', questions:[]}], [...rows, idle]);
   assert.equal(more.needsToday().count, 3); assert.equal(more.needsToday().count, more.reviewCount());
-  assert.equal(more.reviewSubtitle(), '3 things wait on you, most urgent first.');
+  assert.equal(more.reviewSubtitle(), '3 things need you.');
   assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
@@ -164,7 +173,7 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
 
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
-  assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
+  assert.match(c.reviewSubtitle(), /^1 thing needs you\./);
 });
 
 test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
@@ -207,7 +216,7 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
   assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
-  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
+  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to review');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
   const attached = [];
@@ -240,12 +249,13 @@ test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)'
   const cardNode = c.reviewAutoCard();
   assert.match(text(cardNode), /^Auto Reviewer/);
   const sw = nodes(cardNode).filter(n => n.attrs?.role === 'switch');
-  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true]]);
+  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true], ['reviewer-mode-set', false]]);
   const rail = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
   assert.ok(nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
   await c.reviewSwitch('auto');
   await c.reviewSwitch('away');
-  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
+  await c.reviewSwitch('propose');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}], ['reviewer_mode.set', {on:true}]]);
   assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
   const snap = ctx({settings:{away_on:true}}, {snapshot:true});
   assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
@@ -262,7 +272,7 @@ test('Auto Reviewer: hidden on Review until a switch is on in Settings; plain wo
   const set = off.autoReviewerCard();
   assert.equal(set.attrs['data-key'], 'settings-auto-reviewer');
   assert.deepEqual(nodes(set).filter(n => n.attrs?.role === 'switch').map(n => [n.attrs['data-key'], n.attrs['data-action'], n.attrs['aria-checked']]),
-    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false]]);
+    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false], ['settings-switch-propose', 'reviewer-mode-set', false]]);
   const words = text(set);
   assert.match(words, /shows in the ticket\u2019s history, and you can undo it/);
   for (const w of ['Words, names', 'deploy', 'recommendation']) assert.ok(!words.includes(w), 'no orch-only word: ' + w);
@@ -336,7 +346,7 @@ test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuc
   const stack = await c.reviewApi().stack();
   assert.equal(stack.length, n.count, 'one card per thing counted');
   assert.equal(c.reviewCount(), n.count);
-  assert.equal(c.reviewSubtitle(), n.count + ' things wait on you, most urgent first.');
+  assert.equal(c.reviewSubtitle(), n.count + ' things need you.');
   const stuck = stack.filter(x => x.card.kind === 'stuck');
   assert.deepEqual([...stuck.map(x => x.ticket)], ['t_aaaa01', 't_aaaa02', 't_aaaa03', 't_aaaa04', 't_aaaa06'], 'first in line, as on Home; the unsure ticket in Check has only its Check card');
   assert.equal(stack.indexOf(stuck[0]), 0);
@@ -437,7 +447,7 @@ test('ORCH-1616: what the number counts but has no card is listed above the card
     {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
   const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
   const rows = none.reviewExtraRows();
-  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to review.']]));
   assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
   assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
   // with a card for each, nothing extra: the cards list them
@@ -504,4 +514,98 @@ test('ORCH-1804: the deck gets the "Open ticket" address, and an open panel foll
   c.location.hash = '#review';
   calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}], index:0, answers:{}});
   assert.equal(moved.length, 1, 'closed: the card never opens it');
+});
+
+// ORCH-2185 (Focused review D, behind workflow.decision_first): the panel beside the card has Ticket, Chat and
+// "What the helper does" ("Terminal" with the plain terminal's typing on); it keeps its tab when it follows the card,
+// "Ask about this" opens Chat with "About: <the decision>" and Run it on a sign-in shows the terminal in the panel.
+const jeq = (a, b, m) => assert.equal(JSON.stringify(a), JSON.stringify(b), m);
+const panelCtx = (hash, settings = {decision_first_on:true}, more = {}) => ctx({settings, runs:more.runs || {}}, {location:{hash}, snapshot:false, array:v => Array.isArray(v) ? v : [], history:{state:null, replaceState(){}},
+  ticketOf:id => id === 't_abcdef' ? {id, key:'DT-41', status:more.status || 'open', history:[]} : null, detail:t => h('div', {className:'ticket-page'}, 'ticket ' + t.key), missingTicket:id => h('p', {}, 'gone ' + id),
+  tcItems:() => more.items || [], tcGroupOf:() => null, tcLine:item => h('article', {}, 'line ' + item.e.text), tcAnswer:item => h('article', {}, 'answer ' + item.q.answer),
+  tcLineShell:(item, prev, g, ...b) => h('article', {}, ...b), ...more.extra});
+const panelOf = c => nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-ticket');
+test('ORCH-2185: off, the panel is as before; on, three tabs and the address keeps the tab', () => {
+  assert.match(text(panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', {}))), /^Ticket/, 'switch off: the heading, the ticket page, no tabs');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=chat', {}).reviewPanelTab(), 'ticket');
+  const c = panelCtx('#review?card=x&ticket=t_abcdef');
+  const tabs = nodes(panelOf(c)).find(n => n.attrs?.['data-key'] === 'review-ticket-tabs');
+  const links = nodes(tabs).filter(n => n.tag === 'a');
+  jeq(links.map(text), ['Ticket', 'Chat', 'What the helper does']);
+  jeq(links.map(a => a.attrs.href), ['#review?card=x&ticket=t_abcdef', '#review?card=x&ticket=t_abcdef&tab=chat', '#review?card=x&ticket=t_abcdef&tab=helper']);
+  assert.equal(links[0].attrs['aria-current'], 'true');
+  assert.match(text(panelOf(c)), /ticket DT-41/, 'the Ticket tab is the ticket page');
+  jeq(nodes(panelOf(panelCtx('#review?ticket=t_abcdef', {decision_first_on:true, terminal_typing_on:true}))).filter(n => n.attrs?.['data-key'] === 'review-tab-helper').map(text), ['Terminal'], 'Terminal only with the plain terminal setting on');
+  assert.equal(c.reviewTicketHref('t_abcdef', 'helper', 't_term01'), '#review?card=x&ticket=t_abcdef&tab=helper&term=t_term01');
+  assert.equal(c.reviewTicketHref('t_abcdef', 'chat', 't_term01'), '#review?card=x&ticket=t_abcdef&tab=chat', 'a terminal only on the helper tab');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=helper&term=t_term01').reviewTicketHref(''), '#review', 'Close drops the ticket, its tab and terminal');
+  assert.equal(panelCtx('#review?ticket=t_abcdef&tab=evil').reviewPanelTab(), 'ticket', 'only the three tabs');
+});
+test('ORCH-2185: the Chat tab shows the chat lines, open questions as plain lines and the message box; closed: no box', () => {
+  const items = [{kind:'line', key:'h1', at:'2026-11-26T09:00:00Z', e:{by:'human:me', text:'Keep it short'}}, {kind:'question', key:'q-q1', at:'2026-11-26T10:00:00Z', q:{id:'q1', text:'Send it today?'}}];
+  const p = panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {items}));
+  assert.match(text(p), /line Keep it short/);
+  assert.match(text(p), /Send it today\?/);
+  assert.ok(nodes(p).some(n => n.attrs?.['data-review-chat-box'] === 't_abcdef'), 'the message box host');
+  const closed = panelOf(panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {status:'done'}));
+  assert.ok(!nodes(closed).some(n => n.attrs?.['data-review-chat-box']), 'a closed ticket takes no reply');
+  assert.match(text(closed), /No messages yet/);
+});
+test('ORCH-2185: the helper tab: the live screen, the plain terminal Run it started, or a plain empty state', () => {
+  const live = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper', undefined, {runs:{t_abcdef:{running:true, claim:{mode:'tmux'}}}}));
+  assert.ok(nodes(live).some(n => n.attrs?.['data-review-term'] === 't_abcdef'));
+  const oneshot = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper', undefined, {runs:{t_abcdef:{running:true, claim:{mode:'oneshot'}}}}));
+  assert.match(text(oneshot), /No helper works on this now/, 'a one-step helper has no live screen');
+  const term = panelOf(panelCtx('#review?ticket=t_abcdef&tab=helper&term=t_term01'));
+  const host = nodes(term).find(n => n.attrs?.['data-review-term']);
+  assert.equal(host.attrs['data-review-term'], 't_term01'); assert.equal(host.attrs['data-review-plain'], 'yes');
+  assert.doesNotMatch(text(term), /session/i, 'never "session" on screen');
+});
+test('ORCH-2185: More gets Ask about this (and Watch the helper with a live helper); Ask prefills the box once', () => {
+  const off = panelCtx('#review', {});
+  jeq(off.reviewMoreItems({ticketId:'t_abcdef'}), [], 'switch off: nothing');
+  const c = panelCtx('#review', undefined, {runs:{t_abcdef:{running:true, claim:{}}}});
+  const items = c.reviewMoreItems({id:'core:q:t_abcdef:q1', ticketId:'t_abcdef', text:'Send the newsletter today?'});
+  jeq(items.map(i => i.label), ['Ask about this', 'Watch the helper']);
+  jeq(items.map(i => i.href), ['#review?ticket=t_abcdef&tab=chat', '#review?ticket=t_abcdef&tab=helper']);
+  jeq(panelCtx('#review').reviewMoreItems({ticketId:'t_abcdef'}).map(i => i.label), ['Ask about this'], 'no live helper: no Watch');
+  items[0].onClick();
+  assert.equal(vm.runInContext('reviewChatDrafts', c).get('t_abcdef'), 'About: Send the newsletter today?\n');
+  vm.runInContext('reviewChatDrafts', c).set('t_abcdef', 'my own words');
+  items[0].onClick();
+  assert.equal(vm.runInContext('reviewChatDrafts', c).get('t_abcdef'), 'my own words', 'never over words already typed');
+});
+test('ORCH-2185: the panel keeps its tab when it follows the card; Run it opens the terminal in the panel', () => {
+  const moved = [];
+  const c = panelCtx('#review?ticket=t_abcdef&tab=chat', undefined, {extra:{setTimeout(){}, history:{state:null, replaceState:(s, t, u) => moved.push(u)}, route:() => ({kind:'review'})}});
+  c.reviewTicketFollow({items:[{id:'b', ticketId:'t_abc999'}], index:0, answers:{}});
+  jeq(moved, ['#review?ticket=t_abc999&tab=chat']);
+  assert.equal(c.reviewPanelRun('t_term01', 't_abcdef'), true);
+  assert.equal(c.location.hash, '#review?ticket=t_abcdef&tab=helper&term=t_term01');
+  assert.equal(panelCtx('#review', {}, {extra:{route:() => ({kind:'review'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'switch off: the live layer as before');
+  assert.equal(panelCtx('#review', undefined, {extra:{route:() => ({kind:'review'}), liveLayerPhone:() => true}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'a phone keeps the live layer');
+  assert.equal(panelCtx('#home', undefined, {extra:{route:() => ({kind:'home'})}}).reviewPanelRun('t_term01', 't_abcdef'), false, 'Home keeps the live layer');
+});
+test('ORCH-2316 (R2 A, draft r2-a): the subtitle says how many need you and how many hold up work now', () => {
+  const ask = {...CARD, card_kind:{family:'answer', kind:'question', name:'Question', lane:'holds_up'}};
+  const look = {...CARD, id:'core:review:t_abcdef', key:'review', card:{kind:'check', title:'Done'}, card_kind:{family:'look', kind:'document', name:'Document', lane:'look'}};
+  assert.equal(ctx({review:{cards:[ask, look]}}).reviewSubtitle(), '2 things need you. 1 holds up work now.');
+  assert.equal(ctx({review:{cards:[ask, {...ask, id:'core:q:t_abcdef:q4'}, look]}}).reviewSubtitle(), '3 things need you. 2 hold up work now.');
+  assert.equal(ctx({review:{cards:[look]}}).reviewSubtitle(), '1 thing needs you.');
+});
+// ORCH-2339: the heading says cards + listed rows, the Waiting tab the cards, the badge needsToday().count. Whatever the
+// core counts must be on the page as a card or as a row of "Also waiting for you", so the three can never drift apart.
+test('ORCH-2339: every item the core counts is a card or a listed row (stopped work with no Home row too)', async () => {
+  const c = stuckHome();
+  const items = [{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null},
+    {ticket:'t_aaaa02', question:null, stopped:'helper:idle', row:'core:idle:t_aaaa02'},
+    // counted by the core, but no row on Home's list (so no stuck card is made for it)
+    {ticket:'t_aaaa03', question:null, stopped:'helper:failing', row:'core:failing:t_aaaa03'}];
+  c.state.counts = {needs_you:{count:items.length, questions:1, results:1, failed:0, stopped:2, items}};
+  c.state.review.cards = c.state.review.cards.slice(0, 2);  // the question and the result of t_aaaa01
+  c.needsList = () => [];  // Home lists nothing of the stopped work
+  const n = c.needsToday(), cards = (await c.reviewApi().stack()).length;
+  assert.equal(n.count, items.length);
+  assert.equal(cards + c.reviewExtraRows().length, n.count, 'the heading adds up to the badge');
+  assert.equal(c.reviewExtraRows().map(r => r.what).join(), 'stopped,stopped');
 });

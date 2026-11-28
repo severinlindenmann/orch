@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config, reminder_settings
+from orch import adapters, agentsdata, config, reminder_settings, tickets
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -107,7 +107,7 @@ def _claude_argvs(root):
     )
 
 
-def test_claude_snapshots(proj):
+def test_claude_snapshots(proj, collect_claude):
     fresh, resume, deny = _claude_argvs(proj)
     v = {"prompt": "Do it", "new_session": NEW, "session": OLD, "permissions": "ask"}
     assert adapters.render("claude", "fresh", "oneshot", v, proj) == fresh
@@ -175,7 +175,8 @@ def test_permission_modes_for_claude(claude_help, mode, proj):
     assert flags("auto") == ("--permission-mode", "auto")
 
 
-def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run):
+def test_permission_mode_comes_from_the_workspace_config(proj, claude_help, run, monkeypatch):
+    monkeypatch.setattr(tickets, "attended", lambda: True)
     assert config.permissions(proj) == "auto"  # the default
     assert (
         adapters.render("claude", "fresh", "oneshot", {"prompt": "p", "new_session": NEW}, proj).count(
@@ -623,8 +624,8 @@ def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
         adapters.render("claude", "fresh", "oneshot", {**v, "allow": ["--dangerous"]}, proj)
 
 
-def test_hooks_doc_comes_from_data():
-    d = adapters.hooks_doc("claude", "r_8k2m")
+def test_hooks_doc_comes_from_data(proj, collect_claude):
+    d = adapters.hooks_doc("claude", "r_8k2m", proj)
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
     # ORCH-689: a turn ended by an error (usage limit, login changed) fires StopFailure, not Stop: idle too
@@ -655,7 +656,7 @@ def _orch_groups(doc, event):
     ]
 
 
-def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
+def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj, collect_claude):
     """W2b 1.7: the record hook is in the SAME generated settings as the work-check reminder: one --settings
     in the final argv of a oneshot and of a live run (two configs could override each other)."""
     argv = reminder_settings.record_hook_argv()
@@ -699,7 +700,7 @@ def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
         ("\\\\server\\share\\py\\python.exe", '"//server/share/py/python.exe"'),
     ],
 )
-def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
+def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want, proj, collect_claude):
     """The Windows interpreter forms reminder_settings handles: forward slashes, double-quoted, one line that
     Git Bash (Claude's hook shell on Windows) and cmd both split back into the same argv.
     TODO(W2b 1.7, VM): prove on the Windows VM that the hook process is found in the claim's process tree
@@ -712,9 +713,9 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     argv = reminder_settings.record_hook_argv()
     assert shlex.split(cmd) == argv  # bash (Git Bash)
     cmd_words = [t[1:-1] if t[:1] == t[-1:] == '"' else t for t in shlex.split(cmd, posix=False)]
-    assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
+    assert cmd_words == argv  # cmd: the quoted path is one word
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
-    doc = adapters.reminder_doc("claude")
+    doc = adapters.reminder_doc("claude", proj)
     assert all(_orch_groups(doc, e)[0] == f"{cmd} --with claude" for e in _RECORD_EVENTS)  # ORCH-634
     assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
 
@@ -786,6 +787,12 @@ SKIP_FILES = {"adapters.py", "uv.lock"}
 
 def _hits() -> dict[str, int]:
     out = {}
+    formats = {
+        a[mode]["events"]
+        for a in agentsdata.load()["adapters"].values()
+        for mode in ("oneshot", "live")
+        if (a.get(mode) or {}).get("events")
+    }
     for base in (ROOT / "workspace/src/orch", ROOT / "workspace-addons"):
         for dirpath, dirs, files in os.walk(base):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
@@ -794,7 +801,11 @@ def _hits() -> dict[str, int]:
                     continue
                 p = Path(dirpath) / f
                 try:
-                    n = len(NAME.findall(p.read_text(encoding="utf-8")))
+                    text = p.read_text(encoding="utf-8")
+                    if f in ("orch-addon.toml", "shipped_addons.json"):
+                        for fmt in formats:  # add-ons declare the adapter's existing wire IDs
+                            text = text.replace(json.dumps(fmt), "")
+                    n = len(NAME.findall(text))
                 except (UnicodeDecodeError, OSError):
                     continue
                 if n:

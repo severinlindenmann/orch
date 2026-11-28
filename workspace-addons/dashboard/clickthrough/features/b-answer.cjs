@@ -15,12 +15,12 @@ module.exports = {
     await page.getByRole('link', { name: /Review walk: choose the song/ }).first().click();
     await page.waitForFunction(() => /^#ticket\//.test(location.hash));
     const hash = await page.evaluate(() => location.hash);
-    await page.locator('summary[aria-label="More ticket actions"]').click();
-    await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Check' }).click());
+    await page.locator('summary[data-key^="ticket-actions-"]').click();
+    await act('ticket.patch', () => page.getByRole('menuitemradio', { name: 'Review', exact: true }).click());
 
     await open('#review');
     await page.getByRole('button', { name: 'Later' }).click();  // the question card comes first; this is the Check card
-    await page.getByText('The helper says this is ready for your check.').waitFor();
+    await page.getByText(/Everything you asked for is done and tested\.|The helper says this is ready for your check\./).first().waitFor();  // R6 A (ORCH-2316)
     await act('review.answer', () => page.getByRole('button', { name: 'Looks good' }).click());
     await open(hash);
     must(/Done/.test(await page.locator('main').innerText()), 'the ticket is not Done after "Looks good" and a reload');

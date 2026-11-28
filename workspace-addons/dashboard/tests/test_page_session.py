@@ -98,6 +98,75 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
 
+def test_session_cookie_is_secure_over_https_only(live):
+    """Behind a TLS proxy the page-session cookie never travels over plain http; on http it has no Secure flag
+    (the browser would drop it). The host name alone decides nothing (R4.1a)."""
+    root, port = live
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    _, plain, _ = post(port, "/session", {"token": tok})
+    assert "Secure" not in plain
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    st, ck, _ = post(
+        port,
+        "/session",
+        {"token": tok},
+        headers={"Origin": "https://dash.example.org:8791"},
+        host="dash.example.org:8791",
+    )
+    assert st == 200 and ck.endswith("; Secure") and "HttpOnly" in ck and "SameSite=Strict" in ck
+
+
+def test_answers_carry_the_default_headers(live):
+    root, port = live
+    cookie = session(root, port)
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request(
+        "GET",
+        "/api/state",
+        headers={"Host": f"127.0.0.1:{port}", "Cookie": cookie, "Sec-Fetch-Site": "same-origin"},
+    )
+    r = c.getresponse()
+    r.read()
+    csp = r.getheader("Content-Security-Policy")
+    for part in ("object-src 'self'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'self'"):
+        assert part in csp, part
+    assert (
+        "unsafe-inline" not in csp and "script-src" not in csp
+    )  # scripts only from this app (default-src 'self')
+    assert r.getheader("Referrer-Policy") == "same-origin"
+    assert r.getheader("X-Content-Type-Options") == "nosniff"
+    assert len(r.headers.get_all("Referrer-Policy")) == 1
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "https://evil.example"},  # another website
+        {"Origin": "null"},  # a sandboxed or file page
+        {"Origin": None},  # no Origin: a script outside the browser
+        {"Sec-Fetch-Site": "cross-site"},  # the browser says it came from elsewhere
+        {"Sec-Fetch-Site": "same-site"},  # a sibling sub-domain
+    ],
+)
+def test_a_planted_cross_site_post_is_refused_even_with_the_cookie(live, monkeypatch, headers):
+    """CSRF: the session cookie and page secret alone never let another page act; the fence answers 403 first."""
+    root, port = live
+    ran = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
+    cookie = session(root, port)
+    page_hdrs = {"Cookie": cookie, "X-Orch-Page": SECRETS[cookie], "Origin": f"http://127.0.0.1:{port}"}
+    st, hdr, _ = _raw(port, "POST", "/api/act", ANSWER, {**page_hdrs, **headers})
+    assert st == 403 and ran == [] and "set-cookie" not in hdr
+    st, _, body = _raw(
+        port, "POST", "/api/act", ANSWER, page_hdrs
+    )  # the same click from the page itself runs
+    assert st == 200 and ran, body
+
+
 REMOTE = "dash.example.org:8791"  # a proxy in front, reached from another computer
 
 
@@ -473,6 +542,7 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "reviewer.set": {"on": True},
+    "reviewer_mode.set": {"on": False},
     "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
     "prepare.set": {"on": False},

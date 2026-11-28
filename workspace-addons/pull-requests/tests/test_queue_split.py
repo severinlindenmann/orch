@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from test_queue import FakeGit, FakeGitHub, make, states, url
 
 from orch_pull_requests import blame, store
@@ -213,6 +215,26 @@ def test_a_member_left_by_a_stopped_runner_loses_its_split_mark(ws):
     store.set_state(ws, url(1), store.RUNNING, "its group was red", split=True)
     store.back_to_front(ws, [url(1)], "the last runner stopped")
     assert "split" not in store.find(store.read(ws), url(1))
+
+
+def test_the_part_of_a_split_starts_its_own_clock(ws, monkeypatch):
+    """#1914: after a split the page said "checks running 40 min" for a part that had just started."""
+    from orch_pull_requests import view
+
+    for n in (1, 2):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    monkeypatch.setattr(store, "now", lambda: "2026-11-21T10:00:00Z")
+    store.claim(ws, [{"url": url(n), "added": store.find(store.read(ws), url(n))["added"]} for n in (1, 2)])
+    for n in (1, 2):
+        store.set_state(ws, url(n), store.RUNNING, "its group was red", split=True)
+    monkeypatch.setattr(store, "now", lambda: "2026-11-21T10:40:00Z")
+    assert store.start_part(ws, [url(1)]) == [url(1)]
+    rows = store.read(ws)
+    assert store.find(rows, url(1))["taken"] == "2026-11-21T10:40:00Z"
+    assert store.find(rows, url(2))["taken"] == "2026-11-21T10:00:00Z"  # still waits for its part
+    at = view._stamp("2026-11-21T10:42:00Z")
+    text = json.dumps(view.queue_blocks(ws, {"prs": {}}, True, at))
+    assert "checks running 2 min" in text and "checks running 42 min" not in text
 
 
 def test_imports_reads_python_and_javascript_imports():

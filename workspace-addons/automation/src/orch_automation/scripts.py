@@ -27,6 +27,17 @@ from pathlib import Path
 
 from . import runfiles
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 MAX_ARGS = 64
 MAX_ARG = 4096
@@ -122,13 +133,14 @@ def _approve(root: Path, name: str, argv: list[str]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def an_agent() -> str | None:
-    """The agent tool this process runs under (core's rule), else None. Without core: count as an agent."""
+def an_agent(by: str | None = None) -> str | None:
+    """The helper making this change, including unattended callers. Without core: count as an agent."""
     try:
         from orch import tickets
     except ImportError:
         return "unknown"
-    return tickets.agent_tool()
+    who = tickets.acting_actor(by)
+    return who.removeprefix("agent:") if who.startswith("agent:") else None
 
 
 def shown(argv: list[str]) -> str:
@@ -150,9 +162,9 @@ def showable(argv: list[str]) -> bool:
     )
 
 
-def allow(root: Path, name: str, given_key: str) -> None:
+def allow(root: Path, name: str, given_key: str, by: str | None = None) -> None:
     """A person's yes for exactly ONE entry, and only if it is still what was shown (the key matches now)."""
-    if an_agent():
+    if an_agent(by):
         raise ScriptError("Only a person can allow a script, not an agent.")
     argv = load(root).get(name) if isinstance(name, str) else None
     if argv is None:
@@ -340,7 +352,7 @@ def _attach_log(root: Path, tid: str, name: str, log: Path) -> str | None:
     try:
         with log.open("rb") as f:
             p = subprocess.run(
-                [os.environ.get("ORCH_BIN") or "orch", "ticket", "attach", tid, "--name", fname],
+                [*_orch_cmd(), "ticket", "attach", tid, "--name", fname],
                 stdin=f,
                 cwd=root,
                 capture_output=True,

@@ -270,7 +270,7 @@ def with_codex(ws, tmp_path, monkeypatch):
     from orch import adapters
 
     found = [{"name": n, "label": n.title(), "found": True, "version": None} for n in ("claude", "codex")]
-    monkeypatch.setattr(adapters, "detect", lambda: found)
+    monkeypatch.setattr(adapters, "detect", lambda **_: found)
     cx = tmp_path / "codexhome"
     cx.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(cx))

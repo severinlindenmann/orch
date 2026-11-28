@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const read = f => fs.readFileSync(path.join(WEB, f), 'utf8');
 const helpers = require('../src/orch_dashboard/web/helpers.js');
+const HTML_SET = [];  // every markup string the page hands to innerHTML (only the kit's own icons may go there)
 
 function dom() {
   class Node {
@@ -50,7 +51,7 @@ function dom() {
     set hidden(v) { if (v) this.setAttribute('hidden', ''); else this.removeAttribute('hidden'); }
     get disabled() { return this.hasAttribute('disabled'); }
     set disabled(v) { if (v) this.setAttribute('disabled', ''); else this.removeAttribute('disabled'); }
-    set innerHTML(_) { this.childNodes.forEach(n => { n.parentNode = null; }); this.childNodes = []; }
+    set innerHTML(v) { HTML_SET.push(String(v)); this.childNodes.forEach(n => { n.parentNode = null; }); this.childNodes = []; }
     get textContent() { return this.childNodes.map(n => n.textContent).join(''); }
     set textContent(v) { this.replaceChildren(new Text(v)); }
     insertBefore(node, ref) {
@@ -103,6 +104,7 @@ function page(first) {
     count:key => main.querySelectorAll('[data-key="' + key + '"]').length,
     text:() => main.textContent,
     poll:async next => { replies.push(next); await vm.runInContext('refresh()', ctx); },
+    h:(...a) => vm.runInContext('h', ctx)(...a),
   };
 }
 const ticket = (extra = {}) => ({id:'t_x', title:'Fix the login form', status:'active', checklist:[{id:'c1', text:'Look', state:'doing'}], questions:[], history:[], refs:[], sessions:[], updated_at:'2026-11-11T10:00:00Z', revision:4, ...extra});
@@ -158,7 +160,7 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1, 'a running helper is named in the header line (ORCH-70)');
   assert.equal(p.count('agent-bar'), 0, 'no second helper bar under the header');
   await p.poll(state(ticket({status:'review', work}), {rev:'c', runs:{}}));
-  assert.ok(p.text().includes('Check'), 'the status chip follows the ticket');
+  assert.ok(p.text().includes('Review'), 'the status chip follows the ticket');
   assert.equal(p.count('agent-bar'), 0, 'no agent bar in Review');
   await p.poll(state(ticket({status:'active'}), {rev:'d', runs:{t_x:{running:true, claim:{agent:'claude', mode:'run'}, shared_folder:{line:'"Other" is also changing this folder.'}}}}));
   assert.equal(p.count('work-copy'), 0, 'the copy line goes when the ticket no longer has one');
@@ -166,7 +168,7 @@ test('status chip, shared folder line, copy line and agent bar all follow each n
   assert.equal(p.count('ticket-kicker'), 1);
 });
 
-test('a working ticket: one header line, no old Watch live, Stop and the commands in the menu (ORCH-70, report r-1116-1748)', async () => {
+test('a working ticket: one header line, no old Watch live, Stop in the bar, the commands in Actions (ORCH-70, ORCH-2155)', async () => {
   const live = {addons:[{name:'focus', page:{path:'/', live_session:true}}],
     runs:{t_x:{running:true, age_seconds:3120, claim:{agent:'claude', mode:'live'}}}};
   const p = page(state(ticket({status:'active', key:'ORCH-56'}), live));
@@ -177,10 +179,13 @@ test('a working ticket: one header line, no old Watch live, Stop and the command
   assert.equal(p.count('agent-bar'), 0, 'no helper bar');
   assert.equal(p.count('live-session'), 0, 'no Live session card');
   assert.equal(p.count('watch-live') + p.count('live-open'), 0, 'no link to an old Focus page: the header\'s Focus button (pages/live-layer.js) opens the session');
-  const menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
-  assert.ok(menu && menu.querySelector('[data-key="ticket-stop"]'), 'Stop sits in the menu');
+  // ORCH-2155 (draft A): Stop takes Continue's place in the bar; the two commands sit last in Actions under For developers
+  const bar = p.main.querySelector('[data-key="ticket-actions"]'), menu = p.main.querySelector('[data-key="ticket-menu-t_x"]');
+  assert.ok(bar, 'the bar under the title');
+  assert.equal(bar.querySelector('[data-key="ticket-stop"]')?.parentNode, bar, 'Stop sits in the bar');
   assert.equal(p.count('ticket-stop'), 1, 'Stop once');
-  assert.ok(menu.querySelector('[data-key="live-copy-watch"]') && menu.querySelector('[data-key="live-copy-take"]'), 'the two commands too');
+  const dev = menu.querySelector('[aria-label="For developers"]');
+  assert.ok(dev.querySelector('[data-key="live-copy-watch"]') && dev.querySelector('[data-key="live-copy-take"]'), 'the two commands in Actions');
   // ORCH-581: an empty Owner is no row at all (it waits in + Add), with or without a helper
   assert.equal(p.count('prop-owner-t_x'), 0, 'no empty Owner row while a helper works');
   // the top bar paints outside this fake page: New ticket is always an outline (B2, one filled button per view)
@@ -221,7 +226,8 @@ test('below 1100 px: one Properties button opens the same rail as a sheet (ORCH-
   const p = page(state(ticket({done_when:'It is booked'})));
   await tick(); await tick();
   const button = node(p, 'props-open-t_x'), rail = node(p, 'ticket-rail-t_x');
-  assert.ok(button && /narrow-only/.test(button.className), 'a Properties button for small screens');
+  assert.ok(button && /narrow-only/.test(button.className), 'Properties for small screens (in Actions, ORCH-2155)');
+  assert.ok(button.closest('[data-key="ticket-menu-t_x"]'), 'it sits in the Actions menu');
   assert.equal(button.getAttribute('aria-controls'), 'ticket-rail-t_x');
   assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.match(button.textContent, /Properties1/, 'it counts what the rail holds besides owner and due');
@@ -237,4 +243,38 @@ test('the sheet: a read-only copy keeps its rail in the page; Esc and Tab are ha
   const keys = src.match(/function railKeys\(e\) \{[\s\S]*?\n\}/)[0];
   assert.match(keys, /e\.key === 'Escape'/); assert.match(keys, /e\.key !== 'Tab'/); assert.match(keys, /railNarrow\(\)/, 'only while it is a sheet');
   assert.match(src, /matchMedia\?\.\('\(min-width:1100px\)'\)/, 'a wider window closes the sheet');
+});
+
+test('planted markup in every ticket field shows as text: no element, no handler, no script link', async () => {
+  const x = '<img src=x onerror=alert(1)><script>alert(2)</script>"\'><svg onload=alert(3)>';
+  HTML_SET.length = 0;
+  const p = page(state(ticket({
+    title:'T ' + x, summary:'S ' + x, description:'D ' + x, note:'N ' + x, body:'B ' + x, done_when:'W ' + x,
+    checklist:[{id:'c1', text:'C ' + x, state:'done', evidence:[
+      {type:'note', ref:'E ' + x, summary:'ES ' + x, at:'2026-11-11T10:00:00Z'},
+      {type:'url', ref:'javascript:alert(4)', at:'2026-11-11T10:00:00Z'},
+      {type:'pr', ref:'https://example.org/"><script>alert(5)</script>', at:'2026-11-11T10:00:00Z'}]}],
+    questions:[{id:'q1', text:'Q ' + x, options:['O ' + x, 'fine'], recommended:'O ' + x}],
+    refs:[{kind:'url', url:'javascript:alert(6)', label:'L ' + x}, {kind:'url', url:'https://example.org/ok', label:'R ' + x}],
+    history:[{at:'2026-11-11T10:00:00Z', by:'agent:x', what:'H ' + x}],
+  })));
+  await tick(); await tick();
+  assert.ok(p.text().includes('T ' + x), 'the title shows the planted text as it is');
+  assert.deepEqual(HTML_SET.filter(v => v.includes('alert(')), [], 'no ticket text reaches innerHTML');
+  const walk = n => [n, ...n.childNodes.filter(c => c.nodeType === 1).flatMap(walk)];
+  for (const n of walk(p.main)) {
+    assert.ok(!['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(n.tagName), n.tagName);
+    for (const {name, value} of n.attributes) {
+      assert.ok(!/^on/i.test(name), 'handler attribute ' + name);
+      if (['href', 'src', 'action', 'formaction'].includes(name)) assert.ok(!/^\s*(javascript|data|vbscript):/i.test(value), name + '=' + value);
+    }
+  }
+});
+
+test('h() drops a link that leaves the site once the browser strips a tab or line break', () => {
+  const p = page(state(ticket()));
+  for (const bad of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '//evil.example', '/\\evil.example', 'javascript:alert(1)', ' javascript:alert(1)', 'java\tscript:alert(1)', 'data:text/html,x'])
+    assert.equal(p.h('a', {href:bad}).getAttribute('href'), null, JSON.stringify(bad));
+  for (const ok of ['#ticket/t_x', '/api/files/x', 'https://example.org/a b'])
+    assert.equal(p.h('a', {href:ok}).getAttribute('href'), ok);
 });

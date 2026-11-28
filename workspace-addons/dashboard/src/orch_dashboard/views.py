@@ -32,6 +32,7 @@ BLOCKS = (
     "chart",
     "flow",
     "contacts",
+    "conversations",
 )
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
@@ -575,6 +576,8 @@ def _block_ok(b) -> bool:
         return _split_ok(b)
     if t == "contacts":
         return _contacts_ok(b)
+    if t == "conversations":
+        return _conversations_ok(b)
     if t == "radio":
         opts = b.get("options")
         return (
@@ -658,6 +661,71 @@ def _contacts_ok(b):
     )
 
 
+# One conversation per workspace (RP5; contracts/addon-view.schema.json $defs/conversations)
+_WS = re.compile(r"^ws_[a-z0-9]{10}$")
+_MID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def _message_ok(m):
+    return (
+        _keys_only(m, ("id", "who", "at", "text", "file", "task", "state", "note"))
+        and isinstance(m.get("id"), str)
+        and bool(_MID.match(m["id"]))
+        and m.get("who") in ("you", "them")
+        and _text(m.get("at"), 40)
+        and _opt(m, "text", _text)
+        and _opt(
+            m,
+            "file",
+            lambda f: (
+                _keys_only(f, ("name", "size"))
+                and _text(f.get("name"), 120)
+                and _opt(f, "size", lambda v: _text(v, 20))
+            ),
+        )
+        and _opt(
+            m,
+            "task",
+            lambda t: (
+                _keys_only(t, ("title", "from", "note"))
+                and _text(t.get("title"))
+                and _opt(t, "from", lambda v: _text(v, 24))
+                and _opt(t, "note", _text)
+            ),
+        )
+        and _opt(m, "state", _chip)
+        and _opt(m, "note", lambda v: _text(v, 60))
+    )
+
+
+def _conversation_ok(c):
+    msgs = c.get("messages") if isinstance(c, dict) else None
+    return (
+        _keys_only(c, ("id", "name", "about", "last", "badge", "offline", "messages"))
+        and isinstance(c.get("id"), str)
+        and bool(_WS.match(c["id"]))
+        and _text(c.get("name"), 60)
+        and _opt(c, "about", lambda v: _text(v, 80))
+        and _opt(c, "last", lambda v: _text(v, 60))
+        and _opt(c, "badge", _chip)
+        and _opt(c, "offline", _text)
+        and isinstance(msgs, list)
+        and len(msgs) <= 30
+        and all(map(_message_ok, msgs))
+    )
+
+
+def _conversations_ok(b):
+    items = b.get("items")
+    return (
+        _keys_only(b, ("type", "title", "items"))
+        and _opt(b, "title", lambda v: _text(v, 60))
+        and isinstance(items, list)
+        and len(items) <= 12
+        and all(map(_conversation_ok, items))
+    )
+
+
 def _row_button(b):
     return _keys_only(b, ("label", "action")) and _text(b.get("label"), 30) and _action(b.get("action"))
 
@@ -720,6 +788,56 @@ def check_view(v) -> dict | None:
     }
 
 
+_WINDOWS = os.name == "nt"
+_run = subprocess.run  # module-local, so a test patches this and never the global subprocess.run
+
+
+def _group_kw() -> dict:
+    """Start the `view` command as the head of its own group, so a kill also reaches what it started."""
+    if _WINDOWS:
+        return {"creationflags": 0x00000200}  # CREATE_NEW_PROCESS_GROUP: ended as a tree (taskkill /T)
+    return {"start_new_session": True}
+
+
+def _taskkill_exe() -> str | None:
+    try:
+        from orch.safegit import taskkill_exe  # the core's one lookup: full path in the system folder
+    except ImportError:
+        return None
+    return taskkill_exe()
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """End an add-on's `view` command and what it started; never raises. POSIX: SIGKILL to its own process
+    group. Windows has no os.killpg or SIGKILL (ORCH-1796): `taskkill /T /F` while it still runs (a finished
+    pid may be reused), then the command alone when taskkill is missing or failed."""
+    if not _WINDOWS:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return
+    if p.poll() is not None:
+        return
+    exe = _taskkill_exe()
+    if exe:
+        try:
+            _run(
+                [exe, "/PID", str(p.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        if p.poll() is None:
+            p.kill()
+    except OSError:
+        pass
+
+
 class ViewPuller:
     """One per server. `pull(name)` -> {"state": "ok"|"stale"|"error", "view", "as_of", "message"}."""
 
@@ -741,7 +859,7 @@ class ViewPuller:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                **_group_kw(),
             )
         except OSError:
             return None, "The orch command could not be started."
@@ -749,10 +867,7 @@ class ViewPuller:
         state = {"n": 0, "big": False}
 
         def kill():
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            _kill_tree(p)
 
         def read():  # hard cap while reading, not after
             while True:

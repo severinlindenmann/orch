@@ -223,6 +223,8 @@ function stoppedPage(services, snap = false) {
     array: v => Array.isArray(v) ? v : [],
     addons: () => [{name: 'factory', dashboard: {label: 'Factory'}}],
     addonLabel: a => a?.dashboard?.label || a?.name,
+    addonTitle: a => a?.dashboard?.label || a?.name, window: {}, addonSettingsHref: id => '#settings/addons/' + id,
+    heading: (title, sub, o = {}) => el('header', {'data-key': 'heading'}, el('h1', {}, title), o.actions || null),
   });
   vm.runInContext(ssrc.slice(ps, pe) + '\nthis.f = pageStopped;', c);
   return c.f({id: 'factory', path: 'index.html'});
@@ -230,12 +232,16 @@ function stoppedPage(services, snap = false) {
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.kids || []).map(text).join('');
 const find = (n, key) => !n || typeof n === 'string' ? null : n.props?.['data-key'] === key ? n : (n.kids || []).map(k => find(k, key)).find(Boolean) || null;
 
-test('a stopped background add-on page says so and offers Start (not the raw "not found")', () => {
+test('a stopped background add-on page keeps its name and says so in the one notice, with Start (D5)', () => {
   const page = stoppedPage([{addon: 'factory', running: false}]);
-  assert.match(text(page), /Factory isn’t running\./);
+  assert.equal(text(find(page, 'heading').kids[0]), 'Factory', 'the page keeps its name');
+  const notice = find(page, 'page-stopped');
+  assert.match(notice.props.className, /banner page-notice attn/);
+  assert.match(text(notice), /^Factory has stopped\. Its work waits\. Your tickets and everything else still work\./);
   const start = find(page, 'page-start');
   assert.equal(start.props['data-action'], 'start');
-  assert.equal(text(start), 'Start');
+  assert.match(start.props.className, /btn primary/);
+  assert.equal(text(start), 'Start Factory');
 });
 
 test('running, no service, or a shared copy: the page itself', () => {

@@ -356,7 +356,7 @@ def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(sr
     js = get(srv, "/web/factory.js")[1].decode()
     assert (
         "['drafts', orders.filter(draftWaiting)" in js and "draftActions(o, render)" in js
-    )  # in "Waits for you"
+    )  # in "Needs you"
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
     assert (
@@ -722,7 +722,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Projects"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -742,7 +742,9 @@ def test_page_script_never_writes_html():
     js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
     assert not re.search(r"innerHTML|outerHTML|insertAdjacent|document\.write|srcdoc|eval\(|new Function", js)
     for target in re.findall(r"""['"](/#[a-z]+)""", js):
-        assert target in ("/#ticket", "/#chat"), target
+        assert target in ("/#ticket", "/#chat", "/#settings"), target
+    # the one Settings link goes to Factory's own part of Settings (D6, ORCH-2315)
+    assert "'/#settings/addons/factory'" in js
 
 
 def test_page_decisions_only_post_the_open_question():
@@ -767,13 +769,15 @@ def test_page_decisions_only_post_the_open_question():
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
 
 
-def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
+def test_page_has_no_frame_header_and_an_idea_box_with_the_pauses_row(srv):
     html = get(srv, "/")[1]
     assert b'id="navigation"' not in html and b"New idea in Chat" not in html
     assert b"/kit/widgets.css" in html
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "Start with this idea" in js and "Ask me at every pause" in js
-    assert "setting-row" in js and "'switch'" in js
+    assert "Start with this idea" in js and "setting-row f-pauses" in js
+    # ORCH-2065: the row only opens Chat, so it is a Change in Chat button, never a switch that rolls back
+    assert "'Change in Chat'" in js and "'switch'" not in js and "Ask me at every pause" not in js
+    assert "run to the end" not in js
     assert "Open Chat" not in js
 
 
@@ -832,11 +836,24 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
+    early = js.index(
+        "view.replaceChildren(heading('Factory', 'Loading your runs…', ...settingsButton()), theIdea()"
+    )
     assert early < js.index("await read('/api/home', signal)")
-    assert (
-        "view.append(theIdea(), askRow(auto))" in js
-    )  # the same box (and its typed text) stays when the list comes
+    # the same box (and its typed text) stays when the list comes
+    assert "const box = theIdea()" in js and "view.append(box, askRow(auto))" in js
+
+
+def test_empty_factory_is_the_idea_box_alone():
+    """D4 (26 Nov, owner pick A): with nothing in Factory yet the idea box is the page, in the master's empty-page look
+    (.page-empty: one sentence, the first step right there); no switch and no lines about what is missing."""
+    js = _page_js()
+    assert "el.classList.add('f-idea', 'page-empty')" in js and "group('page-empty-step')" in js
+    assert "const empty = !orders.length && !auto?.on;" in js
+    assert "if (empty) { view.append(box); return; }" in js
+    assert js.index("if (empty) { view.append(box); return; }") < js.index(
+        "Budget health: shows here once an order runs."
+    )
 
 
 def test_the_newest_draft_opens_without_a_click():
@@ -893,9 +910,9 @@ def test_results_waiting_for_your_looks_good_are_one_card_on_factory(ws, run, sr
         "orders.filter(o => o.open || draftWaiting(o) || reviews(o).length)" in js
     )  # not "nothing waits for you"
     assert (
-        "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))]"
+        "['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => of(o, reviewCard(o, r, true)))]"
         in js
-    )  # in "Waits for you": one review per stage
+    )  # in "Needs you": one review per stage
 
 
 def _built(ws, tid, *, picture=True, demo=True, exits=(0,), pulls=(("merged", 1),)):
@@ -1120,7 +1137,7 @@ def test_home_has_no_empty_sections():
         "planned runs are below",
     ):
         assert old not in home, old
-    assert "if (!rows.length) return;" in home and "badge('Waits for you')" in home
+    assert "if (!rows.length) return;" in home and "badge('Needs you')" in home
     assert "'Nothing else in Factory right now: no '" in home and "They show here when they come." in home
     if not shutil.which("node"):
         return
@@ -1148,7 +1165,7 @@ def test_home_names_budget_health_once_when_no_order_runs():
     home = js[js.index("function home(data)") : js.index("function line(items)")]
     line = "if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));"
     assert home.count("Budget health: shows here once an order runs.") == 1 and line in home
-    assert "budget(o), ...(o.eta" in home  # running cards still carry their Budget health
+    assert "budget(o), ...(o.next_stop_at" in home  # running cards still carry their Budget health
 
 
 # ORCH-277: a started order that says Running while nobody works says why instead
@@ -1252,7 +1269,7 @@ def test_a_stopped_factory_says_where_and_who_starts_it_with_no_button():
         "this computer"
         not in (body + js[js.index("function waitWords(") : js.index("const waitNote")]).lower()
     )
-    assert "notices.append(stopped(homeData.workspace))" in js
+    assert "if (homeData.watcher === false) next.push(stopped(homeData.workspace))" in js
 
 
 def test_the_page_words_why_nothing_works():
@@ -1450,3 +1467,132 @@ def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
     assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
     assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
     assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"
+
+
+# ---- #956: about when the next pause needs you, from the plan and the measured time (no AI call) ----------------
+
+
+def _at(monkeypatch, iso):
+    from datetime import datetime
+
+    monkeypatch.setattr(pageapi, "clock", lambda: datetime.fromisoformat(iso))
+
+
+def test_next_pause_time_comes_from_the_plan_and_the_measured_pace(ws, run, srv, monkeypatch):
+    monkeypatch.setattr(
+        pageapi, "_watcher_on", lambda root: True
+    )  # with the watcher off nothing moves: no time
+    _at(monkeypatch, "2026-11-25T10:02:00+00:00")
+    order, _ = started(ws, run)  # plan: 120 active min over 2 tasks, the first pause after build (1 task)
+    assert _home_row(srv, order)["next_stop_at"] == "2026-11-25T11:05:00Z"  # 60 min, rounded up to 5 min
+    assert get(srv, f"/api/order/{order}")[1]["next_stop_at"] == "2026-11-25T11:05:00Z"
+    finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    assert _home_row(srv, order)["next_stop_at"] is None  # the pause is here: it waits for you, no estimate
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    run("next", order)
+    from orch_factory import flow
+
+    monkeypatch.setattr(flow, "_measure", lambda root, d: d.update(used=90, measured=True))
+    monkeypatch.setattr(pageapi, "_measured", {})
+    # one task done in 90 min against 60 planned: the last one is expected 1.5x slower too
+    row = _home_row(srv, order)
+    assert row["stage"] == "ship" and row["next_stop_at"] == "2026-11-25T11:35:00Z"
+
+
+def test_no_next_pause_time_for_an_order_that_is_not_started(ws, run, srv):
+    draft = run("idea", "Only an idea")["order"]
+    assert _home_row(srv, draft)["next_stop_at"] is None
+
+
+def test_next_pause_estimate_keeps_the_pace_in_bounds_and_waits_for_nothing_else():
+    d = {
+        "proposal": {"time": {"active_min": 100}, "budget": {"active_min_cap": 120}},
+        "cap": 140,  # an accepted change added 20 min: 120 planned over 4 tasks, 30 each
+        "tasks": {
+            s: {"stage": st} for s, st in [("a", "build"), ("b", "build"), ("c", "check"), ("d", "ship")]
+        },
+        "crew": {"a": {"status": "done"}},
+        "line": [
+            {"stage": "build", "stop": False, "state": "doing"},
+            {"stage": "check", "stop": True, "state": "todo"},
+            {"stage": "ship", "stop": True, "state": "todo"},
+        ],
+        "used": 1,
+        "open": None,
+        "shipped": False,
+    }
+    from datetime import datetime
+
+    now = datetime.fromisoformat("2026-11-25T10:00:00+00:00")
+    import orch_factory.pageapi as pa
+
+    old = pa.clock
+    pa.clock = lambda: now
+    try:
+        assert pa._next_stop_at(d, None) == "2026-11-25T10:30:00Z"  # 2 tasks x 30 min x pace 0.5 (the floor)
+        assert pa._next_stop_at({**d, "used": 1000}, None) == "2026-11-25T13:00:00Z"  # pace 3 at most
+        assert pa._next_stop_at(d, {"kind": "starting"}) == "2026-11-25T10:30:00Z"
+        for kind in ("you", "time", "ticket", "held", "watcher", "stuck", "idle"):
+            assert pa._next_stop_at(d, {"kind": kind}) is None, kind
+        assert pa._next_stop_at({**d, "open": {"n": 1}}, None) is None
+        done = [{**x, "state": "done"} if x["stop"] else x for x in d["line"]]
+        assert pa._next_stop_at({**d, "line": done}, None) is None  # no pause ahead
+    finally:
+        pa.clock = old
+
+
+def test_the_page_says_when_the_next_pause_comes():
+    js = _page_js()
+    assert "const at = order.next_stop_at ? 'around ' + when(order.next_stop_at) : '';" in js
+    assert "['Next pause: ' + stageLabel(stop), at, need].filter(Boolean).join(' · ')" in js
+    assert "...(o.next_stop_at ? [meta('Next pause around ' + when(o.next_stop_at))] : [])" in js
+
+
+# ---- #949: a taste item offers 2-3 looks as picture cards; the pick is the helper's plain question -----------------
+
+LOOKS = [{"title": "Calm", "picture": "calm.png"}, {"title": "Bold", "picture": "bold.png"}]
+
+
+def test_a_taste_item_carries_its_looks_and_their_pictures_are_served(ws, run, srv):
+    order, _ = waiting_stop(ws, run, {"title": "Page colour", "tag": "taste", "looks": LOOKS})
+    core(ws, "ask", order, "Which look for the page?", "--option", "Calm", "--option", "Bold")
+    o = get(srv, f"/api/order/{order}")[1]
+    assert o["stops"][0]["data"]["items"][0]["looks"] == LOOKS
+    assert [x["options"] for x in o["questions"]] == [["Calm", "Bold"]]
+    put_file(ws, f"stops/{order}/calm.png")
+    code, body, r = get(srv, f"/api/order/{order}/file/calm.png")
+    assert code == 200 and body == PNG and r.getheader("Content-Type") == "image/png"
+
+
+@pytest.mark.parametrize(
+    ("item", "words"),
+    [
+        ({"title": "Typo", "tag": "routine", "looks": LOOKS}, "only a taste item may"),
+        ({"title": "Colour", "tag": "taste", "looks": [LOOKS[0], LOOKS[0]]}, "need different titles"),
+        (
+            {
+                "title": "Colour",
+                "tag": "taste",
+                "looks": [LOOKS[0], {"title": "B", "picture": "b" * 81 + ".png"}],
+            },
+            "at most 80",
+        ),
+    ],
+)
+def test_looks_are_refused_off_taste_items_twice_named_or_too_long(ws, run, item, words):
+    order, _ = started(ws, run)
+    finish_crew(ws, run, order, "booking-form")
+    data = {"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "build", "items": [item]}
+    assert words in run("stop", order, "--file", "-", data=json.dumps(data).encode(), code=2)["error"]
+
+
+def test_look_cards_on_a_tiny_dom():
+    import shutil
+    from pathlib import Path
+
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    test = Path(__file__).with_name("look-cards-dom.test.mjs")
+    out = subprocess.run(["node", "--test", str(test)], check=False, capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr

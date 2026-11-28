@@ -13,8 +13,8 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
   every called job passed or was skipped) and **banned-words** (the `rules` workflow).
 - The orch merge queue (pull-requests add-on) reads **every** check of a queue group: one failed, cancelled or
   timed-out check drops the group. So a known-red part must never report a failed check: known red sits on the
-  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so), and since PR 1473 queue groups run
-  no Windows or macOS part at all. Night 17/18 Nov, before both, a known-red Windows check stopped the queue for
+  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so), queue groups run no macOS part
+  (PR 1473), and Windows parts only for file, process or path code while Windows is not known red (ORCH-1118). Night 17/18 Nov, before both, a known-red Windows check stopped the queue for
   75 minutes.
 - `main` has no required check on GitHub; the owner merges a release after its pull request into `main` is green.
 
@@ -25,8 +25,15 @@ style, ruff, the workspace tests that import the modules it changed (or a quarte
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
 `test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
-18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. When it changes the Focus or Insights
-add-on, their page smoke runs next to it as its own job `page-smoke` (about 6 minutes, ORCH-1333). A new rule test runs on every pull request by its file name alone.
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. A new rule test runs on every pull request by its file name alone.
+
+**Quick set on a ready pull request (ORCH-1118 q6, owner 24 Nov).** Next to light and banned-words a pull request into
+develop runs only what R3.4 asks for: the e2e smoke (the fake-agent F1/F2 scenarios) when it touches `workspace/`,
+`workspace-addons/`, `e2e/` or `install.sh`, and the Windows + macOS CLI smoke when it touches `workspace/`,
+`workspace-addons/`, the installers or `e2e/ci/`; plus, by path, contracts (seconds), the phone smoke set (the phone
+build is not in queue groups, owner 20 Nov) and the dashboard pictures (its review card reads them from the pull
+request's own run). The heavy jobs run once in the queue group only: the workspace parts (Linux, and Windows for file,
+process or path code), the page smoke, the add-on suites and click-throughs, clock, relay, publish and transcription.
 
 Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
 take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
@@ -71,41 +78,88 @@ Increasing `max_group` does not help a PR that must run alone.
 | light (words, style, ruff, tests of the changed code and add-ons) | required | | | | |
 | banned-words (rules) | required | required | | | skipped for `release/*` (already checked) |
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
-| workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
+| contract-vectors (rules): every vector in `contracts/vectors` has a consumer replay test; changed examples that are not additive are warnings (R9.4, `scripts/check_contracts.py`) | runs (the queue stops on it) | required | | | runs |
+| workspace, Linux (2 parts) | ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
-| workspace, Windows (20 parts, split by measured time, 20-minute limit) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
-| Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
-| CLI smoke, Windows + macOS | | required, always | | | required |
-| e2e smoke (5 minutes) | | required, always | | | required |
+| workspace, Windows (20 parts, split by measured time, 20-minute limit) | ² | file, process or path code only, not while known red ¹ ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
+| Windows install as a standard user | | with the Windows parts ¹ | runs | runs | required, in the release check |
+| CLI smoke, Windows + macOS | required (R3.4) | required, always | | | required |
+| e2e smoke (5 minutes) | required (R3.4) | required, always | | | required |
 | add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
-| page smoke (Focus and Insights pages, Focus click-through) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
+| page smoke (Focus and Insights pages, Focus click-through with axe-core: a serious or critical finding fails, #2420) | (ORCH-1118 q6) | required, always | runs, also when proven (ORCH-1457) | | required |
 | dashboard click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
-| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
-| contracts, publish, relay, transcription | required | required (contracts always) | runs unless proven | | required |
+| clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118), quarantined: `quarantine` workflow (ORCH-2363) | | | | shown (02:23 UTC) | shown (push to `release/*`) |
+| quarantined click-throughs (`QUARANTINED` in `clickthrough/run.cjs`), `quarantine` workflow (ORCH-2363) | | | | shown (02:23 UTC) | shown (push to `release/*`) |
+| contracts | required | required, always |
+| publish, relay (with the relay browser page click-through, #2495), transcription | (ORCH-1118 q6) | required | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
-| perf at 10,000 seeded tickets (`perf` workflow, 02:41 UTC: commands, pages, idle minute within `e2e/perf/limits.json`; not required until develop passes, ORCH-525) | | | | runs | |
+| perf at 10,000 seeded tickets (`perf` workflow: commands, pages, idle minute; nightly 02:41 UTC against the owner's limits in `e2e/perf/limits.json`, ORCH-525; a queue group that touches `workspace/`, `workspace-addons/` or `e2e/perf/` fails only on more than 30% slower than develop's newest nightly numbers, R8.3, ORCH-1609) | | required, when it touches orch | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
-`ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
-Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
-keeper's manual `ci` run with `windows=true`). On a push to develop and at night there is no merge left to stop: a
+`ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run no macOS part
+(ORCH-315, PR 1473) and Windows only for file, process or path code (ORCH-1118): macOS and Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
+keeper's manual `ci` run with `windows=true`; a manual run on any branch but main counts every file changed since
+main as changed, so its paths filter sees the whole release, #2559). On a push to develop and at night there is no merge left to stop: a
 red part there (known red aside) opens the release keeper's red-develop ticket, to be fixed by a pull request first
 in the queue.
 
-¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` on every pull request, so the
+¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` for every queue group and pull request, so the
 Windows parts run only on develop pushes, nightly and the release check (or a manual run with `windows=true`).
-Once Windows is green (KNOWN_RED empty), a pull request that changes file, process or path code runs them again.
+Once Windows is green (KNOWN_RED empty), a queue group or a pull request into main that changes file, process or
+path code runs them again.
 
-² A light pull request that changes file, process or path code while Windows is green runs the workspace job
-with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
+² A pull request into develop runs no workspace part (ORCH-1118 q6, owner 24 Nov: with file, process or path code
+it ran all 20 Windows parts on every push, about 150 runner-minutes); its queue group runs them (ORCH-1118 q7:
+such a group takes about 12 minutes longer). `ci.yml` asks `scripts/touches_os_code.py`, the one place that defines
+file, process or path code, only for queue groups and pull requests into main;
+`brand/tests/test_touches_os_code.py` plays the routing through for each place.
+When the workspace job does run on a `copilot/*` pull request into `develop`, at most two parts run at once per PR,
+which leaves hosted runners for queue groups.
 
-³ Queue groups never run the Windows parts (PR 1473): they run after the merge on every push to develop, also one
+³ Queue groups ran no Windows part from PR 1473 to ORCH-1118; now only a group that changes file, process or path
+code does. They also run after the merge on every push to develop, also one
 a green group proved (then only they run, unless they are on our own Windows VM, see below), at night and in the
 release check; a red one on develop opens the red-develop ticket. The click-throughs were out of queue groups from
 20 to 22 Nov (ORCH-1106) and run and count there again since ORCH-1107 (24 develop runs in a row green with them);
 `brand/tests/test_ci_queue_skip.py` keeps `ci.yml`, `addons.yml` and this table in step.
+
+## Scheduled runs that GitHub drops or delays (#2657)
+
+GitHub creates this repository's scheduled runs late or not at all. From 20 to 23 Nov, `live-check` (hourly) ran 7
+times in about 100 slots, and `ci` (01:00 UTC) and `e2e` (03:17 UTC) started 7-8 hours late. GitHub says a schedule
+may be delayed or dropped under load, and no setting changes that. The crons stay as the first try. On every push to
+develop the `catch-up` job in `ci.yml` (`scripts/ci_catch_up.py`, a few seconds, never red, the run's result does not wait for it) starts the
+following with `gh workflow run` on develop:
+
+- `live-check`, when its newest run is 2 hours old;
+- the full `e2e`, when no nightly or manual run came for 26 hours. A dropped nightly, not a late one: a late one would
+  run twice. It is named `e2e (catch-up)`, and the Development expert reads its result like the nightly.
+
+The `ci` nightly gets no catch-up. Every push to develop already runs macOS and Windows unless a green group proved it
+(ORCH-1107), and the release check runs everything again. The Development expert still reports a nightly that came
+late or did not come (ORCH-454).
+
+## Quarantine (ORCH-2363)
+
+Owner, 27 Nov: the merge queue was red 756 of 840 minutes because of flaky checks, so they left every required set
+until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and five click-throughs
+(`a-board-families`, `f-sync-page`, `q-automation-repeats`, and since the 27 Nov train `p-looks-good-cases` and
+`s-role-page`, which time out when their lane is slow late in a run, ORCH-2372: `QUARANTINED` in
+`workspace-addons/dashboard/clickthrough/run.cjs`, each with the ticket that fixes it). `ci.yml` no longer calls
+`clock.yml`, and a default click-through run (pull request, queue group, develop, release) leaves the quarantined
+ones out; `--only <name>` still runs one (the light job does so for a click-through a pull request changes).
+
+They run in the `quarantine` workflow instead: nightly on develop (02:23 UTC), on every push to a `release/*` branch
+and by hand (`--quarantined` runs only the quarantined click-throughs). It has no pull request trigger, so no queue
+group or pull request sees these checks, and the release keeper leaves the workflow's checks out when it judges a
+release pull request. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
+keeper, not started, no rerun, no revert); while it is open, each further red run adds a note to it.
+
+**Back out of quarantine:** fix the check, see it green in the `quarantine` workflow, then in one pull request
+remove its `QUARANTINED` entry (or call `clock.yml` from `ci.yml` again), update this section and the table, and
+`brand/tests/test_ci_quarantine.py`.
 
 ## Windows on our own Windows VM (ORCH-1127)
 
@@ -211,17 +265,17 @@ Actions > Runners.
 
 ## Linux jobs on the orch edge test server (ORCH-1126)
 
-The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
-can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
+Relay, publish, the short e2e set and the Services add-on with its real Linux run (the clock tests too, until they
+were quarantined: ORCH-2363, they now run on GitHub's machines in the `quarantine` workflow) can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
 Never on a production server. There the jobs use uv's own Python builds (`UV_PYTHON_PREFERENCE=only-managed`), and
 the clock tests keep real file times as on GitHub (`NO_FAKE_STAT=1`: libfaketime would shift the file times a
 program reads but not the ones it sets).
 The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
-  into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
+  into develop stay on GitHub's machines for these jobs. The runner's job hook also refuses fork PRs.
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
-  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-long` (the setting in use)
+  unset = GitHub's machines (the default). `orch-edge-long`
   sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
   runs (stress tests, measurements); develop pushes and pull requests stay on GitHub's machines. The release
   keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting: they
@@ -232,6 +286,17 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
+- **Queue capacity (`EDGE_RUNNER=orch-edge-queue`)**: route only the add-on Python suites and lightweight rules
+  and contract checks to edge (brand stays on GitHub: its tests run the runner's own hooks; the Linux workspace
+  shards stay on GitHub too, their timing tests were not yet stable on edge, ORCH-2329) on develop pushes and same-repository
+  `orch-queue/` PRs into develop. This does not turn on the extra builds above. The hosted lookup checks the
+  runner list before scheduling; if none is online or the list is unavailable the jobs use `ubuntu-latest`.
+  Busy online runners accept queued work; GitHub cannot move a job already assigned labels if the pool then
+  disappears. The runner watch handles that by itself (ORCH-1932, `scripts/runner_watch.py`): when a run's jobs
+  wait for our own runners and none that could take them has been online for 10 minutes in a row, the `runner-watch`
+  job cancels the run and `runner-fallback.yml` starts it again as a whole, so the route reads the runner list again
+  and sends the jobs to GitHub's machines (at most twice per run; no other job depends on the watch). Install the updated job-started hook before enabling
+  this mode. To check routing without a queue group, dispatch `rules.yml` on a `copilot/` branch.
 - **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at
   a time), so one run's 12 jobs share them. A develop push goes to orch edge only when EVERY runner there is idle;
   one busy runner means an earlier run is still there and the push goes to GitHub's machines, which run its jobs

@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from orch import net, review, tickets
+from orch import net, review, runs_live, tickets
 
 ME = "human:pat"
+_REAL_RESUME = runs_live.resume_after_answer  # conftest stubs both in every test (no agent is started)
+_REAL_RESUME_SOON = runs_live.resume_soon
 
 
 @pytest.fixture
@@ -159,6 +161,61 @@ def test_text_card_reads_the_tickets_own_artifact(tk, run):
         assert code == 2 and json.loads(out)["code"] == "refused", name
 
 
+def test_card_reads_the_path_artifacts_dir_prints(tk, run):
+    """ORCH-1777: .orch/tickets/<this ticket>/artifacts/<name> (what `orch ticket artifacts-dir` prints, also
+    with backslashes) is read as artifacts/<name> for text, glance and option cards."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "intro.md").write_text("New intro.\n\nSecond part.\n")
+    (folder / "note.txt").write_text("Plain note.\n")
+    (folder / "card.json").write_text(json.dumps({"headline": "Ready."}))
+    (folder / "a.md").write_text("Option A.\n")
+    for src in (f".orch/tickets/{tid}/artifacts/intro.md", f".orch\\tickets\\{tid}\\artifacts\\intro.md"):
+        code, out, err = _add(run, tid, "--draft", "Intro", "--file", src, "--then", "x")
+        assert code == 0, out + err
+        pv = json.loads(out)["card"]["preview"]
+        assert pv["heading"] == "intro.md" and pv["paras"] == ["New intro.", "Second part."]
+    code, out, err = _add(
+        run, tid, "--draft", "Note", "--file", f".orch/tickets/{tid}/artifacts/note.txt", "--then", "x"
+    )
+    assert code == 0 and json.loads(out)["card"]["preview"]["paras"] == ["Plain note."], out + err
+    code, out, err = _add(
+        run, tid, "--draft", "Glance", "--file", f".orch/tickets/{tid}/artifacts/card.json", "--then", "x"
+    )
+    assert code == 0 and json.loads(out)["card"]["preview"]["headline"] == "Ready.", out + err
+    code, out, err = _add(
+        run, tid, "--choose", "Pick", "--option", "A=Title:artifacts/a.md", "--option", "B=Two", "--then", "x"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["card"]["preview"]["options"][0]["preview"]["paras"] == ["Option A."]
+
+
+@pytest.mark.parametrize(
+    "src, says",
+    [
+        (".orch/tickets/t_other1/artifacts/x.md", "inside a .orch folder"),  # another ticket stays refused
+        (".orch/secrets/key.md", "inside a .orch folder"),
+        ("artifacts/nope.md", "was not found (checked .orch/tickets/"),
+        ("docs/nope.md", "was not found (checked docs/nope.md)"),
+        ("artifacts/big.md", "over the 64 KB limit"),
+        ("big.md", "over the 64 KB limit"),
+    ],
+)
+def test_text_card_refusals_name_the_cause(tk, run, src, says):
+    """ORCH-1777: one message per cause instead of 'was not found or is too large'."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "big.md").write_text("x" * (65 * 1024))
+    (root / "big.md").write_text("x" * (65 * 1024))
+    code, out, _ = _add(run, tid, "--draft", "T", "--file", src, "--then", "x")
+    assert code == 2 and json.loads(out)["code"] == "refused"
+    error = json.loads(out)["error"]
+    assert says in error and "or is too large" not in error, error
+    assert tickets.load(root, tid)["questions"] == []
+
+
 @pytest.mark.parametrize(
     "extra",
     [
@@ -200,9 +257,73 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch, person_grant
     assert code == 0, out + err
     e = json.loads(out)
     assert e["decision"]["action"] == "approve" and e["answered_by"] == ME and e["via"] == "page"
-    assert len(seen) == 1 and seen[0][1] == {}
+    assert len(seen) == 1 and seen[0][1] == {"wait": False}
     code, out, _ = run("review", "list", "--json")
     assert json.loads(out)["cards"] == []
+
+
+def _two_questions(run, tid):
+    for text in ("First?", "Second?"):
+        code, out, err = run(
+            "ask", tid, text, "--option", "A", "--option", "B", "--recommend", "A", "--by", "agent:x"
+        )
+        assert code == 0, out + err
+
+
+def test_the_last_answer_returns_at_once_and_starts_the_asker_detached(tk, run, monkeypatch):
+    """ORCH bug 25 Nov: answering the last open question started the asking helper inside the answer command;
+    filling the ticket's copy (git took over 60 s on a full disk) kept `orch review answer` from returning for
+    minutes. The start now runs in a detached `orch run _resume`; the answer returns with its Next line."""
+    from orch import runs, runs_live
+
+    root, tid = tk
+    _two_questions(run, tid)
+    monkeypatch.setattr(runs_live, "resume_soon", _REAL_RESUME_SOON)
+    monkeypatch.setattr(runs_live, "resume_after_answer", _REAL_RESUME)
+
+    def hangs(*a, **k):  # a start that cannot run: in the answer command it would block it
+        raise AssertionError("the helper start ran inside the answer command")
+
+    monkeypatch.setattr(runs, "start", hangs)
+    spawned = []
+    monkeypatch.setattr(runs_live.subprocess, "Popen", lambda argv, **kw: spawned.append((argv, kw)))
+    code, out, err = run("review", "answer", tid, "q2", "--verdict", "ok", "--picked", "A", "--by", ME)
+    assert code == 0, out + err
+    assert spawned == []  # q1 is still open: nothing to start
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--picked", "B", "--by", ME)
+    assert code == 0, out + err
+    assert "Answered q1: B" in out and "\nNext: " in out
+    ((argv, kw),) = spawned
+    assert argv[-6:] == ["run", "_resume", tid, "q1", "--by", ME]
+    assert kw["env"]["ORCH_ROOT"] == str(root) and kw["stdin"] is not None
+    assert (root / ".orch" / "run" / "logs" / f"{tid}-resume.log").exists()
+
+
+def test_run_resume_starts_the_asker_and_says_why_not(tk, run, monkeypatch):
+    """The detached `orch run _resume` is resume_after_answer: a refused start says so on the ticket."""
+    from orch import runs, runs_live
+    from orch.errors import Refused
+
+    root, tid = tk
+    _two_questions(run, tid)
+    monkeypatch.setattr(runs_live, "resume_after_answer", _REAL_RESUME)
+    code, out, _ = run("run", "_resume", tid, "q1", "--by", ME)
+    assert code != 0  # not answered yet: nothing is started
+    started = []
+
+    def full(root_, tid_, by, **kw):
+        started.append((tid_, by))
+        raise Refused("every helper place is taken")
+
+    monkeypatch.setattr(runs, "start", full)
+    for qid, pick in (("q1", "A"), ("q2", "B")):
+        run("review", "answer", tid, qid, "--verdict", "ok", "--picked", pick, "--by", ME)
+    started.clear()  # the conftest runs the detached start in-process; here it is called on its own
+    code, out, err = run("run", "_resume", tid, "q2", "--by", ME)
+    assert code == 0, out + err
+    assert started == [(tid, ME)]
+    lines = [h["text"] for h in tickets.load(root, tid)["history"]]
+    assert "The helper could not start: every helper place is taken" in lines
 
 
 def test_answer_talk_with_note_and_answered_list(tk, run, person_grant):
@@ -234,7 +355,7 @@ def test_a_long_send_back_note_reaches_the_helper_whole(tk, run, person_grant, m
     root, tid = tk
     q = _draft(run, tid)
     passed = []
-    monkeypatch.setattr(runs_live, "pass_answer", lambda root, tid, entry, who: passed.append(entry))
+    monkeypatch.setattr(runs_live, "pass_answer", lambda root, tid, entry, who, **k: passed.append(entry))
     words = "Make the draft more detailed: " + " ".join(f"point{i} needs a line of its own" for i in range(9))
     assert 280 < len(words) <= 500
     person_grant(root)
@@ -301,6 +422,25 @@ def test_answer_agent_acting_as_person_needs_person(tk, run, monkeypatch):
     code, out, _ = run("review", "answer", tid, q["id"], "--verdict", "ok", "--by", "agent:x", "--json")
     assert code == 2 and json.loads(out)["code"] == "needs_person"
     assert tickets.load(root, tid)["questions"][0]["answer"] is None
+
+
+def test_unattended_review_leaves_the_decision_for_the_terminal(tk, run, monkeypatch):
+    root, tid = tk
+    monkeypatch.setattr(tickets, "attended", lambda: False)
+    _in_review(root, tid)
+    code, out, _ = run("review", "answer", tid, "review", "--verdict", "ok", "--json")
+    assert code == 2 and json.loads(out)["code"] == "needs_person"
+    code, _, err = run("review", "undo", tid)
+    assert code == 2 and "Only a person" in err
+    assert tickets.load(root, tid)["status"] == "review"
+    monkeypatch.setattr(tickets, "attended", lambda: True)
+    monkeypatch.setenv("ORCH_RUN", "r_test")
+    code, out, _ = run("review", "answer", tid, "review", "--verdict", "ok", "--json")
+    assert code == 2 and json.loads(out)["code"] == "needs_person"
+    monkeypatch.delenv("ORCH_RUN")
+    code, out, err = run("review", "answer", tid, "review", "--verdict", "ok")
+    assert code == 0, out + err
+    assert tickets.load(root, tid)["status"] == "done"
 
 
 def test_answer_too_large_note_and_unknown_keys(tk, run):
@@ -509,7 +649,7 @@ def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run, person_gran
 
 def test_ticket_show_plain_answer_is_listed(tk, run):
     root, tid = tk
-    run("ask", tid, "Ship it?", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     run("answer", tid, "q1", "Yes", "--by", ME)
     code, out, _ = run("ticket", "show", tid)
     assert "Answered q1: Ship it? - Yes" in out and "What applies now" not in out

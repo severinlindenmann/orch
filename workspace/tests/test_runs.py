@@ -804,3 +804,26 @@ def test_a_busy_refusal_says_how_to_go_on(proj, new_ticket, run):
     runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
     code, _, err = run("run", "start", tid, "--by", "human:p", "--text", "Use the new file")
     assert code == 2 and f'orch run send {key} "<text>"' in err
+
+
+def test_a_start_killed_before_its_wrapper_ran_does_not_block_the_next_start(proj, new_ticket, monkeypatch):
+    """ORCH-2362: the dashboard cut a slow Start off after its time limit (no clean-up on Windows). The claim
+    named no process, so it read alive for the whole lease. Now it names the starting process: once that is
+    gone, the next Start replaces the claim."""
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
+    tid = new_ticket()
+    dead = _dead_pid()
+
+    def killed_here(*a, **k):  # the process dies right after the claim, before the wrapper is spawned
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runs.os, "getpid", lambda: dead)
+    monkeypatch.setattr(runs, "plan", killed_here)
+    monkeypatch.setattr(runs, "release", lambda *a, **k: None)  # a kill runs no clean-up
+    with pytest.raises(KeyboardInterrupt):
+        runs.start(proj, tid, "human:p", mode="oneshot")
+    left = runs.read(proj, tid)
+    assert left["pid"] == dead and runs.state(left) == "dead"
+    # the claim is free again for the next start
+    again = runs.claim(proj, tid, "human:p", "generic")
+    assert again["run"] != left["run"]

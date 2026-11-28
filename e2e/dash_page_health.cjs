@@ -28,8 +28,8 @@ const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 
 const WIDTHS = [{name: 'desktop', width: 1280, height: 800}, {name: 'wide', width: 1920, height: 1080}, {name: 'phone', width: 390, height: 844},
   {name: 'small phone', width: 320, height: 700}, {name: 'zoom 150%', width: 960, height: 600}].map(v => ({...v, label: `${v.name} ${v.width}px`}));
-// Smallest tap target at phone width, in CSS px (WCAG 2.2 level AA, 2.5.8: 24 x 24).
-const TAP_MIN = 24;
+// Smallest tap target at phone width, in CSS px (the master --touch size; WCAG 2.5.8 asks 24 x 24).
+const TAP_MIN = 44;
 const PHONE = vp => vp.width <= 720;
 // The never-list comes from its one source, docs/wording.md (last column of the table). Entries that only make sense
 // in a sentence (with a note in brackets, quotes or a placeholder) are left to the wording test in brand/.
@@ -126,7 +126,7 @@ test('page health: every main page at 1280, 1920 and 390 px', {timeout: 300_000}
   state.addons.push({name: 'lessons', dashboard: {label: 'Lessons', icon: 'book', order: 50, title: 'Lessons', subtitle: 'What your helpers learned.'}});
   // the crowded case of report r-1117-1256-ws-2: every add-on in the menu, the build badge, phone mode on, an uncovered Done-when part
   for (const [name, icon] of [['contacts', 'phone'], ['factory', 'pen'], ['focus', 'target'], ['insights', 'chart'], ['sync', 'cloud'], ['publish', 'link']])
-    state.addons.push({name, dashboard: name === 'contacts' ? {label: 'Contacts', icon, panel: 'phone'} : {label: name[0].toUpperCase() + name.slice(1), icon}});
+    state.addons.push({name, dashboard: name === 'contacts' ? {label: 'Relay', icon, panel: 'phone'} : {label: name[0].toUpperCase() + name.slice(1), icon}});
   state.build = 'development';
   state.mobile_mode = {...state.mobile_mode, on: true, ends_at: new Date(Date.now() + 3 * 3600e3).toISOString()};
   const result = state.tickets.find(t => t.status === 'review');

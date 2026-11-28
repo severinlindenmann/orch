@@ -2,7 +2,7 @@
 // (written with orch as the stand-in helper). The person opens Chats, sees the ticket under Ticket chats with its
 // unread count, opens the chat (it is marked read), writes to the helper, answers the question in the chat and sees
 // the answer under Decided in the ticket beside the chat. At phone width the list comes first, then the chat with a
-// back button. The ticket page's Open chat leads to the same chat. Everything survives a reload.
+// back button. The ticket page's Ticket chat leads to the same chat. Everything survives a reload.
 module.exports = {
   name: 'Chats page: ticket chats, answer a question, Decided',
   covers: ['page:chat', 'chat.read', 'chat.say', 'answer'],
@@ -18,7 +18,7 @@ module.exports = {
     await reload();
     const row = page.locator(`.chat-list-row[data-id="${tid}"]`);
     await row.waitFor();
-    must(/ticket chats/i.test(await page.locator('.chat-list').innerText()), 'there is no Ticket chats heading in the list');
+    must(/^tickets$/i.test((await page.locator('[data-key="ticket-chats-heading"]').innerText()).trim()), 'there is no Tickets heading in the list');
     must(/2/.test(await row.locator('.count').innerText()), 'the row does not show 2 unread');
 
     // open it: the helper's line, the question card, the ticket beside the chat; it is marked read
@@ -33,8 +33,8 @@ module.exports = {
     await shot('open-chat', page.locator('.chat-page'));
 
     // write to the helper: a chat line on the ticket, still there after a reload
-    await page.locator('.chat-page .chat-draft').fill('Please keep the logo small');
-    await act('chat.say', () => page.locator('[data-key="ticket-chat-send"]').click());
+    await page.locator('.chat-page textarea[data-thread]').fill('Please keep the logo small');
+    await act('chat.say', () => page.locator('.chat-page [data-key="send"]').click());
     await reload();
     must((await text()).includes('Please keep the logo small'), 'the message is gone after a reload');
     must(!(await row.locator('.count').count()), 'the opened chat still shows unread after a reload');
@@ -57,11 +57,11 @@ module.exports = {
     must(await page.locator('[data-key="ticket-chat-' + tid + '"]').isVisible(), 'at 390 the chat does not open from the list');
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    // the ticket page's Open chat leads to the same chat
+    // the ticket page's Ticket chat leads to the same chat
     await open('#ticket/' + tid);
-    await page.getByRole('link', { name: 'Open chat' }).first().click();
+    await page.getByRole('link', { name: 'Ticket chat' }).first().click();
     await page.waitForFunction(id => location.hash === '#chat/' + id, tid);
     await page.locator('[data-key="ticket-chat-' + tid + '"]').waitFor();
-    must((await text()).includes('Please keep the logo small'), 'Open chat on the ticket page does not open its chat');
+    must((await text()).includes('Please keep the logo small'), 'Ticket chat on the ticket page does not open its chat');
   },
 };

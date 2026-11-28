@@ -680,6 +680,7 @@ def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_
     assert actions._op_timeout("addon.set", {"on": False}) == 60
     assert actions._op_timeout("config.agent.test", {}) == 75
     assert actions._op_timeout("review.answer", {}) == 300  # ORCH-1415: Merge retries
+    assert actions._op_timeout("run.start", {}) == 180  # ORCH-2362: outlasts the copies lock wait (150 s)
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
@@ -843,7 +844,9 @@ def test_snapshots_carry_no_settings_and_no_folder_path(ws, act_orch):
 
     for with_addons in (False, True):
         html = render_snapshot(ws, with_addons=with_addons, orch_bin=str(act_orch))
-        assert '"settings"' not in html.replace('"settings": null', "").replace('"settings":null', "")
+        # Inspect exported data, not words in the bundled JavaScript or its comments.
+        data = json.loads(re.search(r"window\.ORCH_SNAPSHOT=(.*?);</script>", html, re.DOTALL).group(1))
+        assert data["settings"] is None
         assert str(ws) not in html and str(ws.parent) not in html
 
 
@@ -1190,6 +1193,12 @@ def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
             assert argv[argv.index("--by") + 1].startswith("human:")
         with pytest.raises(actions.BadRequest):
             build_argv(op, {"on": 1})
+    for on, mode in ((True, "propose"), (False, "accept")):  # owner 25 Nov: nothing closes by itself
+        argv = build_argv("reviewer_mode.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.reviewer_mode", mode]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("reviewer_mode.set", {"on": "yes"})
     argv = build_argv("review.undo", {"ticket": "t_abcdef"})
     assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
     argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
@@ -1410,9 +1419,27 @@ def test_chat_new_and_make_ticket_validation():
         ("chat.read", {}),
         ("chat.make_ticket", {"id": "--help"}),
         ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
+        ("chat.say", {"text": "hi", "ticket": "t_abcdef", "files": ["a.txt"]}),
+        ("chat.say", {"text": "hi", "files": "a.txt"}),
+        ("chat.say", {"text": "hi", "files": [f"{i}.txt" for i in range(11)]}),
+        ("chat.say", {"text": "", "files": []}),
     ]:
         with pytest.raises(actions.BadRequest):
             actions.OPS[op](args)
+
+
+def test_chat_say_with_files():
+    """ORCH-2171: files already attached to the Chat ticket go with the message; words may be empty then."""
+    assert actions.OPS["chat.say"]({"text": "see", "files": ["a b.txt", "-x.png"]}) == (
+        ["chat", "say"],
+        ["--file=a b.txt", "--file=-x.png"],
+        ["see"],
+    )
+    assert actions.OPS["chat.say"]({"text": "", "files": ["a.txt"]}) == (
+        ["chat", "say"],
+        ["--file=a.txt"],
+        [""],
+    )
 
 
 # ---- fb19: long text and attached files for a new ticket
@@ -1787,6 +1814,14 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
+def test_attach_refuses_tab_and_line_breaks_in_a_file_name():
+    for name in ("a\tb.md", "a\nb.md", "a\rb.md"):
+        with pytest.raises(actions.BadRequest):
+            actions.attachments(
+                "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": name, "text": "x"}]}
+            )
+
+
 def test_a_voice_note_is_a_ticket_file_like_a_picture():
     """ORCH-422: Send back and Add note bring a voice note recorded in the browser; the mirror of orch's list takes it."""
     import base64
@@ -1829,7 +1864,7 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
     assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
     assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
-    assert "--by" not in a and "--proof-stdin" not in a
+    assert a[a.index("--by") + 1].startswith("human:") and "--proof-stdin" not in a
 
 
 def test_review_answer_text_option_with_spaces(act_server, act_orch):
@@ -1862,10 +1897,11 @@ def test_review_answer_is_checked(act_server, act_orch, args):
     assert acts(act_orch) == []
 
 
-def test_review_answer_has_no_proof_and_no_by():
+def test_review_answer_names_the_current_person(monkeypatch):
     q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
+    monkeypatch.setattr(actions, "actor", lambda root: "human:Pat")
     argv = actions.build_argv("review.answer", q)
-    assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
+    assert argv[-3:] == ["--by", "human:Pat", "--json"] and "--proof-stdin" not in argv
     assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
     assert "review" in actions.RESERVED
 
@@ -1884,7 +1920,7 @@ def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
         actions.run_op(ws, SELF, "review.answer", args)
     assert seen == {}
     code, _, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
-    assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
+    assert code == 200 and seen["argv"][-3:] == ["--by", actions.actor(ws), "--json"]
 
 
 def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):

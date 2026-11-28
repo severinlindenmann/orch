@@ -1,0 +1,43 @@
+name: quarantine
+# Flaky checks taken out of the merge queue (ORCH-2363, owner 27 Nov): the queue was red 756 of 840 minutes because of
+# three dashboard click-throughs (a-board-families, f-sync-page, q-automation-repeats; p-looks-good-cases and
+# s-role-page joined them with the 27 Nov train, ORCH-2372) and the suites at a fake clock
+# (clock.yml). They run here instead, never required anywhere: nightly on develop, on every push to a release branch
+# and by hand. No pull_request trigger, so a queue group or a pull request never sees these checks; the release keeper
+# leaves this workflow's checks out when it judges a release pull request (releasekeeper.QUARANTINE_WORKFLOW).
+# A red nightly run opens one "later" ticket, or adds a note to the open one (releasekeeper.quarantine_red).
+# A check leaves quarantine when it is fixed and green here again: back into ci.yml / addons.yml, out of
+# QUARANTINED in workspace-addons/dashboard/clickthrough/run.cjs, and docs/ci-checks.md updated.
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: quarantine-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  clock:
+    uses: ./.github/workflows/clock.yml
+  clickthroughs:
+    # the QUARANTINED click-throughs only (run.cjs --quarantined), the same set-up as addons.yml dashboard-clickthroughs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
+      - uses: ./.github/actions/setup-uv
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
+      - run: npm install -g playwright@1.64.1
+      - run: playwright install --with-deps chromium
+      - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs --quarantined

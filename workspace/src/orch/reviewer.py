@@ -36,7 +36,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, ghmerge, history, ownerpick, runs, tickets
+from orch import brake, config, ghmerge, history, mergequeue, ownerpick, runs, tickets
 from orch.errors import Refused
 
 BY = tickets.REVIEWER
@@ -406,7 +406,8 @@ def kind_block(root: Path, ticket: dict) -> str | None:
     second look."""
     kind = tickets.kind(ticket)
     if kind == "draft":
-        return "drafts, mockups and designs are only accepted by you."
+        # one wording for the one reason, also when the ticket carries a draft card (report r-1127-0540-ws-2)
+        return ownerpick.LEFT_WHY
     allowed = config.reviewer_kinds(root)
     if not allowed:
         return "this workspace lets the Reviewer accept no kind of work by itself."
@@ -445,16 +446,24 @@ def walk_of(root: Path, ticket: dict) -> dict | None:
         return None
 
 
-def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+def decide(
+    root: Path,
+    ticket: dict,
+    facts: list[dict | None],
+    sent_back: int = 0,
+    queue: mergequeue.Queue | None = None,
+) -> dict:
     """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
     look then leaves it too, whatever the verdict's reason)."""
-    res = _decide(root, ticket, facts, sent_back)
+    res = _decide(root, ticket, facts, sent_back, queue or mergequeue.Queue(root))
     if res.get("verdict") == "leave" and kind_block(root, ticket):
         res["kind_block"] = True
     return res
 
 
-def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+def _decide(
+    root: Path, ticket: dict, facts: list[dict | None], sent_back: int, queue: mergequeue.Queue
+) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
@@ -549,7 +558,7 @@ def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int =
             return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
-        if f["state"] != "MERGED" and tickets.in_merge_queue(root, [f.get("url")]):
+        if f["state"] != "MERGED" and str(f.get("url") or "").lower() in queue.waiting:
             # ORCH-815: sending it back only starts a helper that can do nothing but wait; the queue merges it
             # or wakes the helper with its reason
             return {
@@ -611,6 +620,30 @@ def _back_or_leave(why: str, sent_back: int) -> dict:
 
 
 # ------------------------------------------------------------------ the pass
+
+
+# Reviewer mode "propose" (owner, 25 Nov 2026): the verdict is one history line; the card stays on Review.
+PROPOSE_LINES = {
+    "accept": "The Reviewer proposes to accept: ",
+    "back": "The Reviewer proposes to send it back: ",
+}
+PROPOSAL_WHY_MAX = 300
+
+
+def _one_line(text) -> str:
+    return " ".join(str(text or "").split())[:PROPOSAL_WHY_MAX]
+
+
+def proposal(hist: list) -> dict | None:
+    """{verdict: accept|back, why} when a ticket's newest history line is a Reviewer proposal, else None (the
+    ticket moved on after the Reviewer looked, or its newest word was not a proposal)."""
+    last = next((h for h in reversed(hist or []) if isinstance(h, dict)), None)
+    if not last or last.get("by") != BY or not isinstance(last.get("text"), str):
+        return None
+    for verdict, head in PROPOSE_LINES.items():
+        if last["text"].startswith(head):
+            return {"verdict": verdict, "why": _one_line(last["text"][len(head) :])}
+    return None
 
 
 def _state_path(root: Path) -> Path:
@@ -675,10 +708,12 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     from orch import lookreview
 
     now_mode = autoreview.mode(root)
-    look = plain and lookreview.on(root)
+    propose = config.reviewer_mode(root) == "propose"
+    look = plain and lookreview.on(root) and not propose  # its second look accepts too: never in propose mode
     own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
+    queue = mergequeue.Queue(root)
     in_review = set()
     kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
@@ -707,7 +742,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         res = (
             {"verdict": "accept", "why": itself}
             if itself
-            else decide(root, t, facts, back)
+            else decide(root, t, facts, back, queue)
             if plain
             else None
         )
@@ -732,7 +767,12 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             actions.append(row)
             continue
         try:
-            if res.get("auto"):
+            if (
+                propose and res["verdict"] in PROPOSE_LINES
+            ):  # nothing closes by itself: one line, the card stays
+                after = tickets.log(root, tid, PROPOSE_LINES[res["verdict"]] + _one_line(res["why"]), BY)
+                row["proposed"] = True
+            elif res.get("auto"):
                 after = autoreview.act(root, t, res)
                 if res["verdict"] == "back":
                     mine["back"] = back + 1
@@ -859,6 +899,17 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
     return True, ROUTINE_WHY
 
 
+QUOTE_STALE = "the person's words it quotes changed since: they answer it themselves"
+
+
+def quote_stale(root: Path, ticket: dict, q: dict) -> bool:
+    """ORCH-2183: a question quoting a person whose words, or the ticket's goal, changed since is never
+    answered for them (it asks again instead of only warning)."""
+    from orch import cardcontext
+
+    return "said" in q and cardcontext.stale(root, ticket, q) is not None
+
+
 def answer_routine(root: Path, dry_run: bool = False, now: float | None = None) -> list[dict]:
     """Every open question on a working ticket: answer the routine ones for the owner. Returns
     [{ticket, key, question, routine, why, answer, done}]."""
@@ -870,6 +921,8 @@ def answer_routine(root: Path, dry_run: bool = False, now: float | None = None) 
             if q.get("answer") is not None:
                 continue
             ok, why = routine(root, t, q, now)
+            if ok and quote_stale(root, t, q):
+                ok, why = False, QUOTE_STALE
             row = {"ticket": t["id"], "key": t.get("key") or t["id"], "question": q["id"], "routine": ok,
                    "why": why, "answer": q.get("recommended") if ok else None, "done": False}  # fmt: skip
             if ok and not dry_run:

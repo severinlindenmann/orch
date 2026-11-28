@@ -12,6 +12,7 @@ from pathlib import Path
 
 from orch import (
     addons,
+    cardkinds,
     cli_addons,
     cli_checks,
     cli_clients,
@@ -39,6 +40,7 @@ from orch import (
     diag,
     diag_incident,
     fields,
+    helptext,
     history,
     is_record_hook,
     mobile_mode,
@@ -61,8 +63,24 @@ from orch.errors import Refused
 
 MAX_CHECK_FILES = 10  # files one `orch check done` may attach
 
-_HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
 _noted = False
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def _clear_root_lines() -> list[tuple[str, str]]:
+    """(label, line) that clear ORCH_ROOT in this window only. Windows has two shells and orch can not tell
+    which one started it, so both are named; other systems get the one POSIX line."""
+    if _windows():
+        return [("PowerShell", "Remove-Item Env:ORCH_ROOT"), ("Command Prompt", "set ORCH_ROOT=")]
+    return [("Terminal", "unset ORCH_ROOT")]
+
+
+def _hint() -> str:
+    ways = ", ".join(f"{label}: {line}" for label, line in _clear_root_lines())
+    return f"Clear ORCH_ROOT in this window only ({ways}), or point it at a folder with .orch in it."
 
 
 def _env_root() -> Path | None:
@@ -75,15 +93,17 @@ def _env_root() -> Path | None:
         return None
     p = Path(raw)
     if not p.is_absolute():
-        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_HINT} Nothing was changed.")
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_hint()} Nothing was changed.")
     try:
         p = p.resolve(strict=True)
     except (OSError, RuntimeError):
         raise Refused(
-            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_HINT} Nothing was changed."
+            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_hint()} Nothing was changed."
         ) from None
     if not p.is_dir() or not (p / ".orch").is_dir():
-        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. {_HINT} Nothing was changed.")
+        raise Refused(
+            f"ORCH_ROOT points to a folder without orch in it: {raw}. {_hint()} Nothing was changed."
+        )
     return p
 
 
@@ -230,7 +250,7 @@ def _person_only_review_off(args) -> None:
     who = tickets.current_actor(getattr(args, "by", None))
     if tickets.agent_tool() or not who.startswith("human:"):
         raise Refused(
-            "Only a person turns Human review needed off: on the ticket page, or orch ticket edit "
+            "Only a person turns “I review the result” off: on the ticket page, or orch ticket edit "
             "<ticket> --human-review no in their own terminal."
         )
 
@@ -253,11 +273,19 @@ def _ticket_name(root: Path, tid: str) -> str:
     return (f"{o['key']} " if o.get("key") else "") + str(o.get("title") or tid)
 
 
-def _show(t: dict, root: Path) -> str:
+def _show(t: dict, root: Path, fresh: frozenset = frozenset()) -> str:
     t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  [{t['id']}]"
-    out = [head]
+    out = []
+    if new := [q for q in t["questions"] if q["id"] in fresh]:  # R2.6: a new answer first, with the step
+        names_ = people.names(root)
+        out.append("New answer:" if len(new) == 1 else "New answers:")
+        for q in new:
+            who = people.line_who(names_, q["answered_by"])
+            out.append(f"  {q['id']}: {q.get('text') or ''} - {q['answer']} ({who})")
+        out.append(f"Next step: {nextstep.work_on(t, t['id'])}\n")
+    out.append(head)
     if t.get("summary"):
         out.append(t["summary"])
     d, n = tickets.checks_done(t)
@@ -289,7 +317,7 @@ def _show(t: dict, root: Path) -> str:
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
     if tickets.kind(t):  # ORCH-645
         extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
-    extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
+    extra.append("I review the result: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -446,6 +474,7 @@ ADVANCED_TOP = {
     "ref",
     "ext",
     "tokens",
+    "changes",
     "github",
     "manager",
     "session",
@@ -506,7 +535,7 @@ class _Parser(argparse.ArgumentParser):
             self.exit(2, _EXAMPLES[self.prog] + "\n")
         m = re.search(r"required: (.*)", message)
         sp = next((a for a in self._actions if isinstance(a, argparse._SubParsersAction)), None)
-        if m and sp is not None and m.group(1) == sp.dest:  # a command is missing, not a value
+        if m and sp is not None and m.group(1) in (sp.dest, sp.metavar):  # a command is missing, not a value
             seen: set[int] = set()  # an alias names the same command once
             hidden = getattr(sp, "_hidden", set())
             names = ", ".join(
@@ -571,7 +600,7 @@ class _Version(argparse.Action):
 _INTRO = """\
 orch keeps your work in tickets: each
 with a checklist and the evidence of
-what was done, for any agent tool.
+what was done, for any AI tool.
 
 Examples, inside a workspace:
   See your tickets: orch ticket list
@@ -579,8 +608,15 @@ Examples, inside a workspace:
 
 
 def build_parser(
-    show_all: bool = False, addon_lines: list[str] | None = None, *, command: str | None = None
+    show_all: bool = False,
+    addon_lines: list[str] | None = None,
+    on: frozenset[str] = frozenset(),
+    *,
+    command: str | None = None,
+    helps: bool = True,
 ) -> argparse.ArgumentParser:
+    """`on`: the built-in add-ons (relay, publish) that are on here; help names the others nowhere (R1.1).
+    Help, examples and next steps are only built for a help request (`command` is None)."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -621,12 +657,14 @@ def build_parser(
         a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
     _drop_hidden(p)
+    if helps:
+        helptext.apply(p, on)
     return p
 
 
 def _leading_parsers(sub, common):
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
-    x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
+    x.add_argument("--yes", action="store_true", help="do not ask; take the first AI tool found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     x.add_argument(
@@ -640,6 +678,10 @@ def _leading_parsers(sub, common):
     x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     x = sub.add_parser("tokens", parents=[common], help="tokens per model and per ticket (read-only)")
     x.add_argument("--days", type=int, default=30, help="tickets changed in the last N days (default 30)")
+    x = sub.add_parser(
+        "changes", parents=[common], help="release notes: done tickets by kind, with their links (read-only)"
+    )
+    x.add_argument("--since", required=True, metavar="DATE|TAG", help="a date like 2026-11-01 or a git tag")
     x = sub.add_parser("triage", parents=[common], help="list the tickets that need a look (read-only)")
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
@@ -676,7 +718,7 @@ def _leading_parsers(sub, common):
 
 def _ticket_parsers(sub, common):
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
-    x = t.add_parser("new", parents=[common])
+    x = t.add_parser("new", parents=[common], help="make a ticket")
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
     x.add_argument("--owner", help="who owns it (a name)")
@@ -686,10 +728,10 @@ def _ticket_parsers(sub, common):
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
-        "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+        "--title-auto", action="store_true", help="the title is a placeholder; the helper writes it"
     )
     x.add_argument(
-        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+        "--plan-first", action="store_true", help="the helper plans first and waits for you to start"
     )
     x.add_argument(
         "--epic",
@@ -704,7 +746,7 @@ def _ticket_parsers(sub, common):
     x.add_argument(
         "--human-review",
         choices=("yes", "no"),
-        help="Human review needed (default yes; no while the Auto Reviewer is on); only a person says no",
+        help="I review the result (default yes; no while the Auto Reviewer is on); only a person says no",
     )
     x.add_argument(
         "--ext",
@@ -715,8 +757,8 @@ def _ticket_parsers(sub, common):
     )
     x = t.add_parser("tree", parents=[common], help="a ticket and its sub-tickets")
     x.add_argument("id")
-    x = t.add_parser("list", parents=[common])
-    x.add_argument("--status", choices=tickets.STATUSES)
+    x = t.add_parser("list", parents=[common], help="the tickets that are not done")
+    x.add_argument("--status", choices=tickets.STATUSES, help="only tickets with this status")
     x.add_argument("--all", action="store_true", help="include done and dropped tickets")
     x.add_argument(
         "--ext",
@@ -733,9 +775,13 @@ def _ticket_parsers(sub, common):
     wait.add_argument(
         "--blocked", action="store_true", help="only tickets waiting on a time, a ticket or the outside"
     )
-    x = t.add_parser("show", parents=[common])
+    x = t.add_parser("show", parents=[common], help="one ticket: its tasks, evidence and questions")
     x.add_argument("id")
-    x = t.add_parser("status", parents=[common])
+    x = t.add_parser(
+        "export", parents=[common], help="the ticket as a markdown handover to paste into any AI tool"
+    )
+    x.add_argument("id")
+    x = t.add_parser("status", parents=[common], help="move a ticket to another status")
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
     x.add_argument(
@@ -744,7 +790,7 @@ def _ticket_parsers(sub, common):
         help="with dropped: the ticket that replaces this one (Superseded)",
     )
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
-    x = t.add_parser("edit", parents=[common])
+    x = t.add_parser("edit", parents=[common], help="change a ticket's title, owner, due day or note")
     x.add_argument("id")
     x.add_argument("--title")
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
@@ -764,7 +810,7 @@ def _ticket_parsers(sub, common):
     x.add_argument(
         "--human-review",
         choices=("yes", "no"),
-        help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
+        help="I review the result: yes (nothing is accepted without a person) or no (only a person says no)",
     )
     x.add_argument(
         "--priority",
@@ -796,7 +842,7 @@ def _ticket_parsers(sub, common):
     x.add_argument("id")
     x.add_argument("title")
     x.add_argument(
-        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+        "--description", help="what it is about, 1 to 3 sentences (shown as the helper's description)"
     )
     x = t.add_parser(
         "tidy",
@@ -808,7 +854,9 @@ def _ticket_parsers(sub, common):
     x.add_argument("--owner")
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
-    x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument(
+        "--description", help="what it is about and why, 1 to 3 sentences (the helper's own field)"
+    )
     x.add_argument(
         "--estimate-minutes", help="your estimate of the helper time in whole minutes: 45, or a range 30-60"
     )
@@ -871,15 +919,19 @@ def _ticket_parsers(sub, common):
     x.add_argument("--request", action="store_true", help="the file came with the request of a new ticket")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
-    x = t.add_parser("wait", parents=[common])
+    x = t.add_parser("wait", parents=[common], help="the ticket waits for a time, a ticket or an answer")
     x.add_argument("id")
-    x.add_argument("--until", help="a time; without a zone it is this computer's local time")
-    x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x.add_argument("--until", metavar="TIME", help="a time, e.g. 2026-12-04T09:00 (your local time)")
+    x.add_argument(
+        "--on", metavar="KIND:REF", help="ticket:<key>, pr:<address>, question:<q1> or external:<what>"
+    )
+    x.add_argument("--clear", action="store_true", help="stop waiting")
     x = t.add_parser("changes", parents=[common], help="send a ticket in Review back with a note (a person)")
     x.add_argument("id")
     x.add_argument("text")
-    x = t.add_parser("patch", parents=[common])
+    x = t.add_parser(
+        "patch", parents=[common], help="change several fields at once (JSON, for pages and scripts)"
+    )
     x.add_argument("id")
     x.add_argument(
         "data",
@@ -894,12 +946,14 @@ def _remaining_parsers(sub, common):
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
-    x.add_argument("--until", help="a time; without a zone it is this computer's local time")
-    x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x.add_argument("--until", metavar="TIME", help="a time, e.g. 2026-12-04T09:00 (your local time)")
+    x.add_argument(
+        "--on", metavar="KIND:REF", help="ticket:<key>, pr:<address>, question:<q1> or external:<what>"
+    )
+    x.add_argument("--clear", action="store_true", help="stop waiting")
 
     c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
-    x = c.add_parser("add", parents=[common])
+    x = c.add_parser("add", parents=[common], help="add a task to a ticket")
     x.add_argument("id")
     x.add_argument("text")
     x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
@@ -933,7 +987,7 @@ def _remaining_parsers(sub, common):
     x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
     x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
     x.add_argument("--output", metavar="FILE", help="a plain log file in this workspace with its output")
-    x = c.add_parser("done", parents=[common])
+    x = c.add_parser("done", parents=[common], help="a task is done, with its evidence")
     x.add_argument("id")
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
@@ -964,6 +1018,37 @@ def _remaining_parsers(sub, common):
         help="with --recommend: the reason for the answer you suggest, one line (shown under the question)",
     )
     x.add_argument(
+        "--if-wait",
+        dest="if_wait",
+        metavar="LINE",
+        help="what happens while nobody answers, one line (shown first on the card: If you wait)",
+    )
+    x.add_argument(
+        "--fact",
+        action="append",
+        default=[],
+        metavar="LINE",
+        help="a fact that decides it, one line (up to 4; shown first on the card: What matters)",
+    )
+    x.add_argument(
+        "--idea",
+        action="append",
+        default=[],
+        metavar="LINE",
+        help="one idea for the person to sort (2 to 12; each gets Keep, Later or No; no --option)",
+    )
+    x.add_argument(
+        "--due",
+        metavar="TIME",
+        help="when the answer is needed (a time; without a zone it is this computer's local time)",
+    )
+    x.add_argument(
+        "--said",
+        metavar="REF",
+        help="quote the person on the card: a chat message id (m_...), history:<time of their line> or "
+        "rules:<line of .orch/ask-when.md>; orch copies their words from there",
+    )
+    x.add_argument(
         "--take-back",
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
@@ -974,15 +1059,15 @@ def _remaining_parsers(sub, common):
         help="the person answered in your window, not on the card: write their words on it and close it: "
         '--in-conversation q3 "their words"',
     )
-    x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
+    x.add_argument("--phone", action="store_true", help="also send the question to the phones (relay)")
     x.add_argument(
         "--preview",
         action="append",
         default=[],
         metavar="OPTION=ID",
-        help="with --phone: show an attachment next to an option",
+        help="with --phone (relay): show an attachment next to an option",
     )
-    x.add_argument("--scope", help='with --phone, options Once/Always/No: what "Always" covers')
+    x.add_argument("--scope", help='with --phone (relay), options Once/Always/No: what "Always" covers')
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")
@@ -1107,7 +1192,7 @@ def _remaining_parsers(sub, common):
     x.add_argument("--timeout", type=int, default=60, metavar="MIN", help="give up after this (default 60)")
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
-    x = e.add_parser("set", parents=[common])
+    x = e.add_parser("set", parents=[common], help="write an add-on's data on a ticket")
     x.add_argument("id")
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
@@ -1170,9 +1255,20 @@ def _init_guard(cwd: Path) -> None:
     here = cwd.resolve()
     env = _env_root()
     if env is not None and env != here:
+        ways = _clear_root_lines()
+        width = max(len(label) for label, _ in ways) + 2
         raise Refused(
-            f"ORCH_ROOT is set to {env}. Run orch init there, "
-            "or unset ORCH_ROOT to start a new workspace here."
+            "\n".join(
+                [
+                    f"ORCH_ROOT is set to {env}, a different workspace, so orch init stops here. "
+                    "Nothing was written.",
+                    f"  To use that workspace: go to {env} and run orch init there.",
+                    f"  To start a new workspace in this folder ({here}): clear ORCH_ROOT in this window "
+                    "only (other windows are not changed), then run orch init.",
+                    *(f"    {label + ':':<{width}}{line}" for label, line in ways),
+                    f"    {'Then:':<{width}}orch init",
+                ]
+            )
         )
     if any(c in (here, *here.parents) for c in _copies_folders()):
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
@@ -1304,6 +1400,11 @@ def run(args: argparse.Namespace) -> None:
 
         data = usage.workspace_usage(root, max(args.days, 1))
         _out(args, data, usage.text(data))
+    elif cmd == "changes":
+        from orch import changes
+
+        data = changes.collect(root, changes.since_time(root, args.since))
+        _out(args, data, changes.text(data, args.since))
     elif cmd == "triage":
         from orch import triage
 
@@ -1466,8 +1567,25 @@ def run(args: argparse.Namespace) -> None:
             txt = _picked_text(args, ts, txt)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
-        t = visible(root, tickets.load(root, args.id))
-        _out(args, t, _show(t, root))
+        t = tickets.load(root, args.id)
+        fresh = frozenset() if args.json else frozenset(q["id"] for q in tickets.new_answers(root, t))
+        try:
+            who = by()
+        except Refused:
+            who = ""
+        if tickets.needs_pick_up(root, t, who, mark=not args.json):  # R2.6: the helper picks the answer up
+            try:
+                t = tickets.pick_up_answers(root, t["id"], who or tickets.SYSTEM, mark=not args.json)
+            except (Refused, OSError):
+                pass  # showing never fails on that note
+        t = visible(root, t)
+        _out(args, t, _show(t, root, fresh))
+    elif cmd == "ticket" and sub == "export":
+        from orch import ticketexport
+
+        tid = visible(root, tickets.load(root, args.id))["id"]
+        md = ticketexport.export(root, tid)
+        _out(args, {"id": tid, "markdown": md}, md.rstrip("\n"))
     elif cmd == "ticket" and sub == "status":
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
@@ -1765,6 +1883,11 @@ def run(args: argparse.Namespace) -> None:
             or args.option
             or args.recommend
             or args.because is not None
+            or args.if_wait is not None
+            or args.fact
+            or args.idea
+            or args.said is not None
+            or args.due is not None
             or args.kind
             or args.action
             or args.check
@@ -1782,6 +1905,11 @@ def run(args: argparse.Namespace) -> None:
             or args.option
             or args.recommend
             or args.because is not None
+            or args.if_wait is not None
+            or args.fact
+            or args.idea
+            or args.said is not None
+            or args.due is not None
             or args.kind
             or args.action
             or args.check
@@ -1808,6 +1936,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if card and args.idea:
+            raise Refused("--idea goes with a plain question, not a card: each idea gets Keep, Later or No.")
         if (args.group is not None or args.ref or args.describe) and not card:
             raise Refused(
                 "--group, --ref and --describe go with a card (--draft, --choose, --plan or --link)."
@@ -1820,6 +1950,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.release and not args.merge:
             raise Refused("--release goes with --merge.")
+        if not args.kind and not args.action:  # an add-on's or orch's own question words itself
+            cardkinds.refuse_bad_question(args.text or "", list(args.option or []), bool(card))
         if card:  # the card goes where every question goes; a phone shows it from the stack
             t, q = cli_review.ask_card(
                 args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
@@ -1836,6 +1968,11 @@ def run(args: argparse.Namespace) -> None:
                 args.action,
                 args.check,
                 because=args.because,
+                if_wait=args.if_wait,
+                facts=args.fact,
+                said=args.said,
+                due=args.due,
+                ideas=args.idea,
             )
         if card:
             pass
@@ -1854,6 +1991,11 @@ def run(args: argparse.Namespace) -> None:
                 "\nHint: the question holds an orch command. A person copies or runs it in one click on "
                 'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
                 if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else "\nNext: the person sorts each idea (Keep, Later or No); the answer lists them, and "
+                "what is left for later comes back as its own card. Work on the kept ones."
+                if q.get("ideas")
+                else "\n" + cardkinds.ASK_HINT
+                if not card and not args.kind and not (args.option and args.recommend)
                 else ""
             ),
         )
@@ -1893,7 +2035,7 @@ def run(args: argparse.Namespace) -> None:
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
-            runs_live.pass_answer(root, t["id"], q, who)
+            runs_live.pass_answer(root, t["id"], q, who, wait=False)
         note = _addon_note(root, q)
         _out(
             args,
@@ -1973,29 +2115,13 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
-def _queue_bases(root: Path) -> list[str]:
-    """The base branches the pull-requests add-on's merge queue merges into (`[pull_requests] bases`, default
-    develop, never main or master); empty when the add-on is not turned on here."""
-    from orch import config
-
-    try:
-        if "pull-requests" not in addons.active(root):
-            return []
-        t = config.read(root).get("pull_requests")
-    except Exception:  # noqa: BLE001 - unreadable: the queue is not known to be on
-        return []
-    got = t.get("bases") if isinstance(t, dict) else None
-    if not isinstance(got, list) or not got or not all(isinstance(b, str) and b.strip() for b in got):
-        got = ["develop"]
-    return [b.strip() for b in got if b.strip().lower() not in ("main", "master")]
-
-
 def _past_the_queue(root: Path, urls: list[str], key: str) -> None:
     """ORCH-450: with the merge queue on, every merge into its base branches goes through the queue, where it
     is checked in a queue group on top of the base. `orch ref wait --merge` refuses those, before any wait."""
-    from orch import prwait
+    from orch import mergequeue, prwait
 
-    bases = _queue_bases(root)
+    queue = mergequeue.Queue(root)
+    bases = queue.snapshot["bases"]
     if not bases:
         return
     for url in urls:
@@ -2005,7 +2131,7 @@ def _past_the_queue(root: Path, urls: list[str], key: str) -> None:
             into = base or " / ".join(bases)
             raise Refused(
                 f"Merges into {into} go through the merge queue, never past it. Mark {url} ready, then run: "
-                f"orch pull-requests queue add {url} --ticket {key}"
+                f"orch {' '.join(queue.add_args(url, key))}"
             )
 
 
@@ -2021,7 +2147,7 @@ def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
         if ghmerge.workflow_check(url, head) is None:
             return None
         key = t.get("key") or t["id"]
-        ns = build_parser().parse_args(
+        ns = build_parser(helps=False).parse_args(
             ["ask", t["id"], f"Merge the CI workflow change of {key}?", "--link", "CI workflow change",
              "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
         )  # fmt: skip
@@ -2292,7 +2418,12 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         diag.new_trace(os.environ.get("TRACEPARENT"))
         help_requested = "-h" in argv or "--help" in argv or not argv
         lines = addons.help_lines(root) if help_requested else None
-        parser = build_parser(show_all, lines, command=None if help_requested else argv[0])
+        on = (
+            frozenset(addons.active(root)) & set(addons.CORE_ADDONS)
+            if help_requested and root
+            else frozenset()
+        )
+        parser = build_parser(show_all, lines, on, command=None if help_requested else argv[0])
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
             raise Refused(addons.not_on_message(root, argv[0]))  # built-in add-on that is off: no command
         if (
@@ -2313,7 +2444,9 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         if not want_json:
             line = nextstep.hint(nextstep.leaf_path(parser, args), getattr(args, "_next_data", None), args)
             if line:
-                print(f"Next: {line}")
+                # export: stdout is the handover itself (to paste or redirect), so its hint goes to stderr
+                to = sys.stderr if nextstep.leaf_path(parser, args) in nextstep.HINT_TO_STDERR else sys.stdout
+                print(f"Next: {line}", file=to)
         cli_run.after_command(args, root, want_json)
     except Refused as e:
         return refuse(e)

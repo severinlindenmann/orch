@@ -110,9 +110,14 @@ def add_parsers(sub, common) -> None:
         dest="sub", required=True
     )
     x = pub.add_parser("connect", parents=[common], help="connect this folder to a publish server")
-    x.add_argument("url")
-    x.add_argument("--workspace", required=True)
-    x.add_argument("--token", required=True)
+    x.add_argument("url", nargs="?")
+    x.add_argument("--workspace")
+    x.add_argument("--token")
+    x.add_argument(
+        "--paste",
+        action="store_true",
+        help="read the whole text from your admin on standard input; orch finds the connect line itself",
+    )
     _add_invite(pub, common, "publish server")
     pub.add_parser("whoami", parents=[common], help="show who you are and what you may share")
     _add_profile(pub)
@@ -122,6 +127,7 @@ def add_parsers(sub, common) -> None:
     x = pub.add_parser("file", parents=[common, life], help="encrypt and share a file or a page folder")
     x.add_argument("path")
     x.add_argument("--note", help="a short message for the person who opens the link (up to 280 characters)")
+    x.add_argument("--ticket", help="the ticket this file belongs to (key or id), shown on the Publish page")
     x.add_argument(
         "--replace", metavar="ID", help="swap the content of this file (f_...), the link stays the same"
     )
@@ -148,8 +154,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--lang", choices=templates.LANGS, default="python", help="docker only: rust starts a Rust app"
     )
-    pub.add_parser("list", parents=[common], help="list shared files and apps")
-    pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
+    x = pub.add_parser("list", parents=[common], help="list shared files and apps")
+    x.add_argument(
+        "--quick",
+        action="store_true",
+        help="try once; when publish can't be reached, list what this computer recorded",
+    )
+    pub.add_parser("view", parents=[common], help="the Publish page of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
         x = pub.add_parser(n, parents=[common], help=f"{n} a deployed app")
         x.add_argument("name")
@@ -172,6 +183,9 @@ def add_parsers(sub, common) -> None:
         help="this workspace's signing key: its fingerprint, made and registered if needed",
     )
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
+    rel.add_parser(
+        "needs", parents=[common], help="Home lines: a new contact your admin connected (no network)"
+    )
     _add_mobile(rel, common)
     _add_profile(rel)
     _add_contacts(rel, common)
@@ -412,7 +426,7 @@ def _said_line(r: dict) -> str:
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
-    by, sub = tickets.current_actor(), args.gsub
+    by, sub = tickets.acting_by(args), args.gsub
     tid = tickets.resolve_cli(root, args.ticket, json_output=args.json) if hasattr(args, "ticket") else None
     ws = relay.resolve(root, args.workspace) if hasattr(args, "workspace") else None
     if sub == "list":
@@ -498,6 +512,7 @@ def run_group(args, root: Path, out) -> None:
             click,
             _confirm(args),
             expect_sha=sha if click else None,
+            by=by,
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":
@@ -506,6 +521,11 @@ def run_group(args, root: Path, out) -> None:
 
 
 def run_publish(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_publish(args, root, out)
+
+
+def _run_publish(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -515,11 +535,23 @@ def run_publish(args, root: Path, out) -> None:
         r = publish.invite(root, args.name, args.folder, args.admin_url, _admin_token("publish"))
         out(args, r, _invite_text(r, "publish server"))
     elif sub == "connect":
+        if args.paste:
+            if term.is_terminal(sys.stdin):
+                print(
+                    "Paste the text from your admin, then press Ctrl+D (Ctrl+Z, then Enter, on Windows).",
+                    file=sys.stderr,
+                )
+            args.url, args.workspace, args.token = publish.parse_connect_text(sys.stdin.read())
+        elif not (args.url and args.workspace and args.token):
+            raise Refused(
+                "To connect, give the address, --workspace and --token from your admin, "
+                "or paste the admin's whole text with: orch publish connect --paste"
+            )
         who = publish.connect(root, args.url, args.workspace, args.token)
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.",
+            f"Connected to {_host(args.url)} as {who['name']}. Next: orch publish file <path> shares a file.",
         )
     elif sub == "whoami":
         w = publish.whoami(root)
@@ -533,7 +565,9 @@ def run_publish(args, root: Path, out) -> None:
         )
     elif sub == "file":
         with net.working(f"Encrypting and uploading {Path(args.path).name}"):
-            r = publish.share_file(root, Path(args.path), args.days, args.permanent, args.note, args.replace)
+            r = publish.share_file(
+                root, Path(args.path), args.days, args.permanent, args.note, args.replace, args.ticket
+            )
         out(
             args,
             r,
@@ -553,7 +587,7 @@ def run_publish(args, root: Path, out) -> None:
             if b["type"] == "list"
             for i in b["items"]
         ]
-        out(args, v, "\n".join(rows) or "Nothing shared yet.")
+        out(args, v, "\n".join(rows) or "Nothing shared yet. Next: orch publish file <path>")
     elif sub == "app":
         reach = "public" if args.public else "private" if args.private else None
         auth = True if args.auth else False if args.no_auth else None
@@ -582,8 +616,13 @@ def run_publish(args, root: Path, out) -> None:
             f"Created a {r['stack']} app in {args.folder}.",
         )
     elif sub == "list":
-        r = publish.list_all(root)
+        r = publish.list_all(root, quick=args.quick)
         lines = []
+        if r.get("unreachable"):
+            lines.append(
+                "Publish can't be reached. This is what this computer recorded; "
+                "people may not be able to open these links until it is back."
+            )
         for f in r["files"]:
             nm = f.get("name") or "(unnamed file)"
             lines.append(f"file  {nm}  {_size(f['size'])}  {_exp(f['expires_at'])}  [{f['id']}]")
@@ -623,7 +662,8 @@ def _add_contacts(rel, common) -> None:
 
 _STATE_WORDS = {
     "accepted": "Accepted",
-    "not_accepted": "Not accepted yet",
+    # RP3 A: nobody has to accept a workspace the admin paired; the old "Not accepted yet" read like a to-do
+    "not_accepted": "Paired, trusted from its first message",
     "new_key": "New key without the old one",
     "not_valid": "Not valid",
     "withdrawn": "Withdrawn",
@@ -798,6 +838,11 @@ def _problem(args, root: Path, out) -> None:
 
 
 def run_relay(args, root: Path, out) -> None:
+    with net.one_wait_per_host():  # a server that gave no answer is not waited for again (R1.1)
+        return _run_relay(args, root, out)
+
+
+def _run_relay(args, root: Path, out) -> None:
     sub = args.sub
     args._root = root
     if sub == "profile":
@@ -807,7 +852,7 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "invite", "status", "outbox", "view", "key") and not dry
+        sub not in ("connect", "invite", "status", "outbox", "view", "needs", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
         _key_once(root)
@@ -825,7 +870,7 @@ def run_relay(args, root: Path, out) -> None:
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n{line}",
+            f"Connected as {who['name']}.\n{_connect_line(root, line)}",
         )
     elif sub == "status":
         try:
@@ -833,22 +878,37 @@ def run_relay(args, root: Path, out) -> None:
             st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
         except Refused:
             st = {"configured": False}
-        text = "Not connected to a relay."
+        text = "Not connected yet."
         if st["configured"]:
             try:
-                relay.whoami_quick(root)
+                who = relay.whoami_quick(root)
                 st["reachable"] = True
-                text = f"Connected to {_host(st['url'])}."
+                names = relay.shown_names(root)
+                st["can_write_to"] = names
+                me = who.get("name") if isinstance(who, dict) else None
+                text = f"Connected to {_host(st['url'])}" + (f" as {me}." if me else ".")
+                text += (
+                    "\nYou can write to: " + ", ".join(names) + "."
+                    if names
+                    else "\nYou can write to: nobody yet. Your admin chooses that on the admin page."
+                )
             except (Refused, OSError, TimeoutError) as e:
                 st["reachable"], st["error"] = False, str(e)
                 text = (
-                    f"Set up, but the relay does not answer right now ({_host(st['url'])}): {e}\n"
-                    "Local work is not affected. Messages wait and go out when it answers again."
+                    f"Can't reach {_host(st['url'])} right now. "
+                    "Messages wait here and go out by themselves. Local work is not affected."
                 )
         fp = _own_fingerprint(root)
         if fp:
             st["fingerprint"] = fp
             text += f"\nSigning key fingerprint: {fp}"
+        if st["configured"] and (n := len(relay.outbox_list(root))):  # queued stays visible (R1.1, R3.1)
+            st["waiting"], problem = n, relay.outbox_problem(root)
+            text += f"\n{n} message{'s' if n != 1 else ''} not sent yet: " + (
+                f"{problem} They go out once this is fixed."
+                if problem
+                else "the relay could not be reached. They go out with the next orch relay command."
+            )
         out(args, st, text)
     elif sub == "key":
         from orch import signkey
@@ -863,11 +923,18 @@ def run_relay(args, root: Path, out) -> None:
         rows = [
             f"{i['title']}  {i['subtitle']}"
             if b["type"] == "list"
+            else f"{i['name']}  {i.get('last', '')}".strip()
+            if b["type"] == "conversations"
             else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
             for b in v["blocks"]
             for i in b["items"]
         ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
+    elif sub == "needs":
+        from orch import relay_view
+
+        rows = relay_view.needs(root)
+        out(args, rows, "\n".join(r["text"] for r in rows) or "Nothing new.")
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]
@@ -963,17 +1030,21 @@ def run_relay(args, root: Path, out) -> None:
         out(args, _preview_dict(m), _preview_text(m))
     elif sub == "send":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Message sent to {}."))
+        out(args, m, _sent_line(root, m, "Message sent to {}.") + "\n" + _left_line(m))
         _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
     elif sub == "delegate":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Task handed to {}. It starts once they allow it."))
+        out(
+            args,
+            m,
+            _sent_line(root, m, "Task handed to {}. It starts once they allow it.") + "\n" + _left_line(m),
+        )
     elif sub == "start":
         m = _build_send(root, args, sub, t)
-        out(args, m, _sent_line(root, m, "Start request sent to {}."))
+        out(args, m, _sent_line(root, m, "Start request sent to {}.") + "\n" + _left_line(m))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
         # who gave it goes along: only then is a person's allow at a terminal marked as a person's, and the
@@ -1085,6 +1156,46 @@ def _card_lines(c: dict) -> list[str]:
     return out
 
 
+def _left_line(m: dict) -> str:
+    """R3.3: after every real send, one line on what left this machine (no prompt). Built from the message as
+    it went, so it never says more than was sent; the body is already scanned (R5.2)."""
+    b = m.get("body") if isinstance(m.get("body"), dict) else {}
+    kind = m.get("type")
+    parts = []
+    if kind == "delegate":
+        parts.append(f'the task "{_one(b.get("title"))}"')
+    elif kind == "start":
+        parts.append(f'start "{_one(b.get("key"))}"')
+    elif kind == "file":
+        parts.append(f"the file {_one(b.get('name'))} ({_size(int(b.get('size') or 0))})")
+    if b.get("text"):
+        what = "the text" if kind in ("text", "file") else "its details"
+        parts.append(f"{what} ({_count(len(b['text']), 'character')})")
+    if isinstance(b.get("speak"), dict) and b["speak"].get("summary"):
+        parts.append("a spoken summary")
+    if b.get("checklist"):
+        parts.append(_count(len(b["checklist"]), "checklist item"))
+    if b.get("refs"):
+        parts.append(_count(len(b["refs"]), "card"))
+    word = m.get("key") or m.get("ticket")
+    if isinstance(b.get("ticket_card"), dict):
+        parts.append(f"the whole ticket {word} (--full)")
+    elif b.get("group"):
+        parts.append(f"the group card of ticket {word}")
+    elif word:
+        parts.append(f"a link to ticket {word}, not its content")
+    head = "Goes out once sent: " if m.get("sent") is False else "What left this machine: "
+    return head + (", ".join(parts) or "an empty message") + ". To check first next time, add --dry-run."
+
+
+def _count(n: int, one: str) -> str:
+    return f"{n} {one}" + ("" if n == 1 else "s")
+
+
+def _one(v) -> str:
+    return " ".join(str(v or "").split())[:80]
+
+
 def _sent_line(root: Path, m: dict, ok: str) -> str:
     if m.get("sent") is False and m.get("problem"):
         return f"Not sent: {m['problem']} The message is kept and goes out once this is fixed."
@@ -1103,6 +1214,13 @@ def _target_name(root: Path, to: str) -> str:
         pass
     name = relay.name_of(root, to)
     return name if name != to else f"{to} (its name is not known here yet)"
+
+
+def _connect_line(root: Path, line: str) -> str:
+    """The refresh line, then who you can write to: nobody yet is the admin's step, said plainly."""
+    if any(w.get("name") for w in relay._directory(root)):
+        return line
+    return f"{line}\nYou can write to: nobody yet. Your admin chooses that on the admin page."
 
 
 def _own_fingerprint(root: Path) -> str | None:

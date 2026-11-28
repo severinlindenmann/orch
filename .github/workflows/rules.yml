@@ -1,22 +1,29 @@
 name: rules
 # R4.1 banned-word diff check. Own workflow so a label change re-runs only this check, not the full CI.
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 permissions:
   contents: read
   pull-requests: read  # the labels as they are when the job runs (ORCH-1363)
 jobs:
+  check-runner:
+    uses: ./.github/workflows/check-runner.yml
+    secrets:
+      runner_status: ${{ secrets.MAC_RUNNER_STATUS_TOKEN }}
   banned-words:
     # release/* -> main only carries lines that already passed this check on develop: skip it there
     # a merge queue group the local gate checked (ORCH-1124): the queue posted banned-words itself
-    if: "${{ !(startsWith(github.head_ref, 'release/') && github.base_ref == 'main') && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    runs-on: ubuntu-latest
+    needs: check-runner
+    if: "${{ !cancelled() && github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'release/') && github.base_ref == 'main') && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
+    runs-on: ${{ fromJSON(needs.check-runner.outputs.machine || '"ubuntu-latest"') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/edge-job-home
       - name: added lines must not contain banned words (label owner-approved lifts it)
         # the labels are read when the job runs, not from the event: the merge queue opens its group pull request
         # first and puts a member's owner-approved label on it right after (ORCH-1363), so the opened event has none.
@@ -27,14 +34,29 @@ jobs:
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          LABELS=$(gh api "repos/$REPO/issues/$NUMBER/labels" --jq '[.[].name] | join(",")') || LABELS=""
+          set -o pipefail
+          LABELS=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$REPO/issues/$NUMBER/labels" | jq -er 'map(.name) | join(",")') || LABELS=""
           python3 scripts/check_banned_words.py --base "$BASE" --labels "$LABELS"
   headless-launch:
     # ORCH-615: every browser start goes through e2e/headless.cjs / .py, which add the macOS keychain options.
     # Whole-repo text scan (a few seconds), so it runs on every pull request with no path filter.
+    needs: check-runner
+    if: ${{ !cancelled() }}
+    runs-on: ${{ fromJSON(needs.check-runner.outputs.machine || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
+      - name: no browser start without the keychain options
+        run: python3 scripts/check_headless_launch.py
+  contract-vectors:
+    # R9.4: every vector in contracts/vectors is replayed by a consumer test; changed examples and vectors that are
+    # not additive are shown as warnings. Whole-repo text scan (under a second), no path filter.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: no browser start without the keychain options
-        run: python3 scripts/check_headless_launch.py
+        with:
+          fetch-depth: 0
+      - name: every contract vector has a consumer replay
+        run: python3 scripts/check_contracts.py --base "origin/${{ github.base_ref }}"

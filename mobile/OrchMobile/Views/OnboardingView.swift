@@ -58,7 +58,7 @@ struct OnboardingView: View {
                     let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
                     if clean.isEmpty { linkError = "Paste the link you were sent first. It starts with orch://."; return }
                     if (try? PairingLink(clean)) == nil {
-                        linkError = "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
+                        linkError = InviteWording.badLink
                         return
                     }
                     model.openInvite(clean); showLink = false
@@ -104,8 +104,7 @@ struct OnboardingView: View {
     }
 
     private func pasteLink() {
-        if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           (try? PairingLink(value)) != nil {
+        if let value = InvitePaste.take() {
             model.openInvite(value)
         } else { showLink = true }
     }
@@ -131,7 +130,7 @@ struct OnboardingView: View {
     }
 }
 
-/// "Get an invitation": where the invitation comes from, with the computer-side steps behind a tap.
+/// Where the invitation comes from, with the admin's Add phone steps behind a tap.
 struct InviteHelp: View {
     @State private var open = false
     var body: some View {
