@@ -157,10 +157,39 @@ def test_a_question_without_a_suggested_answer_gets_the_next_step(proj, run, new
     code, out, _ = run(
         "ask", tid, "Which hotel?", "--option", "Near the station", "--option", "Old town", "--by", "agent:x"
     )
-    assert code == 0 and cardkinds.ASK_HINT in out  # a hint, not a refusal (owner pick, ORCH-2067)
+    assert code == 0 and cardkinds.ASK_HINT in out  # answers but none suggested: a hint, not a refusal
     flight = ["Which flight?", "--option", "Morning", "--option", "Evening", "--recommend", "Morning"]
     code, out, _ = run("ask", tid, *flight, "--by", "agent:x")
     assert code == 0 and cardkinds.ASK_HINT not in out
+
+
+def test_a_helpers_question_without_answers_is_refused(proj, run, new_ticket):
+    """ORCH-2177 (AGENTS R2.4): one sentence and the next step; nothing is written."""
+    tid = new_ticket("Trip to Rome")
+    for who in (["--by", "agent:x"], []):  # nobody named and no terminal is a helper too
+        code, out, err = run("ask", tid, "Which hotel?", *who)
+        assert code != 0 and cardkinds.ASK_NEEDS_ANSWERS in err, out + err
+        assert "--option" in err and "--recommend" in err
+    assert tickets.load(proj, tid)["questions"] == []
+    # the more telling refusals come first
+    code, _, err = run("ask", tid, "What is your password?", "--by", "agent:x")
+    assert code != 0 and "credential" in err and cardkinds.ASK_NEEDS_ANSWERS not in err
+    # ideas to sort, a card, and an add-on's own question bring their answers or word themselves
+    ideas = ["--idea", "A reel", "--idea", "A post"]
+    assert run("ask", tid, "Which ideas should I work out?", *ideas, "--by", "agent:x")[0] == 0
+    assert run("ask", tid, "Check the disk?", "--run", "df -h", "--by", "agent:x")[0] == 0
+    assert run("ask", tid, "Restart the shop page?", "--kind", "services:failing", "--by", "agent:x")[0] == 0
+
+
+def test_a_persons_own_question_without_answers_keeps_the_hint(proj, run, new_ticket, monkeypatch):
+    """ORCH-2177: the one caller that cannot give options yet asks as the person (an add-on's question to
+    another workspace, by a click, answered in free words). From inside a helper's run it is a helper."""
+    tid = new_ticket("Trip to Rome")
+    code, out, err = run("ask", tid, "What would you change before this ships?", "--by", "human:tester")
+    assert code == 0 and cardkinds.ASK_HINT in out, out + err
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    code, _, err = run("ask", tid, "And what else?", "--by", "human:tester")
+    assert code != 0 and cardkinds.ASK_NEEDS_ANSWERS in err
 
 
 def test_refusals_apply_to_cards_only_by_length():

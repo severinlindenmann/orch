@@ -1973,6 +1973,11 @@ def run(args: argparse.Namespace) -> None:
                 said=args.said,
                 due=args.due,
                 ideas=args.idea,
+                # a helper's plain question brings answers to pick (ORCH-2177); an add-on's or orch's own
+                # question (--kind, --action) words itself, and a person's own question gets the hint
+                needs_answers=cardkinds.ASK_NEEDS_ANSWERS
+                if not args.kind and not args.action and tickets._agent_actor(by())
+                else None,
             )
         if card:
             pass

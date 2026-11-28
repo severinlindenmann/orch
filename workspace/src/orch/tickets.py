@@ -4653,8 +4653,12 @@ def ask(
     said: str | None = None,
     due: str | None = None,
     ideas: list[str] | None = None,
+    needs_answers: str | None = None,
 ) -> tuple[dict, dict]:
-    """ideas (ORCH-2186, Focused review E): IDEAS_MIN to IDEAS_MAX one-line ideas the person sorts one by one
+    """needs_answers (ORCH-2177): the refusal for a question that has no options and no ideas, said after
+    every other check of the question (a secret, a credential) and before anything is written. Only the
+    CLI gives it, for a helper's plain question.
+    ideas (ORCH-2186, Focused review E): IDEAS_MIN to IDEAS_MAX one-line ideas the person sorts one by one
     (Keep, Later or No) on Review; the question then has no --option. What is left for later comes back as a
     smaller card (`left_from`) that never holds up the ticket.
     due (ORCH-2184, Focused review C): when the answer is needed, any time `orch wait --until` takes;
@@ -4759,6 +4763,9 @@ def ask(
                 "(for example: Is access to the service set up for this workspace?), "
                 "and say in the ticket summary what is missing."
             )
+
+    if needs_answers and not options and not ideas:
+        raise Refused(needs_answers)
 
     preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
 
