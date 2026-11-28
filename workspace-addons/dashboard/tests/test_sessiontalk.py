@@ -3,10 +3,26 @@
 import json
 import os
 
+import pytest
+
 from orch_dashboard import sessiontalk
 
 SID = "0364ced3-ceac-463a-a68d-53a565d7e9df"
 OLD = "11111111-ceac-463a-a68d-53a565d7e9df"
+
+
+class _NoKeys:
+    """The hider of a workspace with no stored keys (the test folder is no orch home, so none is read)."""
+
+    def hide_text(self, s):
+        return s
+
+
+@pytest.fixture(autouse=True)
+def _no_stored_keys(monkeypatch):
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: _NoKeys())
 
 
 def _ticket(sessions):
@@ -98,3 +114,58 @@ def test_no_conversation_says_unavailable(tmp_path, monkeypatch):
 def test_unknown_ticket_says_unavailable(tmp_path):
     sessiontalk._CACHE.clear()
     assert sessiontalk.talk(tmp_path, "t_zzzzzz") == {"available": False, "turns": [], "more": False}
+
+
+def test_secrets_in_a_turn_show_as_hidden(tmp_path, monkeypatch):
+    """ORCH-2352 (security L3 of #3328): a key the helper printed never reaches the page; the rest stays."""
+    sessiontalk._CACHE.clear()
+    token = "ghp_" + "a1B2c3D4e5" * 4  # put together here: no token-shaped text in the repo
+    stored = "zebra-" + "plum-" * 3 + "42"
+
+    class Hide:
+        def hide_text(self, s):
+            return s.replace(stored, "[hidden]")
+
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: Hide())
+    _conv(
+        tmp_path,
+        monkeypatch,
+        [
+            {"type": "assistant", "message": {"content": f"I read the file.\nThe token is {token}\nDone."}},
+            {"type": "assistant", "message": {"content": "export API_KEY=" + "s3cr3t" * 4}},
+            {"type": "user", "message": {"content": f"use {stored} for the shop"}},
+            {"type": "assistant", "message": {"content": "First line.\n\n- one\n- two"}},
+        ],
+    )
+    _load(monkeypatch, _ticket([{"agent": "claude", "id": SID, "last_used": "2026-11-26T09:00:00Z"}]))
+    texts = [t["text"] for t in sessiontalk.talk(tmp_path, "t_abcdef")["turns"]]
+    joined = "\n".join(texts)
+    assert token not in joined and "s3cr3t" not in joined and stored not in joined
+    assert (
+        texts[0].startswith("I read the file.\n") and texts[0].endswith("\nDone.") and "[hidden]" in texts[0]
+    )
+    assert "[hidden]" in texts[1] and texts[2] == "use [hidden] for the shop"
+    assert texts[3] == "First line.\n\n- one\n- two"  # plain text keeps its lines
+
+
+def test_a_scrub_that_fails_shows_nothing_of_the_turn(tmp_path, monkeypatch):
+    sessiontalk._CACHE.clear()
+    from orch import phone_view
+
+    monkeypatch.setattr(phone_view, "redact", lambda text: 1 / 0)
+    _conv(tmp_path, monkeypatch, [{"type": "assistant", "message": {"content": "anything"}}])
+    _load(monkeypatch, _ticket([{"agent": "claude", "id": SID, "last_used": "2026-11-26T09:00:00Z"}]))
+    assert [t["text"] for t in sessiontalk.talk(tmp_path, "t_abcdef")["turns"]] == ["[hidden]"]
+
+
+def test_stored_keys_that_cannot_be_read_show_no_conversation(tmp_path, monkeypatch):
+    sessiontalk._CACHE.clear()
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+    _conv(tmp_path, monkeypatch, [{"type": "assistant", "message": {"content": "anything"}}])
+    _load(monkeypatch, _ticket([{"agent": "claude", "id": SID, "last_used": "2026-11-26T09:00:00Z"}]))
+    assert sessiontalk.talk(tmp_path, "t_abcdef") == {"available": False, "turns": [], "more": False}
+    assert not sessiontalk._CACHE  # asked again next time
