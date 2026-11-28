@@ -95,7 +95,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .nav-row{position:relative;display:grid}
 /* The menu's add-ons (D2 A, ORCH-2283; O-34): plain rows in the person's order, More (n) / Fewer unfolds the rest in
    place. No row edits the list. Way A: .nav-edit, a quiet '…' beside 'Add-ons' that shows when the menu is pointed at or
-   holds the keyboard, opens Settings › Menu (.menu-order: one row per page with a grip, two arrows and the switch).
+   holds the keyboard, opens Settings › Menu (.menu-order: one row per page with a grip, two arrows and the switch; the
+   first page has no arrow up and the last none down, .menu-no-arrow keeps the place).
    Way B: every row is dragged in place and has its own '…' (.nav-row-menu). A dragged row fades; a line marks the place. */
 .nav-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
 .nav-head>.nav-edit{margin-right:4px}
@@ -115,6 +116,7 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .card.menu-order>.card-row.menu-order-row>.btn{margin-left:0}
 @media(max-width:360px){.menu-order-row>.switch-text{display:none}}
 .menu-order-row h3{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu-no-arrow{visibility:hidden}
 .menu-grip{display:grid;place-items:center;flex:none;width:18px;color:var(--text-faint)}
 .menu-order-row.off h3{color:var(--text-muted)}
 @media(hover:none){.menu-grip{display:none}}

@@ -567,7 +567,9 @@ function menuSettingsCard() {
   const pages = menuPages();
   if (snapshot || navEditB() || !pages.length) return null;
   const pinned = navPinned(pages), rows = [...pinned, ...pages.filter(a => !pinned.includes(a))];
-  const arrow = (a, dir, off) => h('button', {type:'button', className:'btn ghost icon sm', 'aria-label':'Move ' + addonLabel(a) + (dir < 0 ? ' up' : ' down'), title:dir < 0 ? 'Move up' : 'Move down', 'data-menu-step':String(dir), 'data-name':a.name, 'data-key':'settings-menu-' + (dir < 0 ? 'up-' : 'down-') + a.name, disabled:off}, iconEl(dir < 0 ? 'chevron-up' : 'chevron-down'));
+  // the first page has no way up and the last no way down: an empty place of the same size, never a dead button
+  const arrow = (a, dir, none) => none ? h('span', {className:'btn ghost icon sm menu-no-arrow', 'aria-hidden':'true'})
+    : h('button', {type:'button', className:'btn ghost icon sm', 'aria-label':'Move ' + addonLabel(a) + (dir < 0 ? ' up' : ' down'), title:dir < 0 ? 'Move up' : 'Move down', 'data-menu-step':String(dir), 'data-name':a.name, 'data-key':'settings-menu-' + (dir < 0 ? 'up-' : 'down-') + a.name}, iconEl(dir < 0 ? 'chevron-up' : 'chevron-down'));
   return h('div', {className:'stack', 'data-key':'settings-menu'}, h('h2', {className:'set-sub', id:'settings-menu', tabindex:'-1'}, 'Menu'),
     h('p', {className:'meta'}, 'Choose the add-on pages in the menu and their order. Drag a row or use its arrows. A page you turn off waits under More. Kept in this browser.'),
     h('div', {className:'card menu-order', role:'list', 'aria-label':'Add-on pages in the menu'}, rows.map(a => {
