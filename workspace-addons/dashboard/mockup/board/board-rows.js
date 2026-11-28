@@ -1,13 +1,15 @@
 /* ORCH-576 board mockup: status rows (owner picked draft C, 18 Nov). Renders with the KIT classes only
    (.status-rows, .status-row, .ticket-tile, .parts-bar, .scope-bar, .kind-tag in widgets.css); no page stylesheet.
-   Tile = title (2 lines) + one foot line: tasks, ONE signal, part of, ONE add-on icon, the ⋯ menu.
+   Tile (O-16 C, 28 Nov) = two lines: the title on one line with the add-on icon and the state icon top right, then one foot
+   line: tasks, ONE signal word, part of, the ⋯ menu. No button on a card; the card opens the ticket.
    Moving: drag, ⋯ menu Move to / up / down, Waiting asks "Wait until when?", Undo toast. */
 (() => {
   const D = window.D576, OPEN = '../ticket/ticket-working.html';
   const ORDER = ['needs', 'check', 'working', 'waiting', 'todo', 'backlog', 'done', 'wontdo'];
   // The product's row ids (data-status) for the mockup's lanes.
   const STATUS = { needs: 'waiting', check: 'review', working: 'active', waiting: 'blocked', todo: 'ready', backlog: 'open', done: 'done', wontdo: 'dropped' };
-  const st = { q: '', open: {}, unfold: {}, more: {}, hl: null, only: null };
+  // O-14 D (28 Nov): Top tickets only (off at first, top=1 in the address): tickets that are part of no other ticket
+  const st = { q: '', open: {}, unfold: {}, more: {}, hl: null, only: null, top: new URLSearchParams(location.search).get('top') === '1' };
   const root = document.getElementById('rows');
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ic = (n, s = 14) => n === 'focus'
@@ -20,7 +22,7 @@
   const ms = v => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(v)) || 200;
   const match = t => !st.q || (t.k + ' ' + t.title).toLowerCase().includes(st.q);
   const items = id => {
-    const list = D.t.filter(t => t.lane === id && match(t) && (!st.only || (st.only.has(t.k) && t.k !== st.hl?.root)));
+    const list = D.t.filter(t => t.lane === id && match(t) && (!st.only || (st.only.has(t.k) && t.k !== st.hl?.root)) && (!st.top || st.hl || !t.pk));
     return st.hl ? [...list.filter(t => st.hl.keys.has(t.k)), ...list.filter(t => !st.hl.keys.has(t.k))] : list;
   };
 
@@ -49,8 +51,9 @@
   const addonsOf = t => (t.addons || []).filter(a => !(a.same === 'wait' && t.wait)).sort((a, b) => TONE_ORDER.indexOf(a.tone) - TONE_ORDER.indexOf(b.tone));
   const late = t => t.due && (t.q || t.act) ? `<span class="tile-late" title="${esc(t.due)}" aria-label="${esc(t.due)}">${ic('clock', 13)}</span>` : '';
   function signal(t) {
-    if (t.q) return `<a class="btn outline xs tile-answer" href="${OPEN}">Answer</a>`;
-    if (t.act) return `<a class="btn outline xs" href="${OPEN}">${esc(t.act)}</a>`;
+    // O-15 C / O-16 C (28 Nov): no button on a card; the state is one word here and the icon top right
+    if (t.q) return '<span class="tile-sig warn">Question</span>';
+    if (t.act) return '<span class="tile-sig">Result</span>';
     if (t.due) return `<span class="tile-sig warn">${esc(t.due)}</span>`;
     if (t.helper) return `<span class="tile-sig${t.helper.kind === 'stuck' ? ' bad' : ''}">${esc(t.helper.text)}</span>`;
     if (t.replacedBy) { const r = D.t.find(x => x.k === t.replacedBy); return `<button class="tile-sig tile-link" type="button" data-rep="${t.k}" title="Replaced by ${esc(t.replacedBy + ' ' + (r?.title || ''))}">Replaced by: ${esc(r?.title || t.replacedBy)}</button>`; }
@@ -61,6 +64,13 @@
     const parts = partsOf(t);
     if (parts.length && !t.kind) return partsBar(t, parts, st.open[t.k]);
     return '';
+  }
+  // O-16 C: the card's state as an icon in its top right corner, with its word for a screen reader and on hover
+  const STATE = { needs: ['needs', 'Question'], check: ['check', 'Result'], working: ['working', 'Working'], waiting: ['todo', 'Waiting'], todo: ['todo', 'To do'], backlog: ['todo', 'Backlog'], done: ['done', 'Done'], wontdo: ['todo', "Won't do"] };
+  function stateIcon(t) {
+    const [look, word] = t.helper?.kind === 'stuck' ? ['needs', 'Stuck'] : t.q ? STATE.needs : STATE[t.lane] || STATE.todo;
+    const svg = window.UI?.statusIcon ? window.UI.statusIcon(look).outerHTML : '';
+    return `<span class="nowrap" role="img" title="${word}" aria-label="${word}" data-state="${look}">${svg}</span>`;
   }
   function menuItems(t) {
     const same = D.t.filter(x => x.lane === t.lane), i = same.indexOf(t);
@@ -77,10 +87,12 @@
     const tasks = t.kind && parts.length ? partsBar(t, parts, open) : t.tasks[1] ? `<span class="tile-num">${t.tasks[0]}/${t.tasks[1]} tasks</span>` : '';
     const fam = p && !(st.hl && st.hl.root === p.k) ? `<button class="tile-part-of tile-link" type="button" data-scope="${p.k}" data-focus="${t.k}" title="Part of ${esc(p.k + ' ' + p.title)}. Show all its parts">Part of: ${esc(p.title)}</button>` : '';
     return `<article class="ticket-tile${st.hl && st.hl.focus === t.k ? ' tile-mark' : ''}" data-ticket="${t.k}" style="--c:${t.q ? 'var(--needs-you)' : tone(l)}" ${phone() ? '' : 'draggable="true"'}>
-      <h3 class="tile-title">${t.kind ? `<span class="kind-tag" data-kind="${t.kind}">${KIND[t.kind]}</span>` : ''}<a href="${OPEN}" title="${esc(t.k + ' · ' + t.title + ' · changed ' + t.age)}"><span class="key">${t.k}</span>${esc(t.title)}</a></h3>
-      <div class="tile-foot">${tasks}${late(t)}${signal(t)}${fam}<span class="grow"></span>${addon}<details class="menu" data-menu="${t.k}"><summary class="tile-icon move-button" aria-label="Move ${esc(t.k)} to another row">${ic('more')}</summary><div class="menu-pop" role="menu">${menuItems(t)}</div></details></div>${subs}
+      <div class="row"><h3 class="tile-title grow"><span class="truncate">${t.kind ? `<span class="kind-tag" data-kind="${t.kind}">${KIND[t.kind]}</span>` : ''}<a href="${OPEN}" title="${esc(t.k + ' · ' + t.title + ' · changed ' + t.age)}"><span class="key">${t.k}</span>${esc(t.title)}</a></span></h3>${addon}${stateIcon(t)}</div>
+      <div class="tile-foot">${tasks}${late(t)}${signal(t)}${fam}<span class="grow"></span><details class="menu" data-menu="${t.k}"><summary class="tile-icon move-button" aria-label="Move ${esc(t.k)} to another row">${ic('more')}</summary><div class="menu-pop" role="menu">${menuItems(t)}</div></details></div>${subs}
     </article>`;
   }
+
+  root.addEventListener('click', e => { const card = e.target.closest('.ticket-tile'); if (card && !e.target.closest('a,button,summary,details,[role="menu"],[role="dialog"]')) location.href = OPEN; });
 
   /* ---------- rows ---------- */
   const cols = () => Math.max(1, Math.floor(((root.clientWidth - (phone() ? 0 : 156)) + 6) / 266));
@@ -110,6 +122,7 @@
   live.className = 'sr-only'; live.setAttribute('aria-live', 'polite'); root.after(live);
   partOf.innerHTML = '<option value="">Any ticket</option>' + D.t.filter(t => kids(t.k).length).sort((a, b) => (b.kind === 'release') - (a.kind === 'release') || (b.kind === 'epic') - (a.kind === 'epic')).map(t => `<option value="${t.k}">${esc((t.kind ? KIND[t.kind] + ': ' : '') + t.title)}</option>`).join('');
   partOf.addEventListener('change', () => { if (!partOf.value) return clearHl(); showParts(partOf.value); });
+  { const chip = document.querySelector('[data-top]'); if (chip) { chip.setAttribute('aria-checked', String(st.top)); chip.classList.toggle('active', st.top); chip.href = st.top ? 'board.html' : 'board.html?top=1'; } }
   document.getElementById('q').addEventListener('input', e => flip(() => { st.q = e.target.value.trim().toLowerCase(); }));
   const jump = () => phone() ? `<div class="row wrap" role="group" aria-label="Jump to a row">${ORDER.map(id => `<button class="chip outline" type="button" data-jump="${id}">${esc(lane(id).name)} <span class="tile-num">${lane(id).total}</span></button>`).join('')}</div>` : '';
   function banner() {

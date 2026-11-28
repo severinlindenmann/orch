@@ -40,7 +40,7 @@
   <button class="btn ghost sm" type="button" id="clear" hidden>Clear filters</button>
   <label class="filter">Part of <select id="group"><option value="">Any ticket</option><option value="epic">Autumn newsletter</option></select></label>
   <label class="filter">Person <select id="person"><option value="">Everyone</option><option value="Anna">Anna</option><option value="Ben">Ben</option></select></label>
-  <div class="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input type="search" id="q" placeholder="Search tickets" aria-label="Search tickets"><kbd aria-hidden="true">/</kbd></div>
+  <div class="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><a class="chip view-chip" role="switch" aria-checked="false" href="board.html?top=1" data-top title="Show only tickets that are part of no other ticket">Top tickets only</a><input type="search" id="q" placeholder="Search tickets" aria-label="Search tickets"><kbd aria-hidden="true">/</kbd></div>
  </div>
 
  <!-- LOADED: status rows (ORCH-576), drawn by board-rows.js with kit classes -->
@@ -74,4 +74,4 @@ const params=new URLSearchParams(location.search);q.value=params.get('q')||'';pe
 document.querySelector('#skel').innerHTML=Array.from({length:9},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
 document.querySelectorAll('.tc-more').forEach(b=>b.remove());
 filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
-})();</script><script src="../../../../workspace/src/orch_ui/static/icons.js"></script><script src="board-rows-data.js"></script><script src="board-rows.js"></script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>
+})();</script><script src="../../../../workspace/src/orch_ui/static/icons.js"></script><script src="../../../../workspace/src/orch_ui/static/widgets.js"></script><script src="board-rows-data.js"></script><script src="board-rows.js"></script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>
