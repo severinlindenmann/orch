@@ -2399,7 +2399,7 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .swipe-head>.swipe-lead:first-child{margin-top:0}
 .swipe-card>.swipe-foot:not(.empty):last-child{margin-bottom:0;padding-bottom:var(--s5)}
 .review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty){display:none}
-.review-layout:not(.with-ticket)>.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty)+.review-main{grid-column:1/-1}
+.review-layout:not(.with-ticket):has(>.review-rail:not(:has(>:not(.review-side))):has(>.review-side .review-queue:empty))>.review-main{grid-column:1/-1}
 .review-ticket-b{min-width:0;padding:var(--s4)}
 .review-ticket .ticket-page .ticket-layout,.review-ticket .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}
 .review-ticket .ticket-page .ticket-side,.review-ticket .ticket-page [aria-controls^="ticket-rail-"]{display:none}
@@ -3076,11 +3076,10 @@ dialog .actions .actions-note{flex:1;min-width:0}
 .stat-tile.attn-tile{font:inherit;color:inherit;text-align:left;cursor:pointer;align-content:start;transition:border-color var(--dur-fast) var(--ease-out)}
 .stat-tile.attn-tile:hover{border-color:var(--border-strong)}
 .stat-tile.attn-tile:focus-visible{outline:none;box-shadow:var(--focus-ring)}
-.stat-tile.attn-tile.is-empty{cursor:default}.stat-tile.attn-tile.is-empty:hover{border-color:var(--border)}.stat-tile.attn-tile.is-empty .stat-value{color:var(--text-muted)}
 .attn-tile-line{display:flex;align-items:center;gap:6px;font-size:var(--fs-meta);line-height:18px;color:var(--text-muted)}.attn-tile-line.attn-due{color:var(--warning)}
 .attn-round{display:flex;align-items:center;gap:var(--s2)}.attn-round .attn-round-h{margin:0;font-size:16px;line-height:24px}
 .review-attn .attn-keys{margin:0}
-@media(max-width:720px){.review-attn .attn-keys{display:none}.stat-row.attn-tiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s2)}.attn-tiles .attn-tile{padding:12px;gap:2px}.attn-tiles .attn-tile .stat-value{font-size:24px;line-height:30px}.attn-tiles .attn-tile .stat-delta,.attn-tiles .attn-tile .attn-tile-line{display:none}.attn-due-line{margin:var(--s2) 0 0}}
+@media(max-width:720px){.review-attn .attn-keys{display:none}.stat-row.attn-tiles{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--s2)}.attn-tiles .attn-tile{padding:12px;gap:2px}.attn-tiles .attn-tile .stat-value{font-size:24px;line-height:30px}.attn-tiles .attn-tile .stat-delta,.attn-tiles .attn-tile .attn-tile-line{display:none}.attn-due-line{margin:var(--s2) 0 0}}
 .swipe-done.attn-end{position:relative;inset:auto;justify-items:stretch;text-align:left;place-content:start stretch;max-width:560px;margin:0 auto}
 .attn-decided{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid var(--border)}
 .attn-decided-row{display:flex;gap:var(--s2);align-items:baseline;padding:var(--s2) 0;border-bottom:1px solid var(--border)}
@@ -3137,13 +3136,30 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
 .doc details.doc-steps>summary{min-height:32px;display:flex;align-items:center}
 .doc details.doc-steps ol{margin:var(--s1) 0 0}
 @media (max-width:720px){.swipe-commenting{order:-1;flex-wrap:wrap;align-items:flex-start;margin:0 var(--s4) var(--s3);padding:var(--s2) var(--s3)}.swipe-commenting>.grow{flex:1 1 calc(100% - 32px)}.swipe-commenting>.btn{margin-left:auto}.swipe-commenting>.btn+.btn{margin-left:0}}
-/* ORCH-2316: on a phone the answers are pinned over the card's lower part, so the card's links (Open ticket, Open,
-   See the changes) sit right under its title, where the pinned bar never covers them */
+/* W-042 A (owner, 28 Nov; takes the place of the ORCH-2316 phone order, which put the card's foot under or above its
+   title): a phone card reads as on the desk: the question, the evidence, the explanation with the card's links, then the
+   answers. The answer bar is pinned but stands in the page after the card, so the foot scrolls clear of it. */
 @media (max-width:720px){
  .swipe-card>.swipe-head{order:-2}
- .swipe-card>.swipe-foot:not(.empty){order:-1;margin-top:0;padding:0 var(--s4) var(--s3);min-height:0}
  .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
 }
-/* ORCH-2185 / ORCH-2316: narrow phones need the links above the title: Linux font wrapping at 390 px
-   leaves only 21 px before the pinned answer bar. Keep the same safe placement through 480 px. */
-@media (max-width:480px){.swipe-card>.swipe-foot:not(.empty){order:-3;padding:var(--s4) var(--s4) 0}.swipe-card:has(>.swipe-foot:not(.empty))>.swipe-head{padding-top:var(--s3)}}
+/* Review, the owner's walk of 28 Nov (W-036, W-038, W-042, O-04, FX-06):
+   W-036: the page has the card before the list (Tab reaches the decision first); on a wide page the list still stands
+   on the left ([data-narrow], set by the page, is one column with the card first).
+   W-038: before the first answer the progress row holds nothing on a desk (the list beside the card is the way to
+   every card), so it takes no room.
+   O-04: the list beside the card ends above the Live bar or panel at the bottom and scrolls in itself.
+   FX-06: one right edge: the tiles, the progress row, the card, the answer bar, the list under the card and the
+   Answered blocks share the card's reading column (two cards side by side keep the full width).
+   W-042: on a phone the answer bar stands above the tab bar and the Live bar. */
+@media (min-width:721px){
+ .review-layout:not([data-narrow])>.review-rail{order:-1}
+ .review-layout .swipe-top.is-fresh{display:none}
+ .review-side{max-height:calc(100dvh - var(--topbar-height) - var(--s6) - var(--live-pad,0px))}
+}
+.review-main:not(:has(.swipe.pairing))>*{max-width:var(--review-card-w)}
+@media (max-width:720px){
+ body[data-live-layer] .swipe-actions{bottom:var(--live-pad,0px)}
+ body[data-live-layer]:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + var(--live-pad,0px) + env(safe-area-inset-bottom))}
+ :where(html:not([data-window=wide])) .review-queue-row{min-height:var(--touch)}
+}
