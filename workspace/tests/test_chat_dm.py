@@ -856,7 +856,7 @@ def _inbound(root, n, text="hello", peer=WS):
 
 def test_unread_counts_only_their_messages_after_the_read_mark(dm, monkeypatch):
     """O-18 (owner, 28 Nov): a workspace conversation's number is what the OTHER workspace wrote since the
-    person last opened it; our own messages never count, and opening it (or writing) starts again from there."""
+    person last opened it; our own messages never count; opening it (or writing) starts again from there."""
     root, _ = dm
     monkeypatch.setattr(relay, "send_text", lambda *a, **k: {"id": "m_relay00000000000", "sent": True})
     assert chat.contacts(root)[0]["unread"] == 0
