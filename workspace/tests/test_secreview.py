@@ -553,6 +553,90 @@ def test_a_fix_merged_inside_a_queue_group_is_reviewed_as_its_member(tmp_path):
     assert "security-review:#9" not in out["did"]
 
 
+# ORCH-2399 (release 52): #3328's finding came in through queue group #3400 and was fixed by #3421, which
+# touches no guarded file and came in through its own group. The keeper could not count that fix for the
+# group, so the hold on #3400 never ended by itself and the release went out with --skip-hold.
+
+
+def _queued(n, files):
+    return {**change(n, files), "title": f"Merge pull request #{n} from x/orch-queue/a{n}"}
+
+
+G_FOUND = _queued(8, ["relay/src/subs.rs"])  # the group that brought in #2, the pull request with the finding
+G_FIX = _queued(9, ["workspace/src/orch/cli.py"])  # the group that brought in #3, its fix (no guarded file)
+GROUPS = {"8": [(2, "h2", ["relay/src/subs.rs"])], "9": [(3, "h3", [])]}
+FIX_OK = {**LINKED, "3": {"sha": "h3", "verdict": "ok", "line": "fine"}}
+
+
+def _held(out):
+    return [x for x in out["lines"] if x.startswith("waits for every security OK")]
+
+
+def test_a_group_waits_for_the_linked_fix_of_its_member_instead_of_a_review_of_the_group(tmp_path):
+    out = go(
+        tmp_path,
+        changes=[SAFE, G_FOUND, G_FIX],
+        state=entry(card_sha="h2", qid="q7"),
+        security_verdicts=LINKED,
+        groups=GROUPS,
+    )
+    assert "security-review:#3" in out["did"] and "security-review:#8" not in out["did"]
+    assert "#8: waits for #3, the fix of its member #2, to be merged with a security OK" in out["lines"]
+    assert "#8 (waits for the security review of a group member)" in _held(out)[0]
+
+
+def test_a_fix_without_a_guarded_file_ends_the_hold_on_the_group_of_the_finding(tmp_path):
+    changes = [SAFE, G_FOUND, G_FIX]
+    first = go(
+        tmp_path,
+        changes=changes,
+        state=entry(card_sha="h2", qid="q7"),
+        security_verdicts=LINKED,
+        groups=GROUPS,
+    )
+    out = go(tmp_path, changes=changes, state=first["state"], security_verdicts=FIX_OK, groups=GROUPS)
+    assert not _held(out), out["lines"]
+    assert "#8: queue group, security OK kept from its members (#2)" in out["lines"]
+    assert out["state"]["security"]["prs"]["8"]["kept"] == "group"
+    assert any(d.startswith("dispatch:") for d in out["did"])  # the normal cut path starts
+    kept = {**FIX_OK, "8": {"sha": "h8", "verdict": "ok", "line": "kept", "kept_from": "group #2"}}
+    again = go(tmp_path, changes=changes, state=out["state"], security_verdicts=kept, groups=GROUPS)
+    # the kept OK stands on later passes
+    assert not _held(again) and "security-withdraw:#8" not in again["did"]
+
+
+def test_a_group_review_started_before_the_fix_was_linked_no_longer_holds(tmp_path):
+    st = entry(card_sha="h2", qid="q7")
+    st["security"]["prs"]["8"] = {"sha": "h8", "tid": "t_sec8", "key": "SEC-8"}
+    st["security"]["prs"]["3"] = {"sha": "h3", "tid": "t_sec3", "key": "SEC-3"}
+    out = go(tmp_path, changes=[SAFE, G_FOUND, G_FIX], state=st, security_verdicts=FIX_OK, groups=GROUPS,
+             open_reviews=["t_sec8"])  # fmt: skip
+    assert not _held(out), out["lines"]
+    assert "#8: queue group, its members' findings are fixed by #3: nothing holds it" in out["lines"]
+
+
+def test_a_group_still_holds_while_the_fix_has_no_ok_or_the_group_has_its_own_finding(tmp_path):
+    st = entry(card_sha="h2", qid="q7")
+    st["security"]["prs"]["8"] = {"sha": "h8", "tid": "t_sec8", "key": "SEC-8"}
+    st["security"]["prs"]["3"] = {"sha": "h3", "tid": "t_sec3", "key": "SEC-3"}
+    changes = [SAFE, G_FOUND, G_FIX]
+    no_ok = go(tmp_path, changes=changes, state=st, security_verdicts=LINKED, groups=GROUPS,
+               open_reviews=["t_sec8", "t_sec3"])  # fmt: skip
+    assert "#8 (security review SEC-8 running)" in _held(no_ok)[0]
+    own = {**FIX_OK, "8": {"sha": "h8", "verdict": "problems", "line": "another finding"}}
+    st["security"]["prs"]["8"].update(card_sha="h8", qid="q8")
+    held = go(tmp_path, changes=changes, state=st, security_verdicts=own, groups=GROUPS)
+    assert "#8 (security review found problems)" in _held(held)[0]
+
+
+def test_a_group_member_without_any_ok_or_fix_is_still_reviewed_with_the_group(tmp_path):
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "race"}}  # no fix linked
+    out = go(tmp_path, changes=[SAFE, G_FOUND], state=entry(card_sha="h2", qid="q7"), security_verdicts=v,
+             groups=GROUPS)  # fmt: skip
+    assert "#8: queue group, member #2 has no security OK: the group is reviewed" in out["lines"]
+    assert "security-review:#8" in out["did"]
+
+
 def test_an_unlinked_change_that_touches_no_matched_file_still_gets_no_review(tmp_path):
     out = go(tmp_path, changes=[SAFE, RELAY, SAFE_FIX], state=entry(), security_verdicts={})
     assert "security-review:#3" not in out["did"]

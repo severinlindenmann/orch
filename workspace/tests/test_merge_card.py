@@ -36,6 +36,7 @@ class FakeGh:
         self.review_err = ""  # #1764: GitHub refuses the APPROVE review with this text
         self.lost = 0  # this many next merges land on GitHub but their answer gets lost on the way back
         self.author = "helper-bot"  # who wrote the pull request (ORCH-1118)
+        self.quarantine_runs = None  # run ids of the quarantine workflow on the head (None: no such workflow)
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
@@ -66,6 +67,15 @@ class FakeGh:
             if ref == self.head and name in self.whole:
                 return subprocess.CompletedProcess(argv, 0, self.whole[name], "")
             return subprocess.CompletedProcess(argv, 1, "", "Not Found")
+        if args[0] == "api" and args[1].startswith("repos/acme/app/actions/workflows/"):
+            if self.quarantine_runs is None or f"/quarantine.yml/runs?head_sha={self.head}&" not in args[1]:
+                return subprocess.CompletedProcess(argv, 1, "", "gh: Not Found (HTTP 404)")
+            return subprocess.CompletedProcess(argv, 0, "".join(f"{i}\n" for i in self.quarantine_runs), "")
+        if args[:2] == ["pr", "view"] and args[3:] == ["--json", ghmerge.JSON_CHECKS]:
+            facts = {"state": self.state, "isDraft": False, "headRefOid": self.head}
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({**facts, "statusCheckRollup": self.rollup}), ""
+            )
         if args[:2] == ["pr", "view"] and args[3:] == ["--json", "statusCheckRollup"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": self.rollup}), "")
         if args[:2] == ["pr", "view"]:
