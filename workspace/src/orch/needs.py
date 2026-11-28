@@ -10,6 +10,8 @@ next call; saved rows come back with stale = true when the pull failed or the sa
 STALE_AFTER. An add-on that was late is not waited for the next time (ORCH-2289): its saved answer is shown
 at once and the background refresh alone asks it, until one refresh gets its answer quickly again. So
 `orch needs` takes about as long as its core part, however many add-ons are on.
+A parked ticket (parked.py: in Backlog, or waiting on a time, a ticket or something outside) gives no row at
+all, from the core or an add-on (ORCH-2431); `orch needs --parked` lists those.
 The core names no add-on.
 """
 
@@ -100,9 +102,9 @@ def _may_need(r: dict, live: set[str]) -> bool:
     )
 
 
-def _candidates(root: Path) -> list[dict]:
+def _candidates(root: Path, skip: set[str] | frozenset = frozenset()) -> list[dict]:
     """The tickets core_rows looks at, read in full, in list_all order: only those the index says may
-    need a person (ORCH-521: with 10,000 tickets reading every file took seconds)."""
+    need a person (ORCH-521: with 10,000 tickets reading every file took seconds). skip: the parked ones."""
     try:
         live = {
             e.name[:-5] for e in os.scandir(root / ".orch" / "run" / "tickets") if e.name.endswith(".json")
@@ -111,7 +113,7 @@ def _candidates(root: Path) -> list[dict]:
         live = set()
     out = []
     for r in ticketindex.rows(root):
-        if not _may_need(r, live):
+        if r["id"] in skip or not _may_need(r, live):
             continue
         try:
             t = tickets.load(root, r["id"])
@@ -125,8 +127,11 @@ def _candidates(root: Path) -> list[dict]:
 def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
-    seen = set()
-    shown = history.shown_json(root, _candidates(root))  # every person field as proven here
+    from orch import parked
+
+    resting = parked.ids(root, now)  # ORCH-2431: no row for these, whatever they hold
+    seen = set(resting)
+    shown = history.shown_json(root, _candidates(root, resting))  # every person field as proven here
     for t in shown:
         seen.add(t["id"])
         back = (t.get("work") or {}).get("bring_back") or {}
@@ -186,7 +191,11 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
             rows.append(_bring_back_row(item["ticket"], item["ticket"], item, now))
     from orch import stuck
 
-    rows += stuck.rows(root, shown)  # a pull request left open, a helper idle at its prompt
+    halted = stuck.rows(root, shown)  # a pull request left open, a helper idle at its prompt
+    # ORCH-2431, one row per ticket at most: a wait past its time gives way to the ticket's question or to
+    # its row of work that stopped (ORCH-1205 showed "check failed" and "wake time passed" side by side)
+    has_row = {r["ticket"] for r in [*rows, *halted] if r["kind"] != "overdue-wait"}
+    rows = [r for r in rows if r["kind"] != "overdue-wait" or r["ticket"] not in has_row] + halted
     from orch import health
 
     health.soon(root)  # tool logins: a stale result is checked again in the background (ORCH-44)
@@ -600,11 +609,16 @@ def needs(root: Path) -> list[dict]:
                 p.stop()
         raise
     seen = {r["id"] for r in core}
+    from orch import parked
+
+    resting = parked.ids(root) if pulls else set()
     answered = {(r["ticket"], r["answer"]["question"]) for r in core if "answer" in r}
     rows = list(core)
     for name, p in pulls.items():
         budget = FAST_BUDGET if _cache_path(root, name).is_file() else PULL_TIMEOUT + 1
         for r in _saved(root, name, p) if isinstance(p, list) else _settle(root, name, p, start + budget):
+            if r["ticket"] is not None and r["ticket"] in resting:
+                continue  # ORCH-2431: an add-on's row on a parked ticket waits with it
             ans = r.get("answer")
             same_q = isinstance(ans, dict) and (r["ticket"], ans.get("question")) in answered
             if r["id"] in seen or same_q:

@@ -5375,6 +5375,19 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
             raise Refused("--clear cannot be combined with --until or --on.")
 
         def op(ticket):
+            from orch import parked
+
+            w, still = ticket.get("waiting_on"), _open_questions(ticket)
+            if (
+                still
+                and ticket["status"] == "waiting"
+                and isinstance(w, dict)
+                and w.get("kind") in parked.KINDS
+            ):
+                # ORCH-2431: brought back from parking with a question still open: it waits on that again
+                ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
+                add_history(ticket, by, "Wait cleared")
+                return
             ticket["waiting_on"] = None
             if ticket["status"] == "waiting":
                 ticket["status"] = "active"
