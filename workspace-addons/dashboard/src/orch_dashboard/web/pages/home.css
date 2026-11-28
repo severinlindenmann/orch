@@ -60,12 +60,16 @@ body[data-live-narrow] .home-columns{grid-template-columns:minmax(0,1fr)}
 .home-section-head h2{font-size:14px;line-height:20px}
 /* Owner feedback 14 Nov: the question is body text, not a heading. A long web address in it wraps (ORCH-1713). */
 .home-need .question-title{font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere}
-/* What changed: one row per finished ticket, the helper's note under its title. */
-.what-changed{margin-top:24px}
-.what-changed .home-note{display:flex;align-items:flex-start;gap:16px;padding:12px 16px;color:var(--text);text-decoration:none}
-.what-changed .home-note+.home-note{border-top:1px solid var(--border)}
-.what-changed .home-note:hover{background:var(--surface-2)}
-.what-changed .home-note p{margin:2px 0 0}
-.what-changed .home-note .meta{flex:none;white-space:nowrap}
 /* ORCH-2140: the title links of the In progress / Not started rows are the row's tap target on a phone (44 px) */
 @media(max-width:720px){.home-card h3 a{display:inline-flex;align-items:center;min-height:44px}}
+/* O-01 D (28 Nov): the numbers are one quiet row; a finished ticket is one title and one short line of its result. */
+.home-numbers{gap:4px 24px;color:var(--text-muted)}
+.home-number{display:inline-flex;align-items:baseline;gap:4px;min-height:24px;color:inherit;text-decoration:none}
+.home-number strong{color:var(--text);font-variant-numeric:tabular-nums}
+a.home-number:hover{color:var(--text)}
+a.home-number:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius)}
+.home-finished{align-items:center;gap:12px}
+.home-finished>.grow{min-width:0}
+.home-finished h3,.home-finished p{margin:0}
+.home-finished h3 a{text-decoration:none}
+@media(max-width:720px){.home-number{min-height:44px}}
