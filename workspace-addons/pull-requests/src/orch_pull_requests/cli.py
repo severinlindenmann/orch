@@ -90,7 +90,19 @@ def start_runner(root: Path) -> None:
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "queue", "run", "--root", str(root)]
     with open(d / "runner.log", "a", encoding="utf-8") as log:
         # background_popen_kwargs sets stdin and the own session (or the hidden Windows console): never pass them here too
-        subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
+        try:
+            # ORCH-2409: the core's one door for a long-running start (never from inside background work)
+            procs.service_start(
+                root,
+                argv,
+                start=subprocess.Popen,
+                cwd=root,
+                stdout=log,
+                stderr=log,
+                **procs.background_popen_kwargs(),
+            )
+        except procs.NotStarted as e:  # inside orch's own background work: the next queue command starts it
+            log.write(f"The runner was not started. {e}\n")
 
 
 def _github():

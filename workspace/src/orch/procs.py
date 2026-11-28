@@ -100,6 +100,7 @@ BG_MAX_MOST = 64
 BG_LOAD_DEFAULT = 1.5  # 1-minute load per core over which background work waits ([workspace] background_load)
 BG_ASK_TIMES = 8  # add-ons asked at once (`needs --json` children, their refreshes): times background_max
 BG_OVER = 16  # slots of their own for a start a person asked for (never skipped, still counted)
+BG_SERVICES = 32  # long-running processes of the add-ons at once per workspace (service_start)
 BG_OLD = 600  # a slot older than this is checked for a pid that now belongs to another program
 _BG_LOCK_WAIT = 1.0  # the longest a start waits for the slot lock; then it is skipped
 
@@ -227,9 +228,15 @@ def _slot_held(slot: Path) -> bool:
 
 def bg_count(root: Path, kind: str | None = None) -> int:
     """How many background tasks of this workspace run right now (slots whose process is alive): orch's own
-    and the ones a person asked for. `kind="ask"`: the add-ons being asked for their needs right now."""
+    and the ones a person asked for. `kind="ask"`: the add-ons being asked for their needs right now;
+    `kind="service"`: the add-ons' long-running processes (service_start), never part of the task count."""
     try:
-        slots = [s for s in _bg_dir(root).glob("*.slot") if (kind == "ask") == s.name.startswith("ask-")]
+        own = {"ask": "ask-", "service": "service-"}
+        slots = [
+            s
+            for s in _bg_dir(root).glob("*.slot")
+            if (s.name.startswith(own[kind]) if kind in own else not s.name.startswith(tuple(own.values())))
+        ]
         return sum(1 for s in slots if _slot_held(s))
     except OSError:
         return 0
@@ -239,10 +246,11 @@ def bg_claim(root: Path, kind: str = "task") -> Path | None:
     """Take one free slot for a process about to start, or None when that pool is used up. The slot names
     this process until bg_bind hands it to the child. Pools: "task" (orch's own background work, at most
     background_max), "ask" (an add-on asked for its needs, BG_ASK_TIMES as many), "person" (a start a
-    person asked for: its own slots, so it is never skipped and never takes a task's place). Never raises."""
+    person asked for: its own slots, so it is never skipped and never takes a task's place), "service" (an
+    add-on's long-running process, BG_SERVICES at once). Never raises."""
     try:
         most = bg_limits(root)[0]
-        size = {"task": most, "ask": most * BG_ASK_TIMES, "person": BG_OVER}[kind]
+        size = {"task": most, "ask": most * BG_ASK_TIMES, "person": BG_OVER, "service": BG_SERVICES}[kind]
         name = "" if kind == "task" else f"{kind}-"
         with _bg_lock(root) as got:
             if not got:
@@ -320,6 +328,41 @@ def background_start(
         # would look alive and hold its slot for as long as the starter runs; the slot is free at once
         threading.Thread(target=_bg_reap, args=(p, slot), daemon=True, name="orch-bg-reap").start()
     return True
+
+
+class NotStarted(RuntimeError):
+    """service_start did not start the process; the message says why and what to do, in one sentence."""
+
+
+def service_start(root: Path, argv: list[str], *, start=None, **popen) -> subprocess.Popen:
+    """THE way an add-on starts a long-running process of its own (its service loop, a queue's runner): the
+    started process, for the caller to watch. Such a process lives as long as the workspace is on, so it is no
+    task of the budget and is never held back by the load (a person's `orch start` asked for it, and nothing
+    would start it later). It passes the same door all the same (ORCH-2409):
+      - never from inside background work (ORCH_BG_DEPTH set): a refresh, a look or a check starts no service,
+        so nothing orch started by itself can start more of orch;
+      - one slot of the "service" pool while it runs, BG_SERVICES at once per workspace: a start that came
+        again and again (each add-on also keeps its own "one per workspace" record) ends there.
+    The process itself is a root, not background work: it carries no depth marker, so the work it starts later
+    is counted and limited like a command's. `start`: the caller's own Popen (a module's test seam).
+    NotStarted when refused; raises what Popen raises."""
+    if bg_depth() >= 1:
+        raise NotStarted("Not started from inside orch's own background work. Start it yourself: orch start")
+    slot = bg_claim(Path(root), "service")
+    if slot is None:
+        raise NotStarted(
+            f"Not started: {BG_SERVICES} long-running processes of this workspace run already. "
+            "Stop what is not needed (orch stop), then: orch start"
+        )
+    try:
+        p = (start or subprocess.Popen)(argv, **popen)  # noqa: S603
+    except BaseException:
+        bg_release(slot)
+        raise
+    bg_bind(slot, getattr(p, "pid", None))
+    if callable(getattr(p, "wait", None)):  # as background_start: a long-lived starter frees the slot at once
+        threading.Thread(target=_bg_reap, args=(p, slot), daemon=True, name="orch-bg-reap").start()
+    return p
 
 
 def _bg_reap(p: subprocess.Popen, slot: Path) -> None:

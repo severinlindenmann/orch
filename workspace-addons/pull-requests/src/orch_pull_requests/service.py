@@ -59,8 +59,18 @@ def start(root: Path) -> int:
     d.mkdir(parents=True, exist_ok=True)
     # -I -P: the workspace folder is never on the import path (a planted module there is not run)
     argv = [sys.executable, "-I", "-P", "-m", "orch_pull_requests", "watch", "--root", str(root)]
+    from orch.procs import service_start  # ORCH-2409: the one door for a long-running start
+
     with open(d / "watch.log", "a", encoding="utf-8") as log:
-        proc = subprocess.Popen(argv, cwd=root, stdout=log, stderr=log, **procs.background_popen_kwargs())
+        proc = service_start(
+            root,
+            argv,
+            start=subprocess.Popen,
+            cwd=root,
+            stdout=log,
+            stderr=log,
+            **procs.background_popen_kwargs(),
+        )
     end = time.monotonic() + START_WAIT
     while time.monotonic() < end:
         pid = running_pid(root)
