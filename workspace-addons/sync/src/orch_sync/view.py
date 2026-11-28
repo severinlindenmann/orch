@@ -40,6 +40,15 @@ def size(n):
     return f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{max(1, round(n / 1e3))} KB" if n else "0 KB"
 
 
+def place(s):
+    """Where the copy goes, in a few plain words: the host of the person's own storage, or this computer only."""
+    remote = s.get("remote") if s.get("mode") == "remote" else None
+    if not remote:
+        return "this computer only"
+    m = re.match(r"^(?:[a-z+]+://)?(?:[^@/\s]+@)?([^:/\s]+)", str(remote))
+    return f"your storage at {m.group(1)}" if m else "your storage"
+
+
 def build(root, settings, now=None):
     """The Sync page: the saved setting as rows, the three places to keep a copy as one choice, then what was kept
     here. When the status can't be read the saved setting still shows, with one plain line and Try again."""
@@ -65,6 +74,10 @@ def build(root, settings, now=None):
     text, tone = STATE.get(s["shown"], STATE["never"])
     rows = []  # the choice below says the current setting; no extra row (owner sweep 14 Nov)
     if s["mode"] != "off" and not unreadable:
+        # W-058d (owner 28 Nov): one line first: where the backup goes and when it last worked
+        rows.append(
+            {"label": "Backed up to", "value": clean(f"{place(s)}, last time {local_time(s['last_ok'])}", 120)}
+        )
         rows.append({"label": "Status", "value": clean(text, 120), "tone": tone})
         rows.append({"label": "Last synced", "value": local_time(s["last_ok"])})
         if s.get("next_run"):
@@ -99,7 +112,8 @@ def build(root, settings, now=None):
                 {
                     "label": "Another computer or your own storage",
                     "selected": s["mode"] == "remote",
-                    "link": "app:settings",  # the address is chosen and signed in Settings > General
+                    # the address is chosen on the add-on's own Settings page (W-058d: one place to edit)
+                    "link": "app:settings/addons/sync",
                 },
             ],
         },

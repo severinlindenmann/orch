@@ -1,4 +1,5 @@
 import json
+import re
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -366,7 +367,8 @@ def test_view_matches_the_addon_view_contract(root, capsys):
         ("On this computer only", False),
         ("Another computer or your own storage", False),
     ]
-    assert radio["options"][2]["link"] == "app:settings" and "action" not in radio["options"][2]
+    # W-058d (owner 28 Nov): the address is chosen in one place, the add-on's own Settings page
+    assert radio["options"][2]["link"] == "app:settings/addons/sync" and "action" not in radio["options"][2]
     assert "header" not in off
     assert run(root, "set", "--mode", "local") == 0
     (root / ".orch/run/sync/state.json").write_text(
@@ -382,6 +384,10 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     view = json.loads(capsys.readouterr().out)
     assert not list(check.iter_errors(view))
     assert next(b for b in view["blocks"] if b["type"] == "radio")["options"][1]["selected"] is True
+    # W-058d: the page's first line says where the backup goes and when it last worked
+    first = next(b for b in view["blocks"] if b["type"] == "settings")["rows"][0]
+    assert first["label"] == "Backed up to"
+    assert re.fullmatch(r"this computer only, last time 13 Nov, \d\d:00", first["value"]), first
     rows = next(b for b in view["blocks"] if b["type"] == "list")
     assert rows["title"].endswith("· 1")
     assert "t_abc123" in rows["items"][0]["title"]
@@ -434,3 +440,17 @@ def test_status_line_shows_local_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_view_place_names_the_storage_host_never_the_whole_address():
+    """W-058d: 'Backed up to <place>': the host of the person's own storage in plain words, or this computer only."""
+    from orch_sync import view
+
+    for remote, want in (
+        ("https://github.com/mia/orch-copy", "your storage at github.com"),
+        ("git@example.org:team/copy.git", "your storage at example.org"),
+        ("ssh://git@files.example.org:2222/mia/copy", "your storage at files.example.org"),
+    ):
+        assert view.place({"mode": "remote", "remote": remote}) == want
+    assert view.place({"mode": "remote", "remote": None}) == "this computer only"
+    assert view.place({"mode": "local", "remote": "https://github.com/x/y"}) == "this computer only"
