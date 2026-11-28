@@ -155,6 +155,19 @@ test('ORCH-1108: a stuck card has only its own buttons (Nudge, Start fresh) and 
   assert.equal(decided.length, 1, 'no Looks good by key either');
 });
 
+test('ORCH-2431: with notNow a card of a ticket has "Not now" in its foot; the page gets the card', () => {
+  const asked = [];
+  const cards = [check('a', {ticket:'ORCH-8', ticketId:'t_abc124'}), check('b', {ticket:'ORCH-9', ticketId:'t_abc125'})];
+  const {host} = deck(cards, {notNow:it => it.id === 'a' ? item => asked.push(item.id) : null});
+  const now = host.querySelectorAll('.swipe-not-now').filter(b => !b.closest('.swipe-card').className.includes('under'));
+  assert.equal(now.length, 1, 'one on the card on screen');
+  assert.equal(now[0].textContent, 'Not now');
+  (now[0].listeners.click || []).forEach(f => f({preventDefault() {}, stopPropagation() {}}));
+  assert.deepEqual(asked, ['a']);
+  assert.equal(deck(cards).host.querySelectorAll('.swipe-not-now').length, 0, 'no notNow: no button');
+  assert.equal(deck(cards, {notNow:() => null}).host.querySelectorAll('.swipe-not-now').length, 0, 'the page says no: no button');
+});
+
 test('ORCH-1804: with ticketLink every card has "Open ticket" (its ticket beside the deck, same tab) in place of the plain Open', () => {
   const stuck = {id:'s', kind:'stuck', kindLabel:'Stuck', title:'The checks failed.', ticket:'ORCH-7', ticketId:'t_abc123', href:'#ticket/t_abc123', preview:{type:'doc'}};
   const {host} = deck([check('a', {ticket:'ORCH-8', ticketId:'t_abc124'}), stuck], {ticketLink:it => '#review?ticket=' + it.ticketId});

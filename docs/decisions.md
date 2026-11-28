@@ -113,3 +113,7 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   error; a later command starts it. A start a person asked for is counted, never skipped. `orch doctor` names both.
   The add-ons a command asks for their needs, and the refresh of a late one, are bounded by a pool of their own
   (eight times `background_max`) and not by the load, so `orch needs` never waits behind background work.
+- **28 Nov 2026 (owner, ORCH-2431):** a parked ticket (in Backlog, or waiting on a time, a ticket or something
+  outside) gives no row in `orch needs`, on Home or Review and is not in the Needs you number; its questions are kept
+  and come back when the wait ends, a person brings it back or it moves to To do. One rule (`orch/parked.py`) for
+  every surface; `orch needs --parked` and Home list what is parked. One row per ticket at most.

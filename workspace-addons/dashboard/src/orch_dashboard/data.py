@@ -1973,6 +1973,17 @@ def read_ticket(root: Path, orch_bin: str | None, tid: str, live: dict | None = 
     return t
 
 
+def load_parked(root: Path, orch_bin: str | None) -> list[dict]:
+    """ORCH-2431: what is parked (`orch needs --parked --json`): the tickets that ask nothing until they come
+    back, with the reason. Empty with an older core."""
+    got = run_orch(orch_bin, ["needs", "--parked", "--json"], root) if orch_bin else None
+    return (
+        [r for r in got if isinstance(r, dict) and isinstance(r.get("ticket"), str)]
+        if isinstance(got, list)
+        else []
+    )
+
+
 def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dict | None:
     """A click's answer (ORCH-102): the last full state with the clicked ticket read again, its run and the
     review cards fresh; everything else stays as it was until the background build replaces it. Before, every
@@ -2031,15 +2042,23 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             and n["id"][len(mine) :] not in open_qs
         )
     ]
-    if orch_bin and any(
-        q not in (before.get("questions") or [])
-        for q in t.get("questions") or []
-        if isinstance(q, dict) and q.get("answer") is None
+    # ORCH-2431: parked or brought back by this click (its status or its wait changed): its rows leave or
+    # return at once, and the parked list follows
+    moved = (before.get("status"), before.get("waiting_on")) != (t.get("status"), t.get("waiting_on"))
+    if orch_bin and (
+        moved
+        or any(
+            q not in (before.get("questions") or [])
+            for q in t.get("questions") or []
+            if isinstance(q, dict) and q.get("answer") is None
+        )
     ):
         # A new or edited question must also reach Home's needs list, not just the open ticket.
         needs = run_orch(orch_bin, ["needs", "--json"], root)
         if isinstance(needs, list):
             out["needs"] = needs
+    if orch_bin and moved:
+        out["parked"] = load_parked(root, orch_bin)
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]
@@ -2088,6 +2107,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
         f_tickets = pool.submit(load_live_tickets if with_settings else load_tickets, root, orch_bin)
         f_raw = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
         f_needs = pool.submit(run_orch, orch_bin, ["needs", "--json"], root) if with_addons else None
+        f_parked = pool.submit(load_parked, root, orch_bin) if with_settings else None
         # the cards and decisions are for the live page only (a snapshot is shared and carries none)
         f_review = pool.submit(load_review, root, orch_bin) if with_settings else None
         f_general = pool.submit(load_general, root) if with_addons else None
@@ -2148,6 +2168,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
         # Chats page (team chat step 1): tickets with chat lines or an open question, newest first, unread counts
         "ticket_chats": ticket_chats,
         "needs": needs if isinstance(needs, list) else [],
+        "parked": f_parked.result() if f_parked else [],  # ORCH-2431: live page only
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,

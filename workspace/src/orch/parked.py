@@ -22,6 +22,7 @@ from pathlib import Path
 KINDS = ("time", "ticket", "external")  # the waits that park a ticket
 ENDED = ("review", "done", "dropped")  # the other ticket is finished: the wait on it ended (as tend wakes it)
 BACKLOG = "backlog"
+NOT_NOW = "Not now"  # the ref a page writes when the person puts a question off (no reason of their own)
 
 
 def _now() -> str:
@@ -72,6 +73,8 @@ def reason(p: dict) -> str:
     if p["kind"] == BACKLOG:
         return "In Backlog"
     ref = p.get("ref")
+    if ref == NOT_NOW:  # the question card's "Not now": the reason is the choice itself
+        ref = None
     if p["kind"] == "time":
         from orch.net import when
 

@@ -40,3 +40,37 @@ def test_an_answered_question_leaves_the_needs_list_of_the_click_answer(ws):
         "sync:note",
     ]
     assert state["needs"][0]["id"] == f"core:q:{tid}:q1", "the cached state itself is not changed"
+
+
+def test_parking_a_ticket_reads_needs_and_the_parked_list_again(ws, monkeypatch):
+    """ORCH-2431: "Not now" changes the ticket's wait; its question leaves Home at once and the parked list
+    names it (before, the cached needs list kept the row until the background build)."""
+    tid = "t_order0002"
+    before = _ticket(tid, "Try it on my notebook", "waiting", checklist=[], ext={},
+                     questions=[_q("q1", "Did it work?")], waiting_on={"kind": "question", "ref": "q1"})  # fmt: skip
+    after = {**before, "waiting_on": {"kind": "external", "ref": "Not now"}}
+    parked = [{"ticket": tid, "key": "DM-2", "kind": "external", "reason": "Until you bring it back"}]
+    asked = []
+
+    def run_orch(orch_bin, args, root, timeout=5.0):
+        asked.append(list(args))
+        if args[:2] == ["ticket", "show"]:
+            return after
+        if args == ["needs", "--json"]:
+            return []
+        if args == ["needs", "--parked", "--json"]:
+            return parked
+        return None
+
+    monkeypatch.setattr(data, "run_orch", run_orch)
+    state = {"tickets": [before], "needs": [_row(tid, "q1")], "runs": {}, "parked": []}
+    out = data.patch_ticket(ws, "orch", state, tid)
+    assert out is not None and out["needs"] == [] and out["parked"] == parked
+    assert ["needs", "--parked", "--json"] in asked
+    # a click that moves nothing asks neither again
+    asked.clear()
+    same = data.patch_ticket(ws, "orch", {**state, "tickets": [after], "parked": parked}, tid)
+    assert same["parked"] == parked and ["needs", "--parked", "--json"] not in asked
+    # an older core without the list: empty, never an error
+    monkeypatch.setattr(data, "run_orch", lambda *a, **k: None)
+    assert data.load_parked(ws, "orch") == []

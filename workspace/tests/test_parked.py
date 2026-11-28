@@ -59,6 +59,8 @@ def test_the_reason_is_plain_words():
     assert parked.reason({"kind": "backlog"}) == "In Backlog"
     assert parked.reason({"kind": "external", "ref": "my own test"}) == "Until you bring it back: my own test"
     assert parked.reason({"kind": "ticket", "ref": "DM-2"}) == "Until DM-2 is finished"
+    assert parked.reason({"kind": "external", "ref": "Not now"}) == "Until you bring it back"
+    assert ": " not in parked.reason({"kind": "time", "until": "2999-01-01T09:00:00Z", "ref": "Not now"})[9:]
     assert parked.reason({"kind": "time", "until": "2999-01-01T09:00:00Z"}).startswith("Until ")
 
 
