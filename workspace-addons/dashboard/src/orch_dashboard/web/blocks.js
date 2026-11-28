@@ -12,7 +12,8 @@ const OrchBlocks = (() => {
   const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
-  const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
+  // a page of the dashboard (hash route); also the conversation with a workspace in Chat, or one message of it (O-26, W-055)
+  const APP = /^app:(?:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}|chat\/ws_[a-z0-9]{10}(\/m_[a-z0-9]{16})?)$/;
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   const shownAll = new Set();   // tables whose "Show more" was pressed (by title), kept while the page is open

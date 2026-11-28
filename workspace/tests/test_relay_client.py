@@ -2011,10 +2011,15 @@ def test_pickups_started_is_recorded_and_shown(proj, run, rel, new_ticket):
     items = {
         i["subtitle"].split(" · ", 1)[-1]: i for b in relay_view.view(proj)["blocks"] for i in b["items"]
     }
-    done = items["Done here"]
+    done = items[
+        "Done here"
+    ]  # the Relay page's short log: where it went, and a click opens all of it (W-055)
     assert done["chips"][0]["label"].startswith("Picked up") and done["chips"][0]["tone"] == "good"
-    assert any("r_abc123" in d["value"] for d in done["detail"])
-    assert any("busy" in d["value"] for d in items["Still open"]["detail"])
+    assert done["link"] == f"app:chat/{PEER}/m_text000000000015" and "detail" not in done
+    said = {m["text"]: m for m in relay_view.thread(proj, PEER)}  # the conversation in Chat keeps the rest
+    assert said["Done here"]["note"].startswith("Picked up")
+    assert any("r_abc123" in d["value"] for d in said["Done here"]["detail"])
+    assert any("busy" in d["value"] for d in said["Still open"]["detail"])
 
 
 def _allow_ticket_of(run):
@@ -2603,9 +2608,11 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
     people = _lists(v)[-1]  # who you can talk to
-    convs = next(b for b in v["blocks"] if b["type"] == "conversations")  # what was said, one thread each
+    # O-26 (owner, 28 Nov): the conversations are in Chat; Relay keeps the connection, who is connected, a log
+    assert not any(b["type"] == "conversations" for b in v["blocks"])
     assert v["notice"].startswith("Connected.") and v["header"] == {
-        "status": {"label": "Connected", "tone": "good"}
+        "status": {"label": "Connected", "tone": "good"},
+        "link": {"label": "Open Chat", "to": "app:chat"},
     }
     assert people["title"] == "Workspaces" and people["count"] == 1
     first = people["items"][0]
@@ -2622,16 +2629,57 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     ]
     details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
     assert details["You may give them tasks"] == "Not yet"
-    (thread,) = convs["items"]
-    assert thread["name"] == "Reports" and thread["id"] == first["actions"][0]["action"]["args"]["workspace"]
-    msgs = thread["messages"]
-    assert [m["who"] for m in msgs].count("you") == 1 and [m["who"] for m in msgs].count("them") == 2
-    mine = next(m for m in msgs if m["who"] == "you")
-    assert mine["text"] == "Thanks, got it" and mine["state"] == {"label": "Sent", "tone": "good"}
-    assert any(m.get("text") == "March numbers bready/b" for m in msgs)  # received text, markup stripped
+    peer = first["actions"][0]["action"]["args"]["workspace"]
+    from orch import relay_view
+
+    msgs = relay_view.thread(proj, peer)  # what Chat shows of this workspace
+    assert [m["by"] for m in msgs].count(peer) == 2 and len(msgs) == 3
+    mine = next(m for m in msgs if m["by"] != peer)
+    assert mine["text"] == "Thanks, got it" and mine["status"] == {"label": "Sent", "tone": "good"}
+    assert mine["by"] == "person"  # the sent log says who wrote it: a person's text is shown as written
+    # the conversation keeps the words as written (the page only ever shows them as text, never as markup)
+    assert any(m.get("text") == "March numbers <b>ready</b>" for m in msgs)
     assert any(m.get("file") == {"name": "march.csv", "size": "2.0 KB"} for m in msgs)  # a file card
     assert any(m.get("note", "").startswith("Picked up") for m in msgs)  # where orch passed it on
-    assert not any(b.get("title") == "Recent messages" for b in v["blocks"])  # nothing said twice
+    log = _lists(v)[0]  # the page's short log: one row per message with its state; a text opens on a click
+    assert log["title"] == "Recent messages" and log["meta"] == "Open a message to read all of it"
+    rows = {r["title"]: r for r in log["items"]}
+    assert rows["you → Reports"]["link"] == f"app:chat/{peer}/{mine['id']}"
+    assert {"label": "Sent", "tone": "good"} in rows["you → Reports"]["chips"]
+    assert sum(1 for r in log["items"] if r["title"] == "Reports → you") == 2
+    assert any(
+        r["subtitle"].endswith("March numbers bready/b") for r in log["items"]
+    )  # the log: markup stripped
+    assert any("link" not in r for r in log["items"])  # the file row: nothing to read, no link
+
+
+def test_a_long_text_is_kept_as_written_and_the_log_row_opens_it(proj, run, rel, monkeypatch):
+    """O-19 step 1 and W-055 (owner, 28 Nov): what a helper sends to another workspace is kept in full
+    (before, only its first 120 characters were), with who wrote it; the Relay page shows one short row that
+    opens it."""
+    from orch import relay_view
+
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    long = "Management workspace here. Two questions.\n\n" + "\n".join(
+        f"{i}. A question with enough words to fill a whole line of the page?" for i in range(1, 12)
+    )
+    monkeypatch.setenv("CLAUDECODE", "1")  # a helper sends it
+    assert run("relay", "send", "reports", long)[0] == 0
+    monkeypatch.delenv("CLAUDECODE")
+    (mine,) = relay_view.thread(proj, PEER)
+    assert mine["text"] == long and mine["by"] == "helper" and "cut" not in mine
+    v = json.loads(run("relay", "view", "--json")[1])
+    (row,) = _lists(v)[0]["items"]
+    assert row["link"] == f"app:chat/{PEER}/{mine['id']}" and len(row["subtitle"]) <= 200
+    assert "Management workspace here. Two questions." in row["subtitle"]
+    # a line from before the whole text was kept: only its start is there, and the conversation says so
+    log = proj / ".orch/run/relay/sent.jsonl"
+    old = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    old.pop("text"), old.pop("by")
+    log.write_text(json.dumps(old) + "\n", encoding="utf-8")
+    (kept,) = relay_view.thread(proj, PEER)
+    assert kept["by"] == "workspace" and kept["cut"] is True and kept["text"].endswith("…")
 
 
 def test_view_not_connected_says_so(proj, run):
@@ -2679,15 +2727,13 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     assert list(elsewhere.iterdir()) == []
 
 
-def test_view_without_messages_shows_an_empty_thread_and_the_next_step(proj, run, rel):
+def test_view_without_messages_shows_an_empty_log_and_the_next_step(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    convs = next(b for b in v["blocks"] if b["type"] == "conversations")
-    assert [(c["name"], c["messages"]) for c in convs["items"]] == [("Reports", [])]
-    assert [b["title"] for b in _lists(v)] == [
-        "Workspaces"
-    ]  # no empty "Recent messages" card beside the thread
+    assert not any(b["type"] == "conversations" for b in v["blocks"])  # O-26: conversations are in Chat
+    assert [b["title"] for b in _lists(v)] == ["Recent messages", "Workspaces"]
+    assert _lists(v)[0]["items"] == [] and _lists(v)[0]["empty"]["title"] == "No messages yet"
 
 
 def test_view_without_a_workspace_says_it_is_the_admins_step(proj, run, rel):
@@ -3629,7 +3675,7 @@ def test_needs_new_contact_on_home(proj, run, rel, monkeypatch):
         and r["tone"] == "warn"
         and r["since"] == "2026-11-26T09:00:00Z"
     )
-    assert "Marketing" in r["text"] and "connected by your admin" in r["text"] and "Relay page" in r["text"]
+    assert "Marketing" in r["text"] and "connected by your admin" in r["text"] and "in Chat" in r["text"]
     assert r["actions"] == [{"label": "OK", "later": True}]
     monkeypatch.setattr(msgtrust, "contacts", lambda root: [])
     connect(run, rel)

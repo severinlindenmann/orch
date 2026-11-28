@@ -103,7 +103,9 @@ function tcLineShell(item, previous, g, ...body) {
       ...body));
 }
 function tcLine(item, previous, g = null) {
-  return tcLineShell(item, previous, g, chatText('div', 'thread-line-text chat-message-text', tcPlain(item.e.text)));
+  // O-19 (owner, 28 Nov; chat.js chatBody): a helper's long line is a short entry with Open message, a person's stays as written
+  const who = tcWho(item.e, g);
+  return tcLineShell(item, previous, g, chatBody(tcPlain(item.e.text), {helper:!!who.helper, summary:item.e.summary, who:who.name, when:tcWhen(item.e.at, true), key:'message-' + item.key}));
 }
 function tcQuestion(t, item, previous, g = null) {
   const q = item.q;

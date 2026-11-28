@@ -33,6 +33,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--ticket", help="the Chat ticket, or a ticket whose chat you answer")
     x.add_argument("--reply-to")
     x.add_argument("--ref", action="append", default=[], metavar="KIND:VALUE")
+    x.add_argument(
+        "--summary",
+        metavar="LINE",
+        help="with a long answer: one short line that says it (shown first; the answer opens in full)",
+    )
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
@@ -95,10 +100,10 @@ def dispatch(args, root: Path) -> bool:
         if args.ticket and tickets.resolve(root, args.ticket) != gid:
             if args.reply_to or refs:
                 raise Refused("A ticket chat answer is plain text: no --reply-to or --ref.")
-            r = chat.reply_ticket(root, args.ticket, args.text)
+            r = chat.reply_ticket(root, args.ticket, args.text, args.summary)
             _out(args, r, f"Saved in the chat of {r['key']}.")
             return True
-        r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs)
+        r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs, args.summary)
         _out(args, r, "Sent." if r["sent"] else "Saved in the chat.")
     elif args.sub == "say":
         who = tickets.acting_by(args)
@@ -147,6 +152,12 @@ def _add_dm_parsers(sub, common):
     p.add_argument("--retry", help="replace a failed message")
 
 
+def _dm_line(m: dict) -> str:
+    """One message of a workspace conversation as a line: its words, or the file or task it carried."""
+    said = m.get("text") or (m.get("file") or {}).get("name") or (m.get("task") or {}).get("title") or ""
+    return f"{m['by']}: {said}"
+
+
 def _ws_name(root, ws):
     """The workspace's name for a sentence (never its raw id when a name is known)."""
     from orch import relay
@@ -167,8 +178,8 @@ def _dispatch_dm(args, root):
     elif args.sub == "thread":
         if args.sync:
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))
-        data = chat.dm_read(root, args.workspace, getattr(args, "by", None))
-        text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
+        data = chat.dm_conversation(root, args.workspace, getattr(args, "by", None))
+        text = "\n".join(_dm_line(m) for m in data["messages"]) or "No messages."
     elif args.sub == "sync":
         data = (
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))

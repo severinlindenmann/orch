@@ -279,6 +279,7 @@ def record(
     refs: list[dict] | None = None,
     convo_start: bool = False,
     files: list[dict] | None = None,
+    summary: str | None = None,
 ) -> dict:
     """Add one Chat text to its day's file (once per message id). by: "you" or the workspace id.
     files: [{name, size}] attached to the Chat ticket with this message (chat_files checked them)."""
@@ -287,6 +288,8 @@ def record(
     entry: dict = {"id": mid, "at": at, "by": by, "via": via, "text": str(text)[:MAX_TEXT], "day": day}
     if convo_start:
         entry["convo_start"] = True
+    if short := tickets.clean_summary(summary):
+        entry["summary"] = short  # the helper's own short line of a long answer (O-19)
     if files:
         entry["files"] = [
             {"name": str(f["name"]), "size": int(f.get("size") or 0)} for f in files[:MAX_SAY_FILES]
@@ -469,8 +472,25 @@ def say(
     return {"id": mid, "ticket": gid, "day": entry["day"], "sent": bool(sent)}
 
 
+def _set_summary(root: Path, mid: str, summary: str) -> None:
+    """Put the helper's short line on a Chat text the relay path already recorded (same day file, same lock)."""
+    with tickets._locked(root, "chat"):
+        for row in days(root)[:2]:
+            d = _read_day(root, row["day"])
+            hit = next((m for m in d["messages"] if m.get("id") == mid), None)
+            if hit is not None:
+                hit["summary"] = summary
+                net.write_json(_day_path(root, row["day"]), d, True)
+                return
+
+
 def reply(
-    root: Path, text: str, ticket: str, reply_to: str | None = None, refs: list[dict] | None = None
+    root: Path,
+    text: str,
+    ticket: str,
+    reply_to: str | None = None,
+    refs: list[dict] | None = None,
+    summary: str | None = None,
 ) -> dict:
     """The helper answers in Chat (`orch chat reply`). It is kept in the Chat history first; when a relay is
     connected the paired phones get it too. No relay (or the add-on off) is not an error: the dashboard shows it."""
@@ -479,21 +499,27 @@ def reply(
     text = (text or "").strip()
     if not text or len(text) > MAX_TEXT:
         raise Refused("A Chat text has 1 to 20000 characters.")
-    tickets.no_secret(root, {"text": text}, "Chat text")
+    short = tickets.clean_summary(summary)
+    tickets.no_secret(root, {"text": text, **({"summary": short} if short else {})}, "Chat text")
     gid = tickets.general_id(root)
     if not gid or tickets.resolve(root, ticket) != gid:
         raise Refused("A Chat answer belongs to the Chat ticket.")
     if "relay" in addons.active(root):
         try:
             msg = relay.send_text(root, "phones", text, gid, None, reply_to, general=True, refs=refs)
+            if short:
+                with contextlib.suppress(Exception):  # the answer is saved and sent; the short line is extra
+                    _set_summary(root, msg["id"], short)
             return {"id": msg["id"], "sent": bool(msg.get("sent", True))}
         except Refused as e:
             if "not connected" not in str(e):
                 raise
     who = tickets.current_actor()
     mid = relay.new_id()
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, chat=True, mid=mid), by=who)
-    record(root, mid, "helper", "helper", text, reply_to=reply_to, refs=refs)
+    tickets.apply_op(
+        root, gid, lambda t: tickets.add_history(t, who, text, chat=True, mid=mid, summary=short), by=who
+    )
+    record(root, mid, "helper", "helper", text, reply_to=reply_to, refs=refs, summary=short)
     return {"id": mid, "sent": False}
 
 
@@ -549,15 +575,21 @@ def say_ticket(root: Path, ref: str, text: str, by: str | None = None, by_name: 
     return {"id": mid, "ticket": t["id"], "key": t.get("key") or t["id"], "send": sent}
 
 
-def reply_ticket(root: Path, ref: str, text: str) -> dict:
+def reply_ticket(root: Path, ref: str, text: str, summary: str | None = None) -> dict:
     """The helper answers in a ticket's chat (`orch chat reply --ticket <id>` on a ticket that is not the
     workspace Chat): one chat line on the ticket by the helper."""
     text = _ticket_text(text)
-    tickets.no_secret(root, {"text": text}, "chat message")
+    short = tickets.clean_summary(summary)
+    tickets.no_secret(root, {"text": text, **({"summary": short} if short else {})}, "chat message")
     t = _chat_ticket(root, ref)
     who = tickets.current_actor()
     mid = tickets.chat_line_id()
-    tickets.apply_op(root, t["id"], lambda tk: tickets.add_history(tk, who, text, chat=True, mid=mid), by=who)
+    tickets.apply_op(
+        root,
+        t["id"],
+        lambda tk: tickets.add_history(tk, who, text, chat=True, mid=mid, summary=short),
+        by=who,
+    )
     return {"id": mid, "ticket": t["id"], "key": t.get("key") or t["id"], "sent": False}
 
 
@@ -887,7 +919,7 @@ HELPER_COMMANDS = {
         {"workspace", "text", "reply_to", "ticket", "summary", "speak", "ref"},
         ("ticket",),
     ),
-    ("chat", "reply"): ("reply", {"text", "reply_to", "ticket", "ref"}, ("ticket",)),
+    ("chat", "reply"): ("reply", {"text", "reply_to", "ticket", "ref", "summary"}, ("ticket",)),
     ("relay", "topic"): ("plain", {"message", "title"}, ()),  # makes a ticket from a phone text; no target
     ("chat", "status"): ("read", set(), ()),
     ("chat", "days"): ("read", set(), ()),
@@ -1276,6 +1308,55 @@ def dm_read(root: Path, ws: str, by: str | None = None) -> dict:
     return {**contact, "messages": data["messages"][-500:]}
 
 
+def _dm_when(at) -> dt.datetime | None:
+    try:
+        d = dt.datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d.replace(tzinfo=dt.UTC) if d.tzinfo is None else d
+
+
+def dm_conversation(root: Path, ws: str, by: str | None = None) -> dict:
+    """O-26 (owner, 28 Nov): the whole conversation with one workspace for Chat. The stored thread (what the
+    person typed and every text that came in), and from the relay's own records (relay_view.thread) what else
+    was said: a text this workspace's helper sent, files, handed-over tasks, and what orch knows about each
+    one's delivery (`status`) or where it passed a message on (`note`). A pure read: the stored thread keeps
+    its order, the rest is put in by time."""
+    data = dm_read(root, ws, by)
+    try:
+        from orch import relay_view
+
+        extra = relay_view.thread(root, ws)
+    except Exception:  # noqa: BLE001 - the relay's records are an addition: without them the thread still reads
+        extra = []
+    rows = [dict(m) for m in data["messages"]]
+    mine = {m["id"]: m for m in rows if isinstance(m.get("id"), str)}
+    sent = {m["relay_id"]: m for m in rows if isinstance(m.get("relay_id"), str)}
+    for e in extra:
+        known = mine.get(e["id"]) or sent.get(e["id"])
+        if known is not None:  # the same message: only what the relay's records add to it
+            if (
+                known.get("by") == ws
+                and isinstance(e.get("text"), str)
+                and len(e["text"]) > len(str(known.get("text") or ""))
+            ):
+                known["text"] = e["text"]  # imported before the whole text was kept
+            for k in ("status", "note"):
+                if k in e and not (k == "status" and known.get("state") == "failed"):
+                    known[k] = e[k]
+            continue
+        when = _dm_when(e["at"])
+        at = len(rows)
+        if when is not None:
+            for i, m in enumerate(rows):
+                seen = _dm_when(m.get("at"))
+                if seen is not None and seen > when:
+                    at = i
+                    break
+        rows.insert(at, {**e, "state": "delivered"})
+    return {**data, "messages": rows[-500:]}
+
+
 def dm_mark_read(root: Path, ws: str, by: str | None = None) -> dict:
     """The person opened the conversation with this workspace: its unread count starts again from here."""
     _dm_person(by)
@@ -1389,7 +1470,9 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
                     "peer_at": str(msg.get("created_at") or "")[:40],
                     "shown_at": _shown_at(msg.get("created_at"), now, data[ws]["messages"]),
                     "by": ws,
-                    "text": relay.clean_untrusted(body["text"], 2000),
+                    # O-19 step 1: the words as they were written (the wire's own limit); Chat shows a long
+                    # message short and opens all of it
+                    "text": relay.clean_untrusted(body["text"], MAX_TEXT),
                     "state": "delivered",
                 }
             )

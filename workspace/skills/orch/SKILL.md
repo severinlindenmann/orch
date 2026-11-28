@@ -351,7 +351,7 @@ person updates a tool (Settings > About & updates); a check file may add an `upd
 
 When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 
-To tell the person something on the ticket (it shows in the ticket's history): `orch chat reply --ticket <id> "<one or two sentences>"`.
+To tell the person something on the ticket (it shows in the ticket's history): `orch chat reply --ticket <id> "<one or two sentences>"`. When it has to be long, add `--summary "<one short line that says it>"`: the chat shows your line and opens the whole text on a click.
 
 If work remains, leave it visible (open steps, a log line).
 
