@@ -554,9 +554,7 @@ body.mobile-mode-on{--mm-page-start:var(--mm-dark-page-start);--mm-page-end:var(
 .report-check{display:flex;gap:8px;align-items:flex-start}
 .report-check .chip{flex:none}
 .report-sub{margin-top:8px}
-dialog.report-dialog{display:grid;gap:12px;width:min(520px,calc(100% - 32px))}
-dialog.report-dialog:not([open]){display:none}
-dialog.report-dialog .actions{margin-top:12px}
+dialog.report-dialog{width:min(520px,calc(100% - 32px))}
 /* Reference list (15 Nov, linked work): one dense 32 px row per link. [16px tool mark] [key + title, one line, ellipsis]
    [state slot: 6px dot + sentence-case word]. Only the title shrinks; key and state never do. Full text (tool, key, title,
    state) in the native title tooltip and aria-label. Underline on hover only. Add row is a quiet row in the same list.

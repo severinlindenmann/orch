@@ -459,6 +459,15 @@ dialog.dialog{width:min(480px,calc(100% - 32px));border-radius:12px}
 dialog::backdrop{background:var(--scrim)}
 dialog h2{margin-bottom:8px}
 dialog .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:24px}
+/* A dialog that can outgrow the window (W-060): class dialog-fit on the dialog, dialog-body on its middle. The title and
+   the buttons stay in view and only the middle scrolls, so the main button is never cut off below the window edge. */
+dialog.dialog.dialog-fit[open]{display:flex;flex-direction:column;overflow:hidden}
+dialog.dialog.dialog-fit>*{flex:none}
+dialog.dialog.dialog-fit>.dialog-body{flex:1 1 auto;min-height:0;overflow:hidden auto;margin:0 -24px;padding:4px 24px}
+dialog.dialog.dialog-fit>.actions{margin-top:16px}
+/* Tick boxes that belong together (W-060): one short block, the rows close to each other, one small line of help below. */
+.check-block{display:grid;gap:0;margin:0;padding:4px 12px;border:1px solid var(--border);border-radius:8px;min-width:0}
+.check-block>.meta{padding:4px 0 8px}
 dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% - 32px));height:100dvh;max-height:100dvh;border-width:0 0 0 1px;border-radius:0}
 /* Results */
 .file-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);text-decoration:none;min-height:40px}

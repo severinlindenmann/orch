@@ -32,20 +32,19 @@
   <!-- ORCH-81 (owner pick A, 16 Nov): the same dialog takes a feature wish -->
   <div class="segmented" role="radiogroup" aria-label="What is it?"><label><input type="radio" name="about" value="problem" checked><span>A problem</span></label><label><input type="radio" name="about" value="feature"><span>A feature wish</span></label></div>
   <p class="muted" style="margin:0" data-w="intro">orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. It stays on this computer unless you tick the last box.</p>
-  <label class="field"><span><span data-w="happened">What happened?</span> <span class="meta">(optional)</span></span>
-   <input class="input" data-w="happenedIn" placeholder="For example: stuck since 10:00, nothing happens" value="Stuck on checking links since 10:00"></label>
-  <label class="field"><span><span data-w="expected">What did you expect?</span> <span class="meta">(optional)</span></span>
-   <input class="input" data-w="expectedIn" placeholder="For example: the newsletter is sent" value=""></label>
-  <label class="field"><span>Anything else? <span class="meta">(optional)</span></span>
-   <textarea class="input" rows="2" placeholder="For example: it worked yesterday, and what you tried"></textarea></label>
+  <!-- W-060 C (owner, 28 Nov): one text box in place of three, the tick boxes as one short block; the dialog fits a 900 px
+       window, its title and buttons stay in view and only the middle scrolls (kit class dialog-fit) -->
+  <label class="field"><span><span data-w="happened">What happened, and what did you expect?</span> <span class="meta">(optional)</span></span>
+   <textarea class="input" rows="4" data-w="happenedIn" placeholder="For example: stuck since 10:00, nothing happens. I expected the newsletter to be sent.">Stuck on checking links since 10:00. I expected the newsletter to be sent.</textarea><span class="meta">74 / 4000</span></label>
   <div class="row"><button class="btn outline sm" type="button">Add pictures or files</button><span class="meta">Pick, drop or paste them. Up to 10.</span></div>
   <ul class="report-checks stack-sm" aria-label="Added files"><li class="report-check"><span class="grow">Screenshot 12-26.png <span class="meta">64 KB</span></span><button class="btn ghost xs" type="button">Remove</button></li></ul>
-  <label class="check-label" data-p><input type="checkbox" checked> Add a picture of this page</label>
-  <p class="meta" style="margin:0" data-p>The picture can show ticket text.</p>
-  <label class="check-label" data-p><input type="checkbox" checked> Include ticket text and helper conversation</label>
-  <!-- only when this workspace is connected to a relay -->
-  <label class="check-label"><input type="checkbox"> Send this report to the admin of <strong>relay.example.com</strong></label>
-  <p class="meta" style="margin:0">Everything in the report goes along, with the files you added. The admin and the workspaces they choose can read it.</p>
+  <fieldset class="check-block"><legend class="sr-only">What goes into the report</legend>
+   <label class="check-label" data-p><input type="checkbox" checked> Add a picture of this page</label>
+   <label class="check-label" data-p><input type="checkbox" checked> Include ticket text and helper conversation</label>
+   <!-- only when this workspace is connected to a relay -->
+   <label class="check-label"><input type="checkbox"> <span>Send this report to the admin of <strong>relay.example.com</strong></span></label>
+   <p class="meta"><span data-p>The picture can show ticket text. </span>A sent report goes with the files you added; the admin and the workspaces they choose can read it.</p>
+  </fieldset>
  </div>
  <div class="dlg-f dstate st-form"><button class="btn outline">Cancel</button><button class="btn primary" onclick="show('busy')">Create report</button></div>
 
@@ -96,9 +95,9 @@ function show(s){if(s==='settings'){location.href='../settings/settings.html';re
 }
 document.querySelectorAll('.segmented [data-s]').forEach(b=>b.onclick=()=>show(b.dataset.s));
 document.getElementById('reportBtn').onclick=()=>show('form');
-const W={problem:{intro:'orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. It stays on this computer unless you tick the last box.',happened:'What happened?',expected:'What did you expect?',happenedIn:'For example: stuck since 10:00, nothing happens',expectedIn:'For example: the newsletter is sent'},
- feature:{intro:'orch saves your wish on this computer. It stays on this computer unless you tick the last box.',happened:'What do you want?',expected:'Why would it help?',happenedIn:'For example: a dark look for the dashboard',expectedIn:'For example: easier to read at night'}};
-function about(a){const w=W[a];document.querySelectorAll('[data-w]').forEach(n=>{const k=n.dataset.w;if(n.tagName==='INPUT'){n.placeholder=w[k];n.value=a==='feature'?'':n.defaultValue}else n.innerHTML=w[k]});
+const W={problem:{intro:'orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. It stays on this computer unless you tick the last box.',happened:'What happened, and what did you expect?',happenedIn:'For example: stuck since 10:00, nothing happens. I expected the newsletter to be sent.'},
+ feature:{intro:'orch saves your wish on this computer. It stays on this computer unless you tick the last box.',happened:'What do you want, and why would it help?',happenedIn:'For example: a dark look for the dashboard, easier to read at night'}};
+function about(a){const w=W[a];document.querySelectorAll('[data-w]').forEach(n=>{const k=n.dataset.w;if(n.tagName==='TEXTAREA'){n.placeholder=w[k];n.value=a==='feature'?'':n.defaultValue}else n.innerHTML=w[k]});
  document.querySelectorAll('[data-p]').forEach(n=>n.hidden=a==='feature');document.querySelector('input[name=about][value='+a+']').checked=true;
  document.getElementById('doneWish').hidden=a!=='feature';document.getElementById('doneProblem').hidden=a==='feature';
  document.querySelectorAll('[data-hp]').forEach(n=>n.hidden=a==='feature');document.querySelector('[data-hw]').hidden=a!=='feature'}
