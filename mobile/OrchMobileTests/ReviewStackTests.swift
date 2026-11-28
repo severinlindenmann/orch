@@ -168,7 +168,7 @@ final class ReviewStackRulesTests: XCTestCase {
                      ReviewStackRules.item(for: cardQ("6", ReviewCard(kind: .check, title: "k", then: "t"), review: true))!,
                      ReviewStackRules.item(for: cardQ("7", ReviewCard(kind: .check, title: "k", then: "t"), review: true))!,
                      item("8", ReviewCard(kind: .plan, title: "p", then: "t"))]
-        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 2 results · 1 plan")
+        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 2 test results · 1 plan")
         XCTAssertEqual(ReviewStackRules.countsText([items[0]]), "1 draft")
         XCTAssertEqual(ReviewStackRules.countsText([]), "")
     }
@@ -443,7 +443,7 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         let qs = try await relay.questions().filter { $0.id.hasPrefix("m_rvstack") }
         XCTAssertEqual(qs.count, 7)
         let items = ReviewStackRules.stack(questions: qs, answers: [:])
-        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 1 result · 1 plan")
+        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 1 test result · 1 plan")
         let compare = items.first { if case .compare? = $0.card.preview { true } else { false } }
         XCTAssertNotNil(compare)
         for f in qs.flatMap({ $0.message.body.cardFiles ?? [] }) {

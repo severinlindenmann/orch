@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from orch import history, review, runs, safefile, tickets
+from orch import config, history, review, runs, safefile, tickets
 from orch.errors import Refused
 from orch.httpbody import ReadsWholeBody
 
@@ -242,7 +242,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         try:
             if path == "/api/stack":
                 cards = history.shown_json(self.root, review.stack(self.root))
-                return self._json(200, {"workspace": self.root.name, "cards": cards})
+                # ORCH-2187 (Focused review F): the workspace's own switch, so this page draws the same
+                # decision-first card as the dashboard (off: the key is left out, the page as before)
+                df = {"decision_first": True} if config.decision_first_on(self.root) else {}
+                return self._json(200, {"workspace": self.root.name, "cards": cards, **df})
             from orch import cli_review  # late: cli_review imports this module
 
             return self._json(200, history.shown_json(self.root, cli_review._answered(self.root)))

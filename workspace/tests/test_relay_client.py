@@ -3512,6 +3512,43 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     assert "task" not in sent[1] and "about" not in sent[1]
 
 
+def test_a_question_tells_the_phone_the_decision_first_lines_only_with_the_switch_on(proj, monkeypatch):
+    """ORCH-2187 (Focused review F), contracts/vectors/question-decision-first-v1.json: with [workflow]
+    decision_first on, a question to the phones carries decision_first plus the helper's "If you wait" and
+    "What matters" lines (one line each, cut like the title); a question without them carries only the flag.
+    Off (the default): the body is as before (RULE A)."""
+    from conftest import CONTRACTS, ensure_keys
+
+    from orch import addons, config, relay, tickets
+
+    vec = json.loads((CONTRACTS / "vectors" / "question-decision-first-v1.json").read_text(encoding="utf-8"))
+    want = {v["name"]: v["message"]["body"] for v in vec["valid"]}
+    addons.workspace_id(proj, create=True)
+    ensure_keys(proj)
+    sent = []
+    monkeypatch.setattr(
+        relay, "_message", lambda root, to, type_, body, tid, **kw: sent.append(body) or {"id": "m_q1"}
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+    tid = tickets.create(proj, want["all-three"]["title"], "human:tester")["id"]
+    full = want["all-three"]
+    tickets.ask(
+        proj, tid, full["text"], full["options"], full["recommended"], "agent:claude",
+        if_wait=full["if_wait"].replace(" ends ", "  ends\n"), facts=full["facts"],
+    )  # fmt: skip
+    tickets.ask(proj, tid, "Any colour?", ["red", "blue"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    new_keys = {"decision_first", "if_wait", "facts"}
+    relay.send_question(proj, t, t["questions"][0])
+    assert sent[0] == {**want["switch-off"], "question_id": "q1"}  # off: nothing new on the wire
+    config.set_decision_first(proj, True)
+    relay.send_question(proj, t, t["questions"][0])
+    relay.send_question(proj, t, t["questions"][1])
+    assert sent[1] == {**full, "question_id": "q1"}
+    assert {k: v for k, v in sent[1].items() if k not in new_keys} == sent[0]
+    assert {k: sent[2][k] for k in new_keys & set(sent[2])} == {"decision_first": True}  # the flag-only shape
+
+
 def test_allow_words_rp4(proj, run, rel):
     """RP4 A: three buttons that say what they do; the sender's words are on the card; old words count."""
     from orch import relay

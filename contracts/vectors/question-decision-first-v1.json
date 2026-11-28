@@ -1,0 +1,170 @@
+{
+  "about": "A question to the phones with the decision-first lines (relay-api.md, Questions; ORCH-2187). valid: messages that pass message.schema.json, with what the phone shows (shows: null = the card as before). invalid: bodies the schema refuses.",
+  "valid": [
+    {
+      "name": "switch-off",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_qdf0000000000001",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-28T09:10:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "question_id": "q3",
+          "title": "Autumn newsletter",
+          "text": "Send the newsletter on Friday?",
+          "options": [
+            "Friday",
+            "Next week"
+          ],
+          "recommended": "Friday"
+        }
+      },
+      "shows": null
+    },
+    {
+      "name": "flag-only",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_qdf0000000000002",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-28T09:10:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "question_id": "q3",
+          "title": "Autumn newsletter",
+          "text": "Send the newsletter on Friday?",
+          "options": [
+            "Friday",
+            "Next week"
+          ],
+          "recommended": "Friday",
+          "decision_first": true
+        }
+      },
+      "shows": {
+        "decide": "Send the newsletter on Friday?",
+        "if_wait": null,
+        "facts": []
+      }
+    },
+    {
+      "name": "all-three",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_qdf0000000000003",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-28T09:10:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "question_id": "q3",
+          "title": "Autumn newsletter",
+          "text": "Send the newsletter on Friday?",
+          "options": [
+            "Friday",
+            "Next week"
+          ],
+          "recommended": "Friday",
+          "decision_first": true,
+          "if_wait": "The autumn offer ends before it goes out.",
+          "facts": [
+            "1,400 readers open it on Fridays",
+            "Legal said yes on 26 Nov"
+          ]
+        }
+      },
+      "shows": {
+        "decide": "Send the newsletter on Friday?",
+        "if_wait": "The autumn offer ends before it goes out.",
+        "facts": [
+          "1,400 readers open it on Fridays",
+          "Legal said yes on 26 Nov"
+        ]
+      }
+    },
+    {
+      "name": "lines-without-the-flag-are-ignored",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_qdf0000000000004",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-28T09:10:00Z",
+        "ticket": "t_7k3f9q",
+        "body": {
+          "question_id": "q3",
+          "title": "Autumn newsletter",
+          "text": "Send the newsletter on Friday?",
+          "options": [
+            "Friday",
+            "Next week"
+          ],
+          "recommended": "Friday",
+          "if_wait": "The autumn offer ends before it goes out.",
+          "facts": [
+            "Legal said yes on 26 Nov"
+          ]
+        }
+      },
+      "shows": null
+    }
+  ],
+  "invalid": [
+    {
+      "name": "flag-false",
+      "body": {
+        "decision_first": false
+      }
+    },
+    {
+      "name": "if-wait-two-lines",
+      "body": {
+        "decision_first": true,
+        "if_wait": "One\nTwo"
+      }
+    },
+    {
+      "name": "if-wait-too-long",
+      "body": {
+        "decision_first": true,
+        "if_wait": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "five-facts",
+      "body": {
+        "decision_first": true,
+        "facts": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e"
+        ]
+      }
+    },
+    {
+      "name": "no-facts",
+      "body": {
+        "decision_first": true,
+        "facts": []
+      }
+    },
+    {
+      "name": "fact-not-text",
+      "body": {
+        "decision_first": true,
+        "facts": [
+          1
+        ]
+      }
+    }
+  ]
+}
