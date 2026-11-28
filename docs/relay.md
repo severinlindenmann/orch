@@ -100,7 +100,8 @@ when the answer still comes, the helper that gets it is told the line that takes
 message never settles a question by itself).
 First contact (RP3 A) pins the key `orch relay refresh` took from the relay's own answer and kept in the guarded orch
 home (`listed.json`), never the copy in the workspace folder (ORCH-2349): when `workspaces.json` says another key, the
-message is held and orch asks the relay again.
+message is held and orch asks the relay again: once for a sender, not once for each of its messages; while its
+messages still wait, orch asks again at most every five minutes (ORCH-2376).
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 
