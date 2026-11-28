@@ -55,6 +55,9 @@ def sites_file(root: Path, tid: str) -> Path:
 
 
 WORKSPACE_LIST = "_workspace"  # never a ticket id (those start with t_)
+# The run that holds the browser a person opened on the dashboard's Browser page (O-20). Not a ticket id (those have
+# 6 to 16 characters after t_), and no `orch browse` command takes it: only the dashboard, for a signed-in person.
+OWN_RUN = "t_self"
 MAX_SITES = 5000  # one list; far above what a person keeps, and the filter reads it on every connection
 
 

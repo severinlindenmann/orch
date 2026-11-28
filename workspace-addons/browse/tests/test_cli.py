@@ -492,3 +492,17 @@ def test_a_list_has_a_size_bound(ws):
     with _pytest.raises(ValueError):
         paths.save_workspace_sites(ws, [f"s{i}.example.org" for i in range(paths.MAX_SITES + 1)])
     assert len(paths.load_workspace_sites(ws)) == 1000
+
+
+def test_no_command_reaches_the_persons_own_browser(ws, capsys, monkeypatch):
+    """O-20: the browser a person opens on the Browser page is held by paths.OWN_RUN, which is not a ticket id and
+    which no `orch browse` command takes, by --ticket or from a helper run's ORCH_TICKET."""
+    import re
+
+    assert not re.fullmatch(r"t_[a-z0-9]{6,16}", paths.OWN_RUN)
+    for cmd in (["look"], ["open", "https://example.com"], ["sites", "add", "example.com"]):
+        code, out = run(capsys, *cmd, "--ticket", paths.OWN_RUN)
+        assert code == 2 and "person's own browser" in out
+    monkeypatch.setenv("ORCH_TICKET", paths.OWN_RUN)
+    code, out = run(capsys, "look")
+    assert code == 2 and "person's own browser" in out

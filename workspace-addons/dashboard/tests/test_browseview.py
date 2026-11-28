@@ -508,9 +508,6 @@ def test_open_a_browser_only_on_an_allowed_site(real_browse, server, ws, monkeyp
     )
     port = server()
     code, text = post(port, "/api/browse/open", {"address": "example.com"})
-    assert code == 409 and "Chat" in text and opened == []  # no Chat ticket yet: nothing to hold the browser
-    monkeypatch.setattr(browseview, "own_ticket", lambda root: TID)
-    code, text = post(port, "/api/browse/open", {"address": "example.com"})
     assert code == 409 and "No site is allowed yet" in text and opened == []
     paths.save_workspace_sites(ws, ["20min.ch"])
     code, text = post(port, "/api/browse/open", {"address": "https://evil.example/x"})
@@ -518,10 +515,11 @@ def test_open_a_browser_only_on_an_allowed_site(real_browse, server, ws, monkeyp
     code, text = post(port, "/api/browse/open", {"address": "10.0.0.1"})
     assert code == 409 and opened == []
     code, text = post(port, "/api/browse/open", {"address": "www.20min.ch"})
-    assert code == 200 and json.loads(text) == {"ticket": TID, "site": "www.20min.ch"}
-    assert opened == [(TID, "open", ["https://www.20min.ch"])]
+    own = browseview.OWN_RUN  # the person's own run: never a ticket, so no helper command can name it
+    assert code == 200 and json.loads(text) == {"ticket": own, "site": "www.20min.ch"}
+    assert opened == [(own, "open", ["https://www.20min.ch"])]
     code, text = post(port, "/api/browse/open", {"address": "https://20min.ch/zuerich"})
-    assert code == 200 and opened[-1] == (TID, "open", ["https://20min.ch/zuerich"])
+    assert code == 200 and opened[-1] == (own, "open", ["https://20min.ch/zuerich"])
     monkeypatch.setattr(
         cli,
         "_browser",
@@ -531,10 +529,27 @@ def test_open_a_browser_only_on_an_allowed_site(real_browse, server, ws, monkeyp
     assert code == 409 and "orch browse setup" in text  # the add-on's own words say what to do
 
 
-def test_the_persons_own_browser_is_marked_in_the_list(fake_browse, ws, monkeypatch):
-    monkeypatch.setattr(browseview, "_on", lambda root: True)
-    monkeypatch.setattr(browseview, "own_ticket", lambda root: TID)
-    (row,) = browseview.listing(ws)["browsers"]
-    assert row["ticket"] == TID and row["own"] is True
-    monkeypatch.setattr(browseview, "own_ticket", lambda root: None)
-    assert "own" not in browseview.listing(ws)["browsers"][0]
+def test_the_persons_own_browser_is_its_own_run_that_no_ticket_can_be(
+    fake_browse, real_browse, server, ws, monkeypatch
+):
+    """O-20: the person's browser is held by a run that is not a ticket id, so `orch browse --ticket` (a helper's
+    only way in) can never name it; the page reaches it through the person's own stream and Stop."""
+    import re
+
+    paths = real_browse
+    own = browseview.OWN_RUN
+    assert own == paths.OWN_RUN and not re.fullmatch(
+        r"t_[a-z0-9]{6,16}", own
+    )  # ticket.schema.json tid: never a ticket
+    run = paths.run_dir(ws, own)
+    (run / "state.json").write_text(json.dumps({"state": "ready", "generation": "f" * 16}))
+    (run / "channel.json").write_text(json.dumps({"address": "x", "family": "AF_UNIX", "key": "ab" * 32}))
+    rows = {r["ticket"]: r for r in browseview.listing(ws)["browsers"]}
+    assert rows[own]["own"] is True and "own" not in rows[TID]
+    assert browseview.run_dir(ws, own) == run and browseview.state(ws, own)["open"] is True
+    paths.save_workspace_sites(ws, ["20min.ch"])
+    paths.save_sites(ws, TID, ["docs.python.org"])
+    assert paths.load_sites(ws, own) == ["20min.ch"]  # the workspace's list only, never a ticket's extras
+    cli = __import__("importlib").import_module("orch_browse.cli")
+    with pytest.raises(cli.Refused):
+        cli._ticket(ws, own)  # what every `orch browse ... --ticket` goes through

@@ -46,13 +46,21 @@ def _channel():
     return channel
 
 
+# The person's own browser (O-20) is held by this name, never by a ticket: it has the form of a run folder but
+# not of a ticket id (those have 6 to 16 characters after t_), so no ticket can carry it and no helper command
+# can name it (`orch browse ... --ticket` only takes a ticket that exists). What the person opens and signs in to
+# there stays out of every helper's reach.
+OWN_RUN = "t_self"
+
+
 def run_dir(root: Path, ref: str) -> Path | None:
     """The ticket's broker folder, or None for an unknown ticket or an odd folder (never follows a link)."""
     tid = (ref or "").strip()
     try:
         from orch import tickets
 
-        tid = tickets.resolve(root, tid)
+        if tid != OWN_RUN:
+            tid = tickets.resolve(root, tid)
     except Exception:  # noqa: BLE001 - an unknown ticket is simply no browser
         return None
     if not _TID.match(tid):
@@ -155,10 +163,9 @@ def listing(root: Path, now: float | None = None) -> dict:
             rows.append({"ticket": d.name, "open": False, "ended": at, "why": str(st.get("why", ""))[:200]})
     rows.sort(key=lambda r: (not r["open"], -(r.get("started") or r.get("ended") or 0)))
     rows = rows[:MAX_LIST]
-    own = own_ticket(root)
     for r in rows:
         r["title"] = _title(root, r["ticket"])
-        if r["ticket"] == own:  # the person's own browser (O-20): the page shows it as "Your browser"
+        if r["ticket"] == OWN_RUN:  # the person's own browser (O-20): the page shows it as "Your browser"
             r["own"] = True
     return {"on": True, "browsers": rows}
 
@@ -397,31 +404,18 @@ def sites_change(root: Path, body: dict) -> tuple[int, str]:
     return 200, json.dumps(doc)
 
 
-def own_ticket(root: Path) -> str | None:
-    """The ticket that holds the person's own browser: the workspace's Chat ticket (hidden, one per workspace).
-    None before the first Chat text and when the core cannot be read."""
-    try:
-        from orch import tickets
-
-        tid = tickets.general_id(root)
-    except Exception:  # noqa: BLE001 - no answer is "none"
-        return None
-    return tid if isinstance(tid, str) and _TID.match(tid) else None
-
-
 def open_own(root: Path, address) -> tuple[int, str]:
     """POST /api/browse/open {address} (O-20): a browser for the person, on the allowed sites only. It is the
-    browse add-on's own `open` for the workspace's Chat ticket, so the same network filter and the same lists
-    hold as for a helper; an address that is not on the list is refused here in plain words, before anything
-    starts. Starting may take a moment (the add-on waits until the browser answers)."""
+    browse add-on's own `open` under the person's own run (OWN_RUN, never a ticket), so the same network filter
+    holds as for a helper and the workspace's list decides what opens; an address that is not on the list is
+    refused here in plain words, before anything starts. Starting may take a moment (the add-on waits until the
+    browser answers)."""
     cli, paths, netcheck = _part("cli"), _part("paths"), _part("netcheck")
     if cli is None or paths is None or netcheck is None or not _on(root):
         return 404, NOT_ON
     if not isinstance(address, str) or not 0 < len(address.strip()) <= OPEN_MAX:
         return 400, "Give the address of a site on the list."
-    tid = own_ticket(root)
-    if tid is None:
-        return 409, "Write one message in Chat first: your browser belongs to this workspace's Chat."
+    tid = OWN_RUN
     try:
         site = netcheck.norm_site(address)
         allowed = paths.load_sites(root, tid)

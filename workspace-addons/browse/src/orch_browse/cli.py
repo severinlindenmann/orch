@@ -80,6 +80,8 @@ def _ticket(root: Path, ref: str | None) -> str:
     ref = ref or os.environ.get("ORCH_TICKET")
     if not ref:
         raise Refused("Which ticket? Add --ticket <id> (inside a helper run the ticket is known).")
+    if ref.strip() == paths.OWN_RUN:  # the browser a person opened for themselves is not a ticket's
+        raise Refused("That is the person's own browser, not a ticket's. Use your ticket's browser.")
     try:
         from orch import tickets
 
