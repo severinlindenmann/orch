@@ -56,7 +56,7 @@ test('every greyed choice says why in one plain sentence', () => {
   assert.equal(S.why('fresh', {running: true}), 'A helper is already working on this ticket.');
   assert.equal(S.why('reopen', {running: true}), 'Stop the helper to reopen an earlier session.');
   assert.match(S.why('main', {inLine: true}), /waits in line/);
-  assert.equal(S.why('fresh', {tools: S.tools([])}), 'No helper tool is set up on this computer.');
+  assert.equal(S.why('fresh', {tools: S.tools([])}), 'No helper tool is set up yet.');
   assert.equal(S.why('model', {tool: {models: false}}), 'This tool uses its own model.');
   const away = S.sessionRow({id: 's', reopenable: false}, new Date());
   assert.equal(S.why('reopen', {row: away}), 'On another computer, so it cannot be reopened here.');
@@ -148,6 +148,21 @@ test('the short places line: N of M in use, the full sentence when every place i
   assert.equal(S.placesShort(p(0, null)), '');
   assert.equal(S.placesShort(p(1, null)), '1 helper working');
   assert.match(S.placesShort(p(6, 6)), /^All 6 helper places are in use\..*waits in line/);
+});
+
+test('ORCH-2314: an idle, stuck or waiting helper holds a place but is not counted as working', () => {
+  const S = require('../static/start-choice-state.js');
+  const h = state => ({running: true, helper: {state}});
+  const idle = S.places({a: h('idle'), b: h('stuck'), c: h('you')}, {}, {});
+  assert.equal(idle.used, 3); assert.equal(idle.working, 0);
+  assert.equal(S.placesShort(idle), '', 'three idle helpers never read "3 helpers working"');
+  assert.equal(S.placesText(idle), 'No helper is working now.');
+  const mixed = S.places({a: h('working'), b: h('starting'), c: h('idle'), d: {running: true}, e: {running: false}}, {}, {waiting: ['t_1']});
+  assert.equal(mixed.working, 3, 'working, starting and a run of an older core without the state');
+  assert.equal(S.placesShort(mixed), '3 helpers working · 1 ticket waits');
+  assert.equal(S.placesShort({...idle, waiting: ['t_1']}), '1 ticket waits');
+  const limit = S.places({a: h('idle'), b: h('working')}, {live_max: 2}, {});
+  assert.equal(limit.full, true, 'an idle helper still holds its place');
 });
 
 test('ORCH-1362: a failed start names the steps that did not go through, so Try again sends a message only once', async () => {

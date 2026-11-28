@@ -182,17 +182,38 @@ def _when(at) -> str:
 TEXT_MAX = 64 * 1024  # a text or glance card shows at most this much of its file
 
 
-def _read_small(root: Path, tid: str | None, src: str, where: str = "file") -> bytes:
-    """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
-    and pages are), anything else a file in the workspace. The path `orch ticket artifacts-dir` prints
-    (.orch/tickets/<this ticket>/artifacts/<name>, also with backslashes) counts as artifacts/<name>
-    (ORCH-1777); any other .orch or .git path is refused. Each refusal names its cause and the next step."""
+def _card_path(root: Path, tid: str | None, src: str) -> str:
+    """One spelling for a card's file, whatever the helper typed (ORCH-2364): forward slashes, and the
+    ticket's own file as artifacts/<name>. That is what `orch ticket artifacts` and `artifacts-dir` print
+    (.orch/tickets/<this ticket>/artifacts/<name>, also with backslashes, ORCH-1777), the same file by its
+    full path on this computer, and a bare name that is in the artifacts folder and not in the workspace
+    folder. Any other path comes back as typed, for the reader to accept or refuse."""
     path = src.strip().replace("\\", "/")
+    if os.path.isabs(src.strip()):
+        base = os.path.realpath(root).replace("\\", "/").rstrip("/") + "/"
+        folder, name = os.path.split(os.path.abspath(src.strip()))  # the folder's links, never the file's
+        full = os.path.join(os.path.realpath(folder), name).replace("\\", "/")
+        fold = (lambda x: x.lower()) if os.name == "nt" else (lambda x: x)
+        if not fold(full).startswith(fold(base)):
+            return path  # outside the workspace: refused by the reader, with the form that works
+        path = full[len(base) :]
     while path.startswith("./"):
         path = path[2:]
     own = f".orch/tickets/{tid}/artifacts/" if tid else None
     if own and path.startswith(own) and len(path) > len(own):
-        path = "artifacts/" + path[len(own) :]
+        return "artifacts/" + path[len(own) :]
+    if tid and path and "/" not in path and not (Path(root) / path).exists():
+        if (tickets.artifacts_path(root, tid) / path).is_file():
+            return "artifacts/" + path
+    return path
+
+
+def _read_small(root: Path, tid: str | None, src: str, where: str = "file") -> bytes:
+    """A text or card file for a card, at most 64 KB: artifacts/<name> is the ticket's own file (as images
+    and pages are), anything else a file in the workspace (`_card_path` reads the other spellings of the
+    ticket's own file as artifacts/<name>); any other .orch or .git path is refused. Each refusal names its
+    cause and the next step."""
+    path = _card_path(root, tid, src)
     shown = src[:120]
     parts = safefile._parts(path)
     if parts is None:
@@ -234,7 +255,7 @@ def _file_preview(root: Path, src: str, where: str, tid: str | None = None) -> d
     ext = Path(src).suffix.lower()
     kind = review.FILE_TYPES.get(ext)
     if kind in ("img", "page"):
-        return {"type": kind, "src": src}
+        return {"type": kind, "src": _card_path(root, tid, src)}
     if ext in (".md", ".txt"):
         data = _read_small(root, tid, src, where)
         text = data.decode("utf-8", "replace")

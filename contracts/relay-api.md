@@ -73,6 +73,13 @@ with `body.update.kind = "ack"` and `reply_to` = the id of the message it is abo
   one that went to Chat carries `body.general: true` and no `ticket`.
 - At most one receipt per message. A receipt is an update: it is never passed on to a ticket and never answered
   with a receipt.
+- `Declined` (ORCH-2189, RP4 A): the one fixed line the receiver's orch sends when its person presses Decline on a
+  1:1 `delegate` or `start`. Same form as above (`ack`, `reply_to` = the task, `body.general: true`, no `ticket`);
+  it follows the `Delivered` the task got while it waited, so a task has at most these two. No reason and no name
+  goes back. The sender shows "Declined" on that message and on the ticket it was about; it replaces Delivered and
+  is never replaced. A sender that does not know the line yet reads it as Delivered (every line it does not know
+  counts as that). Not sent for a task of a group (chat-groups.md has its own note) or one put aside by a helper
+  (`orch relay done`).
 - The sender takes a receipt only from the workspace it sent that message to, and only the fixed lines: any other
   words count as `Delivered` (the text is data, R3.2). An older orch that does not know receipts lists the text as
   any other update; a sender that hears nothing shows `Sent` as before.
@@ -326,6 +333,13 @@ preview) and, for permission questions (options `Once` / `Always` / `No`), optio
 most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
 ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
 older phone ignores both.
+With `[workflow] decision_first` on in the sending workspace (ORCH-2187, Focused review F) a question to the phones
+also carries `decision_first: true` and, when the helper gave them (`orch ask --if-wait --fact`), `if_wait` (one line,
+at most 200 characters) and `facts` (1 to 4 lines of at most 200 characters). The phone then draws the card as the
+dashboard does: "You decide: <the question>" first, then "If you wait: <line>" and one "What matters" box. `if_wait`
+and `facts` without `decision_first` are ignored. The lines are data like the title: hidden and cut by the workspace,
+one line each. The review question of a Test results card never carries them. Switch off: none of the three is sent
+and the message is byte for byte as before; an older phone ignores all three (vectors/question-decision-first-v1.json).
 
 **A refused phone answer** (the workspace could not take it, e.g. it needs a person's proof the answer did not
 carry): the relay already stored the first answer, so the workspace sends the question to the phones again as a new

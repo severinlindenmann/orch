@@ -16,13 +16,16 @@ function liveStartPlaces(runs, settings, line) {
   const used = rows.filter(r => r && r.running === true).length; // one-step helpers hold a place too (ORCH-1677)
   const max = Number.isInteger(settings?.live_max) && settings.live_max > 0 ? settings.live_max : null;
   const waiting = Array.isArray(line?.waiting) ? line.waiting.filter(x => typeof x === 'string') : [];
-  return {used, max, waiting, full:max !== null && used >= max};
+  // ORCH-2314: an idle, stuck or waiting helper holds a place but is not "working" (as kit/start-choice-state.js)
+  const working = rows.filter(r => r && r.running === true && (!r.helper || typeof r.helper.state !== 'string' || ['working', 'starting'].includes(r.helper.state))).length;
+  return {used, working, max, waiting, full:max !== null && used >= max};
 }
 // The places line above the choices, in plain words with the right singular and plural.
 function liveStartPlacesText(p) {
   const wait = p.waiting.length ? liveStartPlural(p.waiting.length, 'ticket waits', 'tickets wait') + ' in line.' : '';
   if (p.max === null) {
-    const now = p.used ? liveStartPlural(p.used, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
+    const n = Number.isInteger(p.working) ? p.working : p.used;
+    const now = n ? liveStartPlural(n, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
     return [now, wait].filter(Boolean).join(' ');
   }
   if (p.full) return [(p.max === 1 ? 'The one helper place is in use.' : 'All ' + p.max + ' helper places are in use.'), wait,

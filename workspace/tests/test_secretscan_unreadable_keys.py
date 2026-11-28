@@ -131,3 +131,45 @@ def test_sends_still_continue_with_note_when_store_unavailable(store_unavailable
     secretscan.refuse_if_secret_in(tmp_path, {"text": "hello there"})
     secretscan.refuse_if_secret(b"plain file", "file", tmp_path)
     assert secretscan.NOTE_SKIPPED in capsys.readouterr().err
+
+
+# ORCH-2207: the note says why and what to do, and a workspace reads it once a day, not on every write.
+def test_note_names_the_reason_and_the_way_out(store_unavailable, tmp_path, capsys):
+    secretscan.refuse_if_secret_in(tmp_path, {"text": "hello there"})
+    err = capsys.readouterr().err
+    assert secretscan.NOTE_SKIPPED in err
+    assert "Why: These saved keys belong to another folder. Run orch workspace move-here." in err
+
+
+def test_ticket_writes_say_it_once_a_day_and_json_stays_clean(store_unavailable, proj, monkeypatch, capsys):
+    from orch import cli
+
+    (proj / ".orch").mkdir(exist_ok=True)  # as after orch init: the folder that remembers the note
+    ids = []
+    for n in range(3):
+        monkeypatch.setattr(secretscan, "_noted", False)  # each write is its own command
+        assert cli.main(["ticket", "new", f"Write {n}", "--json"]) == 0
+        captured = capsys.readouterr()
+        ids.append(json.loads(captured.out)["id"])  # stdout is the JSON alone
+        assert (secretscan.NOTE_SKIPPED in captured.err) == (n == 0), captured.err
+    assert len(set(ids)) == 3
+    assert (proj / secretscan.NOTE_MARK).is_file()
+    # another reason is said again
+    from orch import keystore
+
+    def other(root):
+        raise Refused("The key file is damaged.")
+
+    monkeypatch.setattr(keystore, "all_needles", other)
+    monkeypatch.setattr(secretscan, "_noted", False)
+    assert cli.main(["ticket", "new", "Write 4", "--json"]) == 0
+    assert "Why: The key file is damaged." in capsys.readouterr().err
+
+
+def test_a_workspace_without_saved_keys_writes_tickets_without_a_note(proj, capsys):
+    from orch import cli
+
+    assert cli.main(["ticket", "new", "Fresh", "--json"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["id"] and captured.err == ""
+    assert not (proj / secretscan.NOTE_MARK).exists()

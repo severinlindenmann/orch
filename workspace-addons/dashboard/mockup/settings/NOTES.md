@@ -85,7 +85,7 @@
 
 ## addon-detail.html — Shared links add-on settings
 
-- An add-on has one focused settings surface and a clear return to Installed add-ons (SN-09, SN-26).
+- An add-on has one focused settings surface and a clear return to Add-ons (SN-09, SN-26).
 - Connection address is one click away; connection status stays visible (SN-26; BP-49).
 - One shared-file summary links to the actual list, without repeating files (SN-11).
 - Product data: Needs connection status, permission-aware writes, share count and cached update time.

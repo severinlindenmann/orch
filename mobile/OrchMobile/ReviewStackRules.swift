@@ -41,7 +41,41 @@ enum VerdictState: Equatable, Sendable {
     var canChange: Bool { self == .savedOnPhone }
 }
 
+/// ORCH-2187 (Focused review F): what a decision-first card leads with, as the dashboard draws it ("You decide: <the question>",
+/// "If you wait: <line>", one "What matters" box). The words on screen are `DecisionFirst.decideWord` etc.
+struct DecisionFirst: Equatable, Sendable {
+    static let decideWord = "You decide:", waitWord = "If you wait:", factsTitle = "What matters"
+    static let maxFacts = 4, maxLine = 200
+    /// The question itself.
+    let decide: String
+    /// The card's own title as one quiet line, when it says more than the question.
+    let title: String?
+    let ifWait: String?
+    let facts: [String]
+}
+
 enum ReviewStackRules {
+    // MARK: Decision first
+
+    /// One line of at most `DecisionFirst.maxLine` characters: what the workspace sent is data, so it is cut here again.
+    private static func line(_ text: String?) -> String? {
+        let one = (text ?? "").split(whereSeparator: { $0.isNewline || $0.isWhitespace }).joined(separator: " ")
+        return one.isEmpty ? nil : String(one.prefix(DecisionFirst.maxLine))
+    }
+
+    /// The decision-first lead of a card, or nil = the card as before: the workspace did not say `decision_first` (its switch is
+    /// off, or it is older), or the card is a Test results card (its result leads, not a question) or a command to run.
+    static func decisionFirst(_ item: ReviewItem) -> DecisionFirst? {
+        let b = item.question.message.body
+        guard b.decisionFirst == true, item.kind != .check, item.kind != .run else { return nil }
+        let title = line(item.card.title)
+        guard let decide = line(b.text) ?? title else { return nil }
+        // A title that only repeats the question (or is its cut start) is shown once, as the question.
+        let stem = (title ?? "").trimmingCharacters(in: CharacterSet(charactersIn: " ….")), repeats = title == nil || decide.hasPrefix(stem)
+        let facts = (b.facts ?? []).compactMap { line($0) }.prefix(DecisionFirst.maxFacts)
+        return DecisionFirst(decide: decide, title: repeats ? nil : title, ifWait: line(b.ifWait), facts: Array(facts))
+    }
+
     // MARK: Which questions are stack cards
 
     /// A question that is never a stack card: permission asks, ticket proposals, group questions.
@@ -139,11 +173,11 @@ enum ReviewStackRules {
     /// `ChatsRowRules.needsYou` / `openQuestions`. (ReviewBar in the ticket chat is not affected.)
     static func withoutStackQuestions(_ questions: [Question]) -> [Question] { questions.filter { !isStackQuestion($0) } }
 
-    /// "3 drafts · 2 choices · 2 results · 1 plan": what waits, by kind (a plain question counts as a choice). Empty when nothing waits.
+    /// "3 drafts · 2 choices · 2 test results · 1 plan": what waits, by kind (a plain question counts as a choice). Empty when nothing waits.
     static func countsText(_ items: [ReviewItem]) -> String {
         func n(_ kinds: [ReviewItemKind]) -> Int { items.filter { kinds.contains($0.kind) }.count }
         let parts: [(Int, String, String)] = [(n([.draft]), "draft", "drafts"), (n([.choice, .plainQuestion]), "choice", "choices"),
-                                              (n([.check]), "result", "results"), (n([.plan]), "plan", "plans"), (n([.link]), "link", "links"),
+                                              (n([.check]), "test result", "test results"), (n([.plan]), "plan", "plans"), (n([.link]), "link", "links"),
                                               (n([.run]), "command", "commands")]
         return parts.filter { $0.0 > 0 }.map { "\($0.0) " + ($0.0 == 1 ? $0.1 : $0.2) }.joined(separator: " · ")
     }

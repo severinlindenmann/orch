@@ -253,7 +253,9 @@ function moveContext(actRetry) {
     h:(tag, attrs) => { const n = {tag, attrs, listeners:{}, addEventListener(t, f) { n.listeners[t] = f; }, remove() { n.removed = true; }}; return n; },
     document:{querySelectorAll:() => []}};
   ctx.ticketOf = id => ctx.state.tickets.find(t => t.id === id);
-  ctx.window = {orch:{toast:(text, kind) => { const item = {text, kind, remove() { item.removed = true; }, querySelector:() => ({before(n) { item.undo = n; }})}; toasts.push(item); return item; }}};
+  ctx.window = {orch:{toast:(text, kind) => { const item = {text, kind, remove() { item.removed = true; }, querySelector:() => null,
+    // the master toast (UI.toast): its Dismiss button carries the word, no aria-label (ORCH-2149: Undo was looked up by the label and never shown)
+    querySelectorAll:() => [{textContent:'Dismiss', getAttribute:() => null, before(n) { item.undo = n; }}]}; toasts.push(item); return item; }}};
   vm.createContext(ctx); vm.runInContext(moveSource, ctx); return ctx;
 }
 test('status change is optimistic with an Undo notice, before the server answers', async () => {

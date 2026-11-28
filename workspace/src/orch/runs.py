@@ -833,9 +833,12 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         waiting = bool(undelivered(root, tid))
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
+        # The ticket's record of this run gets its end (history.md 'Runs') BEFORE the claim goes: whoever sees
+        # the claim gone reads a finished record (ORCH-2215). The ticket write waits 5 s at most for its own
+        # lock and nothing that holds that lock waits for this one.
+        with contextlib.suppress(Exception):
+            tickets.run_ended(root, tid, rec["run"])
         _release_locked(root, tid, rec)
-    with contextlib.suppress(Exception):  # the ticket's record of this run gets its end (history.md 'Runs')
-        tickets.run_ended(root, tid, rec["run"])
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
     from orch import worktrees
 

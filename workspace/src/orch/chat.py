@@ -402,6 +402,9 @@ def chat_files(root: Path, gid: str, names) -> list[dict]:
             or "/" in name
             or "\\" in name
             or "\x00" in name
+            # R1.6: on Windows `folder / "C:x"` leaves the folder (a drive-qualified name), and "x:y" names a
+            # second stream of x. No attached file has such a name: refused on every system, as the other bad names
+            or ":" in name
             or p.is_symlink()
             or not p.is_file()
         ):
@@ -434,6 +437,10 @@ def say(
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
     tickets.no_secret(root, {"text": text}, "Chat text")
+    # R5.2: the file names go into the Chat history and the helper's input like the words: the same scan
+    tickets.no_secret(
+        root, {"name": [str(f or "") for f in list(files or [])[: MAX_SAY_FILES + 1]]}, "Chat file"
+    )
     gid = tickets.ensure_general(root, who)
     kept = chat_files(root, gid, files)
     told = "\n\n".join(x for x in (text, files_line(gid, kept)) if x)
@@ -580,6 +587,16 @@ def make_ticket(root: Path, mid: str, title: str | None = None, by: str | None =
     return result
 
 
+def _from_workspace(m: dict) -> bool:
+    """A Chat line another workspace wrote (relay._chat_record: by = its id, via "workspace")."""
+    return m.get("via") == "workspace" and bool(re.fullmatch(r"ws_[a-z0-9]{10}", str(m.get("by") or "")))
+
+
+def _asks(m: dict) -> bool:
+    """A Chat line that asks for something: the person's, or another workspace's. Never the helper's own."""
+    return m.get("by") == "you" or _from_workspace(m)
+
+
 def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None = None) -> dict:
     who = tickets.current_actor(by)
     if tickets.agent_tool() or not who.startswith("human:"):
@@ -608,15 +625,18 @@ def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None 
             convo = next((i for i in range(end, -1, -1) if entries[i].get("convo_start")), -1)
             moved_end = next((i + 1 for i in range(end, -1, -1) if entries[i].get("moved_to")), -1)
             boundary = max(convo, moved_end, 0)
-            start = next((i for i in range(boundary, end + 1) if entries[i].get("by") == "you"), None)
+            # ORCH-2354: the helper also proposes a ticket for what another workspace asked ("send the weekly
+            # report"); nobody typed in Chat then. That request starts the exchange like a person's message,
+            # or the person's click on Make ticket was refused three times with nothing they could do.
+            start = next((i for i in range(boundary, end + 1) if _asks(entries[i])), None)
             if start is None:
                 raise Refused("Nothing new to make a ticket from.")
-            # Only the exchange the proposal answers: the helper's turns before it and the person's last
-            # run of messages before those, never earlier unrelated Chat.
+            # Only the exchange the proposal answers: the helper's turns before it and the last run of
+            # messages (the person's, or another workspace's) before those, never earlier unrelated Chat.
             i = end
-            while i >= start and entries[i].get("by") != "you":
+            while i >= start and not _asks(entries[i]):
                 i -= 1
-            while i - 1 >= start and entries[i - 1].get("by") == "you":
+            while i - 1 >= start and _asks(entries[i - 1]):
                 i -= 1
             conversation = entries[max(i, start) : end + 1]
             making = {"id": tickets.new_id(root), "messages": [m["id"] for m in conversation]}
@@ -653,7 +673,12 @@ def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None 
                 via = via if isinstance(via, str) and tickets.VIA_RE.fullmatch(via) else "chat"
                 tickets.add_history(
                     ticket,
-                    who if m.get("by") == "you" else helper,
+                    # another workspace's words stay marked as theirs (data from outside, R3.2)
+                    who
+                    if m.get("by") == "you"
+                    else relay._by_relay(m["by"])
+                    if _from_workspace(m)
+                    else helper,
                     m.get("text", ""),
                     via,
                 )

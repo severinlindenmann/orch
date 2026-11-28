@@ -1,7 +1,8 @@
 name: quarantine
 # Flaky checks taken out of the merge queue (ORCH-2363, owner 27 Nov): the queue was red 756 of 840 minutes because of
 # three dashboard click-throughs (a-board-families, f-sync-page, q-automation-repeats; p-looks-good-cases and
-# s-role-page joined them with the 27 Nov train, ORCH-2372) and the suites at a fake clock
+# s-role-page joined them with the 27 Nov train and left again when ORCH-2372 fixed their slow lane) and the suites
+# at a fake clock
 # (clock.yml). They run here instead, never required anywhere: nightly on develop, on every push to a release branch
 # and by hand. No pull_request trigger, so a queue group or a pull request never sees these checks; the release keeper
 # leaves this workflow's checks out when it judges a release pull request (releasekeeper.QUARANTINE_WORKFLOW).

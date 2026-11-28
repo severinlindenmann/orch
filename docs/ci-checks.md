@@ -144,9 +144,8 @@ late or did not come (ORCH-454).
 ## Quarantine (ORCH-2363)
 
 Owner, 27 Nov: the merge queue was red 756 of 840 minutes because of flaky checks, so they left every required set
-until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and five click-throughs
-(`a-board-families`, `f-sync-page`, `q-automation-repeats`, and since the 27 Nov train `p-looks-good-cases` and
-`s-role-page`, which time out when their lane is slow late in a run, ORCH-2372: `QUARANTINED` in
+until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and three click-throughs
+(`a-board-families`, `f-sync-page`, `q-automation-repeats`: `QUARANTINED` in
 `workspace-addons/dashboard/clickthrough/run.cjs`, each with the ticket that fixes it). `ci.yml` no longer calls
 `clock.yml`, and a default click-through run (pull request, queue group, develop, release) leaves the quarantined
 ones out; `--only <name>` still runs one (the light job does so for a click-through a pull request changes).
@@ -156,6 +155,10 @@ and by hand (`--quarantined` runs only the quarantined click-throughs). It has n
 group or pull request sees these checks, and the release keeper leaves the workflow's checks out when it judges a
 release pull request. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
 keeper, not started, no rerun, no revert); while it is open, each further red run adds a note to it.
+
+`p-looks-good-cases` and `s-role-page` were quarantined with the 27 Nov train and are back in the default run
+(ORCH-2372): they timed out late in a run because every Home read left a chain of `orch needs` processes behind
+that never ended (the built-in relay add-on's needs asked `orch needs` again); that is fixed in `orch/needs.py`.
 
 **Back out of quarantine:** fix the check, see it green in the `quarantine` workflow, then in one pull request
 remove its `QUARANTINED` entry (or call `clock.yml` from `ci.yml` again), update this section and the table, and
@@ -217,8 +220,10 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
-- **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
-  queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
+- **Busy**: a develop push or a manual run while the runner is busy goes to GitHub's machines (one runner, one
+  job at a time: a manual proof run sat queued behind the run before it, ORCH-2323); set
+  `MAC_RUNNER_WHEN_BUSY=wait` to queue it on the Mac instead. The nightly run and release pull requests always
+  wait for the Mac. A second Mac runner is a machine job for the owner (`scripts/mac-runner/setup.sh` on that Mac).
 - **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
   owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
   stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root, and gives the
@@ -286,9 +291,10 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
-- **Queue capacity (`EDGE_RUNNER=orch-edge-queue`)**: route only the add-on Python suites and lightweight rules
-  and contract checks to edge (brand stays on GitHub: its tests run the runner's own hooks; the Linux workspace
-  shards stay on GitHub too, their timing tests were not yet stable on edge, ORCH-2329) on develop pushes and same-repository
+- **Queue capacity (`EDGE_RUNNER=orch-edge-queue`)**: route only the add-on Python suites, the Linux workspace
+  shards and lightweight rules and contract checks to edge (brand stays on GitHub: its tests run the runner's
+  own hooks; the workspace shards are back on edge since ORCH-2329 made their four timing tests steady, with a
+  30-minute limit per shard there) on develop pushes and same-repository
   `orch-queue/` PRs into develop. This does not turn on the extra builds above. The hosted lookup checks the
   runner list before scheduling; if none is online or the list is unavailable the jobs use `ubuntu-latest`.
   Busy online runners accept queued work; GitHub cannot move a job already assigned labels if the pool then

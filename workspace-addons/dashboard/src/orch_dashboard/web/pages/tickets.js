@@ -358,7 +358,9 @@ function ticketNext(t) {
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
     // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
     // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
-    if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
+    // one word per state, the ticket page's (ORCH-1696): a sent-back ticket reads Changes asked, never Paused
+    if (window.DashHelpers.changesAsked(t)) text = 'Changes asked';
+    else if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
@@ -556,7 +558,7 @@ function boardSignal(t, lane, parts) {
     const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp)).replace(/^Waits /, '').replace(/^until /, 'Until ');
     if (text) return h('span', {className:'tile-sig', title:text}, text);
   }
-  if (ticketIsPaused(t) && ['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running) return h('span', {className:'tile-sig'}, 'Paused');
+  if (ticketIsPaused(t) && ['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running) return h('span', {className:'tile-sig'}, window.DashHelpers.changesAsked(t) ? 'Changes asked' : 'Paused');
   if (parts.length && !t.release && !t.epic) return boardPartsBar(t, parts, boardPartsOpen.has(t.id));
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
   if (quiet) return h('span', {className:'tile-sig'}, quiet);
@@ -798,7 +800,7 @@ function offerStart(id) {
   const look = {align:'start'};
   look.style = 'ghost';  // a quiet button in a notice
   if (!startButtonIn(start, ticketOf(id), look)) return;
-  toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
+  toastAction(toast, start);
 }
 /* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
    or Cancel. Resolves true to go on. */
@@ -813,6 +815,14 @@ function confirmOpenKids(t, open) {
       h('p', {}, (open.length === 1 ? '1 sub-ticket is' : open.length + ' sub-tickets are') + ' not done yet: ' + names + '.')), actions);
     d.showModal();
   });
+}
+// ORCH-2149 (1): a button in a toast (Undo, Start helper) sits before its Dismiss button. The master toast's
+// Dismiss carries its word, the older one an aria-label; with neither the button goes last. It was looked up by
+// the aria-label only, so 'Moved to Done' had no Undo.
+function toastAction(toast, button) {
+  const all = toast?.querySelectorAll ? [...toast.querySelectorAll('button')] : [];
+  const dismiss = all.find(b => b.getAttribute?.('aria-label') === 'Dismiss notification' || b.textContent === 'Dismiss');
+  if (dismiss) dismiss.before(button); else toast?.append?.(button);
 }
 function moveTicket(id, status, undoing = false, extra = {}) {
   if (status === 'done' && !undoing && extra.quiet !== true && !extra.kids_ok) {
@@ -843,7 +853,7 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   if (!undoing && toast?.querySelector) {
     const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
     undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true, {data:before}); });
-    toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+    toastAction(toast, undo);
   }
   const run = (async () => {
     let result;
@@ -996,7 +1006,7 @@ function bulkNotice(text, ok, failed, undo) {
     if (undo && toast?.querySelector) {
       const back = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
       back.addEventListener('click', () => { toast.remove(); undo(); });
-      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(back);
+      toastAction(toast, back);
     }
   }
   if (failed) window.orch.toast((failed === 1 ? '1 ticket' : failed + ' tickets') + ' could not be saved. Try again, or change them on their tickets.', 'error');
@@ -1239,6 +1249,8 @@ function calendarAction(action, control) {
 function list() {
   syncTicketAddress();
   const visible = filteredTickets();
+  // ORCH-1699: no ticket at all: no views, filters or search, only the first step
+  if (!tickets().length) return fragment(heading('Tickets'), ticketsEmpty());
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));

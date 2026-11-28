@@ -670,6 +670,8 @@ def test_a_private_write_asks_git_twice_and_starts_no_agent(proj, monkeypatch):
     asked = []
     monkeypatch.setattr(adapters, "detect", lambda **k: asked.append(k) or [])
     seen = _count_git(monkeypatch)
+    harness._PRIVATE_SEEN.clear()  # a new command: nothing git said is kept (ORCH-2313, ORCH-2384)
+    harness._TRACKED_SEEN.clear()
     net.write_json(proj / ".orch" / "secrets" / "x.json", {"a": 1}, private=True)
     assert seen == ["ls-files", "check-ignore"]
     assert asked and all(k == {"versions": False} for k in asked)

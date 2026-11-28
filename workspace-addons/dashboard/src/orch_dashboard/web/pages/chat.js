@@ -176,6 +176,8 @@ function chatNewChatRows(onPick) {
 function chatPresence() {
   const blocked = chatHelperBlocked();
   if (blocked) return {state:'stopped', text:'Stopped · ' + blocked.replace(/\.$/, ''), action:'fix'};
+  // ORCH-2149 (2): no helper tool set up is not "Ready to answer"; the way on is the button in the conversation
+  if (typeof ticketNoHelperTool === 'function' && ticketNoHelperTool()) return {state:'off', text:'Not set up yet'};
   if (array(state?.services).some(x => x && x.running === false)) return {state:'off', text:'Not running', action:'start'};
   let rows = [];
   try { rows = array(window.DashHelpers?.helperRows?.(tickets(), state?.runs)).filter(r => r.state === 'working' && !r.finished); } catch { rows = []; }
@@ -350,6 +352,12 @@ function chatMessage(m, previous, g, index, readOnly, lastMine, after = null) {
 const CHAT_PROMPTS = [['Plan something', 'Help me plan my week'], ['Compare options', 'Help me compare two options'], ['Check a result', 'What is still open this week?']];
 // Empty chat in the new frame: the three starters, drawn as a first message from your helper.
 function chatWelcome() {
+  // ORCH-2149 (2): with no helper tool set up nobody answers here; the way on is to set one up (the words of the
+  // ticket page's Two ways card), never three starters for a helper that is not there
+  if (typeof ticketNoHelperTool === 'function' && ticketNoHelperTool()) return h('article', {className:'thread-line chat-welcome', 'data-key':'welcome-no-helper'}, chatAvatar('Helper', true),
+    h('div', {className:'thread-line-body'}, h('div', {className:'thread-line-head'}, 'No helper is set up yet'),
+      chatText('p', 'chat-muted', 'Set it up once. After that you can talk things through here.'),
+      h('div', {className:'row'}, h('a', {className:'btn primary sm', href:'#settings/helper', 'data-key':'chat-setup-helper'}, 'Set up a helper'))));
   return h('article', {className:'thread-line chat-welcome', 'data-key':'welcome'}, chatAvatar('Helper', true),
     h('div', {className:'thread-line-body'}, h('div', {className:'thread-line-head'}, 'Talk it through with your helper'),
       chatText('p', 'chat-muted', 'Nothing written today. Start with one of these or write your own.'),

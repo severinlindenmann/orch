@@ -1351,6 +1351,14 @@ def _set_state(root: Path, tid: str, run: str, state: str, asks: str | None = No
 ATTENTION_CLEAR_SECONDS = 3.0  # the dialog must stay gone this long before a person's OK no longer counts
 
 
+def attention_clear_seconds() -> float:
+    """ATTENTION_CLEAR_SECONDS; ORCH_RUN_ATTENTION_CLEAR_SECONDS changes it (tests, ORCH-2305)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_ATTENTION_CLEAR_SECONDS", ATTENTION_CLEAR_SECONDS))
+    except ValueError:
+        return ATTENTION_CLEAR_SECONDS
+
+
 def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
     """The tool asked for a person's OK on the screen after it was up (attention, no first-run screen) and the
     dialog went away without a Stop or a new prompt: the tool took a decision by itself (it blocked the call
@@ -1380,7 +1388,7 @@ def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | Non
     if since != live.get("since"):
         memo["attention_gone"] = (live.get("since"), t)
         return False
-    if t - first < ATTENTION_CLEAR_SECONDS:
+    if t - first < attention_clear_seconds():
         return False
     memo.pop("attention_gone", None)
     with runs.locked(root, tid):
@@ -1426,6 +1434,32 @@ def _dialog_rows(pane: str) -> list[str]:
     return rows
 
 
+def _real_top(raw: list[str], qrow: int) -> int | None:
+    """The row of the dialog's own top border among the rows read, or None when it was not read (ORCH-2383).
+    Text inside a dialog never starts in the first column: the tool indents every row of it (title, the
+    command and its wrapped rows, a hook's words), or draws a side bar before it. So, going up from the
+    question, the first filled row that is not inside is where the dialog starts, and it has to be the border
+    the tool draws there. A command that imitates a border or a title stays inside, and a dialog taller than
+    the rows read has no top among them. With no such column to go by (a question in the first column, no
+    box), the top cannot be told from the command's own text: None."""
+    q = raw[qrow]
+    boxed = q.lstrip()[:1] in _SIDES
+    if not boxed and not q[:1].isspace():
+        return None
+    for i in range(qrow - 1, -1, -1):
+        r = raw[i]
+        if not r.strip():
+            continue
+        if boxed:
+            if r.lstrip()[:1] in _SIDES:
+                continue
+            return i if r.lstrip()[:1] in "\u256d\u250c" else None
+        if r[:1].isspace():
+            continue
+        return i if len(r) >= 20 and " " not in r and _SEPARATOR.fullmatch(r) else None
+    return None
+
+
 def _unwrap(lines: list[str]) -> str:
     """Rows of a block as written: a row cut at the full width (a long word) goes on without a break, so a
     long path is copied whole; any other row ends a line as on the screen."""
@@ -1444,7 +1478,12 @@ def confirm_prompt(pane: str) -> dict | None:
     "<digit>", command: <the call as shown, or None>, reason: <the hook's words, or None>, unclear: <True when
     the dialog could not be read with certainty: show no command and offer no answer>, digest}. yes is
     the plain "Yes" (once, never "Yes, and don't ask again"), no the first option that starts with "No"."""
-    rows = _dialog_rows(pane)[-CONFIRM_TAIL:]
+    whole = _dialog_rows(pane)
+    rows = whole[-CONFIRM_TAIL:]
+    # the same rows with their first column kept (what is inside the dialog is indented or behind a side bar)
+    raw = [ln.rstrip() for ln in _ANSI.sub("", pane).replace("\r", "").split("\n")][: len(whole)][
+        -CONFIRM_TAIL:
+    ]
     filled = [i for i, r in enumerate(rows) if r.strip()]
     opts: list[tuple[int, str, str, bool]] = []  # (row, digit, label, selected)
     for i in reversed(filled[-12:]):
@@ -1470,18 +1509,19 @@ def confirm_prompt(pane: str) -> dict | None:
     if yes is None or no is None:
         return None
     # The command is the helper's own text and could imitate the dialog's rows (a "Bash command" line, a line
-    # of dashes, a "Hook ... requires confirmation" line). The dialog must be bounded (its top border in the
-    # rows read) and hold exactly one title, at most one hook line and 0 or 2 separators; anything else is
-    # unclear: no command is shown and no answer is offered (the card sends the person to the terminal).
-    tops = [i for i in above if _SEPARATOR.fullmatch(rows[i].strip()) and len(rows[i].strip()) >= 20]
-    heads = [i for i in above if _TOOL_HEAD.match(rows[i].strip())]
-    hooks = [i for i in above if _HOOK_HEAD.match(rows[i].strip())]
+    # of dashes, a "Hook ... requires confirmation" line). An answer is offered only when the whole dialog was
+    # read from its real top border (_real_top: never a row of the command, ORCH-2383) and it holds at most
+    # one title, at most one hook line and 0 or 2 separators. Anything else is unclear: no command is shown
+    # and no answer is offered (the card sends the person to the terminal). So a command that wraps over more
+    # rows than are read (ORCH-2352), with or without a title of its own near its end, is never answered blind
+    top = _real_top(raw, qrow)
+    inside = [i for i in above if top is not None and i > top]
+    tops = [] if top is None else [top]
+    heads = [i for i in inside if _TOOL_HEAD.match(rows[i].strip())]
+    hooks = [i for i in inside if _HOOK_HEAD.match(rows[i].strip())]
     command = reason = None
-    unclear = len(heads) > 1 or len(hooks) > 1 or (bool(heads) and not any(t < heads[0] for t in tops))
-    # ORCH-2352: a command that wraps over more rows than are read pushes the title and the top border out of
-    # them. With no title there is no command to show, so an answer is offered only when the dialog is still
-    # bounded and no hook asked: a hook's confirm is never answered blind.
-    unclear = unclear or (not heads and (bool(hooks) or not tops))
+    # with no title there is no command to show: a hook's confirm is then never answered blind
+    unclear = top is None or len(heads) > 1 or len(hooks) > 1 or (not heads and bool(hooks))
     if heads and not unclear:
         head = heads[0]
         hook = hooks[0] if hooks and hooks[0] > head else None
@@ -1998,6 +2038,55 @@ def stop_hidden(root: Path) -> list[str]:
     return done
 
 
+def stop_all(root: Path) -> list[str]:
+    """`orch uninstall` (ORCH-2299): end everything orch started for this workspace: every helper session
+    and run (the hidden Chat helper's and the Manager's too) and the sessions' own background program.
+    Nothing waiting in line is started in its place. The run this command runs inside is never stopped from
+    within. Returns the names of what was stopped (a ticket's key, or "Chat"); never raises."""
+    names: list[str] = []
+    inside = False
+    for rec in records(root):
+        tid = rec.get("ticket")
+        try:
+            if not isinstance(tid, str):
+                continue
+            if _inside_run(rec) or os.environ.get("ORCH_TICKET") == tid:
+                inside = True
+                continue
+            was = runs.state(rec)
+            with runs.locked(root, tid):
+                cur = runs.read(root, tid)
+                if not cur or cur["run"] != rec["run"]:
+                    continue
+                cur["stop_requested"] = tickets.now()
+                runs._write(root, cur)
+            _close(root, cur, interrupt=True)
+            if was != "dead":
+                names.append(_session_name(root, tid))
+        except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+            continue
+    if inside or shutil.which("tmux") is None:
+        return names
+    with contextlib.suppress(Exception):  # sessions without a run record, then the program that held them
+        left = tmux(root, "list-sessions", "-F", "#{session_name}")
+        if left.returncode == 0:
+            for sid in left.stdout.split():
+                name = _session_name(root, sid) if re.fullmatch(r"t_[a-z0-9]+", sid) else "a helper"
+                if name not in names:
+                    names.append(name)
+            tmux(root, "kill-server")
+    return names
+
+
+def _session_name(root: Path, tid: str) -> str:
+    with contextlib.suppress(Exception):
+        if tickets.is_general(root, tid):
+            return "Chat"
+        if tickets.is_manager(root, tid):
+            return "the Manager"
+    return ref(root, tid)
+
+
 def _inside_run(rec: dict) -> bool:
     """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
     stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET
@@ -2295,10 +2384,11 @@ def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
     return min(asked)
 
 
-def waiting_line(root: Path) -> list[tuple[str, str]]:
+def waiting_line(root: Path, closed: list[str] | None = None) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
     low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
-    then the oldest first. [(ticket id, priority)]"""
+    then the oldest first. [(ticket id, priority)]. A Done or Dropped ticket is never in it; `closed`
+    collects those."""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -2306,6 +2396,11 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if runs.read(root, tid):
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if items and _status(root, tid) in ("done", "dropped"):
+            # ORCH-2295: a closed ticket never starts by itself (ORCH-247), so it holds no place in line
+            if closed is not None:
+                closed.append(tid)
+            continue
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
@@ -2322,10 +2417,31 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
+def leave_line(root: Path, tid: str) -> bool:
+    """Take the ticket out of the line for a free helper place (ORCH-2295): its queued start is removed, so
+    nothing starts it by itself. A person's own waiting messages stay. True when it stood in line."""
+    with runs.locked(root, tid):
+        items = runs._pending_read(root, tid)
+        keep = [i for i in items if i.get("delivered_at") or i.get("via") != "slots"]
+        if len(keep) == len(items):
+            return False
+        runs._pending_write(root, tid, keep)
+        rec = runs.read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            runs._write(root, rec)
+        return True
+
+
 def start_waiting(root: Path) -> list[str]:
     """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
     started: list[str] = []
-    for tid, _ in waiting_line(root):
+    closed: list[str] = []
+    line = waiting_line(root, closed)
+    for tid in closed:  # a place an older orch left for a ticket that is Done: it goes (ORCH-2295)
+        with contextlib.suppress(Exception):
+            leave_line(root, tid)
+    for tid, _ in line:
         if _full(root) or _held(root):
             break
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]

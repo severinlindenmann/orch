@@ -2,6 +2,7 @@
 The watcher and the idle close leave such a session alone."""
 
 import json
+import os
 import subprocess
 import time
 
@@ -162,8 +163,15 @@ def convo(tmp_path, monkeypatch):
     p.write_text("")
     monkeypatch.setattr(bgwork, "_path", lambda root, rec: p)
 
+    stamp = [p.stat().st_mtime_ns]
+
     def write(entries):
         p.write_text("\n".join(_lines(entries)) + "\n")
+        # A rewrite of the same length inside one step of the file clock (4 ms on the orch edge runners, Linux
+        # 6.12 with HZ=250) looks unchanged to bgwork.read (size and file time), so the watcher saw the old
+        # lines (ORCH-2329). A real conversation only grows; here every write gets its own file time.
+        stamp[0] += 1_000_000_000
+        os.utime(p, ns=(stamp[0], stamp[0]))
 
     return write
 

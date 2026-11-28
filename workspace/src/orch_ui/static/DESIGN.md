@@ -156,7 +156,7 @@ the first rows without any extra work.
 - SX-9 Status icon set: SVG icons for To do / Working / Needs you / Check / Done used in pills, group headers, board
   columns, sidebar badges and the stepper (if it survives); no "!" "◇" "○" "✓" text glyphs; each status one colour
   (amber only for "needs you", live colour for Working, green for Done, neutral for To do and Check).
-- SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon, one sentence "what will appear and
+- SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon (`UI.state({icon})`, an icons.js name; never a ring that reads as loading), one sentence "what will appear and
   when", one secondary button; never inside a card with a title, never with search/filters above it, never twice on a
   page (Messages, Factory). `UI.state({action:{label, href, target}})` draws that button as a link when the next step
   is another page (gallery `#w-empty-link`); a filter or search that shows nothing offers Show all / Clear search.
@@ -167,6 +167,9 @@ the first rows without any extra work.
   (update started/finished) are toasts.
 - SX-13 Dialogs: sizes S/M/L, one icon-only close, title 20/28, footer rule [tertiary] … [Cancel] [Primary]; info-only
   dialogs become inline text; the question card never opens a dialog.
+  A question's choices on Home and on the ticket page are the answer tiles (`.answer-options`, `.answer-option`,
+  gallery `#answer-tiles`, ORCH-2388): one tile per choice, Suggested on its tile, "Write your own…" under them;
+  never a filled button for the suggested choice.
 - SX-14 List row: 40-48 px, one line, [status icon] title · owner avatar · one time fact · attention marker; the row is
   the click target, the single action appears on hover/focus and always in the group header; no "…" per row.
 - SX-15 Card: 20 px padding, title 16/24, optional meta right (time only), one action in the footer row; cards hold

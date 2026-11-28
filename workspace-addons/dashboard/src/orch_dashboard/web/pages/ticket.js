@@ -1877,6 +1877,8 @@ function localStamp(at, withTime = true) {
 function ticketPaused(t, run) {
   return ['open', 'ready'].includes(t.status) && !run?.running && array(t.sessions).length > 0;
 }
+// The word of the one Start button on this page (pages/start.js): the sentence names the button it means (ORCH-1696).
+const ticketStartWord = t => array(t.sessions).length ? 'Continue' : 'Start helper';
 // ---- The ticket page: header (actions, title, one state line, stepper), tabs Overview / Tasks / Files / Activity, Properties.
 const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do && changeTask(c.text, c.origin));
 // One strip at the top of the ticket in every state: one status pill, one sentence, one main action (no stepper).
@@ -1897,11 +1899,15 @@ function ticketPrepareSentence(m) {
   return m.sentence;
 }
 function ticketStripModel(t, run, fresh) {
+  const noTool = typeof ticketNoHelperTool === 'function' && ticketNoHelperTool();  // ORCH-2388: then no line names a Start button
   const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
   // ORCH-415: a helper that may be stuck is passed too (helperState gives null when none runs), so the pill never says no helper
   const s = window.UI.ticketState(t, window.DashHelpers.helperState(run, t));
-  const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
+  // ORCH-1696: one word per state, the same as the tickets list: sent back reads Changes asked, a stopped helper Paused
+  const word = s.helper || s.pill !== 'todo' || s.word === 'Waiting' || ticketPrepare(t) ? s.word
+    : window.DashHelpers.changesAsked(t) ? 'Changes asked' : ticketPaused(t, run) ? 'Paused' : s.word;
+  const m = sentence => ({pill:s.pill, word, helper:s.helper || undefined, sentence});
   // ORCH-548: Looks good given on the Review page and still being saved (Undo there for a few seconds)
   if (t.status === 'done' && t.accept_saving) return m('Done: your Looks good is being saved.');
   if (t.status === 'done') {
@@ -1926,16 +1932,21 @@ function ticketStripModel(t, run, fresh) {
   const prep = ticketPrepare(t);
   if (prep) {
     const said = {waiting:'In line to be prepared. Start still works.', preparing:'Preparing: reading the links and filling in the ticket.',
-      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '. Press Start to begin.', not_prepared:'Not prepared yet. Start still works.'}[prep.state];
+      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '.' + (noTool ? '' : ' Press ' + ticketStartWord(t) + ' to begin.'), not_prepared:'Not prepared yet. Start still works.'}[prep.state];
     return {...m(said), prepare:prep.state};
   }
   if (run?.running || run?.state === 'maybe-stale') {
     // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
-    if (s.helper) return m((s.helper.detail || s.word) + '.');
+    if (s.helper) return m(((window.UI?.helperWhy ? window.UI.helperWhy(s.helper.detail) : s.helper.detail) || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
-  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
-  if (fresh) return m('Not started. Your helper begins when you press Start.');
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts' + (noTool ? '.' : '; press ' + ticketStartWord(t) + ' to begin now.'));
+  // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
+  // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
+  // ORCH-2388: with no helper tool there is no Start to press; the line says what is true
+  const begins = noTool ? 'No helper is set up yet.' : 'Your helper begins when you press ' + ticketStartWord(t) + '.';
+  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m(begins), word:'Not started'};
+  if (fresh) return m('Not started. ' + begins);
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
   if (t.status === 'active' && run?.state !== 'maybe-stale') return m('No helper is working on it right now.');
@@ -2116,7 +2127,7 @@ function ticketProperties(t, parent) {
       field('I review the result', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', doneWhenField(t), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
@@ -2124,6 +2135,11 @@ function ticketProperties(t, parent) {
     propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
+}
+// ORCH-1696: a long Done when reads three lines, then Show more (the master's UI.moreText); a click on it still edits it.
+function doneWhenField(t) {
+  const field = inlineField(t, 'done_when');
+  return window.UI?.moreText ? window.UI.moreText(clean(t.done_when), {node:field}) : field;
 }
 // Created and updated (or finished) in one quiet line at the foot of the rail.
 function railStamp(t) {
@@ -2294,9 +2310,15 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // While Prepare runs (ORCH-742) Start still shows: the prepare run is not the work.
     // ORCH-2140 W2: with no helper tool set up, the Two ways card below replaces a Start that cannot work; a result to
     // review goes on with Send back (W4), not with a second start
-    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review' && !(fresh && ticketNoHelperTool())) {
-      const plain = main.length > 0, start = ticketStartPick(t);
-      if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+    // ORCH-2388: with no helper tool no Start is drawn in any state (it was a greyed, squeezed button with its reason
+    // beside it); where the Two ways card does not show (a question is open, the ticket is not new) the bar offers
+    // the way out instead: Set up a helper
+    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review') {
+      if (ticketNoHelperTool()) { if (!ticketTwoWaysShown(t, fresh)) main.push(h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'ticket-setup-helper'}, 'Set up a helper')); }
+      else {
+        const plain = main.length > 0, start = ticketStartPick(t);
+        if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+      }
     }
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -2323,6 +2345,8 @@ function stripKicker(t, pill, extra, dataKey) {
 // computer and on the phone (the phone had no way back). Not in a shared copy, which has no Tickets page of its own.
 const ticketBack = () => !snapshot && window.UI?.pageBack ? window.UI.pageBack({label:'Tickets', href:'#tickets'}) : null;
 // ORCH-2140 W2: no helper tool is set up (the dashboard knows the list of tools). Unknown while settings load: false.
+// The Two ways card shows on a ticket nobody started that has no open question (the question card comes first).
+const ticketTwoWaysShown = (t, fresh) => !snapshot && !!fresh && !questions(t).length && ticketNoHelperTool();
 const ticketNoHelperTool = () => Array.isArray(state?.settings?.agents) && !!window.StartChoiceState?.tools && !window.StartChoiceState.tools(state.settings.agents).tools.length;
 // ORCH-2140 W2 (owner accepted B): a saved ticket no helper can start yet is no dead end. Two ways: set a helper up
 // here once, or paste one line into the AI tool the person already uses.
@@ -2385,7 +2409,8 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
   const kicker = stripKicker(t, pill, [agent ? name(agent) : null, minutes], 'ticket-kicker');
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
-  const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
+  // a wait for an OK says only that (ORCH-2314): the command is on the OK card in Live, not cut off here
+  const why = helper.state !== 'working' && helper.detail ? clean(window.UI?.helperWhy ? window.UI.helperWhy(helper.detail) : helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
   const idle = ['idle', 'stuck'].includes(helper.state);
   const stop = ticketButton([iconEl('stop'), idle ? 'Stop idle helper' : 'Stop'], 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'});
@@ -2877,12 +2902,6 @@ function mountQuestion(host, q, context = {}) {
       return {status:200, who, via:'dashboard'};
     }
   });
-  if (host.closest('.ticket-page')) {
-    const labelAnswer = () => { const other = host.querySelector('.qoptions .quiet'); if (other && other.textContent !== 'Write your own answer') other.textContent = 'Write your own answer'; };
-    labelAnswer();
-    const observer = new MutationObserver(labelAnswer); observer.observe(host, {childList:true, subtree:true});
-    const destroy = mounted.destroy.bind(mounted); mounted.destroy = () => { observer.disconnect(); destroy(); };
-  }
   // The shared component uses the real key for persistence; only its visible label changes.
   const label = host.querySelector('.qmeta .muted');
   if (label) label.textContent = clean(ticketOf(q.ticket)?.title) || 'Ticket';
@@ -3057,7 +3076,7 @@ async function looksGoodAll(req) {
     if (toast?.querySelector) {
       const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
       undo.addEventListener('click', () => { toast.remove(); for (const t of moved) moveTicket(t.id, 'review', true, {quiet:true}); });
-      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+      toastAction(toast, undo);
     }
     if (moved.length < waiting.length) window.orch.toast((waiting.length - moved.length) + ' could not be saved. Try those again from their tickets.', 'error');
     reply({type:'orch.looksgood.done', moved:moved.length});

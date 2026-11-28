@@ -216,6 +216,18 @@ def test_stack_and_answered_for_a_session(srv, ws, card):
     assert st == 200 and json.loads(body) == []
 
 
+def test_stack_says_decision_first_only_when_the_switch_is_on(srv, ws, card, run):
+    """ORCH-2187 (Focused review F): the page reads the workspace's own switch with the list. Off (the
+    default): no key, the answer is as before. On: decision_first true, the page draws "You decide" first."""
+    port = srv.server_address[1]
+    ck = open_session(ws, port)
+    off = json.loads(req(port, "GET", "/api/stack", headers={"Cookie": ck})[2])
+    assert "decision_first" not in off and set(off) == {"workspace", "cards"}
+    assert run("config", "set", "workflow.decision_first", "on", "--by", "human:tester")[0] == 0
+    on = json.loads(req(port, "GET", "/api/stack", headers={"Cookie": ck})[2])
+    assert on["decision_first"] is True and on["cards"] == off["cards"]
+
+
 def test_answer_runs_the_core_in_a_child(srv, ws, card):
     port = srv.server_address[1]
     ck = open_session(ws, port)

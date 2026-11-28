@@ -16,6 +16,10 @@ from orch.text import at_word, clean_untrusted
 
 SENT_LOG = ("run", "relay", "sent.jsonl")  # under .orch/, which is not tracked by git
 SENT_MAX = 400  # lines kept in the sent log
+# ORCH-2157: phone notes filled the 400 lines within a day, so a late reply from a workspace no longer found
+# the ticket that asked. Lines to a workspace are kept 30 days on top (at most SENT_PEER_MAX of them).
+SENT_PEER_DAYS = 30
+SENT_PEER_MAX = 10000  # a size bound only: far above the messages a workspace sends to others in 30 days
 KINDS = {
     "text": "Message",
     "file": "File",
@@ -116,9 +120,25 @@ def record_sent(root: Path, msg: dict) -> None:
     try:
         have = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
         have.append(json.dumps(entry))
-        net.write_atomic(path, ("\n".join(have[-SENT_MAX:]) + "\n").encode("utf-8"), True)
+        net.write_atomic(path, ("\n".join(_kept(have)) + "\n").encode("utf-8"), True)
     except OSError:
         pass
+
+
+def _kept(lines: list[str]) -> list[str]:
+    """The last SENT_MAX lines, and before them the lines to a workspace from the last SENT_PEER_DAYS days."""
+    older, recent = lines[:-SENT_MAX], lines[-SENT_MAX:]
+    cut = dt.datetime.now(dt.UTC) - dt.timedelta(days=SENT_PEER_DAYS)
+    keep = []
+    for ln in older:
+        try:
+            e = json.loads(ln)
+            at = dt.datetime.fromisoformat(str(e["at"]).replace("Z", "+00:00"))
+        except (ValueError, KeyError, TypeError):
+            continue
+        if str(e.get("to", "")).startswith("ws_") and at.tzinfo is not None and at >= cut:
+            keep.append(ln)
+    return keep[-SENT_PEER_MAX:] + recent
 
 
 def _sent(root: Path) -> list[dict]:
@@ -357,7 +377,8 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
     """RP5: one conversation per workspace (the people in the relay's list), oldest first. What a message says
     about itself comes from what this workspace already records: still in the outbox is "Not sent yet"; sent
     is "Sent"; a task they must allow first is "Waiting for <Name>". ORCH-2348: once the other workspace's
-    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back."""
+    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back;
+    "Declined" when their person declined a task (ORCH-2189)."""
     d = relay._read_dir(root)
     waiting: dict[str, list[dict]] = {}
     for m in relay.outbox_list(root):
@@ -415,6 +436,8 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
         unsent = any(w.get("id") == e["id"] for w in waiting.get(pid, []))
         if unsent:
             item["state"] = {"label": "Not sent yet", "tone": "warn"}
+        elif (got.get(e["id"]) or {}).get("state") == "declined":  # ORCH-2189: their person said no
+            item["state"] = {"label": relay.DECLINED, "tone": "warn"}
         elif e["type"] in ("delegate", "start") and not _yes(allowed, pid, e["type"]):
             item["state"] = {"label": plain(f"Waiting for {name}", 40), "tone": "warn"}
         elif e["id"] in silent:  # ORCH-2348: the person was asked about it on the ticket
@@ -501,13 +524,14 @@ def view(root: Path) -> dict:
         return out
     with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
         relay.auto_refresh(root)
+    relay.send_waiting(root)  # ORCH-2312: the open page sends what waits; no `orch relay` command needed
     peers = _peers(root)
     waiting = len(relay.outbox_list(root))
     if waiting:
         s = "s" if waiting != 1 else ""
         problem = relay.outbox_problem(root)
         out["notice"] = (
-            f"{waiting} message{s} wait to be sent: {problem}"
+            f"{waiting} message{s} {'waits' if waiting == 1 else 'wait'} to be sent: {problem}"
             if problem
             else f"The relay can't be reached. You can keep writing. {waiting} message{s} "
             + (

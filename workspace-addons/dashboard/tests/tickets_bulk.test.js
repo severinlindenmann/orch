@@ -81,7 +81,7 @@ test('Status: every picked ticket moves through moveTicket (quietly), one notice
   assert.deepEqual(moves.map(m => [m[0], m[1], m[3].quiet]).sort(), [['a', 'ready', true], ['c', 'ready', true]], 'b is in To do already');
   assert.deepEqual(toasts, [['ok', 'Moved 2 tickets to To do']]);
   let undo;
-  c.window.orch.toast = () => ({querySelector:() => ({before(n) { undo = n; }}), remove() {}});
+  c.window.orch.toast = () => ({querySelector:() => null, querySelectorAll:() => [{textContent:'Dismiss', getAttribute:() => null, before(n) { undo = n; }}], remove() {}});  // the master toast (ORCH-2149)
   c.pickTicket('a', true);
   await c.bulkAction({dataset:{field:'status', value:'done'}});
   assert.ok(undo, 'the notice carries Undo');

@@ -606,7 +606,7 @@ async function shelfView(page, dash, width) {
     if (!(await page.isVisible(`#live-bar [data-lbar-open="${id}"]`))) await page.click('#live-bar [data-lbar-list="helpers"]');  // its row is in the Helpers menu (ORCH-2198)
     await page.click(`#live-bar [data-lbar-open="${id}"]`);
   };
-  // a ticket with no results: the shelf says so in one line
+  // a ticket with no results: the shelf says so in one line (as a column; the strip above the chat is then hidden, ORCH-2314)
   await open('t_bar201');
   const empty = '#live-dock .live-pane[data-session="t_bar201"] .live-shelf';
   await page.waitForFunction(sel => /Nothing yet\. Pictures, pages and tables show up here\./.test(document.querySelector(sel)?.textContent || ''), empty, { timeout: 10000 });
@@ -659,7 +659,7 @@ async function minLayer(page) {
   await page.click('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]', { timeout: 3000 }).catch(() => page.keyboard.press('Escape'));
 }
 // Split right of a pane (ORCH-2200): Split right, then Chat with..., then the first live session not shown yet.
-// Split right / down opens its menu: from the header, or from More when the pane is under 600 px (ORCH-2199 fold)
+// Split right / down opens its menu: from the header, or from More when the pane is under 720 px (ORCH-2199 fold, ORCH-2314)
 async function openSplit(page, btn) {
   if (await page.isVisible(btn)) { await page.click(btn); return; }
   await page.click(btn.replace(/\[data-key="live-split-(right|down)"\]$/, '[data-key="live-pane-more"]'));
@@ -1572,7 +1572,7 @@ async function split(page, dash, width) {
     return panes();
   };
   const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
-  // ORCH-2199: every pane header has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and
+  // ORCH-2199: every pane header has Full screen, Split right, Split down, Pin, Close and More; under 720 px Split and
   // Pin fold into More (a phone has no split and no pin); More has the place (Where Focus sits) and the rest
   const controls = async () => {
     for (const p of await panes()) {
@@ -1586,7 +1586,7 @@ async function split(page, dash, width) {
       await page.waitForSelector('[data-key="live-more-menu"]', { timeout: 5000 });
       if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
       if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bar"]')) throw new Error(`More of ${p.key} has no Bar only`);
-      if (!phone) for (const k of ['live-pin', 'live-more-split-right', 'live-more-split-down']) if (!await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`)) throw new Error(`More of ${p.key} has no ${k} (it shows when the pane is under 480 px)`);
+      if (!phone) for (const k of ['live-pin', 'live-more-split-right', 'live-more-split-down']) if (!await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`)) throw new Error(`More of ${p.key} has no ${k} (it shows when the pane is under 720 px)`);
       await page.keyboard.press('Escape');
       await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
     }
@@ -2090,7 +2090,8 @@ async function wall(page, dash) {
     .then(s => (s.counts?.needs_you?.items || []).filter(i => !String(i.ticket).startsWith('t_bar')).length));
   for (const w of [(3 + own) + ' need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
   const total = (await page.textContent('[data-key="wall-total"]')).trim();
-  if (!/^24 sessions · \d+( of \d+)? helper places? in use$/.test(total)) throw new Error('the summary does not say 24 sessions and the helper places in use: ' + total);
+  // ORCH-1695: plain words; without a limit the counts above say it, the line is the sessions only
+  if (!/^24 sessions( · \d+ of \d+ helpers? working)?$/.test(total)) throw new Error('the summary does not say 24 sessions and the helpers working: ' + total);
   const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
   if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
   if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
@@ -2247,7 +2248,7 @@ async function manySessions(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]:not([data-wall-extra])').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
-  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
+  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
@@ -2839,7 +2840,7 @@ const STEPS = [
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
     see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
-      'One summary line on top, with the number of sessions and of helper places in use.', 'Each tile says in one plain sentence what its helper does.',
+      'One summary line on top, with the number of sessions and of helpers working.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
     async run({ page, dash }) {
       await wall(page, dash);
@@ -2951,7 +2952,7 @@ const STEPS = [
   {
     n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into up to four sessions with the pane controls', feature: [7],
     do: ['In the layer press Split right, pick Chat with... and a session; do it three times.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Where Focus sits (More), Bar only and close.'],
-    see: ['Two, three, then four panes sit next to each other with a thin divider between them; panes keep the order they were opened in.', 'Every pane has Full screen, Split right, Split down, Pin, Close and More; under 480 px Split and Pin are in More.',
+    see: ['Two, three, then four panes sit next to each other with a thin divider between them; panes keep the order they were opened in.', 'Every pane has Full screen, Split right, Split down, Pin, Close and More; under 720 px Split and Pin are in More.',
       'With four panes Split is not greyed: its menu says four is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
       'On a phone one session shows at a time and there is no split and no pin in the header.',
@@ -3196,7 +3197,7 @@ const STEPS = [
   {
     n: 34, pic: 'fd-34-shelf', area: 'chat', title: 'Results shelf beside or above the chat', feature: [10],
     do: ['Open a session whose ticket has no results, then one with a pull request.', 'Place Focus at the bottom, on the right, in full screen; then on a phone.'],
-    see: ['Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."',
+    see: ['Without results the column beside the chat says "Nothing yet. Pictures, pages and tables show up here."; the strip above the chat (on the right, on a phone) takes no row (ORCH-2314).',
       'The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.',
       'At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.'],
     run: ({ page, dash, width }) => shelfView(page, dash, width).catch(async e => { await extraShot(page, 'fd-34-shelf-failed', width).catch(() => {}); throw e; }),

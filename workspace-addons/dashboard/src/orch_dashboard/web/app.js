@@ -109,8 +109,29 @@ function loadFullTicket(ref) {
 }
 const fullAsked = new Map();  // ticket id -> the live row's updated_at it was read again for (once per change, also when that read fails)
 const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
+// The live row of a ticket, by id or key. ORCH-2388: it was a scan of every ticket at each call (250 to 400 ms of the
+// Review page at 10,000 tickets); now one look-up in an index built once per ticket list. A row that is not where the
+// index says (a list changed in place) or not in it falls back to the scan, so the answer is always the scan's.
+const ticketRowIndex = new WeakMap();
+const liveRowOf = id => {
+  const list = array(state?.tickets);
+  let ix = ticketRowIndex.get(list);
+  if (!ix || ix.n !== list.length) {
+    ix = {n:list.length, ids:new Map(), keys:new Map()};
+    list.forEach((t, i) => {
+      if (!t) return;
+      const tid = String(t.id), key = typeof t.key === 'string' ? t.key.toUpperCase() : null;
+      if (!ix.ids.has(tid)) ix.ids.set(tid, i);
+      if (key !== null && !ix.keys.has(key)) ix.keys.set(key, i);
+    });
+    ticketRowIndex.set(list, ix);
+  }
+  const a = ix.ids.get(String(id)), b = ix.keys.get(String(id).toUpperCase());
+  const i = a === undefined ? b : b === undefined ? a : Math.min(a, b);  // the first row that fits, as the scan gives
+  return i !== undefined && sameTicket(list[i], id) ? list[i] : list.find(t => sameTicket(t, id));
+};
 const ticketOf = id => {
-  const row = array(state?.tickets).find(t => sameTicket(t, id));
+  const row = liveRowOf(id);
   if (row && !row.slim) return row;
   const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
   if (!full) return row;
@@ -516,6 +537,8 @@ function render(arrived = new Set()) {
   const active = document.activeElement;
   const activeKey = nodeKey(active);
   const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'docs' ? 'Documentation' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  // ORCH-2176 (messenger draft, option A): the top bar's Chat button is not on the Chat page, which is the chat already
+  document.getElementById('open-agent').hidden = snapshot || r.kind === 'chat';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -977,6 +1000,16 @@ document.addEventListener('keydown', e => {
   const focusSearch = () => document.querySelector('[data-key="ticket-search"]')?.focus();
   if (route().kind !== 'tickets') { location.hash = '#tickets'; setTimeout(focusSearch, 0); } else focusSearch();
 });
+// ORCH-2149 (7): the room a dashboard-drawn page keeps for its scrollbar (0 where scrollbars lie over the page), for
+// the top bar of a framed add-on page. Read from the page itself with the gutter on: a scrolling box does not tell
+// (a browser may draw its own bars over the content and still keep the page's gutter).
+try {
+  const html = document.documentElement, was = html.style.scrollbarGutter;
+  html.style.scrollbarGutter = 'stable';
+  const room = Math.max(0, Math.round(window.innerWidth - html.getBoundingClientRect().width));
+  html.style.scrollbarGutter = was;
+  html.style.setProperty('--scrollbar-w', room + 'px');
+} catch (_) { /* no layout (a test page): the top bar keeps its own padding */ }
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('report-problem').hidden = snapshot;

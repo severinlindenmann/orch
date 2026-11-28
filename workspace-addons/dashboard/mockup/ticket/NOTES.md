@@ -206,7 +206,7 @@ Saved from the real ticket page (draft ORCH-730 section 6, draft folder draft-74
 
 - `ticket-preparing.html`: the sentence under the title says "Preparing: reading the links and filling in the ticket."
   with a small spinner; Start stays, no live Working header.
-- `ticket-prepared.html`: "☰ Prepared today 09:41. Press Start to begin." (hover: described by the helper, not checked).
+- `ticket-prepared.html`: "☰ Prepared today 09:41. Press Start helper to begin." (the sentence names the button: Start helper, or Continue after an earlier session, ORCH-1696). (hover: described by the helper, not checked).
   Under What was asked, What I found is one line ("2 sources read", "! 1 could not be opened"); a click opens the key
   facts and the sources with Open ↗. The sources it could not open stay in sight in the same box, each with Attach it
   (moves to Add to this ticket).
@@ -252,6 +252,9 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
   helper, or paste "Work on orch ticket ORCH-12" into the AI tool you already use) instead of a Start that cannot work.
 - ticket-question.html (W3): the header says only "Waiting for your answer since 12:26."; the question shows once, in
   its card, with what happens after the answer under it. No second Answer button in the header.
+- ticket-question.html (ORCH-2388): the choices of a question are the answer tiles of Home (master `.answer-option`,
+  Suggested on its tile, "Write your own…" under them): one look on Home and on the ticket page. With no helper tool
+  set up the bar holds "Set up a helper" where Start was; no greyed Start in any state.
 - ticket-review.html (W4): one Result card. The result first, then "What was done" with its evidence, then Looks good
   and Send back under it. No verdict buttons in the header and no Continue in Review.
 - Every ticket page (W5): the step is called Review (pill, stepper, history) and the switch reads "I review the result".

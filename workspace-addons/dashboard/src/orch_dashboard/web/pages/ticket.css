@@ -187,7 +187,7 @@
 .ticket-page .ticket-strip .ticket-strip-actions{flex:none;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .ticket-page .ticket-parent{display:block;margin-bottom:8px}
 .ticket-page .properties.compact .ticket-details{gap:12px}
-@media(max-width:760px){.ticket-page .ticket-strip .strip-h{flex-wrap:wrap}.ticket-page .ticket-strip .ticket-strip-text{flex:1 1 100%;order:-1}.ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}.ticket-page .ticket-strip .ticket-strip-actions>.cost-pick{flex:1 0 100%}}  /* the action row may shrink: it wraps instead of scrolling the page sideways (report r-1117-1256-ws-2) */
+@media(max-width:1099px){.ticket-page .ticket-strip .strip-h{flex-wrap:wrap}.ticket-page .ticket-strip .ticket-strip-text{flex:1 1 100%;order:-1}.ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}.ticket-page .ticket-strip .ticket-strip-actions>.cost-pick{flex:1 0 100%}}  /* the action row may shrink: it wraps instead of scrolling the page sideways (report r-1117-1256-ws-2) */
 .ticket-page .ticket-strip .ticket-strip-actions .menu{flex:none;position:relative}
 .ticket-page .ticket-strip .ticket-strip-actions .menu>summary{width:32px;min-width:32px;padding:0;justify-content:center}
 @media(max-width:760px){.ticket-page .ticket-strip h1.title-clamp .ed-title,.ticket-page .ticket-strip h1.title-clamp .ed{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}}  /* phone: three lines then an ellipsis; wider, the whole title shows beside the buttons (a-ticket-header-fit) */

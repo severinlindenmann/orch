@@ -17,7 +17,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, config, procs, runs, runs_live, tickets
+from orch import addons, cli_addons, config, procs, runs, runs_live, tickets
 
 AGENT = Path(__file__).resolve().parents[2] / "e2e" / "fixtures" / "generic-agent" / "agent.py"
 SID = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
@@ -712,6 +712,10 @@ def test_claude_idle_notice_lets_input_in_but_a_permission_notice_never_does(
 ):
     """Claude's Notification hook fires for "waiting for your input" (idle, ~60 s after a turn) and for a
     permission prompt. Only the first lets input in: a paste into a permission prompt could allow a tool."""
+    # ORCH-2305: the fake tool never draws the dialog, so the run's own watcher would read "the dialog is
+    # gone" and set working again after ATTENTION_CLEAR_SECONDS; on a slow machine that fell between two
+    # asserts here. This test is about the hooks alone: the watcher's clearing is switched off for it.
+    monkeypatch.setenv("ORCH_RUN_ATTENTION_CLEAR_SECONDS", "3600")
     calls, typed = _fake_claude(tmp_path, monkeypatch)
     _claude_live(proj)
     tid = _ticket(run)
@@ -896,3 +900,28 @@ def test_take_back_clears_the_pending_flag_of_a_live_claim(proj, run):
     assert runs.read(proj, tid)["pending"] is True
     run("run", "take-back", tid, a["id"], "--by", "human:anna")
     assert runs.read(proj, tid)["pending"] is False
+
+
+@needs_tmux
+def test_uninstall_stops_every_helper_session_and_names_it(proj, run, lab, tmp_path, monkeypatch):
+    """ORCH-2299 (R8.5): after `orch uninstall` a helper's live session (its tmux server and the run's own
+    python process) kept running, and the output did not name it. Removing an add-on says when a session
+    stays open."""
+    _fake_claude(tmp_path, monkeypatch)
+    _claude_live(proj)
+    tid = _ticket(run)
+    key = tickets.load(proj, tid)["key"]
+    json.loads(run("run", "start", tid, "--json")[1])
+    _until(lambda: runs_live.session_exists(proj, tid), what="the session is up")
+    rec = runs.read(proj, tid)
+    assert cli_addons._open_sessions(proj) == [(key, f"orch run stop {key}")]
+    monkeypatch.setattr(addons, "remove", lambda root, name, purge=False: None)
+    code, out, _ = run("addon", "remove", "hello")
+    assert code == 0
+    assert f"A helper session stays open: {key} (end it: orch run stop {key})." in out
+    code, out, err = run("uninstall")
+    assert code == 0, out + err
+    assert f"Stopped the helper session of {key}" in out
+    assert runs_live.tmux(proj, "list-sessions").returncode != 0  # no server of this workspace is left
+    _until(lambda: not runs._running(rec.get("pid"), rec.get("pid_started")), what="the run's process ended")
+    assert not (proj / ".orch" / "run").exists()

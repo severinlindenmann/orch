@@ -183,10 +183,24 @@ def test_shot_pages():
     assert cli_shot.parse_pages("home, tickets,ticket=ticket/DM1-2") == [
         ("home", "home"), ("tickets", "tickets"), ("ticket", "ticket/DM1-2")]  # fmt: skip
     assert cli_shot.parse_pages(None) == []
-    for bad in ("Home", "a=<x>", "a,a", "a=javascript:x"):
+    for bad in ("Home", "a=<x>", "a,a", "a=javascript:x", "review?", "review?card=<x>", "review?card=a b"):
         with pytest.raises(Refused):
             cli_shot.parse_pages(bad)
     assert cli_shot.page_url("http://x:1/#launch=tok", "home") == "http://x:1/#home"
+
+
+def test_shot_page_may_carry_a_query():
+    """ORCH-2164: one Review card alone, as Home links to it (#review?card=<id>, the id plain or encoded)."""
+    card = "core%3Aq%3At_abc123%3Aq3"
+    assert cli_shot.parse_pages(f"review?card={card}") == [("review", f"review?card={card}")]
+    assert cli_shot.parse_pages("review?card=core:q:t_abc123:q3,home") == [
+        ("review", "review?card=core:q:t_abc123:q3"), ("home", "home")]  # fmt: skip
+    assert cli_shot.parse_pages(f"one=review?card={card},two=review?card=x&tab=done") == [
+        ("one", f"review?card={card}"), ("two", "review?card=x&tab=done")]  # fmt: skip
+    with pytest.raises(Refused, match="one=review"):  # two cards need a name each, and the refusal shows how
+        cli_shot.parse_pages("review?card=a,review?card=b")
+    url = cli_shot.page_url("http://x:1/#launch=tok", f"review?card={card}")
+    assert url == f"http://x:1/#review?card={card}"
 
 
 def test_shot_pages_sign_in_once_then_each_page_at_each_width(tmp_path, monkeypatch):

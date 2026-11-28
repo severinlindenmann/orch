@@ -286,12 +286,12 @@ test('Prepare: Preparing line with Start still there, not the live Working heade
 test('Prepare: Prepared mark, Not prepared yet, In line; none of it once the ticket left Backlog', () => {
   const c = ctx();
   const prepared = sentenceOf(c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'prepared', at:'2026-11-19T09:41:00Z'}}));
-  assert.match(text(prepared), /^☰ Prepared .+\. Press Start to begin\.$/);
+  assert.match(text(prepared), /^☰ Prepared .+\. Press Continue to begin\.$/, 'the sentence names the button: Continue after an earlier session (ORCH-1696)');
   assert.equal(nodes(prepared).find(n => n.attrs['data-key'] === 'prepared-mark').attrs.title, 'Described by the helper, not checked');
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'not_prepared', at:'x'}}))), 'Not prepared yet. Start still works.');
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'waiting', at:'x'}}))), 'In line to be prepared. Start still works.');
   assert.doesNotMatch(text(sentenceOf(c.detail({...base, status:'review', prepare:{state:'prepared', at:'x'}}))), /Prepared/);
-  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /Not started/);
+  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /^Your helper begins when you press Start helper\.$/);  // 'Not started' is the word above the title (ORCH-2149)
 });
 test('What I found: folded line with counts, sources with web links only, Could not open in sight with one action', () => {
   const c = ctx();
@@ -329,6 +329,33 @@ test('one start button (ORCH-1466), owner draft A (ORCH-2155): Open in Live firs
   assert.ok(!off.some(n => n.attrs?.['aria-label'] === 'More ticket actions'), 'no "⋯" anywhere');
 });
 
+// ORCH-1696: the sentence names the Start button it means, and one status word per state (as the tickets list says)
+test('Sent back and paused: the sentence says the button\'s word, the pill says Changes asked / Paused', () => {
+  const c = ctx();
+  const stripOf = patch => nodes(c.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
+  const pillOf = strip => text(nodes(strip).find(n => /^status-/.test(n.attrs?.['data-key'] || ''))).replace(/chevron-down$/, '');  // the pill opens the Move list
+  const back = stripOf({status:'ready', sessions:[{id:'s'}], checklist:[{id:'c1', text:'Use the new logo', origin:'change_request'}]});
+  assert.match(text(nodes(back).find(n => n.attrs?.['data-key'] === 'ticket-sentence')), /press Continue to begin now\.$/);
+  assert.ok(nodes(back).some(n => n.tag === 'button' && text(n) === 'Continue'));
+  assert.equal(pillOf(back), 'Changes asked');
+  const paused = stripOf({status:'ready', sessions:[{id:'s'}]});
+  assert.equal(pillOf(paused), 'Paused');
+  const fresh = stripOf({status:'open'});
+  // ORCH-2149: a just-saved ticket says "Not started" above the title (not the lane name), so the line does not say it again
+  assert.equal(text(nodes(fresh).find(n => n.attrs?.['data-key'] === 'ticket-sentence')), 'Your helper begins when you press Start helper.');
+  assert.equal(pillOf(fresh), 'Not started');
+});
+test('Done when: a long one is cut to three lines with Show more, and stays editable (ORCH-1696)', () => {
+  const seen = [];
+  const c = ctx();
+  c.window.UI.moreText = (t, o) => { seen.push(t); return h('div', {className:'more-text clamped'}, o.node, h('button', {}, 'Show more')); };
+  const long = Array.from({length:20}, (_, i) => 'Line ' + (i + 1)).join('\n');
+  const row = nodes(c.detail({...base, status:'open', done_when:long})).find(n => n.attrs?.['data-key'] === 'prop-done-when-t_one');
+  assert.deepEqual(seen, [long]);
+  assert.ok(nodes(row).some(n => /more-text/.test(n.attrs?.className || '')));
+  assert.ok(nodes(row).some(n => n.attrs?.['data-key'] === 'inline-done_when-t_one' || /inline/.test(n.attrs?.className || '')), 'the editable field is inside');
+});
+
 // ORCH-1850: "Is anyone doing this now, and where did they stop?" A marked task is a handover, not a process.
 const lunch = {...base, status:'active', checklist:[
   {id:'c1', text:'Ask the team who comes', done:true, evidence:[{type:'note', text:'Answers collected', at:'2026-11-14T10:00:00Z'}], summary:'Twelve people come.'},
@@ -344,6 +371,16 @@ test('helper bar without a run appears on active tickets, never Review or Done',
     const all = nodes(handoverCtx({}).detail({...lunch, status}));
     assert.equal(Boolean(keyed(all, 'agent-bar')), status === 'active', status);
   }
+});
+
+test('ORCH-2149: a just-saved ticket says Not started above the title, not the lane name Backlog; the words are not said twice', () => {
+  const saved = nodes(handoverCtx({}).detail({...lunch, status:'open', sessions:[], checklist:[]}));
+  const pill = saved.find(n => /^status-open-/.test(n.attrs?.['data-key'] || ''));
+  assert.match(text(pill), /Not started/); assert.doesNotMatch(text(pill), /Backlog/);
+  assert.equal(text(keyed(saved, 'ticket-sentence')), 'Your helper begins when you press Start helper.');
+  const todo = nodes(handoverCtx({}).detail({...lunch, status:'ready', sessions:[], checklist:[]}));
+  assert.match(text(todo.find(n => /^status-ready-/.test(n.attrs?.['data-key'] || ''))), /To do/, 'a ticket in To do keeps its word');
+  assert.equal(text(keyed(todo, 'ticket-sentence')), 'Not started. Your helper begins when you press Start helper.');
 });
 
 test('ORCH-1850: active task and no run: the bar names the last marked step and who marked it, never a helper that is not running', () => {
@@ -425,4 +462,28 @@ test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to 
   const tool = page([{name:'claude', label:'Claude', chosen:true}]);
   assert.ok(!tool.some(n => /two-ways/.test(n.attrs?.className || '')));
   assert.ok(tool.some(n => n.attrs?.['data-key'] === 'ticket-start'));
+});
+
+// ORCH-2388: with no helper tool the page drew a greyed Start squeezed beside its reason (a question open, or work
+// under way) and said "press Start helper" where no Start was. Now: no Start in any state, one way out, true words.
+test('ORCH-2388: no helper tool: never a Start that cannot work; Set up a helper where the Two ways card is not shown; the line names no button', () => {
+  const StartChoiceState = require('../../../workspace/src/orch_ui/static/start-choice-state.js');
+  const page = (t, agents = []) => { const c = ctx({state:{runs:{}, settings:{agents}}}); c.window.StartChoiceState = StartChoiceState; c.window.UI.commandCopy = (cmd, o) => h('div', {className:'cmd-copy', 'data-key':o.dataKey}, cmd); return nodes(c.detail({...base, key:'ORCH-7', ...t})); };
+  const keyed = (all, key) => all.find(n => n.attrs?.['data-key'] === key);
+  const fresh = page({status:'open'});
+  assert.equal(text(keyed(fresh, 'ticket-sentence')), 'No helper is set up yet.');
+  assert.ok(!keyed(fresh, 'ticket-start') && !keyed(fresh, 'ticket-start-cost'));
+  assert.ok(!keyed(fresh, 'ticket-setup-helper'), 'the Two ways card already holds Set up a helper');
+  for (const t of [{status:'waiting', questions:[{id:'q', text:'Which day?', options:['Tue', 'Thu']}]}, {status:'active', checklist:[{id:'c1', text:'Book', done:true, at:'2026-11-14T11:00:00Z'}]}]) {
+    const all = page(t);
+    assert.ok(!keyed(all, 'ticket-start') && !keyed(all, 'ticket-start-cost'), t.status + ': no Start, no cost line');
+    assert.ok(!all.some(n => /two-ways/.test(n.attrs?.className || '')), t.status);
+    const setup = keyed(all, 'ticket-setup-helper');
+    assert.equal(setup.attrs.href, '#settings/helper'); assert.equal(text(setup), 'Set up a helper');
+    assert.equal(setup.attrs.className, 'btn outline sm', 'a cell of the bar like the others, not filled');
+    assert.doesNotMatch(text(keyed(all, 'ticket-actions')), /Start helper|on this computer/);
+  }
+  const tool = page({status:'waiting', questions:[{id:'q', text:'Which day?'}]}, [{name:'claude', label:'Claude', chosen:true}]);
+  assert.ok(keyed(tool, 'ticket-start') && !keyed(tool, 'ticket-setup-helper'));
+  assert.equal(StartChoiceState.why('main', {tools:StartChoiceState.tools([])}), 'No helper tool is set up yet.');  // R4.1a: no "on this computer"
 });

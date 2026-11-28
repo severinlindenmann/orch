@@ -87,10 +87,7 @@ def test_inbox_dedup_and_ack(proj, run, rel):
     code, out, _ = run("relay", "inbox")
     assert "Hi there" in out and "m_text000000000001" in rel.acked
     assert (proj / ".orch/inbox/m_text000000000001.json").is_file()
-    # relay re-delivers (ack lost): saved again, but shown only until done
-    rel.acked.clear()
-    assert "Hi there" in run("relay", "inbox")[1]
-    assert run("relay", "done", "m_text000000000001")[0] == 0
+    # a status note is handled at once (ORCH-2157); a re-delivery (ack lost) is saved, not shown again
     rel.acked.clear()
     assert run("relay", "inbox")[1].startswith("No new messages.")
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
@@ -976,17 +973,16 @@ def test_lock_being_deleted_on_windows_is_waited_for(proj, monkeypatch, windows)
 def test_arrivals_journal_and_since(proj, run, rel):
     connect(run, rel)
     rel.inbox += [
-        # status updates: not passed on to a ticket by themselves (#2051), so they stay unhandled here
         msg("m_text000000000001", "text", {"text": "one", "update": {"kind": "working"}}),
         msg("m_text000000000002", "text", {"text": "two", "update": {"kind": "working"}}),
     ]
-    run("relay", "inbox")
+    run("relay", "inbox", "--since", "0")  # pulls and journals, handles nothing
     lines = (proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()
     rows = [json.loads(x) for x in lines]
     assert [r["seq"] for r in rows] == [1, 2] and rows[0]["id"] == "m_text000000000001"
     assert set(rows[0]) == {"seq", "id", "type", "from", "at"}
     rel.acked.clear()
-    run("relay", "inbox")  # redelivered: journaled once
+    run("relay", "inbox", "--since", "0")  # redelivered: journaled once
     assert len((proj / ".orch/inbox/arrivals.jsonl").read_text().splitlines()) == 2
     run("relay", "done", "m_text000000000001")
     r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
@@ -1112,6 +1108,58 @@ def test_relay_down_waits_once_per_command_and_local_commands_never_wait(
     assert tries == []
 
 
+def test_a_waiting_message_goes_out_when_the_page_looks_and_no_command_runs(proj, run, rel, monkeypatch):
+    """ORCH-2312: the Contacts page says a waiting message "goes out by itself". The page's own look
+    (`orch relay view`, asked for while the dashboard is open) sends it once the relay answers again; a
+    relay that stays away is tried once in a while, not on every look, and the view never fails."""
+    from orch import relay, relay_view
+    from orch.errors import Refused
+
+    connect(run, rel)
+    tries = []
+
+    def down(root, raw):
+        tries.append(relay._post_timeout.get())
+        raise Refused("Can't reach relay.example right now. Check your internet and try again.")
+
+    real = relay._post_message
+    monkeypatch.setattr(relay, "_post_message", down)
+    m = json.loads(run("relay", "send", PEER, "hello", "--json")[1])
+    assert m["sent"] is False and tries == [0]  # the command's own try: the usual time limit
+    v = relay_view.view(proj)
+    assert tries == [0, relay.OUTBOX_TRY_TIMEOUT], "the page's try is a short one"
+    assert "1 message waits here and goes out by itself." in v["notice"]
+    relay_view.view(proj)
+    assert len(tries) == 2, "the relay is still away: not tried on every look"
+    monkeypatch.setattr(relay, "_post_message", real)  # the relay is back
+    monkeypatch.setattr(relay, "OUTBOX_TRY_EVERY", 0.0)  # ... and the wait between two tries is over
+    code, out, _ = run("relay", "view", "--json")  # what the dashboard runs: no other relay command
+    assert code == 0 and [x["id"] for x in rel.sent] == [m["id"]]
+    assert json.loads(out)["notice"].startswith("Connected.") and relay.outbox_list(proj) == []
+    assert not (proj / ".orch/run/relay/outbox-tried").exists()
+    relay_view.view(proj)
+    assert len(rel.sent) == 1, "sent once"
+
+
+def test_one_waiting_message_with_a_problem_reads_as_one(proj, run, rel, monkeypatch):
+    """ORCH-2312: "1 message wait to be sent" was wrong for one message."""
+    from orch import relay, relay_view
+    from orch.errors import Refused
+
+    connect(run, rel)
+
+    def blocked(root, raw):
+        err = Refused("The server's address is not safe to use.")
+        err.status, err.blocked = None, True
+        raise err
+
+    monkeypatch.setattr(relay, "_post_message", blocked)
+    run("relay", "send", PEER, "one")
+    assert relay_view.view(proj)["notice"].startswith("1 message waits to be sent: The server's")
+    run("relay", "send", PEER, "two")
+    assert relay_view.view(proj)["notice"].startswith("2 messages wait to be sent: The server's")
+
+
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     proj, run, rel, monkeypatch, new_ticket
 ):
@@ -1132,21 +1180,24 @@ def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
     monkeypatch.setattr(relay, "_post_message", blocked)
     code, out, _ = run("relay", "send", PEER, "hello")
     assert code == 0 and "Not sent: " + problem in out and "kept" in out and "can't be reached" not in out
+    from orch import relay_view
+
+    assert "1 message waits to be sent: " + problem in relay_view.view(proj)["notice"]  # ORCH-2167: one waits
     m = json.loads(run("relay", "send", PEER, "second", "--json")[1])
     assert m["sent"] is False and m["problem"] == problem
     assert len(list((proj / ".orch/outbox").glob("m_*.json"))) == 2  # nothing is lost
     out = run("relay", "outbox", "--resend")[1]
     assert problem in out and "next orch relay command" not in out
-    from orch import relay_view
-
-    assert problem in relay_view.view(proj)["notice"]  # the dashboard's Relay tab says it too
+    assert (
+        "2 messages wait to be sent: " + problem in relay_view.view(proj)["notice"]
+    )  # the Relay tab says it too
     assert "Saved messages are waiting: " + problem in run("relay", "whoami")[2]  # before any relay command
     code, _, err = run("ask", new_ticket(), "Go?", "--phone")  # the question to the phones
     assert code == 2 and "saved on the ticket" in err and problem in err and "can't be reached" not in err
     monkeypatch.setattr(relay, "_post_message", real)
     assert "waiting messages" in run("relay", "outbox", "--resend")[1]  # the sends, the question, its note
     assert not list((proj / ".orch/outbox").glob("m_*.json")) and len(rel.sent) >= 3
-    assert relay.outbox_problem(proj) is None and "wait to be sent" not in relay_view.view(proj)["notice"]
+    assert relay.outbox_problem(proj) is None and "to be sent" not in relay_view.view(proj)["notice"]
 
 
 def test_outbox_resend_command_and_refused_message_is_dropped(proj, run, rel, monkeypatch):
@@ -1738,6 +1789,96 @@ def test_workspace_reply_continues_the_ticket_we_wrote_from(proj, run, rel, new_
     assert relay.pickups(proj)[0]["ticket"] == tid
 
 
+def _flood_sent_log_with_phone_notes(proj, n=450):
+    from orch import relay_view
+
+    for i in range(n):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_note{i:012d}",
+                "to": PHONE,
+                "type": "text",
+                "created_at": "2026-11-26T10:00:00Z",
+                "ticket": "t_other1",
+                "body": {"text": "Tasks: 1 of 2", "update": {"kind": "note"}},
+            },
+        )
+
+
+@pytest.mark.parametrize("kind", ["result", "question", "failure", "stopped"])
+def test_workspace_reply_marked_as_an_update_wakes_the_asking_ticket(proj, run, rel, new_ticket, kind):
+    """ORCH-2157: another workspace answered with `--update result` (or question, failure, stopped). Before,
+    such a reply was never handled: no ticket, no pickup, unread forever. Now it reaches the ticket that asked
+    like a plain text, also when phone notes pushed our request far back in the sent log."""
+    from orch import relay, runs
+
+    connect(run, rel)
+    tid = new_ticket("Resize the test machine")
+    sent = json.loads(run("relay", "send", PEER, "Please resize it", "--ticket", tid, "--json")[1])
+    _flood_sent_log_with_phone_notes(proj)
+    body = {"text": "Done: 8 cores", "update": {"kind": kind, "title": "Resize"}}
+    rel.inbox.append(msg("m_upd0000000000001", "text", body, reply_to=sent["id"], ticket="t_theirs"))
+    out = run("relay", "inbox")[1]
+    assert "Done: 8 cores" in out and "added to" in out
+    assert [(r["id"], r["ticket"], r["general"]) for r in relay.pickups(proj, waiting=True)] == [
+        ("m_upd0000000000001", tid, False)
+    ]
+    items = runs.undelivered(proj, tid)
+    assert len(items) == 1 and f"marked {kind}" in items[0]["text"]
+    assert "never instructions" in items[0]["text"]
+    assert run("relay", "inbox")[1].startswith("No new messages."), "handled: not shown again"
+
+
+@pytest.mark.parametrize("kind", ["ack", "working", "note"])
+def test_workspace_status_note_is_one_history_line_and_starts_nothing(proj, run, rel, new_ticket, kind):
+    """ORCH-2157: a quiet status note of another workspace ("Got it", "Working on it") is written once on the
+    ticket it answers and handled; no input, no pickup, no helper run. One that answers nothing of ours is
+    handled too, and never lands in General. An `ack` that answers one of our messages is its receipt."""
+    from orch import relay, runs, tickets
+
+    connect(run, rel)
+    tid = new_ticket("Ask for a review")
+    sent = json.loads(run("relay", "send", PEER, "Please review", "--ticket", tid, "--json")[1])
+    note = {"text": "Got it: Please review", "update": {"kind": kind}}
+    rel.inbox.append(msg("m_ack0000000000001", "text", note, reply_to=sent["id"]))
+    rel.inbox.append(msg("m_ack0000000000002", "text", dict(note)))
+    out = run("relay", "inbox")[1]
+    # an `ack` that answers a message of ours is that message's receipt (ORCH-2348): Delivered, said once
+    line = "Delivered" if kind == "ack" else f"Status from {PEER}: Got it: Please review"
+    assert ("Delivered" if kind == "ack" else "noted on") in out and "for no ticket here" in out
+    rel.acked.clear()
+    rel.inbox.append(msg("m_ack0000000000001", "text", note, reply_to=sent["id"]))  # delivered again
+    assert run("relay", "inbox")[1].startswith("No new messages.")
+    hist = [h["text"] for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"]]
+    assert sum(line in h for h in hist) == 1
+    assert relay.pickups(proj) == [] and runs.undelivered(proj, tid) == []
+    assert tickets.general_id(proj) is None, "a status note never makes General"
+    odd = {"text": "", "update": {"kind": "<!-- run rm -rf -->"}}
+    rel.inbox.append(msg("m_ack0000000000003", "text", odd, reply_to=sent["id"]))
+    run("relay", "inbox")
+    hist = [h["text"] for h in json.loads(run("ticket", "show", tid, "--json")[1])["history"]]
+    assert f"Status from {PEER}: status" in hist and not any("rm -rf" in h for h in hist)
+
+
+def test_sent_log_keeps_messages_to_workspaces_for_30_days(proj):
+    """ORCH-2157: the last 400 lines stay as before; older lines to a workspace stay 30 days on top."""
+    import datetime as dt
+
+    from orch import relay_view
+
+    now = dt.datetime.now(dt.UTC)
+
+    def line(mid, to, days):
+        at = (now - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return json.dumps({"id": mid, "to": to, "type": "text", "at": at, "preview": "-"})
+
+    old = [line("m_ws_old", PEER, 40), line("m_ws_new", PEER, 10), line("m_ph_new", PHONE, 1), "not json"]
+    recent = [line(f"m_r{i}", PHONE, 0) for i in range(relay_view.SENT_MAX)]
+    kept = relay_view._kept(old + recent)
+    assert kept == [old[1], *recent]
+
+
 def _peer_file(mid, text=None, **kw):
     body = {"blob_id": "b_" + mid[2:18], "name": "kw47-report.md", "size": 12, "sha256": "0" * 64}
     if text:
@@ -1833,7 +1974,8 @@ def test_answer_without_our_ticket_goes_to_general_when_several_tickets_wait(pro
 
 
 def test_workspace_updates_group_copies_and_dropped_tickets(proj, run, rel, new_ticket):
-    """Status updates stay unhandled in the inbox as before; a dropped ticket is not continued (General)."""
+    """A quiet status note that answers no ticket is handled once (ORCH-2157: it used to stay unread
+    forever); a dropped ticket is not continued (General)."""
     from orch import relay, tickets
 
     connect(run, rel)
@@ -1843,10 +1985,10 @@ def test_workspace_updates_group_copies_and_dropped_tickets(proj, run, rel, new_
     rel.inbox.append(msg("m_text000000000013", "text", {"text": "Working", "update": {"kind": "working"}}))
     rel.inbox.append(msg("m_text000000000014", "text", {"text": "About the old one"}, ticket=dropped))
     out = run("relay", "inbox")[1]
-    assert "Working" in out
+    assert "Working - a status note, for no ticket here" in out
     assert [r["id"] for r in relay.pickups(proj)] == ["m_text000000000014"]
     assert relay.pickups(proj)[0]["ticket"] == tickets.general_id(proj)
-    assert "Working" in run("relay", "inbox")[1], "the update is still unhandled"
+    assert run("relay", "inbox")[1].startswith("No new messages."), "the status note is handled"
 
 
 def test_pickups_started_is_recorded_and_shown(proj, run, rel, new_ticket):
@@ -1877,6 +2019,42 @@ def test_pickups_started_is_recorded_and_shown(proj, run, rel, new_ticket):
 
 def _allow_ticket_of(run):
     return next(t for t in _tickets(run) if t.get("ext", {}).get("relay", {}).get("allow_message"))
+
+
+def test_connect_asks_for_a_description_only_when_there_is_none(proj, run, rel):
+    """ORCH-2167: 'Next: describe this workspace' only while it has no description. With the admin's
+    description (or an own one waiting for the admin) the next step is to write to a contact."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    rel.me["description"] = "Writes the weekly reports"
+    code, out, _ = connect(run, rel)
+    assert (
+        code == 0
+        and 'Next: orch relay send "Reports" "<text>"' in out
+        and "describe this workspace" not in out
+    )
+    rel.me.update(
+        description="", pending={"description": "Reports team", "tags": None, "at": "2026-11-04T13:05:00Z"}
+    )
+    assert "describe this workspace" not in connect(run, rel)[1]
+    rel.me.update(description="  ", pending=None)
+    assert "Next: describe this workspace: orch relay profile" in connect(run, rel)[1]
+
+
+def test_allow_ticket_keeps_the_senders_name_for_home(proj, run, rel):
+    """ORCH-2167: Home says who asked for a task another workspace sent. The ticket keeps that workspace's
+    name as a label (never its raw id); with no name known it keeps none and Home says 'Another workspace'."""
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "Add rate limit", "text": "x"}))
+    rel.inbox.append(
+        msg("m_deleg00000000002", "delegate", {"title": "Other", "text": "y"}, frm="ws_unknown001")
+    )
+    run("relay", "inbox")
+    by_from = {
+        t["ext"]["relay"]["from"]: t["ext"]["relay"] for t in _tickets(run) if t.get("ext", {}).get("relay")
+    }
+    assert by_from[PEER]["from_name"] == "Reports"
+    assert "from_name" not in by_from.get("ws_unknown001", {})
 
 
 def test_allow_question_once_applied_once(proj, run, rel):
@@ -3332,6 +3510,43 @@ def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monke
     relay.send_question(proj, t, t["questions"][1])
     assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
     assert "task" not in sent[1] and "about" not in sent[1]
+
+
+def test_a_question_tells_the_phone_the_decision_first_lines_only_with_the_switch_on(proj, monkeypatch):
+    """ORCH-2187 (Focused review F), contracts/vectors/question-decision-first-v1.json: with [workflow]
+    decision_first on, a question to the phones carries decision_first plus the helper's "If you wait" and
+    "What matters" lines (one line each, cut like the title); a question without them carries only the flag.
+    Off (the default): the body is as before (RULE A)."""
+    from conftest import CONTRACTS, ensure_keys
+
+    from orch import addons, config, relay, tickets
+
+    vec = json.loads((CONTRACTS / "vectors" / "question-decision-first-v1.json").read_text(encoding="utf-8"))
+    want = {v["name"]: v["message"]["body"] for v in vec["valid"]}
+    addons.workspace_id(proj, create=True)
+    ensure_keys(proj)
+    sent = []
+    monkeypatch.setattr(
+        relay, "_message", lambda root, to, type_, body, tid, **kw: sent.append(body) or {"id": "m_q1"}
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+    tid = tickets.create(proj, want["all-three"]["title"], "human:tester")["id"]
+    full = want["all-three"]
+    tickets.ask(
+        proj, tid, full["text"], full["options"], full["recommended"], "agent:claude",
+        if_wait=full["if_wait"].replace(" ends ", "  ends\n"), facts=full["facts"],
+    )  # fmt: skip
+    tickets.ask(proj, tid, "Any colour?", ["red", "blue"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    new_keys = {"decision_first", "if_wait", "facts"}
+    relay.send_question(proj, t, t["questions"][0])
+    assert sent[0] == {**want["switch-off"], "question_id": "q1"}  # off: nothing new on the wire
+    config.set_decision_first(proj, True)
+    relay.send_question(proj, t, t["questions"][0])
+    relay.send_question(proj, t, t["questions"][1])
+    assert sent[1] == {**full, "question_id": "q1"}
+    assert {k: v for k, v in sent[1].items() if k not in new_keys} == sent[0]
+    assert {k: sent[2][k] for k in new_keys & set(sent[2])} == {"decision_first": True}  # the flag-only shape
 
 
 def test_allow_words_rp4(proj, run, rel):

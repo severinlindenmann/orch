@@ -5,6 +5,8 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const marker = source.slice(source.indexOf('// A shipped add-on page'));
+// the one way a button gets into a toast (pages/tickets.js)
+const TOAST_ACTION = /function toastAction\(toast, button\) \{[^]*?\n\}\n/.exec(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/tickets.js'), 'utf8'))[0];
 const ORIGIN = 'http://127.0.0.1:8000';
 // Factory stage review "Looks good": every collaborator of the handler is faked.
 function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_aaaaaa:'review', t_bbbbbb:'review', t_cccccc:'active'}, failFor = [], foreign = [], clicked = true} = {}) {
@@ -12,7 +14,8 @@ function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_a
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};
   const frame = {contentWindow:frameWindow};
   const tickets = Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, {id, status, ext:foreign.includes(id) ? {other:{}} : {factory:{}}}]));
-  const toast = {remove(){}, querySelector:() => ({before:b => { calls.undo = b; }})};
+  // the master toast: its Dismiss button carries the word, no aria-label; Undo goes before it (toastAction, ORCH-2149)
+  const toast = {remove(){}, querySelector:() => null, querySelectorAll:() => [{textContent:'Dismiss', getAttribute:() => null, before:b => { calls.undo = b; }}]};
   const ctx = {snapshot, location:{origin:ORIGIN}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => tickets[id] || null,
     document:{querySelector:() => frame}, addEventListener(){}, mutation:0, accept(){},
@@ -20,7 +23,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, statuses = {t_a
     h:(tag, attrs, ...kids) => { const el = {tag, attrs, listeners:{}, addEventListener(n, f) { el.listeners[n] = f; }}; return el; },
     moveTicket:async (id, status, undoing, extra) => { calls.moves.push([id, status, !!undoing, {...extra}]); if (!failFor.includes(id)) tickets[id].status = status; },
     AbortSignal, window:{orch:{toast:(t, kind) => { calls.toasts.push([t, kind]); return toast; }}}, navigator:{userActivation:{isActive:clicked}}};
-  vm.createContext(ctx); vm.runInContext(marker, ctx);
+  vm.createContext(ctx); vm.runInContext(TOAST_ACTION + marker, ctx);
   return {ctx, calls, frameWindow};
 }
 const msg = (frameWindow, extra = {}) => ({origin:ORIGIN, source:frameWindow, data:{type:'orch.looksgood', id:'abcdefgh1234', tickets:['t_aaaaaa', 't_bbbbbb'], ...extra}});

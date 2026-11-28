@@ -896,6 +896,40 @@ def test_case_clash_rename_mine_lets_both_arrive(machines):
     assert {NEW_NAME, f"tickets/t_abc123/artifacts/{new}"} <= tracked(b)
 
 
+@pytest.fixture
+def git_finds_renames(monkeypatch):
+    """git before 2.48 (Debian 13: 2.47) ignores merge.renames=false in merge-tree: the same result here by
+    turning the setting on for the merge."""
+    real = repo.git
+
+    def git(root, *args, **kw):
+        if "merge-tree" in args:
+            args = tuple("merge.renames=true" if a == "merge.renames=false" else a for a in args)
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(repo, "git", git)
+
+
+def test_case_clash_rename_mine_with_a_git_that_finds_renames(machines, git_finds_renames):
+    """ORCH-2321: git 2.47 reports both sides' rename of one file as a conflict; sync drops it itself."""
+    test_case_clash_rename_mine_lets_both_arrive(machines)
+
+
+def test_only_rename_conflicts_are_dropped():
+    """ORCH-2321, git 2.47's own output for the case above: one side per path, and the tree is already right.
+    A path the tree does not prove (changed content, a folder in the way) and a real conflict stay."""
+    f, g = ("100644", "e5abaf9"), ("100644", "0000bad")
+    mine, theirs_name, old = "t/Report (mine v2).txt", "t/Report.txt", "t/report.txt"
+    conflicts = {mine: {2: f}, theirs_name: {3: f}, old: {1: f}}
+    merged = {mine: f, theirs_name: f}
+    assert step.beyond_renames(conflicts, merged, {mine: f}, {theirs_name: f}) == []
+    assert step.beyond_renames(conflicts, {**merged, mine: g}, {mine: f}, {theirs_name: f}) == [mine]
+    assert step.beyond_renames(conflicts, {**merged, old: f}, {mine: f}, {theirs_name: f}) == [old]
+    assert step.beyond_renames({mine: {3: f}}, {}, {}, {mine: f}) == [mine]  # a folder took the name
+    both_sides = {"t/a.txt": {1: f, 2: g, 3: f}, "t/b.txt": {2: f, 3: g}}
+    assert step.beyond_renames(both_sides, {"t/a.txt": g, "t/b.txt": f}, {}, {}) == ["t/a.txt", "t/b.txt"]
+
+
 @pytest.mark.parametrize(
     "name, why",
     [

@@ -9,7 +9,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from orch import cardtext, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
@@ -28,7 +27,7 @@ def _exp(v) -> str:
 
 def _host(url: str) -> str:
 
-    return urlsplit(url).netloc or url
+    return net.shown_host(url) or url.rsplit("@", 1)[-1]
 
 
 def _fields(description, tags) -> str:
@@ -1287,6 +1286,9 @@ def _inbox_line(i: dict, root: Path) -> str:
         return f"{head}: {name}{said} - {i['note']} - save it with: orch relay download {m['id']}{tail}"
     if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
         # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
+        return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
+    if i["note"] and i.get("auto") and relay.is_peer_status(root, m):
+        # ORCH-2157: a workspace's status note: what it said, and where it was noted
         return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"

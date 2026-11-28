@@ -23,7 +23,8 @@
    UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
    UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
-                                 /api/answer, /api/file (f = fetch, for tests)
+                                 /api/answer, /api/file (f = fetch, for tests); api.decisionFirst follows /api/stack's
+                                 decision_first (ORCH-2187), for o.decisionFirst
    UI.review                     pure helpers (mapCard, verdictWord, fmtTime) for tests
 
    api (what the page needs; the dashboard passes its own):
@@ -189,9 +190,11 @@ UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!
 const oneLine=(x,n)=>{x=String(x||'').replace(/\s+/g,' ').trim();if(x.length<=n)return x;const cut=x.slice(0,n),sp=cut.lastIndexOf(' ');return (sp>n*.6?cut.slice(0,sp):cut).replace(/[\s,;:.]+$/,'')+'…'};
 const recordTitle=e=>{const k=e.card||{};return k.title||oneLine(e.text,120)||e.ticket_title||'Answered'};
 const ticketLine=e=>[e.ticket_key,e.ticket_title].filter(x=>typeof x==='string'&&x).join(' · ');
-/* UI.moreText(text, o): a long text cut to three lines with "Show more" / "Show less" (ORCH-294); a short one is plain. */
-UI.moreText=(text,o)=>{o=o||{};const t=String(text||''),w=el('div','more-text'),p=el('p','meta',t);w.append(p);
- if(t.length<=(o.max||180))return w;w.classList.add('clamped');
+/* UI.moreText(text, o): a long text cut to three lines with "Show more" / "Show less" (ORCH-294); a short one is plain.
+   o.max: characters before it is cut (180); o.node: show this node (an editable .ed field) instead of a plain line,
+   cut the same way (ORCH-1696). A text of more than three lines is cut too. */
+UI.moreText=(text,o)=>{o=o||{};const t=String(text||''),w=el('div','more-text'),p=o.node||el('p','meta',t);w.append(p);
+ if(t.length<=(o.max||180)&&t.split('\n').length<=3)return w;w.classList.add('clamped');
  const b=el('button','btn ghost sm','Show more');b.type='button';b.setAttribute('aria-expanded','false');
  b.onclick=()=>{const c=w.classList.toggle('clamped');b.textContent=c?'Show more':'Show less';b.setAttribute('aria-expanded',String(!c))};
  w.append(b);return w};
@@ -225,8 +228,8 @@ UI.appliesNow=(entries,o)=>{o=o||{};const live=(entries||[]).filter(e=>e.decisio
 UI.reviewFetchApi=(base,f)=>{base=base||'';f=f||((...a)=>window.fetch(...a));
  const fail=(r,msg)=>{const e=new Error(msg||'request failed');e.status=r.status;e.code=r.status===401||r.status===403?'needs_person':'error';return e};
  const get=async p=>{const r=await f(base+p,{headers:{accept:'application/json'},cache:'no-store'});if(!r.ok)throw fail(r);return r.json()};
- const api={workspace:'',
-  stack:async()=>{const j=await get('/api/stack');if(j&&!Array.isArray(j)){api.workspace=j.workspace||api.workspace;return j.cards||[]}return j},
+ const api={workspace:'',decisionFirst:false,/* the workspace's workflow.decision_first, as /api/stack says it (ORCH-2187) */
+  stack:async()=>{const j=await get('/api/stack');if(j&&!Array.isArray(j)){api.workspace=j.workspace||api.workspace;api.decisionFirst=j.decision_first===true;return j.cards||[]}return j},
   answered:async()=>{const j=await get('/api/answered');return Array.isArray(j)?j:(j&&j.entries)||[]},
   answer:async body=>{try{const r=await f(base+'/api/answer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     let j=null;try{j=await r.json()}catch{}

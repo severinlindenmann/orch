@@ -175,12 +175,12 @@ test('no helper tool on this computer: the main button and Fresh start are greye
   const m = mount({agents: []});
   assert.equal(m.main().disabled, true);
   const line = m.q(n => n.id === m.main().getAttribute('aria-describedby'));
-  assert.equal(line.textContent, 'No helper tool is set up on this computer.');
+  assert.equal(line.textContent, 'No helper tool is set up yet.');
   assert.equal(line.hidden, false);
   m.btn.open();
   const fresh = m.q(n => n.dataset.start === 'fresh');
   assert.equal(fresh.disabled, true);
-  assert.equal(m.q(n => n.id === fresh.getAttribute('aria-describedby')).textContent, 'No helper tool is set up on this computer.');
+  assert.equal(m.q(n => n.id === fresh.getAttribute('aria-describedby')).textContent, 'No helper tool is set up yet.');
 });
 
 test('Send and start: the page sends its message first, and nothing starts when it stops', async () => {
@@ -284,4 +284,24 @@ test('a waiting review shows Open instead of an answer field; a ticket that wait
   const plain = mount({inline: true, sessions: SESS});
   assert.equal(plain.q(n => n.dataset.key === 'start-why'), null);
   assert.ok(plain.q(n => n.textContent === 'Start a helper'));
+});
+
+test('ORCH-2295: a ticket that waits in line can be taken out of it with one click (the stop path)', async () => {
+  const m = mount({line: {waiting: ['t_0', 't_1']}});
+  assert.equal(m.main().disabled, true, 'a second start is greyed while it waits');
+  m.q(n => n.tag === 'summary').click();
+  assert.ok(m.q(n => n.tag === 'p' && n.textContent === 'ORCH-12 is number 2 of 2 in line. It starts by itself when a place is free.'));
+  const leave = m.q(n => n.dataset.start === 'leave');
+  assert.equal(leave.textContent, 'Take out of the line');
+  leave.click();
+  await tick();
+  assert.deepEqual(m.sent, [['run.stop', {ticket: 't_1'}]]);
+  assert.deepEqual(m.toasts, [['ORCH-12 no longer waits in line.', 'ok']]);
+  const r = mount({line: {waiting: ['t_1']}});
+  r.setReply({ok: false, text: 'The workspace is busy. Try again.'});
+  r.q(n => n.tag === 'summary').click();
+  r.q(n => n.dataset.start === 'leave').click();
+  await tick();
+  assert.deepEqual(r.toasts, [['The workspace is busy. Try again.', 'error']]);
+  assert.equal(r.q(n => n.dataset.start === 'leave').disabled, false, 'it can be pressed again');
 });

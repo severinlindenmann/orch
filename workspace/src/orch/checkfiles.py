@@ -174,7 +174,14 @@ def skipped(root: Path) -> list[str]:
         files = sorted(folder(root).glob("*.json"))
     except OSError:
         return []
-    return [f.name for f in files if not health._NAME.fullmatch(f.stem) and f.is_file()][:20]
+    return [plain_name(f.name) for f in files if not health._NAME.fullmatch(f.stem) and f.is_file()][:20]
+
+
+def plain_name(name: str) -> str:
+    """A file name for the person's terminal: anything that is not a visible character (an escape code, a line
+    break, a direction mark) is shown as a dot, and a very long name is cut."""
+    shown = "".join(c if c.isprintable() else "." for c in name)
+    return shown if len(shown) <= 80 else shown[:79] + "\u2026"
 
 
 def _hash(raw: bytes, body: bytes | None = None, script: bool = False) -> str:

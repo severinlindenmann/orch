@@ -114,6 +114,8 @@ def build_team(answer, me=None):
     ]
     return {
         "time": _seconds_words(seconds),
+        # ORCH-1694: the time tile's "–" says why, as the cost tile's does
+        "time_note": "Last 30 days" if seconds else "Not recorded in the last 30 days",
         "cost": _money(cost),
         "note": _note(seconds, cost),
         "finished": finished,

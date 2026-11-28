@@ -337,6 +337,7 @@ def test_an_empty_queue_still_says_where_it_is(prws):
     first = v["blocks"][0]
     assert first["title"] == "Merge queue" and first["meta"] == "groups of up to 10"
     assert first["empty"]["title"] == "Nothing in the merge queue"
+    assert first["empty"]["button"]["to"] == "app:tickets"  # ORCH-1697: every empty state has one button
     assert "up to 10 pull requests" in v["blocks"][-1]["text"]
 
 

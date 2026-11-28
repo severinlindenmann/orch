@@ -99,9 +99,13 @@ UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
 const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':(d=>d+(d===1?' day':' days'))(Math.round(m/1440));
-UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
+/* ORCH-2314: the core's detail of a helper that waits for an OK carries the start of the call ("Your OK on the screen:
+   S=/private/tmp/…; cd /tmp && python3 $S …", ORCH-1808). A list row and the ticket's line say only that it waits; the
+   command is shown whole on the OK card of its pane, with the answers. UI.helperWhy(detail) -> the words without it. */
+UI.helperWhy=d=>String(d||'').replace(/^(Your (?:answer and your )?OK on the screen):[\s\S]*$/,'$1');
+UI.helperMeta=r=>{r=r||{};const d=UI.helperWhy(r.detail);
  if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
- if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
+ if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.charAt(0).toLowerCase()+d.slice(1)].filter(Boolean).join(' · ');
  if(r.state==='waiting'||r.state==='idle'||r.state==='stuck'||r.state==='limit')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
 /* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
@@ -111,6 +115,8 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
 /* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
    the ticket's "No helper is working" line (ORCH-415) */
 const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Review',done:'Done',dropped:"Won't do"};
+/* ORCH-2314 (owner pick C a of ORCH-2188): a helper that waits for an OK on its screen may say so in its pill (Focus pane) */
+const OK_WORD='Waits for your OK';
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
@@ -120,7 +126,7 @@ UI.ticketState=(t,helper)=>{t=t||{};
  if(t.bring_back&&t.bring_back.state==='waiting')return {pill:'needs',word:'Needs you',helper:null};
  // a wait for a date, another ticket or the outside (no open question) is Waiting, as the board's lane says (ORCH-235)
  if(t.status==='waiting'&&!(t.waiting_on&&t.waiting_on.kind==='question'))return {pill:'todo',word:'Waiting',helper:null};
- if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:(helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||'')?helper.word:HELPER_WORD[helper.state],helper};
+ if(helper&&HELPER_WORD[helper.state])return helper.state==='working'?{pill:'working',word:'Working',helper:null}:{pill:HELPER_PILL[helper.state],word:((helper.state==='idle'||helper.state==='stuck')&&/^Quiet\b/.test(helper.word||''))||(helper.state==='you'&&helper.word===OK_WORD)?helper.word:HELPER_WORD[helper.state],helper};
  if(helper)return {pill:'working',word:'Working',helper:null};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
@@ -218,12 +224,13 @@ UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'but
 UI.fillSettings=root=>{(root||document).querySelectorAll('[data-settings-for]').forEach(s=>{const n=s.dataset.settingsFor;
  if(/^[a-z][a-z0-9-]{1,31}$/.test(n||''))s.replaceWith(UI.settingsButton({href:'/#settings/addons/'+n,top:true}));else s.remove()})};
 if(typeof document!=='undefined'&&document.querySelectorAll){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>UI.fillSettings());else UI.fillSettings()}
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}})
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, icon, action:{label, onClick}})
+   icon: an icons.js name (the page's own icon, SX-10); without one the empty mark is the To do ring.
    action:{label, href, target} draws the button as a link (another page, e.g. '/#tickets' with target '_top' from an add-on frame). */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(kind==='loading'){const b=el('div','card pad-card skeleton-late');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
- const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
+ const ico=el('span','ico');if(kind==='error')ico.append(el('span','dot-err'));else if(o.icon&&typeof window.icon==='function')ico.innerHTML=window.icon(String(o.icon),20);else ico.append(UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const link=typeof o.action.href==='string';const a=el(link?'a':'button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);
   if(link){a.href=o.action.href;if(o.action.target)a.target=o.action.target}else a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
