@@ -174,7 +174,8 @@ def _ready(seen) -> bool:
 def _young(seen, now: float) -> bool:
     """Its checks passed less than UNMERGED_WAIT ago (the time is known): it still waits to be merged."""
     since = seen.get("green_since") if isinstance(seen, dict) else None
-    return isinstance(since, (int, float)) and not isinstance(since, bool) and 0 <= now - since < UNMERGED_WAIT
+    known = isinstance(since, (int, float)) and not isinstance(since, bool)
+    return known and 0 <= now - since < UNMERGED_WAIT
 
 
 def merging_ids(

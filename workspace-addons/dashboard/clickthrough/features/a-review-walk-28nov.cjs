@@ -55,6 +55,7 @@ module.exports = {
     await page.locator('[data-review-nav] button[data-show="answered"]').click();
     await page.locator('#answered:not([hidden])').waitFor();
     must(await page.locator('[data-key="review-extra"]').count() === 0, 'Waiting rows show on Answered');
+    await shot('answered');
     await page.locator('[data-review-nav] button[data-show="deck"]').click();
     await page.locator('#deck:not([hidden])').waitFor();
 

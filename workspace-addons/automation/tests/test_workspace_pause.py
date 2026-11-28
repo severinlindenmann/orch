@@ -142,7 +142,9 @@ def test_a_pause_does_not_hold_the_health_checks(ws):
 
 
 # W-043 (owner, 28 Nov): "Cards that need no person, and questions whose cause is gone".
-PAUSED_Q = "The helper could not start: Automation is paused in this workspace. Turn it back on with: orch resume."
+PAUSED_Q = (
+    "The helper could not start: Automation is paused in this workspace. Turn it back on with: orch resume."
+)
 
 
 def _failure(ws, tid, text, **kw):
@@ -152,7 +154,9 @@ def _failure(ws, tid, text, **kw):
 
 def test_w043_a_start_refused_by_the_pause_asks_nothing(ws):
     add_ticket(ws, "t_p0000001", status="ready")
-    Scheduler(ws).fail("t_p0000001", "Automation is paused in this workspace. Turn it back on with: orch resume.")
+    Scheduler(ws).fail(
+        "t_p0000001", "Automation is paused in this workspace. Turn it back on with: orch resume."
+    )
     assert [c for c in calls(ws) if c["args"][:1] == ["ask"]] == []
     Scheduler(ws).fail("t_p0000001", "the agent stopped within 10 seconds without doing anything")
     assert [c["args"][2] for c in calls(ws) if c["args"][:1] == ["ask"]] == [
@@ -173,7 +177,9 @@ def test_w043_a_question_whose_cause_was_the_pause_closes_when_automation_runs_a
     assert runs_started(ws) == ["t_p0000002"]  # the start the pause held back, once
     import json as _json
 
-    read = lambda tid: _json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())  # noqa: E731
+    read = lambda tid: _json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())
     assert read("t_p0000002")["questions"][0]["answer"].startswith("Taken back: Automation runs again")
-    assert read("t_p0000003")["questions"][0]["answer"] is None  # another cause: it still waits for the person
+    assert (
+        read("t_p0000003")["questions"][0]["answer"] is None
+    )  # another cause: it still waits for the person
     assert Scheduler(ws).tick(T(8, 2)) == [] and runs_started(ws) == ["t_p0000002"]  # never twice
