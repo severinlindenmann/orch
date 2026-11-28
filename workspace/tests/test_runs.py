@@ -515,6 +515,10 @@ def test_the_wrapper_errors_go_to_the_run_log_not_nowhere(proj, new_ticket, run,
             seen.update(kw)
         return P()
 
+    # the fake stands in for every process start, so the one real program the start may ask first (Windows:
+    # "does orch.exe start?", once per process) is answered here; without this the test passed only when
+    # an earlier test of the same worker had already asked
+    monkeypatch.setattr(runs, "_LAUNCHER", [None])
     monkeypatch.setattr(runs.subprocess, "Popen", popen)
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     assert seen["stderr"] not in (subprocess.DEVNULL, subprocess.STDOUT, None)
