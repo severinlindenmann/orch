@@ -167,6 +167,9 @@ the first rows without any extra work.
   (update started/finished) are toasts.
 - SX-13 Dialogs: sizes S/M/L, one icon-only close, title 20/28, footer rule [tertiary] … [Cancel] [Primary]; info-only
   dialogs become inline text; the question card never opens a dialog.
+  A question's choices on Home and on the ticket page are the answer tiles (`.answer-options`, `.answer-option`,
+  gallery `#answer-tiles`, ORCH-2388): one tile per choice, Suggested on its tile, "Write your own…" under them;
+  never a filled button for the suggested choice.
 - SX-14 List row: 40-48 px, one line, [status icon] title · owner avatar · one time fact · attention marker; the row is
   the click target, the single action appears on hover/focus and always in the group header; no "…" per row.
 - SX-15 Card: 20 px padding, title 16/24, optional meta right (time only), one action in the footer row; cards hold
