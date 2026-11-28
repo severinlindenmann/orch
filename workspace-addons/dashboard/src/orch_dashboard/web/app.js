@@ -109,8 +109,29 @@ function loadFullTicket(ref) {
 }
 const fullAsked = new Map();  // ticket id -> the live row's updated_at it was read again for (once per change, also when that read fails)
 const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
+// The live row of a ticket, by id or key. ORCH-2388: it was a scan of every ticket at each call (250 to 400 ms of the
+// Review page at 10,000 tickets); now one look-up in an index built once per ticket list. A row that is not where the
+// index says (a list changed in place) or not in it falls back to the scan, so the answer is always the scan's.
+const ticketRowIndex = new WeakMap();
+const ticketRow = id => {
+  const list = array(state?.tickets);
+  let ix = ticketRowIndex.get(list);
+  if (!ix || ix.n !== list.length) {
+    ix = {n:list.length, ids:new Map(), keys:new Map()};
+    list.forEach((t, i) => {
+      if (!t) return;
+      const tid = String(t.id), key = typeof t.key === 'string' ? t.key.toUpperCase() : null;
+      if (!ix.ids.has(tid)) ix.ids.set(tid, i);
+      if (key !== null && !ix.keys.has(key)) ix.keys.set(key, i);
+    });
+    ticketRowIndex.set(list, ix);
+  }
+  const a = ix.ids.get(String(id)), b = ix.keys.get(String(id).toUpperCase());
+  const i = a === undefined ? b : b === undefined ? a : Math.min(a, b);  // the first row that fits, as the scan gives
+  return i !== undefined && sameTicket(list[i], id) ? list[i] : list.find(t => sameTicket(t, id));
+};
 const ticketOf = id => {
-  const row = array(state?.tickets).find(t => sameTicket(t, id));
+  const row = ticketRow(id);
   if (row && !row.slim) return row;
   const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
   if (!full) return row;

@@ -91,3 +91,31 @@ test('the parts counted at the last build show on the kept whole copy', async ()
   assert.equal(t.parts_done, 1);
   assert.equal(c.log.urls.length, 1, 'the ticket itself did not change: not read again');
 });
+
+// ORCH-2388: the row is found through an index built once per ticket list, never by a scan per call.
+test('ticketOf finds a row by id or key without scanning the list, and still gives what a scan gives', () => {
+  const rows = Array.from({length:10000}, (_, i) => ({id:'t_' + i, key:'WS-' + i, title:'T' + i}));
+  const c = setup(rows, {});
+  let reads = 0;
+  const counted = rows.map(r => new Proxy(r, {get(t, k) { if (k === 'id') reads++; return t[k]; }}));
+  c.state.tickets = counted;
+  assert.equal(c.ticketOf('t_9999').title, 'T9999');  // builds the index: one pass
+  reads = 0;
+  for (let i = 0; i < 200; i++) { assert.equal(c.ticketOf('t_' + (9999 - i)).title, 'T' + (9999 - i)); assert.equal(c.ticketOf('ws-' + (9000 - i)).title, 'T' + (9000 - i)); }
+  assert.ok(reads < 2000, 'a few reads per look-up, not a scan of 10,000 rows each: ' + reads);
+  assert.equal(c.ticketOf('t_nope'), undefined);
+  // the first row that fits wins, as with the scan: an id that is another ticket's key
+  c.state.tickets = [{id:'t_a', key:'WS-1', title:'A'}, {id:'WS-1', title:'B'}];
+  assert.equal(c.ticketOf('WS-1').title, 'A');
+  // a list changed in place (same length, or longer) is still answered right
+  const list = [{id:'t_a', title:'A'}, {id:'t_b', title:'B'}];
+  c.state.tickets = list;
+  assert.equal(c.ticketOf('t_b').title, 'B');
+  list[1] = {id:'t_c', title:'C'};
+  assert.equal(c.ticketOf('t_c').title, 'C'); assert.equal(c.ticketOf('t_b'), undefined);
+  list.push({id:'t_d', title:'D'}); list[0] = null;
+  assert.equal(c.ticketOf('t_d').title, 'D'); assert.equal(c.ticketOf('t_a'), undefined);
+  // a new list replaces the old one
+  c.state.tickets = [{id:'t_b', title:'B2'}];
+  assert.equal(c.ticketOf('t_b').title, 'B2');
+});
