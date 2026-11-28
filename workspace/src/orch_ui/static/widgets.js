@@ -229,7 +229,7 @@ UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='erro
  return b};
 UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'button','btn outline sm page-settings settings-btn');if(link){a.href=o.href||'#settings/addons';if(o.top)a.target='_top'}else a.type='button';
  if(o.onClick)a.addEventListener('click',o.onClick);a.dataset.key=o.dataKey||'page-settings';
- a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),el('span','',o.label||'Settings'));return a};
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>'),el('span','',o.label||'Settings'));return a};
 /* An add-on page drawn inside the dashboard's frame (Factory, Usage, Files, Skills, Personal, Insights ...) marks the
    place of its Settings button in its own top: <span data-settings-for="skills"></span>. It becomes the same
    UI.settingsButton, leading the dashboard (target _top; frame.js hands the move up) to that add-on's part of Settings. */
