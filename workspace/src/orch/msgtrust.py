@@ -458,7 +458,9 @@ def _try_hint(root: Path, st: dict, m: dict, env, peer: str, now_ms: int, me: st
     c = st["contacts"].get(peer) or {}
     if c.get("withdrawn"):
         return "withdrawn"
-    return "new_key" if c.get("keys") else "not_accepted"
+    # ORCH-2154 (owner): every key change reads Changed, like the phone. The workspace cannot tell a change
+    # the old key vouched for from one without it (the relay keeps that statement), so it never says which.
+    return "changed" if c.get("keys") else "not_accepted"
 
 
 def _refuse(st: dict, m: dict, code: str, peer: str | None = None) -> Verdict:
@@ -874,7 +876,8 @@ def _norm_fp(fp: str) -> str:
 
 
 def state_of(st: dict, peer: str, hint: bytes | None) -> str:
-    """accepted | not_accepted | new_key | not_valid | withdrawn (design note section 6)."""
+    """accepted | not_accepted | changed | not_valid | withdrawn (design note section 6). A key the relay
+    lists that is not the accepted one is `changed` (ORCH-2154): Changed, like the phone shows it."""
     c = st["contacts"].get(peer) or {}
     if c.get("withdrawn"):
         return "withdrawn"
@@ -884,7 +887,7 @@ def state_of(st: dict, peer: str, hint: bytes | None) -> str:
     if not keys:
         return "not_accepted"
     if hint is not None and hint.hex() not in keys:
-        return "new_key"
+        return "changed"
     return "accepted"
 
 
