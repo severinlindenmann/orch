@@ -202,3 +202,29 @@ for: … You got: …" on top.
 
 The shared card links sit above the title through 480 px, including 390 px phones. The mockup uses the same
 master rule as the product. This preserves the 24 px clearance from the pinned answer bar with Linux font wrapping.
+
+## Owner's walk of 28 Nov 2026 (batch b302: W-036, W-042, O-04, O-05, O-06, CX-02, FX-04, W-003, W-039, W-040, W-043, FX-06, W-038)
+
+`review.html` follows the product page (`pages/review.js`):
+
+- **Order (W-036, O-04 D):** the card with its buttons, then the list, then one line "The Reviewer accepted N … for
+  you today" with **Look**. Wide: the list stands beside the card and scrolls by itself. Narrow (a phone, or `?narrow=1`
+  for the page beside the Focus panel): one column, the card first, the list after it in the same page scroll.
+  "What the Reviewer did" is the first block of **Answered** (each entry with its reason, Send back and Undo), then
+  "Closed without you" (W-043), then your own answers.
+- **List (O-05 D, O-06 D):** "Needs you · N waiting", five compact rows, **Next five** / **All N** / **First five**. Cards
+  that wait for one cause are one row ("3 · Pull request not merged") with **Open**, which lists them; no button answers
+  several at once. No Compare button and no ticks; a card with a before and an after still shows both.
+- **Evidence and cost (W-040, CX-02):** a pull request card has one evidence line ("Pull request #31 · checks passed,
+  not merged · passed … · looked at …") and **Open pull request**; a button that starts paid helper work says the
+  ticket's estimate or "cost not known" (never a made-up number). A result's Send back says "sends your changes for a
+  helper to work on" with the same cost words.
+- **One number (W-003):** the heading reads the menu badge's number.
+- **Waits to be merged (FX-04):** a pull request in the queue or whose checks only just passed has no card: the line
+  "N wait to be merged, nothing to do" under the list.
+- **Paused (W-043):** `?paused=1` shows the one line on top with **Turn on**.
+- **Open ticket (W-039):** nothing is pushed in above the card; "Also waiting for you" (`?screen=1`) is listed after it.
+
+Still as before, waiting for the master (b301): a tile with 0 and the progress row before the first answer (W-038), the
+card's links above its title under 481 px and the answer bar above both phone bars (W-042), one right edge for tiles,
+progress row and card (FX-06), Compare in the kit's own phone list (O-06).
