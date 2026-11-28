@@ -42,6 +42,15 @@ module.exports = {
     must(await page.locator('[data-key="review-accepted"]').count() === 0, "the Reviewer's history is on Waiting");
     const bar = await page.locator('.swipe-actions').first().boundingBox();
     must(bar && bar.y + bar.height <= page.viewportSize().height, 'the answer buttons are below the window: ' + JSON.stringify(bar));
+    // W-036 (wide): the list stands on the left, and the keyboard still reaches the card before it
+    const wideOrder = await page.evaluate(() => {
+      const stops = [...document.querySelectorAll('[data-key="review-layout"] :is(button,a[href],summary,[tabindex="0"])')].filter(n => n.offsetParent && !n.disabled).map(n => n.closest('.review-side') ? 'list' : n.closest('[data-review-nav]') ? 'switch' : n.closest('#deck') ? 'card' : 'other');
+      return {first: stops[0], card: stops.indexOf('card'), list: stops.indexOf('list'), sideRight: document.querySelector('.review-side').getBoundingClientRect().right, cardLeft: document.querySelector('.swipe-card:not(.under):not(.under2)').getBoundingClientRect().left};
+    });
+    must(wideOrder.first === 'switch' && wideOrder.card > 0 && wideOrder.card < wideOrder.list, 'wide: the keyboard meets the list before the card: ' + JSON.stringify(wideOrder));
+    must(wideOrder.sideRight <= wideOrder.cardLeft, 'wide: the list is not left of the card: ' + JSON.stringify(wideOrder));
+    // W-038: before the first answer there is no progress row (no "0 answered", no bar, no greyed-out Undo)
+    must(!(await page.locator('.swipe-top').first().isVisible()), 'the progress row shows before the first answer');
     await shot('five-rows');
     // Next five shows the next five (the list never grows), All every row, First five the start again
     const shownRows = () => page.evaluate(() => [...document.querySelectorAll('.review-side [data-review-row],.review-side [data-review-group]')].map(n => n.innerText.replace(/\s+/g, ' ').trim()));
@@ -73,6 +82,12 @@ module.exports = {
     await page.locator('.swipe-actions').getByRole('button', {name:/Looks good/}).first().click();
     await page.waitForFunction(n => Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0) === n, n0.badge - 1, {timeout: 3000});
     const n1 = await numbers();
+    // W-038: the first answer brings the progress row; FX-06: it, the card and the answer bar end on one line
+    await page.locator('.swipe-top').first().waitFor();
+    must(/^1 answered · /.test(await page.locator('.swipe-top span').first().innerText()), 'the progress row does not count the first answer');
+    const edges = await page.evaluate(() => { const r = q => Math.round(document.querySelector(q).getBoundingClientRect().right); return {top: r('.swipe-top'), card: r('.swipe-card:not(.under):not(.under2)'), acts: r('.swipe-actions'), nav: r('[data-review-nav]')}; });
+    must(Math.abs(edges.top - edges.card) <= 1 && Math.abs(edges.acts - edges.card) <= 1 && Math.abs(edges.nav - edges.card) <= 1, 'three right edges: ' + JSON.stringify(edges));
+    await shot('first-answer');
     must(n1.line === n1.badge && n1.tab === n0.tab - 1 && n1.list === n0.list - 1, 'the numbers did not drop together: ' + JSON.stringify([n0, n1]));
     await page.locator('.swipe-top').getByRole('button', {name:/Undo/}).click();
     await page.waitForFunction(n => Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0) === n, n0.badge, {timeout: 20000});
@@ -120,6 +135,20 @@ module.exports = {
     must(order.wide <= 1, 'the page scrolls sideways at 390 px by ' + order.wide);
     must(await next.locator('[data-review-row]').count() + await next.locator('[data-review-group]').count() === 5, 'five rows on a phone too');
     await shot('phone');
+    // W-042 A: the phone card reads the question, the evidence, the explanation with its links, then the answers
+    const read = await page.evaluate(() => {
+      const c = document.querySelector('.swipe-card:not(.under):not(.under2)'), t = q => { const n = c.querySelector(q); return n && n.offsetParent ? Math.round(n.getBoundingClientRect().top + scrollY) : null; };
+      return {head: t('.swipe-head'), preview: t('.swipe-preview'), foot: t('.swipe-foot:not(.empty)'), acts: Math.round(document.querySelector('.swipe-actions').getBoundingClientRect().top + scrollY), cardEnd: Math.round(c.getBoundingClientRect().bottom + scrollY)};
+    });
+    must(read.head != null && (read.preview == null || read.head < read.preview) && (read.foot == null || (read.foot > read.head && (read.preview == null || read.foot > read.preview))), 'the phone card is not question, evidence, explanation: ' + JSON.stringify(read));
+    // O-06: the phone's own list (Needs you · 1 of N) has no Compare and no ticks either
+    await page.locator('.swipe-jump-all').click();
+    const over = page.locator('.swipe-overview');
+    await over.locator('.review-row').first().waitFor();
+    must(await over.getByRole('button', {name:/Compare/}).count() === 0 && await over.locator('.review-tick-box').count() === 0, 'the phone list has Compare');
+    await shot('phone-list');
+    await over.getByRole('button', {name:'Close'}).click();
+    await over.waitFor({state:'detached'});
     // the keyboard reaches the card before the list (W-036): the first stops inside the page are the switch and the card
     const firstStops = await page.evaluate(() => [...document.querySelectorAll('[data-key="review-layout"] :is(button,a[href],summary,[tabindex="0"])')].filter(n => n.offsetParent && !n.disabled).slice(0, 3).map(n => n.closest('[data-review-next]') ? 'list' : n.closest('[data-review-nav]') ? 'switch' : n.closest('#deck') ? 'card' : 'other'));
     must(firstStops[0] === 'switch' && firstStops.includes('card') && !firstStops.includes('list'), 'the keyboard meets the list before the card: ' + firstStops);

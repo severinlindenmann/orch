@@ -344,7 +344,8 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
    dashboard's answered list say the same */
 UI.ideasWord=(sorted,total)=>{const k=(sorted&&sorted.keep||[]).length,no=(sorted&&sorted.no||[]).length,l=Math.max(0,(total||0)-k-no);return k+' kept, '+no+' no'+(l?', '+l+' for later':'')};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
- let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,ticked=(o.ticked||[]).slice(0,2),pairSide=0,picking=!!o.picking,showing=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
+ let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,pairSide=0,showing=false;const canCompare=o.compare!==false;/* O-06 (owner, 28 Nov): o.compare:false is a deck with no Compare: no button, no ticks, no pair */
+ let ticked=canCompare?(o.ticked||[]).slice(0,2):[],picking=canCompare&&!!o.picking;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
  host.classList.add('swipe','swipe-'+mode);host.tabIndex=0;host.addEventListener('blur',()=>host.classList.remove('quiet-focus'));
  const focusHost=()=>{host.classList.add('quiet-focus');host.focus({preventScroll:true})};host.setAttribute('role','region');host.setAttribute('aria-label','Review, one item at a time');
@@ -362,8 +363,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* ORCH-1847: one card has no "0 answered · 1 waiting", bar, All or "1 of 1" (the page says how many wait); Undo shows
     while it works. Many cards, or one whose option pictures can be compared, keep the whole row. */
  /* one card with nothing to compare: no count, bar, All, "1 of 1" or side list to steer with (ORCH-1847) */
- const lone=()=>items.length===1&&!optionRefs(items[0]).length;
- const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone();[count,bar,allBtn,jumpRow].forEach(x=>{x.hidden=one});undoBtn.hidden=one&&undoBtn.disabled;top.hidden=one&&undoBtn.hidden&&note.hidden};
+ const lone=()=>items.length===1&&!(canCompare&&optionRefs(items[0]).length);
+ /* W-038 (owner, 28 Nov): the count, the bar and Undo appear with the first answer: before it the row says nothing new
+    (the page names how many wait) and a greyed-out Undo is noise. A move that can be taken back (Later) shows Undo. */
+ const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone(),fresh=!Object.keys(ans).length;[allBtn,jumpRow].forEach(x=>{x.hidden=one});[count,bar].forEach(x=>{x.hidden=one||fresh});undoBtn.hidden=(one||fresh)&&undoBtn.disabled;
+  top.classList.toggle('is-fresh',fresh&&undoBtn.hidden&&note.hidden);top.hidden=one&&undoBtn.hidden&&note.hidden};
  /* a phone: "All cards · 1 of N" and ← → above the card (the whole list with its ticks is one tap away) */
  const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','',o.listTitle||'All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
  jAll.onclick=()=>openOverview();jPrev.onclick=()=>step(-1);jNext.onclick=()=>step(1);jumpRow.append(jAll,jPrev,jNext);
@@ -607,11 +611,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const pairRefs=()=>{const p=ticked.map(parseRef).filter(Boolean);return p.length===2?p:null};
  const pairNow=()=>showing?pairRefs():null;
  const syncOverview=headOnly=>{if(overlay&&overlay.draw)overlay.draw(headOnly)};
- const tick=ref=>{if(overlay&&!overlay.classList.contains('swipe-overview'))return;const on=ticked.includes(ref);if(!on&&(ticked.length>=2||!parseRef(ref)))return;ticked=on?ticked.filter(x=>x!==ref):ticked.concat(ref);picking=true;pairSide=0;
+ const tick=ref=>{if(!canCompare)return;if(overlay&&!overlay.classList.contains('swipe-overview'))return;const on=ticked.includes(ref);if(!on&&(ticked.length>=2||!parseRef(ref)))return;ticked=on?ticked.filter(x=>x!==ref):ticked.concat(ref);picking=true;pairSide=0;
   if(showing&&!pairRefs()){showing=false;render()}else change();syncBoxes();syncOverview(true)};
- const compare=refs=>{ticked=(refs||[]).filter(r=>parseRef(r)).slice(0,2);showing=ticked.length===2;picking=ticked.length>0;pairSide=0;closeOverlay(true);render();syncBoxes()};
+ const compare=refs=>{if(!canCompare)return;ticked=(refs||[]).filter(r=>parseRef(r)).slice(0,2);showing=ticked.length===2;picking=ticked.length>0;pairSide=0;closeOverlay(true);render();syncBoxes()};
  const showPair=()=>{if(!pairRefs())return;showing=true;pairSide=0;closeOverlay(true);render()};
- const setPicking=on=>{picking=!!on;if(!picking){ticked=[];if(showing){showing=false;render();syncOverview();return}}change();syncOverview()};
+ const setPicking=on=>{if(!canCompare)return;picking=!!on;if(!picking){ticked=[];if(showing){showing=false;render();syncOverview();return}}change();syncOverview()};
  const syncBox=cb=>{const on=ticked.includes(cb.dataset.ref);cb.checked=on;cb.disabled=!on&&ticked.length>=2};
  const syncBoxes=()=>{if(overlay)overlay.querySelectorAll('.review-tick-box').forEach(syncBox)};
  /* the checkbox both "All cards" lists use (the page's list beside the deck and the deck's own overview) */
@@ -713,7 +717,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     page's list beside the deck (deck.drawList) and the phone's full list (the overview) draw the same rows. */
  const groupOf=it=>it.laneName||it.group||it.ticketTitle||it.ticket||'';/* a lane (Review: what holds up work first, then by what you do) groups before a set or a ticket */
  const sameName=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
- const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title',o.listTitle||'All cards'),acts);
+ const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title',o.listTitle||'All cards'),acts);if(!canCompare)return hd;
   if(!picking){const c=btn('btn outline sm review-list-compare',[ic('compare',16),el('span','','Compare')]);c.setAttribute('aria-pressed','false');c.onclick=()=>setPicking(true);acts.append(c);return hd}
   const two=!!pairRefs(),go=btn('btn sm review-list-compare '+(two?'primary':'outline'),[el('span','','Compare')]),no=btn('btn ghost sm review-list-cancel',[el('span','','Cancel')]);
   go.disabled=!two;go.onclick=()=>showPair();no.onclick=()=>setPicking(false);acts.append(no,go);
@@ -879,15 +883,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
 /* Attention tiles (ORCH-2184, Focused review C; owner's words of 26 Nov). UI.attentionTiles(groups, o) -> .stat-row of three
    tile buttons (in a .attn-tiles-wrap with the deadline as one line under them on a phone): Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
    deadline ("Next deadline: <card> · <time>", only on the tile that holds the next one)}]. A tile with nothing in it
-   says "Nothing waits here" and does nothing. o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
+   is not shown (W-038, owner 28 Nov: no "Quick look 0 · Nothing waits here"). o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
 UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken back afterwards.',short:'One clear question each.',time:'Big, public or hard to take back.'};
  const row=el('div','stat-row attn-tiles');row.setAttribute('role','group');row.setAttribute('aria-label','Pick where to start');
- (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0),b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
-  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
+ (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0);if(!n)return;const b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
+  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',SAY[g.group]||''));
   if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
   if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
   /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
-  if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
  /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */
  const due=(groups||[]).find(g=>(g.count|0)>0&&g.deadline),wrap=el('div','attn-tiles-wrap');wrap.append(row);

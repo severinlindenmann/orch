@@ -10,17 +10,7 @@
 <!-- W-043 (28 Nov): a paused automation is one line on top with Turn on (?paused=1), never a card per ticket -->
 <div class="banner attn" id="review-paused" role="status" hidden><p class="grow"><strong>Automation is paused: Disk almost full: 8 GB free.</strong> Nothing starts by itself. 4 tickets wait for a helper.</p><button class="btn outline sm" type="button">Turn on</button></div>
 <div class="review-layout">
- <div class="stack review-rail">
- <!-- O-04 / O-05 / O-06 (28 Nov): the page's own list: five compact rows and the count, Next five / All, one row per repeated cause with Open, no Compare; under it the merge line (FX-04) and the Reviewer's one line (W-036). Wide: beside the card; narrow: after it. -->
- <aside class="card review-side" aria-label="Needs you"><div id="queue" class="review-queue"></div></aside>
- <!-- ORCH-1798: shown only while a switch is on (turned on in Settings > General) --><section class="card" aria-label="Auto Reviewer"><div class="card-h"><h2>Auto Reviewer</h2></div>
-  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with &ldquo;I review the result&rdquo; on wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
-  <div class="card-row"><div class="grow"><h3>Away for the night</h3><p class="meta">Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.</p></div><button type="button" class="switch" role="switch" aria-label="Away for the night" aria-checked="false"></button></div>
-  <div class="card-row"><div class="grow"><h3>Nothing closes by itself</h3><p class="meta">The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.</p></div><button type="button" class="switch" role="switch" aria-label="Nothing closes by itself" aria-checked="false"></button></div>
-  <div class="card-row"><p class="meta">Each verdict shows in the ticket&rsquo;s history, and you can undo it on Review under Answered.</p></div>
- </section>
- </div>
-<!-- ORCH-2094: the rail first, then the deck, as the product draws it wide (review-rail / review-main); narrow: the card first -->
+<!-- W-036 (28 Nov): the card comes before the list in the page in every layout (Tab reaches the decision first); wide, the master still stands the list on the left (review-rail has order -1), narrow is one column with the card first -->
  <div class="review-main stack"><nav class="segmented" aria-label="Show"><button class="btn sm" type="button" data-show="deck" aria-pressed="true">Waiting <span class="meta">20</span></button><button class="btn sm" type="button" data-show="answered" aria-pressed="false">Answered <span class="meta"></span></button></nav>
  <!-- W-036 / O-04: what the Reviewer did is the first block of Answered (each entry with its reason, Send back and Undo), no longer a column under the list -->
  <section class="card" id="review-accepted" aria-label="What the Reviewer did" hidden><div class="card-h"><h2>What the Reviewer did</h2></div>
@@ -35,7 +25,6 @@
   <div class="card-row"><div class="grow"><a href="../ticket/ticket.html">DT-58 &middot; Weekly sales mail</a><p class="meta">The helper could not start: Automation is paused in this workspace.</p><p class="meta">Closed by itself &middot; Automation runs again, so this needs no answer. The start is tried again.</p></div></div>
  </section>
  <section id="deck" aria-label="Review deck"></section>
- <section id="deck" aria-label="Review deck"></section>
  <!-- ORCH-1616: what the Review badge counts but has no card (a helper asking on its screen, a question without a card) is listed (?screen=1) -->
  <section class="card" id="review-screen" aria-label="Also waiting for you" hidden><div class="card-h"><h2>Also waiting for you</h2></div>
   <div class="card-row"><div class="grow"><strong><span class="key">ORCH-238</span> Add files and notes to a ticket</strong><p class="meta">Waits for your answer.</p></div><button class="btn outline sm" type="button">Answer</button></div>
@@ -45,6 +34,16 @@
  <!-- narrow (a phone, beside the Focus panel): the list comes here, after the card, in the same page scroll -->
  <section class="card" id="review-next" aria-label="Needs you" hidden></section>
  <section id="answered" class="stack" aria-label="Answered" hidden></section></div>
+ <div class="stack review-rail">
+ <!-- O-04 / O-05 / O-06 (28 Nov): the page's own list: five compact rows and the count, Next five / All, one row per repeated cause with Open, no Compare; under it the merge line (FX-04) and the Reviewer's one line (W-036). Wide: beside the card; narrow: after it. -->
+ <aside class="card review-side" aria-label="Needs you"><div id="queue" class="review-queue"></div></aside>
+ <!-- ORCH-1798: shown only while a switch is on (turned on in Settings > General) --><section class="card" aria-label="Auto Reviewer"><div class="card-h"><h2>Auto Reviewer</h2></div>
+  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets with &ldquo;I review the result&rdquo; on wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
+  <div class="card-row"><div class="grow"><h3>Away for the night</h3><p class="meta">Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.</p></div><button type="button" class="switch" role="switch" aria-label="Away for the night" aria-checked="false"></button></div>
+  <div class="card-row"><div class="grow"><h3>Nothing closes by itself</h3><p class="meta">The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.</p></div><button type="button" class="switch" role="switch" aria-label="Nothing closes by itself" aria-checked="false"></button></div>
+  <div class="card-row"><p class="meta">Each verdict shows in the ticket&rsquo;s history, and you can undo it on Review under Answered.</p></div>
+ </section>
+ </div>
 </div>
 </main></div></div>
 <script>
@@ -81,7 +80,7 @@ function drawSide(follow){if(!deck)return;const wait=deck.items.map((it,i)=>({it
  /* wide: the aside beside the card; narrow (a phone; ?narrow=1 stands for the page beside the Focus panel): a card after the deck */
  const narrow=matchMedia('(max-width:720px)').matches||new URLSearchParams(location.search).has('narrow'),next=document.getElementById('review-next'),lay=document.querySelector('.review-layout'),ae=document.activeElement,held=ae&&(q.contains(ae)||next.contains(ae))?ae.textContent:'';
  if(lay.querySelector('.review-side'))lay.querySelector('.review-side').hidden=narrow;next.hidden=!narrow||document.getElementById('deck').hidden;
- if(narrow&&lay.firstElementChild.classList.contains('review-rail'))lay.append(lay.firstElementChild);/* one column: the card first, as the product */
+ if(narrow)lay.dataset.narrow='yes';else delete lay.dataset.narrow;/* one column, the card first: the product's mark */
  (narrow?q:next).replaceChildren();(narrow?next:q).replaceChildren(...kids);
  if(held)[...(narrow?next:q).querySelectorAll('button')].find(b=>b.textContent===held)?.focus({preventScroll:true})}
 if(new URLSearchParams(location.search).has('paused'))document.getElementById('review-paused').hidden=false;
@@ -90,7 +89,7 @@ addEventListener('resize',()=>drawSide(false));
 /* ?empty=1 (ORCH-2024) and ?one=1 (ORCH-2113): as the product, the rail holds only the empty All cards list, so the page is
    one column, the Waiting / Answered switch lines up with the heading and the empty state or the one card sits in the
    card's column under it (no empty left column) */
-function productRail(){const lay=document.querySelector('.review-layout'),mainCol=lay.querySelector('.review-main'),rail=lay.querySelector('.review-rail');/* ORCH-2094: the markup already has the rail first */
+function productRail(){const lay=document.querySelector('.review-layout'),mainCol=lay.querySelector('.review-main'),rail=lay.querySelector('.review-rail');
  const host=document.createElement('div'),nav=mainCol.querySelector('.segmented');mainCol.insertBefore(host,nav);host.append(nav,document.getElementById('deck'));/* one host for switch and deck, as the product's */
  rail.querySelectorAll(':scope>section').forEach(n=>n.remove());q.replaceChildren()}
 function showEmpty(){productRail();document.querySelector('.page-heading p').textContent='Nothing waits for you.';
@@ -121,7 +120,7 @@ function mkDeck(list){deckHost.replaceChildren();deck=UI.swipeDeck(deckHost,list
 function startRound(g){round={group:g,decided:[]};mkDeck(left().filter(i=>gOf(i)===g).slice(0,UI.review.ROUND))}
 function toStart(){round=null;mkDeck(left())}
 const decided=(it,v,note)=>{doneIds.add(it.id);if(round)round.decided.push({title:it.title,word:v==='ok'?(note&&note.ideas?UI.ideasWord(note.ideas,it.ideas.length):it.okLabel||'Looks good'):v==='no'?(it.noLabel||(it.kind==='check'?'Send back':"Don't do")):'Comment'})};
-if(new URLSearchParams(location.search).has('empty'))showEmpty();else{if(items.length===1){productRail();document.querySelector('.page-heading p').textContent='1 thing needs you.';document.querySelector('[data-show=deck] .meta').textContent='1'}if(DF&&items.length>1)productRail();/* as the product: the deck in the wide column, the All cards list beside it */deckOpts={mode:'desk',listTitle:'Needs you',onDecide:decided,decisionFirst:new URLSearchParams(location.search).has('decide'),/* ?decide=1: the decision-first card (ORCH-2182) */attach:{voice:true,accept:['png','jpg','jpeg','gif','webp','txt','md','csv','webm','ogg','m4a'],maxFiles:10,maxBytes:25*1024*1024,attachLabel:'Add file'},onNote:async()=>({ok:true}),onRun:it=>it.run&&it.run.class==='login'?Promise.resolve({ok:true,in_terminal:true,terminal:'t_term01'}):new Promise(r=>setTimeout(()=>r({ok:true,exit:0,output:'workflow.reviewer_look = on (was off)'}),1200)),onShowTerminal:()=>{},ticketLink:it=>it.ticketId?(DF?'?decide=1&':'?')+'ticket='+encodeURIComponent(it.ticketId):'',/* ORCH-2185 (?decide=1): Ask about this and Watch the helper in More open the panel's Chat / helper tab */moreItems:DF?it=>it.ticketId?[{label:'Ask about this',icon:'comment',href:'?decide=1&ticket='+encodeURIComponent(it.ticketId)+'&tab=chat&ask='+encodeURIComponent(it.text||it.title||'')},{label:'Watch the helper',icon:'code',href:'?decide=1&ticket='+encodeURIComponent(it.ticketId)+'&tab=helper'}]:[]:undefined,onChange:()=>setTimeout(()=>{drawSide();drawTicket()})};deck=UI.swipeDeck(deckHost,items,deckOpts);drawAttn()}
+if(new URLSearchParams(location.search).has('empty'))showEmpty();else{if(items.length===1){productRail();document.querySelector('.page-heading p').textContent='1 thing needs you.';document.querySelector('[data-show=deck] .meta').textContent='1'}if(DF&&items.length>1)productRail();/* as the product: the deck in the wide column, the All cards list beside it */deckOpts={mode:'desk',listTitle:'Needs you',compare:false,/* O-06: no Compare in the deck's own lists either */onDecide:decided,decisionFirst:new URLSearchParams(location.search).has('decide'),/* ?decide=1: the decision-first card (ORCH-2182) */attach:{voice:true,accept:['png','jpg','jpeg','gif','webp','txt','md','csv','webm','ogg','m4a'],maxFiles:10,maxBytes:25*1024*1024,attachLabel:'Add file'},onNote:async()=>({ok:true}),onRun:it=>it.run&&it.run.class==='login'?Promise.resolve({ok:true,in_terminal:true,terminal:'t_term01'}):new Promise(r=>setTimeout(()=>r({ok:true,exit:0,output:'workflow.reviewer_look = on (was off)'}),1200)),onShowTerminal:()=>{},ticketLink:it=>it.ticketId?(DF?'?decide=1&':'?')+'ticket='+encodeURIComponent(it.ticketId):'',/* ORCH-2185 (?decide=1): Ask about this and Watch the helper in More open the panel's Chat / helper tab */moreItems:DF?it=>it.ticketId?[{label:'Ask about this',icon:'comment',href:'?decide=1&ticket='+encodeURIComponent(it.ticketId)+'&tab=chat&ask='+encodeURIComponent(it.text||it.title||'')},{label:'Watch the helper',icon:'code',href:'?decide=1&ticket='+encodeURIComponent(it.ticketId)+'&tab=helper'}]:[]:undefined,onChange:()=>setTimeout(()=>{drawSide();drawTicket()})};deck=UI.swipeDeck(deckHost,items,deckOpts);drawAttn()}
 /* Answered (ORCH-172): records from the master (UI.answerRecord): ticket key and title on every card, tiles about 344x216, a click or Enter opens one large */
 const ans=document.getElementById('answered'),fu=(e,r)=>'assets/'+String(r).split('/').pop(),tk=()=>'../ticket/ticket.html',ago=h=>Date.now()-h*36e5;
 [{id:'a1',ticket:'DT-50',ticket_key:'DT-50',ticket_title:'Home look',by:'Severin',via:'dashboard',at:ago(1),card:{kind:'draft',title:'Home: one list of what needs you',preview:{type:'compare',before:{type:'img',src:'reviewed/aa/home-today.jpg'},after:{type:'img',src:'reviewed/aa/home-proposal.jpg'}}},shown:{copy:'reviewed/aa/',files:{'home-proposal.jpg':'x'}},decision:{action:'approve',summary:'Build it'}},

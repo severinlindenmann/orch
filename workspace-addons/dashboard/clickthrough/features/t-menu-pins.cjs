@@ -36,7 +36,8 @@ module.exports = {
     await page.locator('[data-key="settings-menu-up-' + second + '"]').click();
     must((await inList())[0] === second, 'Move up did not change the menu');
     must(await page.locator('.menu-order [data-menu-row]').first().getAttribute('data-menu-row') === second, 'Move up did not change the Settings list');
-    must(await page.locator('[data-key="settings-menu-up-' + second + '"]').isDisabled(), 'the first page can still move up');
+    must(await page.locator('[data-key="settings-menu-up-' + second + '"]').count() === 0, 'the first page can still move up');
+    must(await page.evaluate(() => document.activeElement?.dataset.key || '') === 'settings-menu-down-' + second, 'the keyboard did not stay on the moved row');
     await reload();
     must((await inList())[0] === second, 'the order is gone after a reload');
     // dragging: the first row onto the lower half of the second puts the old order back

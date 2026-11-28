@@ -934,10 +934,10 @@ function reviewPage() {
   return fragment(
     heading('Review', reviewSubtitle()),
     reviewPausedLine(),
-    // wide: the list on the left, the card on the right; an open ticket takes the list's place (ORCH-1804). Narrow:
-    // one column, the card first.
+    // The card comes before the list in the page in every layout, so Tab reaches the decision first (W-036). Wide: the
+    // master still stands the list on the left; an open ticket takes the list's place (ORCH-1804). Narrow: one column.
     h('div', {className:'review-layout' + (open ? ' with-ticket' : ''), 'data-key':'review-layout', 'data-narrow':narrow ? 'yes' : null},
-      open ? reviewTicketPanel(open) : null, ...(narrow ? [main, rail] : [rail, main])));
+      open ? reviewTicketPanel(open) : null, main, rail));
 }
 // FX-04: results whose pull request is on its way in (in the merge queue, or its checks only just passed) have no card
 // here: one quiet line under the list.

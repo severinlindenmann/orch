@@ -102,8 +102,26 @@ module.exports = {
       must(r.side && !r.next && r.rows === 5, at + 'the list is not beside the card with five rows ' + JSON.stringify(r));
       must(r.pad > 0 && r.acts && r.acts.bottom <= r.h - r.pad + 1, at + 'the answer buttons are under the bar ' + JSON.stringify(r));
       must(r.sideways <= 1 && r.pageSideways <= 1, at + 'the page scrolls sideways ' + JSON.stringify(r));
+      // O-04: the list beside the card ends above the Live panel (it scrolls in itself, nothing of it under the panel)
+      await page.locator('.review-side').getByRole('button', {name:/^All /}).click();
+      await settle();
+      const all = await look();
+      must(all.side && all.side.bottom <= all.h - all.pad + 1, at + 'the list runs under the Live panel ' + JSON.stringify(all));
       if (width === 1440) await shot('live-bottom');
+      await page.locator('.review-side').getByRole('button', {name:'First five'}).click();
     }
+    // W-042: a phone with the Live bar: the answer buttons stand above the tab bar and the Live bar
+    await page.evaluate(() => window.LiveLayer.place('bar'));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-review-next] [data-review-row]').first().waitFor();
+    await settle();
+    const ph = await page.evaluate(() => {
+      const b = q => { const n = document.querySelector(q); return n && n.getClientRects().length ? { top: Math.round(n.getBoundingClientRect().top), bottom: Math.round(n.getBoundingClientRect().bottom) } : null; };
+      return { h: innerHeight, acts: b('.swipe-actions'), tabbar: b('#tabbar'), live: b('#live-dock'), wide: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    must(ph.acts && ph.tabbar && ph.live && ph.live.bottom <= ph.tabbar.top + 1 && ph.acts.bottom <= ph.live.top + 1, 'phone: the answer buttons are under the bars ' + JSON.stringify(ph));
+    must(ph.wide <= 1, 'phone: the page scrolls sideways ' + JSON.stringify(ph));
+    await shot('phone-bars');
     await page.evaluate(() => window.LiveLayer.place('bar'));
     await page.setViewportSize(was);
     }

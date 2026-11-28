@@ -228,3 +228,11 @@ master rule as the product. This preserves the 24 px clearance from the pinned a
 Still as before, waiting for the master (b301): a tile with 0 and the progress row before the first answer (W-038), the
 card's links above its title under 481 px and the answer bar above both phone bars (W-042), one right edge for tiles,
 progress row and card (FX-06), Compare in the kit's own phone list (O-06).
+
+## Follow-up to the walk of 28 Nov (master rules)
+
+- The markup has `review-main` before `review-rail` (W-036: Tab reaches the card first); the master stands the list on the
+  left on a wide page, and `data-narrow` on `.review-layout` (set at phone width and with `?narrow=1`) is one column.
+- The deck is made with `compare:false` (O-06): no Compare in the list beside it or in the phone's "Needs you" list.
+- No progress row before the first answer, no tile for a group with 0 (`?decide=1`), one right edge for tiles, card and
+  answer bar, and a phone card in the desk's reading order (W-038, FX-06, W-042): all from the master, nothing page-local.
