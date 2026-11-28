@@ -417,6 +417,21 @@ def _ticket_paste(a):
     return _ticket_new({**args, "note": text})
 
 
+def _page_wait(v) -> bool:
+    """The waits a page may set: until a time (the board's Waiting lane, ORCH-152; `ref` says what it waits
+    for, ORCH-235), until the person brings the ticket back ("Not now" by hand, ORCH-2431: external with a
+    reason) and on one of its questions again (Bring back). The core checks the rest."""
+    if not isinstance(v, dict) or not isinstance(v.get("ref", ""), str):
+        return False
+    if v.get("kind") == "time":
+        return {"kind", "until"} <= set(v) <= {"kind", "until", "ref"} and isinstance(v["until"], str)
+    if v.get("kind") == "external":
+        return set(v) == {"kind", "ref"} and 0 < len(v["ref"].strip()) <= 200
+    if v.get("kind") == "question":
+        return set(v) == {"kind", "ref"} and re.fullmatch(r"q[0-9]{1,6}", v["ref"]) is not None
+    return False
+
+
 def _ticket_patch(a):
     _only(a, ("ticket", "data", "if_revision", "review_tip"))
     data = a.get("data")
@@ -429,19 +444,7 @@ def _ticket_patch(a):
             raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
         # ORCH-152: the board's Waiting lane waits until a time; Superseded names the ticket that replaces it.
         # The core checks the rest (a real time, a ticket that exists, only with dropped).
-        if (
-            k == "waiting_on"
-            and v is not None
-            and not (
-                isinstance(v, dict)
-                and {"kind", "until"} <= set(v) <= {"kind", "until", "ref"}
-                and v["kind"] == "time"
-                and isinstance(v["until"], str)
-                and isinstance(
-                    v.get("ref", ""), str
-                )  # ORCH-235: what it waits for (optional; the core checks length)
-            )
-        ):
+        if k == "waiting_on" and v is not None and not _page_wait(v):
             raise BadRequest("A wait from the board is a time.")
         if k == "superseded_by" and v is not None and not (isinstance(v, str) and TICKET_REF.fullmatch(v)):
             raise BadRequest("That is not a ticket.")

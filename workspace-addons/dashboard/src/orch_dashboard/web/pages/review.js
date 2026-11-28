@@ -552,6 +552,13 @@ function reviewTicketHref(id, tab = '', term = '') {
   }
   return '#review' + (rest.length ? '?' + rest.join('&') : '');
 }
+// ORCH-2431: "Not now" on a question card parks its ticket (pick a day, or until the person brings it back); the card
+// leaves Review with it. Only a ticket's own question: a result to check or a stuck ticket is not put off this way.
+function reviewNotNow(it) {
+  const id = String(it?.id || ''), t = it?.ticketId ? ticketOf(it.ticketId) : null;
+  if (!t || !id.startsWith('core:q:') || typeof askNotNow !== 'function') return null;
+  return () => askNotNow(ticketOf(t.id));
+}
 // ---- ORCH-2185 (Focused review D, behind workflow.decision_first): the panel beside the card has three tabs ----
 // Ticket (the ticket page, as before), Chat (the ticket's chat with its message box; "Ask about this" in the card's
 // More opens it with "About: <the decision>" in the box) and "What the helper does" (the helper's live screen,
@@ -716,7 +723,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), notNow:snapshot ? undefined : reviewNotNow, decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
   mountReviewPanel(main);

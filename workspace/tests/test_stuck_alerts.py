@@ -12,6 +12,18 @@ import pytest
 from orch import addons, needs, phone_stuck, phone_view, relay, reviewer, runs, stuck, tickets
 
 
+@pytest.fixture
+def new_ticket(proj, run, new_ticket):
+    """A ticket in To do: one in Backlog gives no row at all (ORCH-2431)."""
+
+    def _n(title="Do the thing"):
+        tid = new_ticket(title)
+        assert run("ticket", "status", tid, "ready", "--by", "human:tester")[0] == 0
+        return tid
+
+    return _n
+
+
 def _since(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
 

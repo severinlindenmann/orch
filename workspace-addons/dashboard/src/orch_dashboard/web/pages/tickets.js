@@ -771,6 +771,40 @@ function askWaitUntil(t, from) {
   d.showModal();
   return Promise.resolve();
 }
+// ORCH-2431: "Not now" on a question: the ticket is parked. It asks nothing on Home or Review until the day picked
+// here, or until the person brings it back (Home, Parked). Its question is kept. One click per choice, with Undo.
+const NOT_NOW = 'Not now';
+function askNotNow(t) {
+  if (!t || snapshot) return Promise.resolve();
+  const {d, actions} = dialog('Bring it back when?');
+  const park = wait => { window.orch.close(d); return moveTicket(t.id, 'waiting', false, {data:{waiting_on:wait}}); };
+  const day = at => park({kind:'time', until:utcStamp(at), ref:NOT_NOW});
+  const input = h('input', {className:'input', type:'datetime-local', id:'not-now-until-' + t.id, 'data-key':'not-now-until'});
+  const error = h('p', {className:'meta bad', role:'alert', hidden:true});
+  const quick = h('div', {className:'row wrap'}, waitChoices().map(([label, at]) => { const when = window.UI?.stamp ? window.UI.stamp(at) : ''; const b = button(when ? when.charAt(0).toUpperCase() + when.slice(1) : label, 'outline sm', () => day(at)); b.dataset.key = 'not-now-day'; return b; }));
+  const hand = button('When I bring it back', 'outline sm', () => park({kind:'external', ref:NOT_NOW}));
+  hand.dataset.key = 'not-now-hand';
+  quick.append(hand);
+  const save = button('Park until then', 'primary', () => {
+    const at = input.value ? new Date(input.value) : null;
+    if (!at || Number.isNaN(at.getTime()) || at <= new Date()) { error.textContent = 'Pick a day and time in the future.'; error.hidden = false; input.focus(); return; }
+    day(at);
+  });
+  actions.append(save);
+  d.append(h('div', {className:'stack'}, h('p', {className:'meta'}, clean(t.title)), quick,
+    h('label', {className:'field', for:input.id}, 'Or pick a day and time', input), error,
+    h('p', {className:'meta'}, 'Until then it asks nothing on Home or Review. The question is kept; you find the ticket under Parked on Home.')), actions);
+  d.showModal();
+  return Promise.resolve();
+}
+// Bring a parked ticket back (ORCH-2431): one in Backlog moves to To do; a waiting one waits on its open question
+// again (so the question shows), else it goes on (Working).
+function bringBack(t) {
+  if (!t) return Promise.resolve();
+  if (t.status === 'open') return moveTicket(t.id, 'ready');
+  const q = array(t.questions).find(x => x && x.answer == null && !x.taken_back);
+  return q ? moveTicket(t.id, 'waiting', false, {data:{waiting_on:{kind:'question', ref:q.id}}}) : moveTicket(t.id, 'active');
+}
 function askReplacedBy(t, from) {
   const {d, actions} = dialog('Which ticket replaces it?');
   const others = sorted(tickets().filter(o => o.id !== t.id && activeTicket(o)));

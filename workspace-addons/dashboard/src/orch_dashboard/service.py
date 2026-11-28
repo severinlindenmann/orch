@@ -171,9 +171,13 @@ def start(root: Path, port: int | None = None) -> dict:
         str(ready),
         *(["--port", str(port)] if port else ["--port", str(first), "--auto-port"]),
     ]
+    from orch.procs import service_start  # ORCH-2409: the one door for a long-running start
+
     with runfiles.open_append(d / "server.log") as out:
-        proc = subprocess.Popen(
+        proc = service_start(
+            root,
             cmd,
+            start=subprocess.Popen,
             cwd=root,
             stdout=out,
             stderr=subprocess.STDOUT,

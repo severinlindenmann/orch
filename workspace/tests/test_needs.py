@@ -156,6 +156,18 @@ def test_addon_rows_are_added_and_cached(na, proj, run):
     assert (proj / ".orch/run/needs-cache/hello.json").is_file()
 
 
+def test_an_addon_row_on_a_parked_ticket_waits_with_it(na, proj, run):
+    """ORCH-2431: a parked ticket gives no row, an add-on's neither; brought back, the row is there again."""
+    tid = _ticket(run, "Parked")
+    (proj / "rows.json").write_text(json.dumps([_row(), _row(key="y", ticket=tid)]), encoding="utf-8")
+    assert run("ticket", "status", tid, "ready")[0] == 0
+    assert [r["id"] for r in _rows(run)] == ["hello:x", "hello:y"]
+    assert run("ticket", "wait", tid, "--on", "external:later")[0] == 0
+    assert [r["id"] for r in _rows(run)] == ["hello:x"]
+    assert run("ticket", "wait", tid, "--clear")[0] == 0
+    assert [r["id"] for r in _rows(run)] == ["hello:x", "hello:y"]
+
+
 def test_slow_addon_with_an_old_saved_answer_gives_it_stale_fast(na, proj, run):
     _rows(run)
     cache = proj / ".orch/run/needs-cache/hello.json"

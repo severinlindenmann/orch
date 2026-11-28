@@ -1794,17 +1794,19 @@ ABOUT_MAX = 120
 
 
 def _stack_tickets(root: Path) -> list[dict]:
-    """The tickets that can hold a card: an open question on an unfinished ticket, or in Review. With the
+    """The tickets that can hold a card: an open question on an unfinished ticket that is not parked
+    (parked.py), or in Review. With the
     ticket index (ORCH-521) only their files are read (ORCH-522: every ticket was read, 2 s at 10,000);
     without it every ticket."""
-    from orch import needs
+    from orch import needs, parked
 
     try:
         from orch import ticketindex
 
         rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
     except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
-        return tickets.list_all(root)
+        return parked.without(tickets.list_all(root))
+    rows = parked.without(rows)  # ORCH-2431: a parked ticket holds no card until it comes back
     out = []
     for r in rows:
         if r.get("status") == "review" or (r.get("questions_open") and r.get("status") not in needs.OPEN):

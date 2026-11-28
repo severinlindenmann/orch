@@ -331,10 +331,27 @@ def _port_taken(port: int) -> bool:
         return False
 
 
+def _orch_home_row(root: Path) -> dict | None:
+    """A problem row when the orch folder asked for (ORCH_HOME) is refused: doctor says so and what to do,
+    and never reports "Nothing wrong" about another folder than the one that was named (ORCH-2410)."""
+    try:
+        addons.home(root if (root / ".orch").is_dir() else None)
+    except Refused as e:
+        text = str(e)
+        fix = "Put ORCH_HOME in a folder under your home, or unset it."
+        return _row("orch folder", False, text.split(". Put ORCH_HOME")[0].rstrip(".") + ".", fix)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
 def doctor(root: Path) -> dict:
     if not root.is_dir():
         raise Refused(f"{root} cannot be read. Open a terminal in your project folder and try again.")
     rows = install_checks(root)
+    home_row = _orch_home_row(root)
+    if home_row:
+        rows.append(home_row)
     if (root / ".orch").is_dir():
         rows += ticket_file_checks(root)
         rows += addon_checks(root)

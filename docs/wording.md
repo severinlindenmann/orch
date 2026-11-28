@@ -12,6 +12,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | a ticket made with tickets inside it (owner, ORCH-14) | Epic | `ticket new --epic`, `epic` | Subtask |
 | status of a ticket not started | Backlog (status chip; the button that shows a ticket stays "Open"; a just-saved ticket's own page says "Not started" above its title, ORCH-2149) | `open` | Open (as a status) |
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
+| a ticket that asks nothing for now: in Backlog, or put off until a day, a ticket or by hand (owner, ORCH-2431) | Parked (the list on Home, `orch needs --parked`); "Not now" (the button that parks it); "Bring back" (the button that returns it) | `orch ticket wait`, `waiting_on` time, ticket or external | Snoozed, Muted, Hidden, On hold |
 | a person looking at a helper's finished result (owner, ORCH-2140) | Review (status, lane, page); "Result to review" (row), "Test results" (button, ORCH-2172), "I review the result" (switch) | `review` status, `orch needs` | Check (for this step), Check result, Result to check, Human review needed |
 | open tickets that need nobody (Home, `orch counts`; owner, ORCH-2140) | In progress (started: a task done, a helper on it, or worked on before) / Not started (saved, nobody on it yet) | `in_progress`, `not_started` | Quiet, Idle, Pending |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
