@@ -218,7 +218,7 @@ def test_stack_and_answered_for_a_session(srv, ws, card):
 
 def test_stack_says_decision_first_only_when_the_switch_is_on(srv, ws, card, run):
     """ORCH-2187 (Focused review F): the page reads the workspace's own switch with the list. Off (the
-    default): no key, the answer is as before. On: decision_first true, so the page draws "You decide" first."""
+    default): no key, the answer is as before. On: decision_first true, the page draws "You decide" first."""
     port = srv.server_address[1]
     ck = open_session(ws, port)
     off = json.loads(req(port, "GET", "/api/stack", headers={"Cookie": ck})[2])
