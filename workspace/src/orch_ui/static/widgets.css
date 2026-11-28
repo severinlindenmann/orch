@@ -3142,6 +3142,7 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
 @media (max-width:720px){
  .swipe-card>.swipe-head{order:-2}
  .swipe-card>.swipe-foot .swipe-foot-row>.grow{display:none}
+ .swipe-card>.swipe-foot:not(.empty){padding-inline:var(--s4)}
 }
 /* Review, the owner's walk of 28 Nov (W-036, W-038, W-042, O-04, FX-06):
    W-036: the page has the card before the list (Tab reaches the decision first); on a wide page the list still stands
@@ -3162,4 +3163,5 @@ tr.is-picked>td,tr.is-picked:hover>td{background:var(--brand-soft)}
  body[data-live-layer] .swipe-actions{bottom:var(--live-pad,0px)}
  body[data-live-layer]:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + var(--live-pad,0px) + env(safe-area-inset-bottom))}
  :where(html:not([data-window=wide])) .review-queue-row{min-height:var(--touch)}
+ .review-main .swipe-desk{padding-inline:0}/* FX-06 on a phone: the card starts and ends where the switch, the tiles and the list do */
 }
