@@ -1471,12 +1471,39 @@ def test_say_with_only_a_file_needs_no_words(proj, run):
     assert m["text"] == "" and m["files"][0]["name"] == "agenda.txt"
 
 
-@pytest.mark.parametrize("name", ["missing.txt", "../x.txt", "sub/agenda.txt", ""])
+@pytest.mark.parametrize(
+    "name", ["missing.txt", "../x.txt", "sub/agenda.txt", "", "C:agenda.txt", "c:x", "agenda.txt:more"]
+)
 def test_say_refuses_a_file_that_is_not_in_the_chat(proj, run, name):
     _chat_file(proj, run)
     code, _, err = run("chat", "say", "--by", "human:marco", "--json", f"--file={name}", "--", "hi")
     assert code != 0 and "not in the Chat" in err
     assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "first"  # nothing was written
+
+
+def test_a_drive_qualified_name_is_refused_even_when_such_a_file_is_there(proj, run):
+    """ORCH-2218 (R1.6): on Windows `folder / "C:x"` is a path on drive C, outside the Chat's files. The name
+    is refused by its spelling on every system, before the disk is asked."""
+    gid = _chat_file(proj, run)
+    folder = tickets.artifacts_path(proj, gid)
+    if os.name != "nt":  # a colon is a legal character here: the file exists and is still refused
+        (folder / "C:x").write_bytes(b"x")
+    with pytest.raises(Refused, match="not in the Chat"):
+        chat.chat_files(proj, gid, ["C:x"])
+    assert chat.chat_files(proj, gid, ["agenda.txt"]) == [{"name": "agenda.txt", "size": 7}]
+
+
+def test_say_scans_the_file_names_for_secrets_like_the_words(proj, run):
+    """ORCH-2218 (R5.2): a file name goes into the Chat history and the helper's input, so it is scanned too.
+    A hit refuses with one sentence that names the kind, never the value; nothing is written."""
+    gid = _chat_file(proj, run)
+    secret = "ghp_" + "a1B2c3D4e5F6g7H8i9J0" * 2
+    code, out, err = run("chat", "say", "--by", "human:marco", "--json", f"--file={secret}.txt", "--", "hi")
+    assert code != 0 and "The Chat file has a GitHub token in its name, so nothing was saved." in err, err
+    assert secret not in err and secret not in out
+    assert len(err.strip().splitlines()) == 1
+    assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "first"
+    assert not any(secret in json.dumps(h) for h in tickets.load(proj, gid)["history"])
 
 
 def test_say_refuses_files_in_a_ticket_chat(proj, run):
