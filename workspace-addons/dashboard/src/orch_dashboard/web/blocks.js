@@ -253,7 +253,48 @@ const OrchBlocks = (() => {
     return finish();
   }
 
+  // The room the page has (W-001): under 900 px of page area (beside the Focus panel, or a small window) a row with
+  // buttons is drawn as the master's short row (kit .short-row): the name, one quiet line, and the buttons and the
+  // switch always in view (W-051, O-25, owner 28 Nov). A phone-width window (up to 720 px) keeps its own card form.
+  const ROOM_NARROW = 900, PHONE = 720;
+  function roomNarrow() {
+    if (typeof window === 'undefined') return false;
+    const w = Number(window.innerWidth) || 0;
+    if (w && w <= PHONE) return false;
+    const room = window.UI && window.UI.pageRoom;
+    return room && typeof room.under === 'function' ? !!room.under(ROOM_NARROW) : !!w && w < ROOM_NARROW;
+  }
+  // One short row: {title, link, hover, facts: [text | node], side: [node], below: [node]}. `side` stays at the right of
+  // the name (a switch, one or two buttons); `below` is a line of whole buttons under the quiet line (never squeezed
+  // beside the name, never broken inside a word).
+  function shortRow(o) {
+    const row = el('div', 'short-row'), grow = el('span', 'grow');
+    const t = linked('short-title', o.link, keepRefs(o.title));
+    t.title = String(o.hover || o.title);
+    grow.append(t);
+    const facts = arr(o.facts).filter(x => x != null && x !== '');
+    if (facts.length) {
+      const f = el('span', 'short-fact');
+      facts.forEach((x, i) => { if (i) f.append(' · '); f.append(x); });
+      f.title = facts.map(x => typeof x === 'string' ? x : x.textContent).join(' · ');
+      grow.append(f);
+    }
+    if (arr(o.below).length) { const acts = el('div', 'row'); acts.append(...o.below); grow.append(acts); }
+    row.append(grow);
+    if (arr(o.side).length) { const side = el('span', 'short-side'); side.append(...o.side); row.append(side); }
+    return row;
+  }
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
+  // O-25 (owner 28 Nov): the same row in a page area under 900 px: the name, its note and facts on one quiet line, then
+  // the buttons on a line of their own (whole buttons that wrap, never a word broken letter by letter).
+  function compactShort(it) {
+    const acts = [];
+    for (const a of arr(it.actions)) { const b = rowButton(a); if (b) acts.push(...openFirst(b)); }
+    const facts = [it.subtitle, ...arr(it.meta)].map(x => String(x ?? '').trim()).filter(Boolean);
+    const row = shortRow({title: it.title, link: it.link, facts, below: acts, side: arr(it.chips).slice(0, 1).map(c => toneChip(c.tone, String(c.label)))});
+    row.setAttribute('role', 'listitem');
+    return row;
+  }
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
     const t = linked('li-title compact-title', it.link, keepRefs(it.title));
@@ -556,6 +597,12 @@ const OrchBlocks = (() => {
       if (b.above) s.append(host);
       if (!arr(b.items).length && b.empty) { host.append(emptyState(b.empty)); return s; }
       if (!arr(b.items).length) ul.append(el('li', 'blk-none', 'Nothing here.'));
+      if (b.compact && arr(b.items).length && roomNarrow()) {
+        const box = el('div', 'blk-short cal-list'); box.setAttribute('role', 'list');   // kit .cal-list: no line above the first short row
+        box.append(...arr(b.items).map(compactShort)); host.append(box);
+        if (b.more > 0) host.append(el('p', 'blk-more', `+${b.more} more`));
+        return s;
+      }
       arr(b.items).forEach((it, n) => {
         if (b.compact) { ul.append(compactItem(it)); return; }
         if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
@@ -752,6 +799,7 @@ const OrchBlocks = (() => {
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
+      if (b.compact && (hasActions || hasToggle) && !b.filter && !b.fold && roomNarrow()) return shortTable(s, b, cols, rowsList);
       // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
       // words sit beside each switch on its card.
       const toggleText = String((rowsList.find(r => r.toggle && r.toggle.text) || {toggle:{}}).toggle.text || 'On');
@@ -866,6 +914,46 @@ const OrchBlocks = (() => {
     },
   };
 
+  // W-051 (owner 28 Nov): a compact table whose rows have buttons or a switch, in a page area under 900 px: each row is
+  // two lines (the name, then the other cells as one quiet line that ends in "…", so the last cell drops first), with
+  // the buttons and the switch always in view at the right. The first quiet cell stands alone (the plan); the ones
+  // after it carry their column's name ("Next time: …").
+  function shortTable(s, b, cols, rowsList) {
+    const list = el('div', 'blk-short'), key = String(b.title || cols.map(c => c.key).join(','));
+    const show = Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+    const later = [];
+    rowsList.forEach((r, n) => {
+      const links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+      const main = cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {};
+      const facts = [];
+      for (const c of cols) {
+        if (c.key === main.key) continue;
+        const td = cell(c, (r.cells || {})[c.key]), text = td.textContent;
+        if (!text || /cell-none/.test(td.className)) continue;
+        const said = facts.length ? c.label + ': ' + text : text;
+        facts.push(c.type === 'text' && TONES.includes(tones[c.key]) ? toneChip(tones[c.key], said) : said);
+      }
+      if (r.subtitle) facts.push(String(r.subtitle));
+      const side = [];
+      for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) side.push(...openFirst(btn)); }
+      const sw = r.toggle ? toggleEl(r.toggle) : null;
+      if (sw) side.push(sw);
+      const title = String((r.cells || {})[main.key] ?? '');
+      const row = shortRow({title, link: typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link)) ? r.link : null, hover: title + (r.subtitle ? ' · ' + r.subtitle : ''), facts, side});
+      if (n >= show) { row.hidden = true; later.push(row); }
+      list.append(row);
+    });
+    s.append(list);
+    if (show < rowsList.length) {
+      const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
+      btn.type = 'button';
+      btn.onclick = () => { shownAll.add(key); later.forEach(x => { x.hidden = false; }); btn.remove(); };
+      s.append(btn);
+    }
+    if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
+    return s;
+  }
+
   // Stats sit together in one row; everything else follows in order. Unknown types are skipped.
   function render(blocks, options) {
     opts = options || {};
@@ -892,6 +980,6 @@ const OrchBlocks = (() => {
     return root;
   }
   const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
-  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent};
+  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent, roomNarrow};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;

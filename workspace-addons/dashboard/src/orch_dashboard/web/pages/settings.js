@@ -1588,6 +1588,7 @@ function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
   if (!host || host.dataset.name !== id || !a) return;
   const scroll = [window.scrollX, window.scrollY];
+  addonRoomWas = OrchBlocks.roomNarrow();
   const template = addonBody(a, addonViews[id]);
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
@@ -1625,6 +1626,21 @@ function paintAddon(id) {
   bindAddonControls(host);
   host.querySelectorAll('[data-action="retry-addon"]').forEach(n => { n.disabled = false; });
   window.scrollTo(...scroll);
+}
+// W-051, O-25 (owner 28 Nov): an add-on's rows have a two-line form for a page area under 900 px (blocks.js). When the
+// room crosses that line (the Focus panel opens, closes or the window changes) the page on screen is drawn again from
+// the view it already has: no request, at most one paint per crossing.
+let addonRoomWas = null;
+function addonRoomChanged() {
+  const narrow = OrchBlocks.roomNarrow();
+  if (narrow === addonRoomWas) return;
+  addonRoomWas = narrow;
+  const id = shownAddon();
+  if (id && addonViews[id] && document.getElementById('addon-blocks')) paintAddon(id);
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('orch:page-room', addonRoomChanged);
+  window.addEventListener('resize', addonRoomChanged);
 }
 const addonAgain = new Set();
 async function loadAddon(id, manual = false) {
