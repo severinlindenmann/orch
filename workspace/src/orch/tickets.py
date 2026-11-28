@@ -6066,14 +6066,26 @@ ATTACH_AUDIO = {
     "mp3": (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
     "wav": (b"RIFF",),
 }
+# A file a helper made for the person (ORCH-2437): a presentation, a document, a spreadsheet, a PDF.
+# `orch ticket attach` keeps the original as it is, so the ticket shows the file that was asked for and not
+# only pictures of it. Nothing in it runs here: orch never opens it, the dashboard only lists it and hands
+# it out as a download. Only the command line takes these (`originals=True`); what a phone or another
+# workspace sends stays text, pictures and voice.
+ATTACH_ORIGINALS = {
+    "pptx": (b"PK\x03\x04",),
+    "docx": (b"PK\x03\x04",),
+    "xlsx": (b"PK\x03\x04",),
+    "pdf": (b"%PDF-",),
+}
 ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
 
 
-def attach_name(hint) -> str:
+def attach_name(hint, originals: bool = False) -> str:
     """The file name the SERVER keeps: the base name of the hint only, safe characters, an allowed type.
-    A name from a browser or a phone is a hint, never a path."""
+    A name from a browser or a phone is a hint, never a path. `originals`: a file a helper made (a
+    presentation, a document, a spreadsheet, a PDF) is allowed too."""
     base = re.split(r"[\\/]", clean_untrusted(str(hint), 1000))[-1].strip().strip(". ")
     base = re.sub(r"[^A-Za-z0-9._ -]", "_", base)
     base = re.sub(r"\.{2,}", ".", base)
@@ -6081,7 +6093,14 @@ def attach_name(hint) -> str:
     ext = ext.lower()
     stem = stem.strip()[:80].strip(". ")
     allowed = ext in ATTACH_TEXT or ext in ATTACH_IMAGES or ext in ATTACH_AUDIO
+    if originals and ext in ATTACH_ORIGINALS:
+        allowed = True
     if not dot or not stem.strip("._ -") or not allowed:
+        if originals:
+            raise Refused(
+                "That kind of file cannot be attached. Text files, pictures, voice recordings, PDF, "
+                "PowerPoint, Word and Excel files (pptx, docx, xlsx) can."
+            )
         raise Refused("That kind of file cannot be attached. Text files, pictures and voice recordings can.")
     if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
@@ -6096,7 +6115,10 @@ def _check_attach(name: str, data) -> str:
         raise Refused(
             f"That file is too big: a file is at most {ATTACH_MAX // (1024 * 1024)} MB. Pick a smaller one."
         )
-    if ext in ATTACH_IMAGES:
+    if ext in ATTACH_ORIGINALS:  # only reached when attach_name allowed it; kept byte for byte
+        if not data.startswith(ATTACH_ORIGINALS[ext]):
+            raise Refused("That file is not what its name says.")
+    elif ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
     elif ext in ATTACH_AUDIO:
@@ -6170,6 +6192,7 @@ def attach(
     exact: str | None = None,
     folder: str | None = None,
     request: bool = False,
+    originals: bool = False,
 ) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
@@ -6183,7 +6206,7 @@ def attach(
     ticket_path(root, tid)
     with _locked(root, tid):
         _refuse_closed_agent(root, tid, by)  # before the file is written
-        res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
+        res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else (), originals)
     text = f"Attached {res['name']}"
     # done before: only the history line may be missing (an earlier call was refused as busy after the file
     # was written); add it if it is not there
@@ -6244,9 +6267,11 @@ def note_results(root: Path, ticket: dict, by: str) -> None:
         add_history(ticket, by, RESULT_LINE + name, at=at)
 
 
-def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:
+def _attach_write(
+    root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = (), originals: bool = False
+) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
-    name = attach_name(exact or hint)
+    name = attach_name(exact or hint, originals)
     if exact and name != exact:
         raise Refused("That file name is not allowed.")
     ext = _check_attach(name, data)

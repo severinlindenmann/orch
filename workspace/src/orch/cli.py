@@ -909,7 +909,9 @@ def _ticket_parsers(sub, common):
     x.add_argument("--goal", required=True)
     x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
-        "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
+        "attach",
+        parents=[common],
+        help="keep a file (read from stdin) with the ticket: text, a picture, or a pptx, docx, xlsx or pdf",
     )
     x.add_argument("id")
     x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
@@ -1767,7 +1769,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         folder = tickets.FEEDBACK_DIR if args.feedback else None
-        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder, request=args.request)
+        # ORCH-2437: the command line keeps the original a helper made (pptx, docx, xlsx, pdf), not only
+        # pictures of it; a person's feedback or request file from the page stays text, pictures and voice
+        r = tickets.attach(
+            root,
+            args.id,
+            args.name,
+            data,
+            by(),
+            folder=folder,
+            request=args.request,
+            originals=not (args.feedback or args.request),
+        )
         _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)

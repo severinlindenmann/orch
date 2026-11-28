@@ -127,6 +127,12 @@ explicitly asks for a file in the project. Give each a plain name (`connection-c
 Artifacts tab shows the name, a preview and an Open button. Evidence can point at them:
 `orch check done <id> c1 --file <path>`.
 
+**The file the person asked for is the result.** Asked for a presentation, a document, a spreadsheet or a PDF: put
+that file itself on the ticket (`deck.pptx`, not only pictures of its slides). Pictures of it may go with it as a
+preview; they never stand in for it. Either write it into the folder above, or:
+
+    orch ticket attach <id> --name deck.pptx < deck.pptx     # pptx, docx, xlsx and pdf are kept as they are
+
 **A long text or files came with the ticket**
 
 If the ticket has `note.md` or `note-<id>.md` (or other files a person added) in `.orch/tickets/<id>/artifacts/`, the person pasted a
@@ -141,7 +147,7 @@ Do this first, before you add tasks. Only a placeholder title (the first words o
 replaced: a title a person wrote or edited is never changed. Do not copy the long text into the Note. Already
 tidied and the title is still a placeholder: `orch ticket title <id> "<short title>" --description "<...>"`.
 
-To keep a text file or picture with a ticket yourself: `orch ticket attach <id> --name <file name> < file` (orch picks the final name).
+To keep a text file, a picture or a file you made (pptx, docx, xlsx, pdf) with a ticket yourself: `orch ticket attach <id> --name <file name> < file` (orch picks the final name).
 
 **Change the step list**
 

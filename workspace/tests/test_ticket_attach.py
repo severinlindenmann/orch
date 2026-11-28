@@ -337,3 +337,83 @@ def test_a_file_a_helper_wrote_gets_one_history_line_at_its_time(proj, run):
     lines = [h for h in tickets.load(proj, tid)["history"] if h["text"].startswith("Added file ")]
     assert [(h["text"], h["by"]) for h in lines] == [("Added file out.md", "agent:claude")]
     assert lines[0]["at"] == tickets.load(proj, tid)["created_at"]
+
+
+# ---- ORCH-2437 (O-09): the original a helper made is kept as it is, not only pictures of it
+
+
+def _pptx() -> bytes:
+    """A small real presentation container (a zip with the two parts PowerPoint looks for first)."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("ppt/presentation.xml", "<p:presentation/>")
+    return buf.getvalue()
+
+
+def test_cli_attach_keeps_a_presentation_byte_for_byte(proj, run, monkeypatch):
+    import io
+
+    tid = _new(run)
+    deck = _pptx()
+
+    class In:
+        buffer = io.BytesIO(deck)
+
+    monkeypatch.setattr(sys, "stdin", In())
+    code, out, _ = run(
+        "ticket", "attach", tid, "--name", "Quarter deck.pptx", "--by", "agent:claude", "--json"
+    )
+    assert code == 0, out
+    got = json.loads(out)
+    assert got["name"] == "Quarter deck.pptx"
+    assert (proj / got["path"]).read_bytes() == deck  # unchanged: no conversion, no pictures instead
+    listed = tickets.artifacts_list(proj, tid)
+    assert [(f["name"], f["size"]) for f in listed] == [("Quarter deck.pptx", len(deck))]
+    assert any(h["text"] == "Attached Quarter deck.pptx" for h in tickets.load(proj, tid)["history"])
+
+
+@pytest.mark.parametrize(
+    "hint,data",
+    [
+        ("a.pptx", b"PK\x03\x04rest"),
+        ("a.docx", b"PK\x03\x04rest"),
+        ("a.xlsx", b"PK\x03\x04rest"),
+        ("a.pdf", b"%PDF-1.7\n"),
+    ],
+)
+def test_attach_keeps_an_original_only_when_asked_and_only_what_it_says(proj, run, hint, data):
+    tid = _new(run)
+    with pytest.raises(Refused, match="Text files, pictures and voice recordings can"):
+        tickets.attach(proj, tid, hint, data, "agent:x")  # a phone or another workspace: as before
+    with pytest.raises(Refused, match="not what its name says"):
+        tickets.attach(proj, tid, hint, b"<html>", "agent:x", originals=True)
+    assert tickets.artifacts_list(proj, tid) == []
+    r = tickets.attach(proj, tid, hint, data, "agent:x", originals=True)
+    assert r["name"] == hint and (proj / r["path"]).read_bytes() == data
+
+
+@pytest.mark.parametrize("hint", ["run.sh", "page.html", "x.svg", "x.exe", "a.zip", "a.pptm"])
+def test_attach_originals_still_refuses_what_can_run(proj, run, hint):
+    tid = _new(run)
+    with pytest.raises(Refused, match="pptx, docx, xlsx"):
+        tickets.attach(proj, tid, hint, b"PK\x03\x04", "agent:x", originals=True)
+    assert tickets.artifacts_list(proj, tid) == []
+
+
+def test_cli_attach_feedback_and_request_stay_text_pictures_and_voice(proj, run, monkeypatch):
+    import io
+
+    tid = _new(run)
+    for flag in ("--feedback", "--request"):
+
+        class In:
+            buffer = io.BytesIO(_pptx())
+
+        monkeypatch.setattr(sys, "stdin", In())
+        code, out, err = run("ticket", "attach", tid, "--name", "deck.pptx", flag, "--by", "human:t")
+        assert code != 0 and "cannot be attached" in out + err
+    assert tickets.artifacts_list(proj, tid) == []
