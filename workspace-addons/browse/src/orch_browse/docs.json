@@ -15,7 +15,7 @@
     {
      "who": "you",
      "text": "You add the sites that may open: for every ticket, or for one",
-     "detail": "The workspace's list holds for every ticket; a ticket can have extra sites of its own. On the Browser page, under Allowed sites, you add one or paste a whole list, search it and remove from it; \"*.example.com\" is stored as example.com and covers every part of it. The lists belong to the person: a helper cannot add to them. It asks on the ticket when it needs a site that is missing. On the same page you can open a browser yourself, on the same sites."
+     "detail": "The workspace's list holds for every ticket; a ticket can have extra sites of its own. Add, paste, search and remove on the Browser page under Allowed sites. Only a person changes a list: a helper asks on the ticket when a site is missing."
     },
     {
      "who": "helper",
@@ -85,11 +85,7 @@
      ],
      [
       "orch browse sites add <ticket> <site>",
-      "allow a site for one ticket (a person only)"
-     ],
-     [
-      "orch browse sites --workspace add <site> ...",
-      "allow sites for every ticket (a person only)"
+      "allow a site for one ticket; with --workspace in place of the ticket: for every ticket"
      ],
      [
       "orch browse setup",
