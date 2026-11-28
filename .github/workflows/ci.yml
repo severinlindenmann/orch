@@ -289,7 +289,7 @@ jobs:
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
       # The Linux shards go where the checks go (orch edge for queue groups and develop pushes while a runner is
-      # online, else GitHub's machines; a run whose runners stay offline starts again on GitHub, runner-watch).
+      # online, else GitHub's machines; a run whose runners stay offline starts again on GitHub, #3375).
       # They were held on GitHub while four timing tests went red on edge (runwatch, broken ticket, bgwork,
       # dispatcher; ORCH-1932); all four are steady since ORCH-2329.
       checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
