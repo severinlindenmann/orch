@@ -82,6 +82,14 @@ def test_the_vm_run_keeps_the_standard_user_install_and_the_junction_check():
     assert "junction" in (ROOT / "e2e" / "winvm" / "smoke.ps1").read_text(encoding="utf-8")
 
 
+def test_the_vm_smoke_never_cuts_uv_short_when_it_looks_for_python():
+    # ORCH-2206: "uv python find ... | Select-Object -First 1" ends uv early; PowerShell then gives exit code -1
+    # and the smoke stopped with "no python" although uv had named one. The smoke takes all of uv's answer.
+    smoke = (ROOT / "e2e" / "winvm" / "smoke.ps1").read_text(encoding="utf-8")
+    find = [line for line in smoke.splitlines() if "uv python find" in line and not line.lstrip().startswith("#")]
+    assert find and all("Select-Object" not in line for line in find)
+
+
 def test_only_own_develop_release_pull_requests_reach_the_mac():
     ok = _dispatch().trusted_release
     assert ok({"headRefName": "develop", "isCrossRepository": False, "isDraft": False})

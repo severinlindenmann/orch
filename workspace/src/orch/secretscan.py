@@ -79,13 +79,42 @@ NOTE_SKIPPED = "Couldn't read your saved keys, so this check skipped them. Every
 _noted = False
 
 
+NOTE_MARK = Path(".orch") / "local" / "keys-note"  # gitignored (local/): the day and reason last said
+
+
+def _note_due(root: Path | None, why: str) -> bool:
+    """False when this workspace was already told today, for this reason, by an earlier command: an agent
+    that writes twenty tickets reads the note once, not twenty times (ORCH-2207). Without a workspace
+    folder to remember it in, it is due."""
+    if root is None:
+        return True
+    import datetime
+    import hashlib
+
+    mark = f"{datetime.date.today().isoformat()} {hashlib.sha256(why.encode()).hexdigest()[:16]}"
+    f = Path(root) / NOTE_MARK
+    try:
+        if not (Path(root) / ".orch").is_dir() or f.parent.is_symlink() or f.is_symlink():
+            return True
+        if f.is_file() and f.read_text(encoding="utf-8").strip() == mark:
+            return False
+        f.parent.mkdir(exist_ok=True)
+        f.write_text(mark + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return True
+
+
 def note_skipped(root: Path | None = None) -> None:
-    """The visible note when a send skipped the stored-key comparison: once per process on stderr (a CLI user
-    sees it next to the result), every time in the debug log. Never silent."""
+    """The visible note when a write or send skipped the stored-key comparison: on stderr (a CLI user sees it
+    next to the result, and --json on stdout stays clean), with the reason and its way out (R8.4), once per
+    process and at most once a day per workspace and reason; every time in the debug log. Never silent."""
     global _noted
     if not _noted:
         _noted = True
-        print(NOTE_SKIPPED, file=sys.stderr)
+        why = keys_unreadable_reason(root)
+        if _note_due(root, why):
+            print(f"{NOTE_SKIPPED}\nWhy: {why}", file=sys.stderr)
     try:
         from orch import diag
 
