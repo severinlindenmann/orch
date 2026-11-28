@@ -6,6 +6,10 @@ conversation (or a file that is gone) answers {"available": false}: the Chat the
 says so. orch's own notices to the helper (its start text, "New input on ...") are left out: the person's messages
 come from the ticket, where orch keeps them. Each answer is kept while the file stays the same, so polling panes
 read a long conversation only when it grew.
+
+What looks like a key, token or password, and every stored key value of the workspace, is shown as [hidden]
+(ORCH-2352, security L3 of #3328): the same scrub the phone view uses, so a secret the helper printed does not
+land on a shared screen or in a screenshot (R5.2).
 """
 
 from __future__ import annotations
@@ -40,6 +44,18 @@ def _cut(text: str) -> str:
     return text if len(text) <= TEXT else text[: TEXT - 1].rstrip() + "…"
 
 
+def _safe(text: str, hide) -> str:
+    """One turn's text with secrets as [hidden], in the phone view's order (phone_view._clip): the stored
+    values on the raw text, the pattern scrub, the stored values again (cleaning can join a split value), all
+    on the whole turn before any cut. A scrub that fails shows nothing of the turn, never the raw text."""
+    try:
+        from orch import phone_view
+
+        return hide.hide_text(phone_view.redact(hide.hide_text(text)))
+    except Exception:  # noqa: BLE001 - never a pass
+        return "[hidden]"
+
+
 def talk(root: Path, tid: str) -> dict:
     """{"available": bool, "turns": [{w: "h"|"y", text, at}], "more": bool}, oldest first."""
     try:
@@ -62,11 +78,25 @@ def talk(root: Path, tid: str) -> dict:
     h = session_history.read(cur[0], cur[1], root=root, last=TURNS * 3)
     if not h["found"] or (h["more"] and not h["turns"]):  # gone, or too big to read
         return dict(NONE)
+    try:
+        from orch import phone_results
+
+        hide = phone_results.value_hider(root)
+    except Exception:  # noqa: BLE001 - as above
+        hide = None
+    if hide is None:  # the stored keys cannot be read: no conversation (the Chat shows the ticket's summary)
+        return dict(NONE)
     turns = []
     for t in h["turns"]:
         if t["role"] == "user" and t["text"].startswith(session_history.ORCH_TYPED):
             continue
-        turns.append({"w": "y" if t["role"] == "user" else "h", "text": _cut(t["text"]), "at": t.get("at")})
+        turns.append(
+            {
+                "w": "y" if t["role"] == "user" else "h",
+                "text": _cut(_safe(t["text"], hide)),
+                "at": t.get("at"),
+            }
+        )
     out = {"available": True, "turns": turns[-TURNS:], "more": h["more"] or len(turns) > TURNS}
     if len(_CACHE) >= _CACHE_MAX:
         _CACHE.clear()

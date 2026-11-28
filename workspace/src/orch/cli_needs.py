@@ -104,9 +104,20 @@ def _person_rows(root: Path, rows: list[dict]) -> list[tuple[dict, dict]]:
 
 
 def _keys(root: Path, rows: list[dict]) -> dict[str, str]:
-    """Each row's ticket id -> the key a person reads (MPU-2); the id when it has none."""
+    """Each row's ticket id -> the key a person reads (MPU-2); the id when it has none. From the ticket index
+    (inside the pass it is already in memory): reading every listed ticket's file once more for its key was
+    600 file reads at 10,000 tickets (ORCH-2398). Only a ticket the index does not hold is read."""
+    from orch import ticketindex
+
+    try:
+        known = {r["id"]: r.get("key") for r in ticketindex.rows(root, include_hidden=True)}
+    except Exception:  # noqa: BLE001 - no usable index: every key from its file, as before
+        known = {}
     out = {}
     for tid in {r["ticket"] for r in rows if r.get("ticket")}:
+        if tid in known:
+            out[tid] = known[tid] or tid
+            continue
         try:
             out[tid] = tickets.load(root, tid).get("key") or tid
         except Exception:  # a listing never stalls on a bad file

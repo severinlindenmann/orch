@@ -463,3 +463,27 @@ test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to 
   assert.ok(!tool.some(n => /two-ways/.test(n.attrs?.className || '')));
   assert.ok(tool.some(n => n.attrs?.['data-key'] === 'ticket-start'));
 });
+
+// ORCH-2388: with no helper tool the page drew a greyed Start squeezed beside its reason (a question open, or work
+// under way) and said "press Start helper" where no Start was. Now: no Start in any state, one way out, true words.
+test('ORCH-2388: no helper tool: never a Start that cannot work; Set up a helper where the Two ways card is not shown; the line names no button', () => {
+  const StartChoiceState = require('../../../workspace/src/orch_ui/static/start-choice-state.js');
+  const page = (t, agents = []) => { const c = ctx({state:{runs:{}, settings:{agents}}}); c.window.StartChoiceState = StartChoiceState; c.window.UI.commandCopy = (cmd, o) => h('div', {className:'cmd-copy', 'data-key':o.dataKey}, cmd); return nodes(c.detail({...base, key:'ORCH-7', ...t})); };
+  const keyed = (all, key) => all.find(n => n.attrs?.['data-key'] === key);
+  const fresh = page({status:'open'});
+  assert.equal(text(keyed(fresh, 'ticket-sentence')), 'No helper is set up yet.');
+  assert.ok(!keyed(fresh, 'ticket-start') && !keyed(fresh, 'ticket-start-cost'));
+  assert.ok(!keyed(fresh, 'ticket-setup-helper'), 'the Two ways card already holds Set up a helper');
+  for (const t of [{status:'waiting', questions:[{id:'q', text:'Which day?', options:['Tue', 'Thu']}]}, {status:'active', checklist:[{id:'c1', text:'Book', done:true, at:'2026-11-14T11:00:00Z'}]}]) {
+    const all = page(t);
+    assert.ok(!keyed(all, 'ticket-start') && !keyed(all, 'ticket-start-cost'), t.status + ': no Start, no cost line');
+    assert.ok(!all.some(n => /two-ways/.test(n.attrs?.className || '')), t.status);
+    const setup = keyed(all, 'ticket-setup-helper');
+    assert.equal(setup.attrs.href, '#settings/helper'); assert.equal(text(setup), 'Set up a helper');
+    assert.equal(setup.attrs.className, 'btn outline sm', 'a cell of the bar like the others, not filled');
+    assert.doesNotMatch(text(keyed(all, 'ticket-actions')), /Start helper|on this computer/);
+  }
+  const tool = page({status:'waiting', questions:[{id:'q', text:'Which day?'}]}, [{name:'claude', label:'Claude', chosen:true}]);
+  assert.ok(keyed(tool, 'ticket-start') && !keyed(tool, 'ticket-setup-helper'));
+  assert.equal(StartChoiceState.why('main', {tools:StartChoiceState.tools([])}), 'No helper tool is set up yet.');  // R4.1a: no "on this computer"
+});

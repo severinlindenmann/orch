@@ -47,3 +47,22 @@ def test_counts_text_pluralises_and_names_failed_helpers():
     text = cli_needs._counts_text(c)
     assert "Needs you: 3 (1 question, 1 result to review, 2 helpers that could not start)" in text
     assert "In progress: 0" in text and "Not started: 0" in text and "Stuck: 1" in text
+
+
+def test_needs_reads_each_listed_ticket_file_once(proj, run, new_ticket, monkeypatch):
+    """ORCH-2398: the printed list read every listed ticket's file a second time, only for its key (600 extra
+    file reads at 10,000 tickets). The number of file reads is held here, not the seconds."""
+    from orch import tickets
+
+    asked = [new_ticket(f"Offer {i}") for i in range(3)]
+    quiet = new_ticket("Nothing to ask")
+    for tid in asked:
+        assert run("ask", tid, "Send it?", "--option", "Yes", "--option", "No")[0] == 0
+    read = []
+    real = tickets._read_ticket
+    monkeypatch.setattr(tickets, "_read_ticket", lambda p, tid: read.append(tid) or real(p, tid))
+    code, out, _ = run("needs")
+    assert code == 0 and out.startswith("Needs you (3)")
+    assert sorted(read) == sorted(asked) and quiet not in read
+    keys = {tid: tickets.load(proj, tid)["key"] for tid in asked}
+    assert all(f"  {key} " in out for key in keys.values())  # still named by the key a person reads

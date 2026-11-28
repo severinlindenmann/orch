@@ -175,12 +175,12 @@ test('no helper tool on this computer: the main button and Fresh start are greye
   const m = mount({agents: []});
   assert.equal(m.main().disabled, true);
   const line = m.q(n => n.id === m.main().getAttribute('aria-describedby'));
-  assert.equal(line.textContent, 'No helper tool is set up on this computer.');
+  assert.equal(line.textContent, 'No helper tool is set up yet.');
   assert.equal(line.hidden, false);
   m.btn.open();
   const fresh = m.q(n => n.dataset.start === 'fresh');
   assert.equal(fresh.disabled, true);
-  assert.equal(m.q(n => n.id === fresh.getAttribute('aria-describedby')).textContent, 'No helper tool is set up on this computer.');
+  assert.equal(m.q(n => n.id === fresh.getAttribute('aria-describedby')).textContent, 'No helper tool is set up yet.');
 });
 
 test('Send and start: the page sends its message first, and nothing starts when it stops', async () => {

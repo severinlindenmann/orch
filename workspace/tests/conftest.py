@@ -258,8 +258,10 @@ def _fresh_git_answers():
     from orch import harness
 
     harness._REV_PARSE.clear()
+    harness._TRACKED_SEEN.clear()
     yield
     harness._REV_PARSE.clear()
+    harness._TRACKED_SEEN.clear()
 
 
 @pytest.fixture(autouse=True)

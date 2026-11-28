@@ -402,6 +402,9 @@ def chat_files(root: Path, gid: str, names) -> list[dict]:
             or "/" in name
             or "\\" in name
             or "\x00" in name
+            # R1.6: on Windows `folder / "C:x"` leaves the folder (a drive-qualified name), and "x:y" names a
+            # second stream of x. No attached file has such a name: refused on every system, as the other bad names
+            or ":" in name
             or p.is_symlink()
             or not p.is_file()
         ):
@@ -434,6 +437,10 @@ def say(
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
     tickets.no_secret(root, {"text": text}, "Chat text")
+    # R5.2: the file names go into the Chat history and the helper's input like the words: the same scan
+    tickets.no_secret(
+        root, {"name": [str(f or "") for f in list(files or [])[: MAX_SAY_FILES + 1]]}, "Chat file"
+    )
     gid = tickets.ensure_general(root, who)
     kept = chat_files(root, gid, files)
     told = "\n\n".join(x for x in (text, files_line(gid, kept)) if x)

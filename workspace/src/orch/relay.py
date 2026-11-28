@@ -2611,6 +2611,27 @@ def _kept_here(root: Path, m: dict) -> bool:
     return _saved_here(root, m) or _handled_here(root, m)
 
 
+SETTLE_AGAIN = 300  # seconds
+
+
+def _settle_due(root: Path, peer: str | None) -> bool:
+    """A first contact that is held asks the relay for its list (ORCH-2349). Once per sender, not once per
+    message (ORCH-2376): while an earlier message of the same sender still waits, a refresh already ran and
+    did not hand it on, so a sender whose key disagrees cannot make every pull ask the relay again. After
+    SETTLE_AGAIN seconds with nothing new held from that sender, the next message asks once more (the relay
+    may have been away the first time). Cannot tell = ask."""
+    from orch import msgtrust
+
+    try:
+        waiting = [h for h in msgtrust.held(root, peer) if h.get("why") == "not_accepted"] if peer else []
+        if not waiting:
+            return True
+        newest = max(int(h.get("at") or 0) for h in waiting)
+        return not 0 <= time.time() * 1000 - newest < SETTLE_AGAIN * 1000
+    except (Refused, OSError, ValueError, TypeError):
+        return True
+
+
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
@@ -2634,13 +2655,14 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
             log_send_failure(root, "check of a received message", e)
             continue
         if v.kind == "held":
+            due = v.code == "not_accepted" and _settle_due(root, v.peer)  # before this one is kept
             try:
                 msgtrust.hold(root, v)
             except (Refused, OSError) as e:  # not kept: left on the relay, never acked and lost
                 log_send_failure(root, "keeping a held message", e)
                 continue
             acked.append(m["id"])
-            settle = settle or v.code == "not_accepted"
+            settle = settle or due
             continue
         acked.append(m["id"])
         # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice.
