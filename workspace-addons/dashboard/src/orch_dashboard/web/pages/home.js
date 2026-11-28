@@ -241,7 +241,7 @@ function homeNumbers(inProgress, notStarted, finishedToday, working) {
 function reviewLine(n, questions, results, filled) {
   if (!n) return h('section', {className:'card home-card', 'data-key':'review-line', 'data-counts':'0'}, h('div', {className:'card-row muted'}, 'Nothing waits in Review.'));
   const part = (k, one, many) => k > 0 ? k + ' ' + (k === 1 ? one : many) : '', more = n - questions - results;
-  const parts = more < 0 ? [n + (n === 1 ? ' thing' : ' things')] : [part(questions, 'question', 'questions'), part(results, 'result', 'results'), more ? more + ' more' : ''].filter(Boolean);
+  const parts = more < 0 || more === n ? [n + (n === 1 ? ' thing' : ' things')] : [part(questions, 'question', 'questions'), part(results, 'result', 'results'), more ? more + ' more' : ''].filter(Boolean);
   const words = (parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts.at(-1) : parts[0]) + (n === 1 ? ' waits' : ' wait') + ' in Review';
   return h('section', {className:'card home-card', 'data-key':'review-line', 'data-counts':String(n)},
     h('div', {className:'card-row'}, h('span', {className:'grow'}, h('strong', {}, words)),
@@ -576,7 +576,7 @@ function home() {
   const waiting = Math.max(0, needCount - stopped.length - failed.length);
   // what is neither blocked nor a card of Review, quiet at the foot: a login that runs out soon, an add-on's own
   // row, changes to put live, the notes, the merge queue and what is parked
-  const other = groups.filter(g => !broken.includes(g) && !isHelperRow(g.row) && !isFactoryDraftRow(g.row) && !g.row.answer?.question);
+  const other = groups.filter(g => !broken.includes(g) && !isHelperRow(g.row) && !isFactoryDraftRow(g.row) && (needActs(g.row).length || !g.row.ticket || !g.row.answer?.question));
   const parked = parkedList();
   const also = [...logins.soon.map(loginSoonRow), ...other.map(g => noteRow(g.row)), ...changes.map(changeRow),
     ...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(noteRow) : [])] : []), queueLine(queued),

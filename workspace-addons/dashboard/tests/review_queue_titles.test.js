@@ -24,8 +24,3 @@ test('a list row is grouped under its ticket and the card names its key in its m
   assert.match(kit, /const groupOf=it=>it\.laneName\|\|it\.group\|\|it\.ticketTitle\|\|it\.ticket\|\|''/);  // a lane (Review, 25 Nov) first
   assert.match(kit, /if\(it\.ticket\)m\.append\(el\('span','swipe-key',it\.ticket\)\)/);
 });
-test("Home's card row shows the ticket key and, for one card, what it asks", () => {
-  const home = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/home.js'), 'utf8');
-  assert.match(home, /keyTag\(t, h\), title/);
-  assert.match(home, /one\.card\?\.title \|\| shortQuestion\(one\.text\)/);
-});

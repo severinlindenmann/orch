@@ -44,49 +44,9 @@ function ctx(extra = {}) {
 }
 const buttonsOf = row => nodes(row).filter(n => n.tag === 'button');
 
-test('Home shows a ready draft as the Factory card: Read draft, Plan the run, Ask for changes', () => {
-  const c = ctx(), row = c.needRow(draft, draft.id), text = words(row);
-  assert.ok('data-factory-draft' in row.attrs);
-  assert.match(text, /Factory draft/);
-  assert.match(text, /Opening hours page/);
-  assert.match(text, /Read the draft, then plan the run or ask for changes\./);
-  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read draft'));
-  assert.equal(link.attrs.href, '#addon/factory/#/order/t_abc1234/draft');
-  assert.deepEqual(buttonsOf(row).map(b => b.children[0]), ['Plan the run', 'Ask for changes', 'Send', 'Cancel']);
-  assert.ok(buttonsOf(row).slice(0, 2).every(b => b.attrs.className === 'btn outline sm'), 'equal weight, as the proposal buttons on Home');
-});
 
-test('Plan the run sends the Factory page words to the agent and starts one when none is on the order', async () => {
-  const c = ctx(), row = c.needRow(draft, draft.id);
-  await buttonsOf(row)[0].onclick();
-  await tick();
-  assert.deepEqual(plain(c.acts), [['run.send', {ticket:'t_abc1234', text:helpers.FACTORY_DRAFT_WORDS.plan}], ['run.start', {ticket:'t_abc1234'}]]);
-  assert.match(c.toasts[0][0], /planning the run/);
-  // after the click the row says what happened instead of offering the buttons again
-  assert.equal(buttonsOf(c.needRow(draft, draft.id)).length, 0);
-});
 
-test('Ask for changes sends your words as a change of the draft; a live agent gets them without a second start', async () => {
-  const c = ctx({sendResult:{state:'live', delivered:1}}), row = c.needRow(draft, draft.id);
-  const [, change, send] = buttonsOf(row), note = nodes(row).find(n => n.tag === 'textarea');
-  change.onclick();
-  assert.equal(note.hidden, false);
-  note.value = 'shorter, and add a map'; note.listeners.input();
-  assert.equal(send.disabled, false);
-  await send.onclick();
-  await tick();
-  assert.deepEqual(plain(c.acts), [['run.send', {ticket:'t_abc1234', text:'Change the draft: shorter, and add a map'}]]);
-});
 
-test('a snapshot shows the draft without buttons; further down the list it is one row with Read draft', () => {
-  const s = ctx({snapshot:true});
-  assert.equal(buttonsOf(s.needRow(draft, draft.id)).length, 0);
-  const c = ctx(), row = c.needListRow(draft, 1, []), a = nodes(row).find(n => n.tag === 'a');
-  assert.equal(a.children[0], 'Read draft');
-  assert.equal(a.attrs.href, '#addon/factory/#/order/t_abc1234/draft');
-  const bare = ctx({addons:() => []});
-  assert.equal(nodes(bare.needRow(draft, draft.id)).find(n => n.tag === 'a').attrs.href, '#ticket/t_abc1234');
-});
 
 test('a ready draft is its own part of the one number, once per order, like the Factory page', () => {
   const q = {id:'core:q:t_other12:q1', source:'core', kind:'question', ticket:'t_other12', answer:{question:'q1', options:['A', 'B']}};

@@ -216,16 +216,24 @@ function home(state, tickets = [], rows = []) {
   vm.runInContext(read('pages/ticket.js'), c); vm.runInContext(read('pages/home.js'), c);
   return c;
 }
-test('"Review all" is a link to #review with the card count, and never changes the Home total', () => {
+// O-01 D (28 Nov): Home has no review cards; what waits is one line with "Open Review".
+const homePage = c => { Object.assign(c, {titleTag:() => null, shown:t => t, parse:v => new Date(v), now:() => new Date('2026-11-15T12:00:00Z'), heading:(t, s) => h('header', {}, t, s),
+  card:(key, title, suffix, kids) => h('section', {'data-key':key}, title, kids), emptyRow:t => h('p', {}, t), fragment:(...k) => h('fragment', {}, k)}); return c.home(); };
+test('"Open Review" on Home is a link to #review beside the count, and the cards never change the Home total', () => {
   const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'Home block', answer:{question:'q3', digest:ID, options:[]}}];
   const base = {settings:{}, runs:{}, services:[]};
   const tickets = [{id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]}];
   const withCards = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows), without = home({...base}, tickets, rows);
-  const a = withCards.reviewAllButton();
-  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all$/);  // no number: only the Review badge shows it (ORCH-1616)
-  assert.equal(without.reviewAllButton(), null, 'no cards, no button');
+  const line = nodes(homePage(withCards)).find(n => n.attrs?.['data-key'] === 'review-line');
+  assert.match(text(line), /^1 question waits in Review/);
+  const a = nodes(line).find(n => n.attrs?.['data-key'] === 'review-all');
+  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Open Review$/);
+  assert.doesNotMatch(text(homePage(withCards)), /Home block/, 'the question itself is on Review, never a card on Home');
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
+  // a shared read-only copy keeps the line and the way to Review
+  const copy = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows); copy.snapshot = true;
+  assert.ok(nodes(homePage(copy)).some(n => n.attrs?.['data-key'] === 'review-all'));
 });
 test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say one number: the cards (questions + results)', () => {
   const base = {settings:{}, runs:{}, services:[]};
@@ -255,10 +263,6 @@ test('ORCH-63: the dashboard sends the one count to the shown add-on page of its
   assert.match(src, /const needCount = needsYouTotal\(\)[^\n]*\n[\s\S]{0,400}postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
-});
-test('"Review all" is not shown in a shared copy', () => {
-  assert.ok(home({review:{cards:[CARD]}}).reviewAllButton());
-  const c = home({review:{cards:[CARD]}}); c.snapshot = true; assert.equal(c.reviewAllButton(), null);
 });
 test('Review answers on a ticket: only those with a card answer, newest first', () => {
   const answered = (id, at, extra = {}) => ({id, text:'Q ' + id, answer:'Looks good', answered_by:'human:sev', via:'dashboard', at, card:{kind:'draft', title:'Card ' + id}, decision:{action:'approve', summary:'Looks good'}, ...extra});
@@ -305,14 +309,13 @@ test('"What the Reviewer did": hidden when empty, a link and the why line per ro
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
   assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
 });
-test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle say one number', () => {
+test('ORCH-288: Home’s Review line, the Needs you pill and the subtitle say one number', () => {
   const base = {settings:{}, runs:{}, services:[], review:{cards:[CARD, CARD], answered:[]}};
   const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'A', answer:{question:'q1', digest:ID, options:[]}}];
   const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
-  assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
-  assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to review');
+  assert.equal(text(nodes(homePage(c)).find(n => n.attrs?.['data-key'] === 'review-line')), '1 question and 1 result wait in ReviewOpen Review');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
   const attached = [];
@@ -479,8 +482,6 @@ test('#2385: with the core counting the stopped work, Home adds nothing of its o
   assert.equal(n.count, old, 'the same as Home counted it on its own');
   assert.deepEqual(n.review.map(t => t.id), ['t_aaaa01'], 'a stopped item is never a result to check');
   assert.ok(!c.reviewExtraRows().some(r => r.what === 'result'), 'Review lists no stopped item as "A result to check"');
-  vm.runInContext("pendingAnswers.set('core:idle:t_aaaa02', {})", c);  // a row the page hides for a moment leaves the number
-  assert.equal(c.needsToday().count, items.length - 1);
 });
 test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone, changed or without that button does nothing', async () => {
   const c = stuckHome(), api = c.reviewApi(), stuck = (await api.stack()).filter(x => x.card.kind === 'stuck');

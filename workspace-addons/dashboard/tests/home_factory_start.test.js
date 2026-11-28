@@ -46,49 +46,10 @@ test('the proposal text reads as title, goal and one line of time and cost', () 
   assert.equal(helpers.factoryStart(''), null);
 });
 
-test('the Home card is a few lines and links to the whole proposal on the Factory page', () => {
-  const c = ctx(factoryQ), row = c.needRow(c.row, 'n1'), text = words(row);
-  assert.ok('data-factory-start' in row.attrs);
-  assert.match(text, /Proposed project/);
-  assert.match(text, /Start “Services: see and manage background jobs”\?/);
-  assert.match(text, /Runs about 10 h · needs you for about 15 min/);
-  assert.doesNotMatch(text, /Done means|Crew|Tasks|Ship/, 'never the whole proposal');
-  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
-  assert.equal(link.attrs.href, '#addon/factory/#/order/t_abc1234/proposal');
-});
 
-test('the buttons are Not now, Change it, Start, all the same weight; Change it sends Edit', async () => {
-  const c = ctx(factoryQ), row = c.needRow(c.row, 'n1');
-  const buttons = nodes(row).filter(n => n.tag === 'button');
-  assert.deepEqual(buttons.map(b => b.children[0]), ['Not now', 'Change it', 'Start']);
-  assert.ok(buttons.every(b => b.attrs.className === 'btn outline sm'));
-  assert.ok(!nodes(row).some(n => (n.attrs?.className || '').includes('suggested')), 'no button stands out');
-  buttons[1].onclick({currentTarget:{closest:() => h('div')}});
-  await new Promise(r => setTimeout(r, 60));
-  assert.equal(c.acts[0][1].answer, 'Edit');
-});
 
-test('without the Factory page the link opens the ticket; a snapshot shows no buttons', () => {
-  const c = ctx(factoryQ, {addons:() => []});
-  const link = nodes(c.needRow(c.row, 'n1')).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
-  assert.equal(link.attrs.href, '#ticket/t_abc1234');
-  const s = ctx(factoryQ); vm.runInContext('snapshot = true', s);
-  assert.equal(nodes(s.needRow(s.row, 'n1')).filter(n => n.tag === 'button').length, 0);
-});
 
-test('a Factory start question further down the list opens the proposal, not the full text', () => {
-  const c = ctx(factoryQ), row = c.needListRow(c.row, 1, []);
-  const a = nodes(row).find(n => n.tag === 'a');
-  assert.equal(a.children[0], 'Read proposal');
-  assert.equal(a.attrs.href, '#addon/factory/#/order/t_abc1234/proposal');
-  assert.doesNotMatch(words(row), /Done means/);
-});
 
-test('any other question keeps its usual card', () => {
-  const c = ctx({id:'q1', text:'Which supplier?', options:['A', 'B']}), row = c.needRow(c.row, 'n1');
-  assert.ok(!('data-factory-start' in row.attrs));
-  assert.match(words(row), /Which supplier\?/);
-});
 
 test('the dashboard opens an add-on page at its own place after a second #', () => {
   const app = read('app.js'), settings = read('pages/settings.js');

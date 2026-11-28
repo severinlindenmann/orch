@@ -159,39 +159,10 @@ function pageContext(snapshot = false) {
     array:v => Array.isArray(v) ? v : [], clean:x => x, href:id => '#ticket/' + id, ticketOf:() => t, ticketTitle:() => new Element('h3'), parentLine:() => null,
     setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text, ticketKey:t => (t && t.key) || ''}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('// Helpers (ORCH-61')), ctx);
-  vm.runInContext('ANSWER_UNDO_MS = 5', ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('const finishedAt')), ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('const HELD_WORDS'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
 }
-test('inline options send the question and selected answer, disable together, and unlock', async () => {
-  const {ctx, toasts, calls} = pageContext();
-  let complete, sent;
-  ctx.act = (op, args) => { sent = {op, ...args}; return new Promise(resolve => { complete = resolve; }); };
-  const row = ctx.needRow({id:'n1', ticket:'t_one', answer:{question:'q1', digest:'a'.repeat(64), options:['Hi','Hello'], recommended:'Hi'}});
-  const buttons = row.querySelectorAll('button');
-  const options = buttons.filter(b => b.attrs.className?.startsWith('answer-option'));
-  assert.equal(options.length, 2); assert.match(JSON.stringify(options[0]), /"Hi".*"Suggested"/); assert.match(options[0].attrs.className, /suggested/);
-  assert.match(JSON.stringify(row), /Write your own/);
-  const pending = options[0].onclick({currentTarget:{closest:() => row}});
-  assert.ok(buttons.every(b => b.disabled));
-  assert.equal(sent, undefined, 'nothing is sent inside the Undo window');
-  await new Promise(r => setTimeout(r, 40));
-  assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', digest:'a'.repeat(64), answer:'Hi'});
-  complete({ok:true}); await pending; await new Promise(r => setTimeout(r, 10));
-  assert.deepEqual(toasts, ['Answered · Launch']); assert.ok(calls.includes('render'));
-});
-test('offline answers do not send; network failures show the plain message; snapshots have no answer buttons', async () => {
-  const {ctx, connection, toasts} = pageContext();
-  const data = {id:'n1', ticket:'t_one', answer:{question:'q1', options:['Hi']}};
-  let sent = 0; ctx.act = async () => { sent++; return {ok:false, status:0}; };
-  const row = ctx.needRow(data), control = row.querySelectorAll('button')[0], event = {currentTarget:{closest:() => row}};
-  connection.hidden = false; await control.onclick(event); assert.equal(sent, 0);
-  connection.hidden = true; await control.onclick(event); await new Promise(r => setTimeout(r, 40)); assert.equal(sent, 1);
-  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent; try again in a moment.") && toasts.at(-1) === "Can't reach orch. Your change was not sent; try again in a moment.");
-  assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
-});
 test('connection notice keeps the saved view and offers Try again', () => {
   const {ctx, connection, calls} = pageContext();
   connection.replaceChildren = (...children) => { connection.children = children; };

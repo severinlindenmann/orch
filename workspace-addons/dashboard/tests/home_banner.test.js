@@ -4,37 +4,40 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/home.js'), 'utf8');
-const part = src.slice(src.indexOf('function stoppedServices'), src.indexOf('// Home: what needs the person first'));
+// O-01 D (28 Nov): a background service that stopped is a row of Blocked now (one line, one action), not a banner.
+const part = src.slice(src.indexOf('function blockedRow'), src.indexOf('const ticketLink')) + src.slice(src.indexOf('function stoppedServices'), src.indexOf('// After an automatic update'));
 
 function page(services, snapshot = false) {
   const el = (tag, props, ...kids) => ({tag, props: props || {}, kids: kids.flat().filter(k => k != null)});
   const c = vm.createContext({
     state: {services}, snapshot, h: el, array: v => Array.isArray(v) ? v : [],
     addons: () => [{name: 'sync', dashboard: {label: 'Sync'}}, {name: 'automation'}],
-    pageNotice: ({what, still, action, dataKey}) => el('div', {className: 'banner page-notice attn', 'data-key': dataKey}, el('p', {className: 'grow'}, el('strong', {}, what), ' ' + still), action),
   });
-  vm.runInContext(part + '\nthis.banner = backgroundBanner;', c);
-  return c.banner();
+  vm.runInContext(part + '\nthis.row = stoppedServicesRow;', c);
+  return c.row();
 }
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.kids || []).map(text).join('');
+const find = (n, pred) => !n || typeof n !== 'object' ? [] : [...(pred(n) ? [n] : []), ...(n.kids || []).flatMap(k => find(k, pred))];
 
-test('owner feedback 14 Nov: a service that is off on purpose (Sync off) shows no "not running" banner', () => {
+test('owner feedback 14 Nov: a service that is off on purpose (Sync off) shows no "not running" row', () => {
   assert.equal(page([{addon: 'sync', running: false, idle: true}, {addon: 'dashboard', running: true}]), null);
 });
 
-test('the banner names what is not running and offers Start', () => {
+test('the row names what is not running and offers Start', () => {
   const b = page([{addon: 'sync', running: false}, {addon: 'automation', running: false}, {addon: 'dashboard', running: true}]);
-  // D5: the same sentence as the add-on's own page, in the one notice
-  assert.match(text(b), /^Sync and Automation have stopped\. Their work waits\. Your tickets and everything else still work\./);
-  assert.equal(b.kids.at(-1).props['data-action'], 'start');
-  assert.equal(text(b.kids.at(-1)), 'Start them');
+  // D5: the same sentence as the add-on's own page
+  assert.match(text(b), /^Sync and Automation have stopped\.Their work waits\. Your tickets and everything else still work\./);
+  assert.equal(b.props['data-key'], 'background'); assert.equal(b.props['data-blocked'], 'service');
+  const [start] = find(b, n => n.tag === 'button');
+  assert.equal(start.props['data-action'], 'start');
+  assert.equal(text(start), 'Start them');
   const one = page([{addon: 'automation', running: false}]);
-  assert.match(text(one), /^Automation has stopped\. Its work waits\./);
-  assert.equal(text(one.kids.at(-1)), 'Start Automation');
+  assert.match(text(one), /^Automation has stopped\.Its work waits\./);
+  assert.equal(text(find(one, n => n.tag === 'button')[0]), 'Start Automation');
 });
 
 test('a shared read-only copy has no Start button', () => {
-  assert.equal(page([{addon: 'sync', running: false}], true).kids.length, 1);
+  assert.equal(find(page([{addon: 'sync', running: false}], true), n => n.tag === 'button').length, 0);
 });
 
 const helpers = require('../src/orch_dashboard/web/helpers.js');
@@ -69,7 +72,3 @@ test('a need with no ticket, no page and no action says its text in a toast inst
   assert.equal(JSON.stringify(toasts), '["Two copies changed."]');
 });
 
-test('"Write your own…" opens the answer box with Send at once', () => {
-  assert.match(src, /'data-write':'own'/);
-  assert.match(openNeedSrc, /trigger\.dataset\?\.write === 'own'[\s\S]*?\.click\(\)/);
-});

@@ -1,5 +1,6 @@
-// Home › Needs you: work that stopped short (ORCH-26). A pull request left open after its checks passed (Merge /
-// Start helper) and a helper idle at its prompt (Remind / Start fresh): two buttons, each one click.
+// Home › Blocked now: work that stopped short (ORCH-26; O-01 D, 28 Nov: one line and ONE action per row). A pull
+// request left open after its checks passed (Merge), a helper idle at its prompt (Remind), a helper that waits for an
+// OK on its screen or a step that keeps failing (Open). More ways (Start helper, Start fresh) are on the Review card.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -40,25 +41,14 @@ function context({runs = {}, results = {}, snapshot = false} = {}) {
   vm.runInContext(fs.readFileSync(path.join(PAGES, 'start.js'), 'utf8'), c);  // the one Start button (ORCH-475)
   return {c, calls, toasts};
 }
-// One click on the main half of a kit Start button (kit/start-choice.js) as the page set it up: the page's ops first
-// (before), then the start: plain, or fresh on the usual tool and model; it stops at the first refusal, as the kit does.
-async function kitClick(c, row, label) {
-  const host = all(row, x => x.attrs?.['data-start-host']).find(x => text(x) === label);
-  assert.ok(host, 'a Start button ' + label);
-  const o = vm.runInContext('startOpts', c).get(host.attrs['data-key']);
-  const ticket = host.attrs['data-start-host'], ops = o.fresh ? [['run.start', {ticket, fresh:true}]] : [['run.start', {ticket}]];
-  const first = o.before ? await o.before(ops) : [];
-  if (first === null) return;
-  for (const [op, args] of [...first, ...ops]) { const r = await c.act(op, args); if (!r.ok) break; }
-}
-
 test('pull request left open: Merge merges exactly the shown commit in one click', async () => {
   const {c, calls, toasts} = context();
-  const row = c.needRow(UNMERGED, null);
+  const row = c.stoppedRow(UNMERGED);
   assert.match(text(row), /passed its checks but was not merged/);
   assert.match(text(row), /Invoice export/);
   assert.deepEqual(all(row, x => x.tag === 'a').map(a => a.attrs.href), ['#ticket/' + TID, PR]);
-  assert.deepEqual(buttons(row).map(text), ['Merge', 'Start helper']);
+  assert.deepEqual(buttons(row).map(text), ['Merge']);
+  assert.match(buttons(row)[0].attrs.className, /outline/);
   await click(buttons(row)[0]);
   assert.deepEqual(calls, [['pull.merge', {ticket:TID, url:PR, head:HEAD}]]);
   assert.deepEqual(toasts, [['Merged', 'ok']]);
@@ -66,51 +56,37 @@ test('pull request left open: Merge merges exactly the shown commit in one click
 
 test('pull request left open: a refused merge says why and nothing else runs', async () => {
   const {c, calls, toasts} = context({results:{'pull.merge':{ok:false, text:'GitHub did not merge it: checks pending.'}}});
-  await click(buttons(c.needRow(UNMERGED, null))[0]);
+  await click(buttons(c.stoppedRow(UNMERGED))[0]);
   assert.equal(calls.length, 1);
   assert.deepEqual(toasts, [['GitHub did not merge it: checks pending.', 'error']]);
 });
 
-test('pull request left open: Start helper tells the helper what is left, then starts it', async () => {
-  const {c, calls} = context();
-  await kitClick(c, c.needRow(UNMERGED, null), 'Start helper');
-  assert.deepEqual(calls.map(x => x[0]), ['run.send', 'run.start']);
-  assert.equal(calls[0][1].ticket, TID);
-  assert.match(calls[0][1].text, /passed its checks but is still open/);
-  assert.deepEqual(calls[1][1], {ticket:TID});
-});
-
-test('pull request left open with a helper idle on it: the second button is Remind and starts nothing', async () => {
-  const {c, calls} = context({runs:{[TID]:{running:true}}});
-  const row = c.needRow({...UNMERGED, helper:'idle'}, null);
-  assert.deepEqual(buttons(row).map(text), ['Merge', 'Remind']);
-  await click(buttons(row)[1]);
-  assert.deepEqual(calls.map(x => x[0]), ['run.send']);
-});
-
-test('idle helper: Remind sends one fixed message, Start fresh stops it and starts a new one', async () => {
+test('idle helper: Remind sends one fixed message; with no live helper it starts one after the message', async () => {
   const {c, calls, toasts} = context({runs:{[TID]:{running:true}}});
-  const row = c.needRow(IDLE, null);
+  const row = c.stoppedRow(IDLE);
   assert.match(text(row), /idle for 14 min with nothing running/);
-  assert.deepEqual(buttons(row).map(text), ['Remind', 'Start fresh']);
+  assert.deepEqual(buttons(row).map(text), ['Remind']);
   await click(buttons(row)[0]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
   assert.match(calls[0][1].text, /idle for a while/);
-  await kitClick(c, row, 'Start fresh');
-  assert.deepEqual(calls.slice(1), [['run.stop', {ticket:TID}], ['run.start', {ticket:TID, fresh:true}]]);
   assert.deepEqual(toasts, [['Message sent', 'ok']]);
+  const gone = context();
+  await click(buttons(gone.c.stoppedRow(IDLE))[0]);
+  assert.deepEqual(gone.calls.map(x => x[0]), ['run.send', 'run.start']);
 });
 
-test('idle helper: a stop that fails starts nothing', async () => {
-  const {c, calls, toasts} = context({runs:{[TID]:{running:true}}, results:{'run.stop':{ok:false, text:'Could not stop it.'}}});
-  await kitClick(c, c.needRow(IDLE, null), 'Start fresh');
-  assert.deepEqual(calls.map(x => x[0]), ['run.stop']);  // the kit shows the refusal's words and ends Starting
-  assert.deepEqual(toasts, []);
+test('the Review card still finds the words and the fresh start it shares with Home', async () => {
+  const {c, calls} = context({runs:{[TID]:{running:true}}, results:{'run.stop':{ok:false, text:'Could not stop it.'}}});
+  assert.match(vm.runInContext('MERGE_ASK', c), /passed its checks but is still open/);
+  const r = await vm.runInContext('restartFresh', c)(TID);
+  assert.equal(r.ok, false);
+  assert.deepEqual(calls.map(x => x[0]), ['run.stop'], 'a stop that fails starts nothing');
 });
 
 test('a shared read-only copy shows the rows without buttons; other rows are not helper rows', () => {
   const {c} = context({snapshot:true});
-  assert.equal(buttons(c.needRow(UNMERGED, null)).length, 0);
+  assert.equal(buttons(c.stoppedRow(UNMERGED)).length, 0);
+  assert.equal(buttons(c.stoppedRow(IDLE)).length, 0);
   const isHelperRow = vm.runInContext('isHelperRow', c);
   assert.equal(isHelperRow({...IDLE, source:'sync'}), false);
   assert.equal(isHelperRow({...IDLE, kind:'overdue-wait'}), false);
@@ -134,18 +110,6 @@ const PERMISSION = stuckRow('helper:permission', 'The helper has waited 5 min fo
 const FAILING = stuckRow('helper:failing', 'The check failed 2 times in a row on the step "Export works".', 'bad');
 const UNSURE = stuckRow('reviewer:unsure', 'The Reviewer was not sure and left it for you: no pull request to check.');
 
-test('stuck rows: Open goes to the ticket; a failing step also offers Remind and Start fresh', () => {
-  const {c} = context({runs:{[TID]:{running:true}}});
-  for (const row of [PERMISSION, UNSURE]) {
-    const el = c.needRow(row, null);
-    assert.deepEqual(buttons(el), []);
-    const open = all(el, x => x.tag === 'a' && /btn/.test(x.attrs.className || ''));
-    assert.deepEqual(open.map(a => [text(a), a.attrs.href]), [['Open', '#ticket/' + TID]]);
-  }
-  const failing = c.needRow(FAILING, null);
-  assert.match(text(failing), /failed 2 times in a row/);
-  assert.deepEqual(buttons(failing).map(text), ['Remind', 'Start fresh']);
-});
 
 test('stuck rows never merge with a question of the same ticket', () => {
   const {c} = context();
@@ -154,24 +118,30 @@ test('stuck rows never merge with a question of the same ticket', () => {
   assert.deepEqual([...groups.map(g => g.row.id)], [question.id, PERMISSION.id, FAILING.id]);
 });
 
-test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle for an idle helper', () => {
-  const {c} = context();
-  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word]),
-    ticketPill:s => node('span', {className:'pill', 'data-state':s.pill}, [s.word])};
-  const pill = row => all(c.needRow(row, null), x => /(^| )pill( |$)/.test(x.attrs.className || '')).map(text);
-  assert.deepEqual(pill(PERMISSION), ['Stuck']);
-  assert.deepEqual(pill(FAILING), ['Stuck']);
-  assert.deepEqual(pill(UNMERGED), ['Stuck']);
-  assert.deepEqual(pill(IDLE), ['Idle']);
-  // ORCH-1717: a ticket the Reviewer left for the person waits for a look, it is not stuck
-  assert.deepEqual(pill(UNSURE), ['Review']);
+
+
+test('stuck rows: one line, one action: Open goes to the ticket, where the answer is', () => {
+  const {c} = context({runs:{[TID]:{running:true}}});
+  for (const row of [PERMISSION, FAILING]) {
+    const el = c.stoppedRow(row);
+    assert.deepEqual(buttons(el), []);
+    const open = all(el, x => x.tag === 'a' && /btn/.test(x.attrs.className || ''));
+    assert.deepEqual(open.map(a => [text(a), a.attrs.href]), [['Open', '#ticket/' + TID]]);
+    assert.equal(el.attrs['data-blocked'], 'stopped'); assert.equal(el.attrs['data-counts'], '1');
+  }
+  assert.match(text(c.stoppedRow(FAILING)), /failed 2 times in a row/);
+  // every row of Blocked now is blocked: no pill repeats it
+  assert.deepEqual(all(c.stoppedRow(PERMISSION), x => /(^| )pill( |$)/.test(x.attrs.className || '')), []);
 });
 
-test('a ticket the Reviewer left for you says its one plain reason, not the Reviewer\'s counts', () => {
+test('a ticket the Reviewer left for you is a card of the Review page, never a row of Blocked now', () => {
   const {c} = context();
-  const row = {...UNSURE, text:'The Reviewer was not sure and left it for you: too big for a small fix (25 files, 4070 lines; small is 10 and 300).', short:'It is a big change.'};
-  const said = text(c.needRow(row, null));
-  assert.match(said, /It is a big change\./);
-  assert.doesNotMatch(said, /Reviewer|files|small is/);
-  assert.match(text(c.needRow(UNSURE, null)), /no pull request to check/);  // an older core without `short`: its text
+  const ticket = c.ticketOf(TID);
+  c.needsList = () => [UNSURE]; c.shown = t => t; c.titleTag = () => null; c.parse = v => new Date(v); c.now = () => new Date('2026-11-16T12:00:00Z');
+  c.heading = (t, s) => node('header', {}, [t, s]); c.card = (key, title, suffix, kids) => node('section', {'data-key':key}, [title, kids]); c.emptyRow = t => node('p', {}, [t]);
+  const page = c.home(), said = text(page);
+  assert.doesNotMatch(said, /Reviewer|Invoice export/);
+  assert.match(said, /Nothing is blocked\./);
+  assert.match(said, /1 thing waits in Review/);
+  assert.equal(ticket.status, 'review');
 });
