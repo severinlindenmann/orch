@@ -8,6 +8,18 @@
   var framed = false;
   try { framed = window.top !== window; } catch (e) { framed = true; }
   var off = {on: false, chan: null, url: function (u) { return u; }, EventSource: window.EventSource};
+  // Touch sizes follow the window, never the frame (W-001, W-006): beside the Focus panel a framed page is narrower
+  // than a phone while the window is a wide one with a mouse. The dashboard says which it is ({type:'orch.window',
+  // wide}); the kit's 44 px touch rules stand down for html[data-window=wide]. Asked once at the start, told again
+  // when the window changes. Only the parent's word counts, and it only sets this one mark.
+  if (framed) {
+    window.addEventListener('message', function (e) {
+      if (e.source !== window.parent || !e.data || e.data.type !== 'orch.window') return;
+      if (e.data.wide === true) document.documentElement.setAttribute('data-window', 'wide');
+      else document.documentElement.removeAttribute('data-window');
+    });
+    try { window.parent.postMessage({orch: 'frame-window'}, location.protocol + '//' + location.host); } catch (e) { /* opened on its own */ }
+  }
   if (!framed || self.origin !== 'null') { window.OrchFrame = off; return; }
 
   var HEADER = 'X-Orch-Frame', PARAM = 'orch-frame';

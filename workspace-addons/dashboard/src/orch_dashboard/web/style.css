@@ -82,7 +82,8 @@
 .settings .set-ctl .input{width:100%;max-width:360px;min-height:32px;padding:5px 10px;font-size:14px}
 .settings .agent-opt{cursor:pointer;align-items:flex-start}
 .settings .agent-opt input{margin-top:3px;flex:none}
-.settings .agent-opt.sel{background:var(--brand-soft)}
+/* W-007: the selected helper tool uses the normal selected look (an edge and a soft surface), never a filled green card */
+.settings .agent-opt.sel{background:var(--surface-2);border-color:var(--text-muted)}
 .settings .grow{min-width:0;overflow-wrap:anywhere}
 .settings .other-cmd{margin-top:12px;display:grid;gap:10px}
 .settings .other-cmd .stack{gap:4px}
@@ -147,10 +148,15 @@ iframe.embed{--embed-bleed:24px;display:block;width:calc(100% + 2*var(--embed-bl
 /* D1 (ORCH-2315): a framed add-on page scrolls inside its frame and keeps its own gutter, so the dashboard keeps none
    around it: its Settings button then ends at the same right edge as on every dashboard-drawn page. */
 html:has(iframe.embed:not(.embed-loading)){scrollbar-gutter:auto}
+/* W-005 (owner, 28 Nov): the shell always keeps the scrollbar room, embedded or not. A framed page scrolls inside its
+   frame, so the window itself has no gutter there; --frame-gutter (the measured --scrollbar-w, 0 where scrollbars lie
+   over the page) is the room everything fixed to the window's right edge keeps instead: the top bar (below), the Live
+   bar, the right panel and its divider (kit widgets.css). They then sit on the same px on Home and on an add-on page. */
+@media(min-width:721px){html:has(iframe.embed:not(.embed-loading)){--frame-gutter:var(--scrollbar-w,0px)}}
 /* ORCH-2149 (7): the top bar then has no gutter beside it either, so its buttons sat one scrollbar further right than
    on a dashboard-drawn page (New ticket jumped 15 px between Home and an add-on page). --scrollbar-w is measured once
    by app.js: 0 where scrollbars lie over the page. */
-@media(min-width:721px){html:has(iframe.embed:not(.embed-loading)) .topbar{padding-right:calc(var(--page-gutter) + var(--scrollbar-w,0px))}}
+@media(min-width:721px){html:has(iframe.embed:not(.embed-loading)) .topbar{padding-right:calc(var(--page-gutter) + var(--frame-gutter,0px))}}
 /* A page that is the dashboard shell itself (three columns, fb17) fills the page like the board: no page padding around it */
 .page:has(>iframe.embed-shell){max-width:none;padding:0}
 iframe.embed.embed-shell{width:100%;margin:0;height:calc(100vh - var(--topbar-height))}

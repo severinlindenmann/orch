@@ -45,6 +45,9 @@
 .page:has(.board-toolbar){max-width:none}
 .page:has(.board-toolbar)>.table-wrap{min-width:0;max-width:100%;overflow-x:auto}
 @media(max-width:899px){.ticket-table{min-width:520px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
+/* W-001: the same when the page area (not the window) is under 900 px, beside the Focus panel (body[data-live-narrow]) */
+body[data-live-narrow] .ticket-table{min-width:520px}body[data-live-narrow] .ticket-table .ticket-cell{min-width:220px}body[data-live-narrow] .ticket-table .who{white-space:nowrap}
+body[data-live-narrow] .board-toolbar .search-field{flex:1 1 160px;width:auto}
 .table-wrap{position:relative}
 
 /* Owner feedback 14 Nov (lane v1): view chips, collapsed empty board columns, clickable rows, one action on hover */
