@@ -240,7 +240,8 @@ def test_issue_state(monkeypatch):
 
 @pytest.mark.parametrize(
     "rc, err, want",
-    [(0, "", True), (1, "gh: Reference does not exist (HTTP 422)", True), (1, "HTTP 404: Not Found", True),
+    # a 404 is no proof: GitHub also answers it when the token cannot see the ref (ORCH-1987, from PR 2846)
+    [(0, "", True), (1, "gh: Reference does not exist (HTTP 422)", True), (1, "HTTP 404: Not Found", False),
      (1, "HTTP 403: forbidden", False)],
 )  # fmt: skip
 def test_delete_branch_counts_a_branch_already_gone_as_deleted(monkeypatch, rc, err, want):
