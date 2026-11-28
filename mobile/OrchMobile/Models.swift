@@ -103,6 +103,11 @@ struct QuestionBody: Codable, Sendable, Equatable {
     /// The task the question is about (relay-api.md "Questions"): `task` is its id, `about` its text. The Review stack groups by them.
     var about: String? = nil
     var task: String? = nil
+    /// ORCH-2187 (Focused review F, relay-api.md "Questions"): the workspace has its decision-first switch on, with the helper's
+    /// "If you wait" line and "What matters" facts. `decisionFirst` / `ifWait` via JSONCoding. Read through `ReviewStackRules.decisionFirst`.
+    var decisionFirst: Bool? = nil
+    var ifWait: String? = nil
+    var facts: [String]? = nil
 }
 
 extension QuestionBody {
@@ -128,6 +133,10 @@ extension QuestionBody {
         if card == nil { cardFiles = nil }
         about = try? c.decodeIfPresent(String.self, forKey: .about)
         task = try? c.decodeIfPresent(String.self, forKey: .task)
+        // Forgiving like the review fields: a wrong type leaves the card as before, never a lost question.
+        decisionFirst = try? c.decodeIfPresent(Bool.self, forKey: .decisionFirst)
+        ifWait = try? c.decodeIfPresent(String.self, forKey: .ifWait)
+        facts = try? c.decodeIfPresent([String].self, forKey: .facts)
     }
 }
 
