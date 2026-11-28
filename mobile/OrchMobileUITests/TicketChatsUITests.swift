@@ -64,28 +64,30 @@ final class TicketChatsUITests: XCTestCase {
         XCTAssertTrue(plus.waitForExistence(timeout: 15), "the + for attachments")
         XCTAssertTrue(el(app, "composer-mic").exists, "the microphone for a voice message")
 
-        // Photo.
+        // Photo. Every sheet button is found by its identifier with firstMatch (el): `app.buttons[id]` reads the whole
+        // screen to be sure there is only one, which timed out on the slow CI simulator while the sheet came up
+        // ("Timed out while evaluating UI query", ORCH-2389). The waits are long enough for that simulator.
         plus.tap()
-        XCTAssertTrue(app.buttons["media-fake-photo"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["media-fake-pdf"].exists, "Files")
-        XCTAssertTrue(app.buttons["media-location"].exists, "Location")
+        XCTAssertTrue(el(app, "media-fake-photo").waitForExistence(timeout: 15))
+        XCTAssertTrue(el(app, "media-fake-pdf").exists, "Files")
+        XCTAssertTrue(el(app, "media-location").exists, "Location")
         try shot(app, "ticket-chat-attach")
-        app.buttons["media-fake-photo"].tap()
-        XCTAssertTrue(app.buttons["media-send"].waitForExistence(timeout: 5)); app.buttons["media-send"].tap()
+        el(app, "media-fake-photo").tap()
+        XCTAssertTrue(el(app, "media-send").waitForExistence(timeout: 15)); el(app, "media-send").tap()
         let image = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'image-'")).firstMatch
         XCTAssertTrue(image.waitForExistence(timeout: 15), "the photo shows in the ticket chat")
 
         // File: goes out at once.
         plus.tap()
-        XCTAssertTrue(app.buttons["media-fake-pdf"].waitForExistence(timeout: 5)); app.buttons["media-fake-pdf"].tap()
+        XCTAssertTrue(el(app, "media-fake-pdf").waitForExistence(timeout: 15)); el(app, "media-fake-pdf").tap()
         let file = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'file-'")).firstMatch
         XCTAssertTrue(file.waitForExistence(timeout: 15), "the file shows in the ticket chat")
 
         // Location.
         plus.tap()
-        XCTAssertTrue(app.buttons["media-location"].waitForExistence(timeout: 5)); app.buttons["media-location"].tap()
-        XCTAssertTrue(app.buttons["media-send"].waitForExistence(timeout: 10)); app.buttons["media-send"].tap()
-        XCTAssertTrue(app.buttons["Open in Maps"].waitForExistence(timeout: 15), "the place shows in the ticket chat")
+        XCTAssertTrue(el(app, "media-location").waitForExistence(timeout: 15)); el(app, "media-location").tap()
+        XCTAssertTrue(el(app, "media-send").waitForExistence(timeout: 15)); el(app, "media-send").tap()
+        XCTAssertTrue(app.buttons["Open in Maps"].firstMatch.waitForExistence(timeout: 15), "the place shows in the ticket chat")
         try shot(app, "ticket-chat-attachments-sent")
 
         // The chat's info: Photos and Files of this ticket chat.
