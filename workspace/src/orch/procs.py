@@ -609,6 +609,15 @@ def own_token() -> str:
     return _tokens[pid]
 
 
+def lock_token() -> bytes:
+    """What a lock with an age limit holds (the relay inbox, the phone view state): its holder (pid and start
+    time, so a holder that died is seen at once) and a word of its own, so two threads of one process never
+    hold the same token and a holder removes only the lock it made itself."""
+    import secrets
+
+    return f"{own_token()} {secrets.token_hex(4)}".encode()
+
+
 def owner_dead(text: str) -> bool:
     """True only when the lock's holder is verifiably gone (pid dead, or the pid now has another start time).
     Anything we cannot read or verify counts as alive: never two holders."""

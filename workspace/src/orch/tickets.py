@@ -449,14 +449,16 @@ def _root_of(p: Path) -> Path:
 _NAMELESS_STALE = 3.0
 
 
-def _break_stale(lock: Path, _depth: int = 0) -> bool:
+def _break_stale(lock: Path, _depth: int = 0, after: float | None = None) -> bool:
     """Remove a lock whose writer is gone; True when this call removed it. Only one waiter at a time may do
     that: it holds a marker next to the lock (`<lock>.take`, exclusive) and judges the lock again while it
     holds it. A writer removes only its own lock, so the lock judged is the lock removed, and the lock's name
     is never free in between: a waiter that judged a dead writer's lock a moment too early finds the next
     writer's fresh lock under the marker and leaves it alone (ORCH-2369; the lock was renamed away and put
     back before, and a third writer could make its own in that gap). A waiter killed while it holds the marker
-    leaves it behind; the marker is a lock like any other and is removed by the same rule."""
+    leaves it behind; the marker is a lock like any other and is removed by the same rule.
+    after: a lock with an age limit (the relay inbox, the phone view state, ORCH-2411): it is also free once
+    it is older than `after` seconds, whoever is named in it (a holder that hangs never blocks for good)."""
     marker = lock.with_name(f"{lock.name}.take")
     for _ in range(2):
         try:
@@ -474,11 +476,14 @@ def _break_stale(lock: Path, _depth: int = 0) -> bool:
             os.write(fd, procs.own_token().encode())
         finally:
             os.close(fd)
-        holder = lock.read_text(encoding="utf-8").strip()
-        if holder:
+        holder = lock.read_text(encoding="utf-8", errors="replace").strip()
+        age = time.time() - lock.stat().st_mtime
+        if after is not None:
+            stale = age > after or (bool(holder) and procs.owner_dead(holder))
+        elif holder:
             stale = procs.owner_dead(holder)  # a live or unverifiable holder keeps it
         else:
-            stale = time.time() - lock.stat().st_mtime > _NAMELESS_STALE
+            stale = age > _NAMELESS_STALE
         if stale:
             procs.unlink(lock)
         return stale
@@ -487,6 +492,23 @@ def _break_stale(lock: Path, _depth: int = 0) -> bool:
     finally:
         with contextlib.suppress(OSError):
             procs.unlink(marker)
+
+
+def _left_behind(lock: Path, after: float, looked: dict[str, float]) -> bool:
+    """A cheap first look at a lock with an age limit, before _break_stale judges it again under the marker:
+    older than `after`, or its named holder is verifiably gone (asked at most every 0.5 s per holder: a wait
+    loop turns every 20 ms). A lock that cannot be read right now is not left behind."""
+    try:
+        age = time.time() - lock.stat().st_mtime
+        holder = lock.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return False
+    if age > after:
+        return True
+    if not holder or time.monotonic() - looked.get(holder, -1.0) < 0.5:
+        return False
+    looked[holder] = time.monotonic()
+    return procs.owner_dead(holder)
 
 
 @contextlib.contextmanager
