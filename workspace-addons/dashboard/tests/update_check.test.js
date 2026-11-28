@@ -60,7 +60,7 @@ test('Go back starts the normal update with that release number; Not now dismiss
   assert.match(back, /\^\[1-9\]\[0-9\]\{0,5\}\(\\\.\[1-9\]\[0-9\]\{0,3\}\)\?\$/); assert.match(back, /updStart\(to\)/); assert.match(back, /#settings\/about/);
   assert.match(app, /action === 'update-check-ok'\) \{ const r = await act\('update\.check\.dismiss'/);
   assert.match(between(settings, 'async function updStart', 'window.addEventListener'), /\^\[1-9\]\[0-9\]\{0,5\}\(\\\.\[1-9\]\[0-9\]\{0,3\}\)\?\$/);
-  assert.match(home, /backgroundBanner\(\), updateCheckCard\(\), autoUpdateNote\(\)/);
+  assert.match(home, /updateCheckCard\(\), autoUpdateNote\(\)/);
 });
 
 test('a sign-in that failed names the page and what to do, never an answer code (report r-1122-0539)', () => {

@@ -252,7 +252,7 @@ const ROWS = [
       {label:'View file', view:{ticket:'t_abc123', name:'payroll-access.txt'}}]},
 ];
 
-test('Home › Needs you: the three sync rows in the draft words, with "Needs your OK" and their buttons', () => {
+test('Home: the three sync rows in the draft words, with "Needs your OK" and their buttons', () => {
   const {c} = context({needs:ROWS});
   vm.runInContext('needsOpen = true', c);
   const home = c.home();
@@ -263,7 +263,7 @@ test('Home › Needs you: the three sync rows in the draft words, with "Needs yo
   assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your OK'], ['Needs your OK'], ['Needs your OK']]);
   assert.deepEqual(rows.map(r => all(r, n => n.tag === 'button').map(text)), [['Keep mine', 'Keep theirs'], ['Move', 'Not now'], ['Leave it out', 'View file']]);
   // ORCH-63: the number counts ticket questions and results only (the Review cards); sync's rows stay listed here
-  assert.match(text(home), /Needs you Sync paused/); assert.doesNotMatch(text(home), /Needs you · /);
+  assert.match(text(home), /Sync paused/); assert.doesNotMatch(text(home), /Needs you · /);
 });
 
 const KEEP_TARGET = 'sync:keep-theirs:' + 'e'.repeat(64);
@@ -273,7 +273,7 @@ const KEEP_REVIEW = {target:KEEP_TARGET, review:{title:'Keep the other computer�
 
 test('a signed need shows the add-on’s review (not the row’s) and signs the target it showed; Move uses the signed core op', async () => {
   const {c, calls, dialogs, toasts} = context({needs:ROWS, reviews:{'keep-theirs':KEEP_REVIEW}});
-  const row = c.needRow(ROWS[0], null);
+  const row = c.noteRow(ROWS[0], null);
   await click(all(row, n => n.tag === 'button')[1]);
   assert.deepEqual(calls, [['addon.act', {addon:'sync', verb:'keep-theirs', target:'tickets/t_abc123.json', review:true}]], 'only the review before Sign');
   const {d, actions, title} = dialogs.at(-1);
@@ -285,16 +285,16 @@ test('a signed need shows the add-on’s review (not the row’s) and signs the 
   await click(byKey(actions, 'confirm-ok'));
   assert.deepEqual(calls[1], ['addon.act', {addon:'sync', verb:'keep-theirs', target:'tickets/t_abc123.json', sign:true, seen:KEEP_TARGET}]);
   assert.deepEqual(toasts.at(-1), ['Confirmed. Kept the other version.', 'ok']);
-  await click(all(c.needRow(ROWS[1], null), n => n.tag === 'button')[0]);
+  await click(all(c.noteRow(ROWS[1], null), n => n.tag === 'button')[0]);
   await click(byKey(dialogs.at(-1).actions, 'confirm-ok'));
   assert.deepEqual(calls[2], ['private.move', {}]);
-  await click(all(c.needRow(ROWS[2], null), n => n.tag === 'button')[1]);
+  await click(all(c.noteRow(ROWS[2], null), n => n.tag === 'button')[1]);
   assert.deepEqual(calls[3], ['preview', 't_abc123', 'artifacts', 'payroll-access.txt']);
 });
 
 test('no review from the add-on: no sign step, nothing signed', async () => {
   const {c, calls, dialogs, toasts} = context({needs:ROWS});
-  await click(all(c.needRow(ROWS[0], null), n => n.tag === 'button')[0]);
+  await click(all(c.noteRow(ROWS[0], null), n => n.tag === 'button')[0]);
   assert.equal(dialogs.length, 0);
   assert.deepEqual(calls.map(([, a]) => [a.verb, !!a.review, !!a.sign]), [['keep-mine', true, false]]);
   assert.deepEqual(toasts.at(-1), ['This file is not waiting for a choice', 'error']);
@@ -303,7 +303,7 @@ test('no review from the add-on: no sign step, nothing signed', async () => {
 test('private.move in a row: only from the sync add-on, always with the core’s own label and wording', async () => {
   const sneaky = {...ROWS[1], id:'sync:move:x', actions:[{label:'Keep mine', op:'private.move', sign:true, review:{title:'Keep your version?', body:'Nothing changes.', done:'Kept.'}}]};
   const {c, calls, dialogs} = context({needs:[sneaky]});
-  const row = c.needRow(sneaky, null);
+  const row = c.noteRow(sneaky, null);
   const [move] = all(row, n => n.tag === 'button');
   assert.equal(text(move), 'Move', 'the row’s label is never shown for a core op');
   await click(move);
@@ -316,24 +316,24 @@ test('private.move in a row: only from the sync add-on, always with the core’s
   // from any other add-on: no button at all (also not when it names a verb next to the op)
   for (const source of ['insights', 'automation']) {
     const other = {...sneaky, source, id:source + ':move:x'};
-    assert.equal(all(c.needRow(other, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source);
+    assert.equal(all(c.noteRow(other, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source);
     const mixed = {...other, actions:[{label:'Move', op:'private.move', verb:'move', sign:true}]};
-    assert.equal(all(c.needRow(mixed, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source + ' op+verb');
+    assert.equal(all(c.noteRow(mixed, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source + ' op+verb');
   }
   const smuggled = {...sneaky, actions:[{label:'Fix', op:'ticket.patch', verb:'fix'}]};
-  assert.equal(all(c.needRow(smuggled, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, 'an op next to a verb is not a verb');
+  assert.equal(all(c.noteRow(smuggled, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, 'an op next to a verb is not a verb');
 });
 
 test('Not now waits a day; a row may not name any other core op; snapshots show no buttons', async () => {
   const {c, calls} = context({needs:ROWS});
-  await click(all(c.needRow(ROWS[1], null), n => n.tag === 'button')[1]);
+  await click(all(c.noteRow(ROWS[1], null), n => n.tag === 'button')[1]);
   assert.equal(calls.length, 0);
   assert.equal(all(c.home(), n => String(n.attrs?.className || '').includes('need-acts')).length, 2);
   const acts = n => all(n, x => String(x.attrs?.className || '').includes('need-acts') && !String(x.attrs?.className).includes('need-notice')).length;
   const evil = {...ROWS[1], id:'sync:x:y', actions:[{label:'Delete', op:'ticket.patch', sign:true}]};
-  assert.equal(acts(c.needRow(evil, null)), 0);
+  assert.equal(acts(c.noteRow(evil, null)), 0);
   const core = {...ROWS[0], source:'core'};
-  assert.equal(acts(c.needRow(core, null)), 0);
+  assert.equal(acts(c.noteRow(core, null)), 0);
 });
 
 // Owner feedback 14 Nov, fb14: a row with answer options but no ticket and no buttons showed as a ticket question
@@ -342,7 +342,7 @@ test('a row with options but no ticket and no buttons is a notice in plain words
   const stuck = {id:'sync:paused:zz', source:'sync', kind:'sync:paused', ticket:null, title:'.json', tone:'needs-you', since:'2026-11-11T10:12:00Z',
     text:'Sync paused: “.json” changed here and on another computer.', answer:{question:'q1', options:['Keep mine', 'Keep theirs'], recommended:null}};
   const {c, calls} = context({needs:[stuck]});
-  const row = c.needRow(stuck, null);
+  const row = c.noteRow(stuck, null);
   const labels = all(row, n => n.tag === 'button').map(text);
   assert.deepEqual(labels, ['Not now'], 'no answer buttons that can only fail');
   assert.match(text(row), /Sync paused/);

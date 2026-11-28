@@ -124,6 +124,13 @@ elif args[:2] == ["run", "status"]:
     sh = root / ("stop-held-" + args[2])
     if sh.exists(): d["stop_held_ids"] = json.loads(sh.read_text())
     print(json.dumps(d))
+elif args[0] == "ask" and "--take-back" in args:  # like core: the question is settled with the reason
+    t = load(args[1]); qid = args[args.index("--take-back") + 1]
+    reason = [a for a in args[2:] if not a.startswith("--") and a != qid][0]
+    for q in t.get("questions", []):
+        if q["id"] == qid and q["answer"] is None:
+            q["answer"] = "Taken back: " + reason; q["taken_back"] = {{"by": by, "reason": reason}}
+    note(t, "Taken back: " + reason); save(t); print("{{}}")
 elif args[0] == "ask":
     t = load(args[1]); qs = t.setdefault("questions", [])
     q = {{"id": "q%d" % (len(qs) + 1), "text": args[2], "answer": None,

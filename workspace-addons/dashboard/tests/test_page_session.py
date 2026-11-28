@@ -556,6 +556,7 @@ ACT_ARGS = {
     "auto_reviewer.set": {"on": False},
     "away.set": {"on": False},
     "review.undo": {"ticket": TID},
+    "automation.resume": {},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},

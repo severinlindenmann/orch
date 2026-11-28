@@ -12,7 +12,10 @@ module.exports = {
     const card = () => page.locator('.swipe-card:not(.under):not(.under2)', { hasText: 'content ideas' }).first();
     const shown = async () => {  // the first load may still show another card
       await page.locator('.swipe-card:not(.under):not(.under2)').first().waitFor();
-      if (!(await card().count())) await page.locator('.review-side').getByText(/content ideas/).first().click();
+      if (!(await card().count())) {
+        if (await page.locator('.review-side [data-review-more="all"]').count()) await page.locator('.review-side [data-review-more="all"]').click();  // O-05: five rows at a time
+        await page.locator('.review-side').getByText(/content ideas/).first().click();
+      }
       await card().locator('.swipe-ideas').waitFor();
     };
     const questions = () => JSON.parse(orch('ticket', 'show', tid, '--json')).questions;
