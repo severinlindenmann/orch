@@ -399,9 +399,13 @@ def tracked_ticket_paths(root: Path) -> set[str] | None:
             return set()
     except Refused:
         return None
-    names = _orch_tracked(root)  # ORCH-2384: the one listing of this command (every tracked file under .orch)
-    if names is not None:
-        return {n.casefold() for n in names[0]}
+    if (
+        _index_key(root) is not None
+    ):  # ORCH-2384: the one listing of this command (every tracked file under .orch)
+        names = _orch_tracked(root)
+        return (
+            None if names is None else {n.casefold() for n in names[0]}
+        )  # a failed listing is not tried twice
     rc, raw, _ = _safegit().run_bytes(["ls-files", "-z", "--", ":(icase,literal).orch/tickets"], root, 10)
     if rc != 0:
         return None
