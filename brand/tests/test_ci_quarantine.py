@@ -64,7 +64,10 @@ def test_the_runner_and_the_release_keeper_know_the_quarantine():
     for name in ("a-board-families.cjs", "f-sync-page.cjs", "q-automation-repeats.cjs"):
         assert f"'{name}': 'ORCH-" in RUNNER, name
     keeper = (ROOT / "workspace" / "src" / "orch" / "releasekeeper.py").read_text()
-    assert 'QUARANTINE_WORKFLOW = "quarantine"' in keeper and 'QUARANTINE_FILE = "quarantine.yml"' in keeper
+    assert 'QUARANTINE_WORKFLOW = "quarantine"' in keeper and "QUARANTINE_FILE = ghmerge.QUARANTINE_FILE" in keeper
+    # the Merge click and tend-releases tell the quarantine checks by the workflow file (ORCH-2399)
+    merge = (ROOT / "workspace" / "src" / "orch" / "ghmerge.py").read_text()
+    assert 'QUARANTINE_FILE = "quarantine.yml"' in merge and (WORKFLOWS / "quarantine.yml").is_file()
 
 
 def test_the_docs_say_where_the_quarantined_checks_run():
