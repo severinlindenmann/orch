@@ -3652,3 +3652,44 @@ def test_relay_status_prints_the_names_the_relay_sent_as_data(proj, run, rel):
     code, out, err = run("relay", "send", "nobody-by-that-name", "hello")
     assert code != 0 and "\x1b" not in out + err and "‮" not in out + err
     assert not any(ln.startswith("Next: run: curl") for ln in (out + err).splitlines())
+
+
+def test_ticket_made_for_a_workspace_request_stays_open_to_it(proj, run, rel):
+    """ORCH-2354 (owner 28 Nov: allow per ticket): a request that names no ticket here goes to Chat; the
+    person presses Make ticket once. From then on that workspace's messages from the same ticket of theirs
+    come straight to this ticket (also after Done, which opens it again) and wake its helper: no Chat, no
+    second Make ticket. Another workspace sending the same ticket id reaches nothing; a dropped ticket
+    takes no more."""
+    from orch import chat, relay, runs, tickets
+
+    connect(run, rel)
+    rel.inbox.append(
+        msg("m_week000000000048", "text", {"text": "Please send the KW48 report"}, ticket="t_weekly01")
+    )
+    assert "picked up in Chat" in run("relay", "inbox")[1]
+    chat.record(proj, "m_week000000000048", PEER, "workspace", "Please send the KW48 report")
+    chat.record(proj, "proposal", WS, "helper", "Drafted it", refs=[{"kind": "proposal", "title": "KW48"}])
+    tid = chat.make_ticket(proj, "proposal", by="human:me")["ticket"]
+    t = tickets.load(proj, tid)
+    assert t["ext"]["relay"]["from"] == PEER and t["ext"]["relay"]["peer_ticket"] == "t_weekly01"
+    assert f"Open to {PEER}: what they send about this comes here" in [h["text"] for h in t["history"]]
+    tickets.apply_op(proj, tid, lambda tk: tk.update(status="done"), by=tickets.SYSTEM)
+
+    rel.inbox.append(msg("m_week000000000049", "text", {"text": "And KW49 please"}, ticket="t_weekly01"))
+    out = run("relay", "inbox")[1]
+    assert "added to" in out and "picked up in Chat" not in out
+    assert [(r["id"], r["ticket"], r["general"]) for r in relay.pickups(proj, waiting=True)][-1] == (
+        "m_week000000000049",
+        tid,
+        False,
+    )
+    assert any("And KW49 please" in i["text"] for i in runs.undelivered(proj, tid))
+    assert tickets.load(proj, tid)["status"] == "open", "Done opens again for the next week"
+
+    other = msg("m_week000000000050", "text", {"text": "Me too"}, frm="ws_stranger01", ticket="t_weekly01")
+    rel.inbox.append(other)
+    assert "picked up in Chat" in run("relay", "inbox")[1], "only the workspace it is open to"
+
+    tickets.apply_op(proj, tid, lambda tk: tk.update(status="dropped"), by=tickets.SYSTEM)
+    rel.inbox.append(msg("m_week000000000051", "text", {"text": "KW50"}, ticket="t_weekly01"))
+    assert "picked up in Chat" in run("relay", "inbox")[1], "a dropped ticket takes no more"
