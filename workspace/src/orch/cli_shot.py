@@ -283,7 +283,7 @@ def parse_pages(text: str | None) -> list[tuple[str, str]]:
             )
         if any(n == name for n, _ in pages):
             raise Refused(
-                f"The page name '{name}' is given twice. Give each its own name: one={part}{mark}{query[:40]}."
+                f"The page name '{name}' is given twice. Name each: one={part}{mark}{query[:40]}."
                 if mark
                 else f"The page name '{name}' is given twice."
             )
