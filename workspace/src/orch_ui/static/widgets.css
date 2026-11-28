@@ -2302,6 +2302,10 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-row.is-current:focus-visible{box-shadow:inset 3px 0 0 var(--brand),var(--focus-ring)}
 .review-row.is-done{color:var(--text-faint)}
 .review-row-icon{display:inline-flex;flex:none;margin-top:2px;color:var(--text-faint)}
+/* FX-05: a stuck row carries the shared Stuck pill in its second line, before its ticket */
+.review-row-icon.failed{color:var(--failed)}
+.review-row-stuck{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.review-row-stuck>.pill{font-size:12px;line-height:16px}
 .review-row-text{display:grid;flex:1;gap:2px;min-width:0}
 .review-row-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
 .review-row-sub{font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}

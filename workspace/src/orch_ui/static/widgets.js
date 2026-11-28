@@ -464,7 +464,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
  /* due within a day (it.dueAt) shows amber; any other deadline stays quiet */
  const soon=it=>{const t=it&&it.dueAt!=null?+new Date(it.dueAt):NaN;return isFinite(t)&&t-Date.now()<864e5};
- const metaLine=it=>{const m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''));m.append(k);
+ /* FX-05: work that stopped wears the one Stuck pill (UI.helperPill, as on Home and Tickets), never a pause mark with a grey word */
+ const stuckPill=it=>UI.helperPill('stuck',it.kindLabel||'Stuck');
+ const metaLine=it=>{const m=el('div','swipe-meta');let k;if(it.kind==='stuck')k=stuckPill(it);else{k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''))}m.append(k);
   if(it.need)m.append(el('span','swipe-need'+(soon(it)?' soon':''),it.need));if(it.ticket)m.append(el('span','swipe-key',it.ticket));return m};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   /* title first, then ONE quiet line: type · deadline · ticket key (ORCH-477 round 2: no routine time stamp, no group, no
@@ -711,8 +713,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   return [why,it.ticket].filter(Boolean).join(' · ')};
  const listRow=i=>{const it=items[i],a=ans[it.id],now=i===idx&&!pairNow()&&idx<items.length,r=btn('review-row'+(now?' is-current':'')+(a?' is-done':''),[]);
   r.dataset.item=it.id;r.title=it.title;if(now)r.setAttribute('aria-current','true');
-  const ico=el('span','review-row-icon');ico.append(ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
-  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
+  const stuck=it.kind==='stuck',ico=el('span','review-row-icon'+(stuck?' failed':''));ico.append(stuck?UI.statusIcon('needs'):ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
+  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else if(stuck){const sb=el('span','review-row-sub review-row-stuck');sb.append(stuckPill(it));const rest=[it.need,it.ticket].filter(Boolean).join(' · ');if(rest)sb.append(el('span','',rest));txt.append(sb)}
+  else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
   r.append(ico,txt);r.onclick=()=>jump(i);
   const li=el('div','review-li');li.setAttribute('role','listitem');
   if(!picking||a){li.append(r);return li}
