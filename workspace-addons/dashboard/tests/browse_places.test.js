@@ -290,3 +290,12 @@ test('O-20: your open browser is "Your browser" with Close and the live view, ap
   assert.ok(!find(page, n => n.props?.['data-browse-peek'] === 't_chat01'), 'your own browser is not listed again as a helper\'s');
   assert.equal(words(find(page, n => n.props?.['data-browse-act'] === 'open')), 'Go');
 });
+
+test('the Browser page has one filled button, also while a pasted list waits for its Add', () => {
+  reset(sitesDoc(['20min.ch']));
+  lb.browseSites.check = {new: ['nzz.ch'], known: 0, changed: [{entry: '*.nzz.ch', site: 'nzz.ch'}], refused: [], refused_count: 0, repeats: 0};
+  lb.browseList.doc = {on: true, browsers: []};
+  const filled = [];
+  (function walk(n) { if (n && n.props && /\bbtn primary\b/.test(n.props.className || '')) filled.push(words(n)); (n && n.kids || []).forEach(walk); })(lb.browserListPage(A));
+  assert.deepEqual(filled, ['Open a browser']);
+});

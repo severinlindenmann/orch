@@ -308,7 +308,8 @@ function browseCheckNote(c) {
   if (c.refused_count) lines.push(h('p', {className:'meta bad', role:'alert', 'data-key':'browse-check-refused'}, browseCount(c.refused_count, 'entry cannot', 'entries cannot') + ' be a site: '
     + (c.refused || []).slice(0, 3).map(x => clean(x.entry) + ' (' + clean(x.why) + ')').join('; ') + (c.refused_count > 3 ? '; and ' + (c.refused_count - 3) + ' more' : '') + '. They are left out.'));
   return h('div', {className:'banner', role:'status', 'data-key':'browse-check'}, h('div', {className:'grow stack-sm'}, lines),
-    h('div', {className:'row'}, fresh ? h('button', {type:'button', className:'btn primary sm', 'data-browse-act':'confirm', 'data-key':'browse-check-add', disabled:browseSites.saving}, 'Add ' + browseCount(fresh, 'site', 'sites')) : null,
+    // the page has one filled button (Open a browser, UX checklist B2): this one is outlined
+    h('div', {className:'row'}, fresh ? h('button', {type:'button', className:'btn outline sm', 'data-browse-act':'confirm', 'data-key':'browse-check-add', disabled:browseSites.saving}, 'Add ' + browseCount(fresh, 'site', 'sites')) : null,
       h('button', {type:'button', className:'btn ghost sm', 'data-browse-act':'cancel-check', 'data-key':'browse-check-cancel'}, fresh ? 'Cancel' : 'OK')));
 }
 function browseSitesCard() {
