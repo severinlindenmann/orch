@@ -159,7 +159,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
 
 /* UI.reviewViewer(shots, index, o): one picture of a Review card, large (owner 17 Nov: "just use more of the screen").
    shots: [{label, preview, src, open}]; o: {title}. A result's own files open here too (ORCH-477): a PDF in the
-   browser's own view without its toolbar, any other file with a plain line; "Open in new tab" (shot.open) stays inside. A native dialog through the shared overlay (× Close, Esc, a click outside,
+   browser's own view without its toolbar, any other file with a plain line; "Open in new tab" (shot.open) stays inside. A native dialog through the shared overlay (× Close, Esc,
    focus back to the tile). A picture fits the width and a tall one scrolls, so it can be read in full; a page fills the
    dialog in a sandboxed frame; words show in full in short lines. ← → (and Previous / Next) go to the card's other tiles. */
 UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!shots.length||typeof document.body==='undefined')return null;

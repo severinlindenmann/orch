@@ -36,7 +36,7 @@ $('b-ok').onclick = () => orch.close($('b'));
 $('c-ok').onclick = () => orch.close($('c'));
 // the action takes its own trigger out of the page, then closes (the row is gone when focus comes back)
 $('stop-ok').onclick = async () => { $('row').remove(); await orch.close($('stop')); };
-// file viewer call site (kit/fileviewer.js): × Close, Esc and a click outside go through the same lifecycle
+// file viewer call site (kit/fileviewer.js): × Close and Esc go through the same lifecycle
 $('after-gone').onclick = () => FileViewer.open({files:[{tid:'t_demo', kind:'artifacts', name:'notes.txt', title:'notes.txt'}], index:0, context:'Shared links'});
 </script>
 </body></html>

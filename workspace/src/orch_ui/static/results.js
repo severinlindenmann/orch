@@ -1,7 +1,7 @@
 /* Result widgets and the big overlay (ORCH-263, look from Focus draft D).
    One widget per kind of result a helper hands back: Markdown, text and logs, code, JSON and YAML, table, web page,
    PDF, picture, video, audio, chart, change, pull request link, archive, plain link and unknown file.
-   The overlay uses the dialog lifecycle of overlay.js (× Close, Esc, a click outside, focus back to the opener).
+   The overlay uses the dialog lifecycle of overlay.js (× Close, Esc, focus back to the opener; a click beside it does nothing).
      UI.result(item, {size: 'sm' | 'lg', state, list, index, onOpen, onRetry})   -> element
      UI.resultOverlay(list, index, {onRetry})                                   -> the open <dialog>
      UI.result.kindOf('notes.md') -> 'md'      UI.result.TYPES -> [{id, word, icon}]
@@ -431,7 +431,7 @@
     return card;
   }
 
-  // ---- the big overlay: one at a time, ← → through the list, × Close / Esc / a click outside close it
+  // ---- the big overlay: one at a time, ← → through the list, × Close / Esc close it
   function resultOverlay(list, index, o) {
     o = o || {};
     const items = (list || []).filter(x => (BY[x.type] ? x.type : kindOf(x.name || x.href)) !== 'link');
