@@ -466,7 +466,7 @@ function pageRoute() {
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|menu|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone', menu:'general'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null, at:named === 'menu' ? 'menu' : null}; }  // #settings/menu: General, at its Menu section (O-34)
+  if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone', menu:'general'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null, ...(named === 'menu' ? {at:'menu'} : {})}; }  // #settings/menu: General, at its Menu section (O-34)
   // the Documentation page (book icon next to Settings, pages/docs.js): #docs, #docs/<page>, #docs/g-<group>
   const docsHash = /^#docs(?:\/([a-z][a-z0-9-]{1,41}))?$/.exec(hash);
   if (docsHash && !snapshot) return {kind:'docs', at:docsHash[1] || '', hash};
