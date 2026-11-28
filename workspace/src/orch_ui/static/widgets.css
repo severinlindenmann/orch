@@ -1925,7 +1925,7 @@ button.gtree-row:hover{background:var(--surface-2)}
  .run-fact dd{flex-wrap:nowrap;justify-content:space-between}
  .run-card .cmd-copy-row{flex-wrap:wrap}
  .run-card .cmd-copy-text{flex-basis:100%}
- .run-card .btn{min-height:44px}
+ :where(html:not([data-window=wide])) .run-card .btn{min-height:44px}
 }
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
@@ -2218,7 +2218,7 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
  body:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
  .swipe-top>.swipe-all{display:none}
  .swipe-jump{display:flex;flex:1 1 100%;order:6;gap:var(--s2);min-width:0}
- .swipe-jump .btn{min-height:var(--touch)}
+ :where(html:not([data-window=wide])) .swipe-jump .btn{min-height:var(--touch)}
  .swipe-jump-all{flex:1;justify-content:flex-start;min-width:0}
  .swipe-jump-all .meta{margin-left:auto}
  .swipe-files{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
@@ -2984,7 +2984,7 @@ button.status-row-none{color:var(--text-muted)}
   .files-mid>.files-gallery{overflow:visible}
   .files-gallery{padding:0 var(--s3) var(--s4)}
   .files-gallery .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
-  .files-sechead .btn{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .files-sechead .btn{min-height:var(--touch)}
 }
 /* ORCH-1467: the Review deck keeps its keyboard ring away from the content (space inside the frame); the cards behind a
    short card (a Stuck card, a plain question) are not drawn, they only peeked out below it; and a card's own answer

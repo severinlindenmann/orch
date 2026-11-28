@@ -696,11 +696,12 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 .preview-metrics b{display:block;font-size:var(--fs-4);margin-top:var(--s1)}
 @media(max-width:900px){.demo-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){
-  .btn,.icon-btn,.input{height:var(--touch)}
-  .check-label{min-height:var(--touch)}
-  .icon-btn{width:var(--touch)}
+  /* touch sizes follow the window, never the frame (W-006): see the touch block above */
+  :where(html:not([data-window=wide])) .btn,:where(html:not([data-window=wide])) .icon-btn,:where(html:not([data-window=wide])) .input{height:var(--touch)}
+  :where(html:not([data-window=wide])) .check-label{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .icon-btn{width:var(--touch)}
   .qoption{height:auto;min-height:var(--touch)}
-  .ev-technical summary{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .ev-technical summary{min-height:var(--touch)}
   .demo{padding:var(--s5) var(--s4)}
   .demo-head{align-items:flex-start;flex-direction:column}
   .section-head{flex-wrap:wrap}
