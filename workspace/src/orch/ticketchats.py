@@ -1,5 +1,6 @@
 """The list of ticket chats (team chat step 1, ORCH-1167): every ticket that has chat lines or an open
-question, newest first, with its last line and an unread count per reader. `orch chat list` prints it; the
+question, newest first, with its last line and an unread count per reader (only what another workspace wrote
+counts as unread). `orch chat list` prints it; the
 dashboard data carries it for the Chats page and the app's Ticket chats list.
 
 One thread per ticket, keyed by the ticket id: the messages are the ticket's own history lines that carry
@@ -93,7 +94,14 @@ def _name(v) -> str | None:
         return None
 
 
-def _row(root: Path, t: dict, mark: dict | None) -> dict | None:
+def from_other_workspace(e: dict, peers: set[str]) -> bool:
+    """A chat line another workspace wrote into this ticket's chat: it came in over the relay and its writer
+    is one of the chat's other workspaces. Everything else started here (the person, this workspace's helper,
+    a phone, orch's own notes)."""
+    return e.get("via") == "relay" and e.get("by") in peers
+
+
+def _row(root: Path, t: dict, mark: dict | None, peers: set[str] | None = None) -> dict | None:
     lines = _chat_lines(root, t)
     asks = [q for q in _open_questions(t) if isinstance(q.get("text"), str)]
     if not lines and not asks:
@@ -116,9 +124,12 @@ def _row(root: Path, t: dict, mark: dict | None) -> dict | None:
         # looked would hide behind the mark; a question counts by the time it was asked
         return x[3] >= mark["lines"] if x[1] == "line" else x[0] > read_at
 
-    # unread: lines someone else wrote (a helper, a phone, a peer) and open questions after the reader's mark;
-    # the person's own lines are never unread for them
-    unread = sum(1 for x in events if new(x) and (x[1] == "question" or not history.is_person_line(x[2])))
+    # unread (owner, 28 Nov, O-18): only what another workspace wrote, after the reader's mark. Nothing that
+    # started in this workspace counts: not the person's lines, not its helper's, not a question (an open
+    # question is in Review, and `open_questions` still says so here)
+    unread = sum(
+        1 for x in events if x[1] == "line" and new(x) and from_other_workspace(x[2], peers or set())
+    )
     name = _name(last.get("by_name")) if kind == "line" else None
     return {
         "id": t["id"],
@@ -146,10 +157,17 @@ def chats(root: Path, reader: str | None = None) -> list[dict]:
     from orch import ticketindex
 
     marks = reads(root, reader)
+    peers: dict[str, set[str]] = {}
+    try:  # who else writes in which ticket chat; no relay or no shared chat: nobody
+        from orch import chat_groups
+
+        peers = chat_groups.peer_writers(root)
+    except Exception:  # noqa: BLE001 - an unreadable group file never hides the chat list
+        peers = {}
     out = []
     # only tickets with a chat line or an open question are read (ORCH-1621: every ticket was, 2 s at 10,000)
     for t in ticketindex.load_where(root, lambda r: bool(r.get("chat_lines") or r.get("questions_open"))):
-        row = _row(root, t, marks.get(t["id"]))
+        row = _row(root, t, marks.get(t["id"]), peers.get(t["id"]))
         if row:
             out.append(row)
     out.sort(key=lambda r: (r["last_at"], r["id"]), reverse=True)

@@ -59,6 +59,7 @@ def test_contacts_only_workspaces_and_malformed(dm, monkeypatch):
             "can": {"chat": True, "tasks": False, "files": True},
             "count": 0,
             "last_at": "",
+            "unread": 0,
         }
     ]
     for bad in (None, [], {"workspaces": None}, {"workspaces": [None, {"id": WS}], "phones": None}):
@@ -837,3 +838,63 @@ def test_unattended_reads_with_the_dashboards_by(dm, monkeypatch, capsys):
         assert WS in capsys.readouterr().out
         with pytest.raises(Refused, match="Only a person"):
             cli_chat.dispatch(parse(["chat", *command, "--json"]), dm[0])
+
+
+def _inbound(root, n, text="hello", peer=WS):
+    net.write_json(
+        root / ".orch/inbox" / f"m_in{n}.json",
+        {
+            "id": f"m_in{n:014d}",
+            "type": "text",
+            "from": peer,
+            "body": {"text": text},
+            "created_at": "2026-11-09T10:00:00Z",
+        },
+        True,
+    )
+
+
+def test_unread_counts_only_their_messages_after_the_read_mark(dm, monkeypatch):
+    """O-18 (owner, 28 Nov): a workspace conversation's number is what the OTHER workspace wrote since the
+    person last opened it; our own messages never count, and opening it (or writing) starts again from there."""
+    root, _ = dm
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: {"id": "m_relay00000000000", "sent": True})
+    assert chat.contacts(root)[0]["unread"] == 0
+    _inbound(root, 1)
+    _inbound(root, 2)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 2
+    assert chat.dm_mark_read(root, WS)["read"] == "m_in00000000000002"
+    assert chat.contacts(root)[0]["unread"] == 0
+    chat.dm_send(root, WS, "ours")  # our own message is never unread
+    assert chat.contacts(root)[0]["unread"] == 0
+    _inbound(root, 3)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 1
+    chat.dm_send(root, WS, "an answer")  # whoever writes has read what came before
+    assert chat.contacts(root)[0]["unread"] == 0
+
+
+def test_a_conversation_from_before_the_read_mark_is_not_suddenly_unread(dm):
+    root, _ = dm
+    old = [{"id": f"m_old{i:013d}", "at": "2026-11-01T10:00:00Z", "by": WS, "text": "old"} for i in range(3)]
+    net.write_json(chat._dm_path(root, WS), {"schema": "orch.chat-dm/1", "ws": WS, "messages": old}, True)
+    assert chat.contacts(root)[0]["unread"] == 0  # no mark yet: nothing counts
+    _inbound(root, 1)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 1  # only the one that arrived after
+
+
+def test_marking_read_is_a_persons_and_the_cli_takes_a_workspace(dm, monkeypatch, capsys):
+    root, _ = dm
+    _inbound(root, 1)
+    chat.dm_sync(root, WS)
+    monkeypatch.chdir(root)
+    (root / ".orch").mkdir(exist_ok=True)
+    with pytest.raises(Refused):
+        chat.dm_mark_read(root, WS, "agent:claude")
+    with pytest.raises(Refused):
+        chat.dm_mark_read(root, OTHER)  # not a contact
+    assert chat.contacts(root)[0]["unread"] == 1
+    assert chat.dm_mark_read(root, WS) == {"workspace": WS, "read": "m_in00000000000001"}
+    assert chat.contacts(root)[0]["unread"] == 0

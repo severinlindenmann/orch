@@ -39,7 +39,7 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("list", parents=[common], help="ticket chats: chat lines or an open question")
     x.add_argument("--reader", help="whose unread count (default: you)")
     x = s.add_parser("read", parents=[common], help="mark a ticket chat as read up to now")
-    x.add_argument("id")
+    x.add_argument("id", help="a ticket, or a workspace (ws_...) for the conversation with it")
     x.add_argument("--reader", help="who read it (default: you)")
     _add_dm_parsers(s, common)
 
@@ -71,6 +71,10 @@ def dispatch(args, root: Path) -> bool:
         d = ticketchats.chats(root, args.reader)
         _out(args, d, "\n".join(_chat_row(r) for r in d) or "No ticket chats yet.")
     elif args.sub == "read":
+        if chat._DM_WS.fullmatch(args.id or ""):  # the conversation with a workspace (a person's own mark)
+            d = chat.dm_mark_read(root, args.id, getattr(args, "by", None))
+            _out(args, d, f"{_ws_name(root, args.id)}: read.")
+            return True
         tid = tickets.resolve_cli(root, args.id, json_output=args.json)
         d = ticketchats.mark_read(root, tid, args.reader)
         _out(args, d, f"{d['key']}: read.")
