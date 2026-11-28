@@ -143,12 +143,14 @@ test('turning on says one plain sentence and keeps the technical lines behind De
   assert.doesNotMatch(text(kids[0]), /command|background/);
 });
 
+// The add-on page's own options (W-011, W-059) are drawn by other parts of settings.js: stand-ins here.
+const OWN_STUBS = "const SYNC = 'sync', syncUi = {card: null}; const syncInfoLine = () => null, syncCard = () => null, sharingOn = () => false;\n";
 // 20/21: Remove is offered, except for the add-ons that are part of orch (said plainly)
 test('the add-on page offers Remove, and says plainly when the add-on is part of orch', () => {
   const ctx = settingsCtx({
     addons: () => [], state: {look: null}, heading: (t) => el('h1', {}, t), settingsBack: null,
   });
-  vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  vm.runInContext(head + '\n' + OWN_STUBS + slice(ssrc, 'function addonDetailRows(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
   assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Remove');
   // D6: one list: on or off first, Remove last with one line about what stays; Back goes to Settings › Add-ons
@@ -169,17 +171,16 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
 // ORCH-816: the new Focus is the only Focus; its add-on page has no Preview switch, in any state
 test('the live-session add-on page has no Preview switch', () => {
   const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t), settingsBack: null});
-  vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  vm.runInContext(head + '\n' + OWN_STUBS + slice(ssrc, 'function addonDetailRows(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const page = ctx.page({name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true});
   assert.equal(find(page, byKey('addon-detail-live-preview')), null);
   assert.doesNotMatch(text(page), /Preview|today’s Focus/);
   assert.ok(find(page, byKey('addon-detail-typing')), 'the Typing switch stays');
-  // Typing sits under "More settings" (shown plainly, ORCH-1693); the connection status stays above it
-  const more = find(page, byKey('settings-more-addon-focus'));
-  assert.ok(find(more, byKey('addon-detail-typing')));
+  // W-059 (owner 28 Nov): Typing is a plain row of the add-on's one list, never under a "More settings" heading
+  assert.equal(find(page, byKey('settings-more-addon-focus')), null);
+  assert.doesNotMatch(text(page), /More settings/);
   const linked = ctx.page({name: 'sync', active: true, description: 'd', detail: {connected: true}});
   assert.ok(find(linked, byKey('addon-detail-status')));
-  assert.equal(find(linked, byKey('settings-more-addon-sync')), null, 'nothing technical: no More settings');
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
@@ -192,7 +193,7 @@ test('the Update button keeps the installed version for the finished banner', ()
 test('the Focus add-on page shows the typing switch with one plain line, only when Focus is on', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t), settingsBack: null});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + OWN_STUBS + slice(ssrc, 'function addonDetailRows(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const on = mk({typing_on: false}).page({name: 'focus', page: {live_session: true}, active: true, description: 'd', removable: true});
@@ -210,7 +211,7 @@ test('the plain terminal switch sits in People, not on the Focus add-on page; th
   const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'Watch helpers work and answer them'};
   const mk = (settings, list = [focus]) => {
     const ctx = settingsCtx({addons: () => list, state: {look: null, settings}, heading: t => el('h1', {}, t), settingsBack: null});
-    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()')
+    vm.runInContext(head + '\n' + OWN_STUBS + slice(ssrc, 'function addonDetailRows(', 'function settingsPage()')
       + '\n' + slice(ssrc, 'function terminalTypingCard(', 'function peoplePanel(') + '\nthis.page = addonDetailPage; this.card = terminalTypingCard;', ctx);
     return ctx;
   };

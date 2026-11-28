@@ -43,7 +43,9 @@ const WAIT = 60000;  // a computer busy with other helpers answers slowly (load 
         // the words follow the owner's word list: the relay is the "phone link" on screen (ORCH-300)
         .catch(async err => { throw new Error(err.message + '; relay line: ' + await p.textContent('[data-testid=profile-relay-state]').catch(() => '(none)') + '; profile: ' + (await p.textContent('[data-testid=settings-profile]').catch(() => '?')).replace(/\s+/g, ' ').slice(0, 300)); });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
-      // shared pages switch off
+      // shared pages switch off: on the sharing add-on's own Settings page (W-059, owner 28 Nov)
+      await p.goto(base + '/#settings/addons/publish');
+      await p.waitForSelector('[data-testid=look-shared-pages]');
       const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');
       await p.click('[data-testid=look-shared-pages]');
       await p.waitForFunction(b => document.querySelector('[data-testid=look-shared-pages]')?.getAttribute('aria-checked') !== b,

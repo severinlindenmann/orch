@@ -193,7 +193,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.equal(all(four, n => n.attrs?.['data-key'] === 'settings-live-max')[0].value, '4');
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
-  assert.ok(src.includes("permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings)), prepareCard(settings)]"), 'sits on the Helper tab');
+  assert.ok(src.includes("namedSection('limits', 'Limits', helpersAtOnceCard(settings))]),"), 'sits on the Helper tab, last, under its own heading (W-059)');
 });
 
 test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {

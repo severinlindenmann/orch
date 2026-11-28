@@ -116,10 +116,11 @@ function helpersAtOnceCard(settings) {
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
 }
-// "More settings": the technical switches shown plainly at the end of a tab under their own heading, no fold
-// (ORCH-1693; owner rule: detail lower down, never a "More" / "Show more" toggle).
-function moreSettings(tab, ...cards) {
-  return h('div', {className:'stack', 'data-key':'settings-more-' + tab}, h('h2', {className:'set-sub'}, 'More settings'), ...cards.filter(Boolean));
+// A named section of a tab (W-059, owner 28 Nov): the fields that stay in Settings sit under a heading that says what
+// they are, never under a generic "More settings".
+function namedSection(key, title, ...cards) {
+  const shown = cards.filter(Boolean);
+  return shown.length ? h('div', {className:'stack', 'data-key':'settings-section-' + key}, h('h2', {className:'set-sub'}, title), ...shown) : null;
 }
 function shareCard(settings) {
   const on = settings.share === true;
@@ -493,7 +494,7 @@ function copiesCard(settings) {
           row('Get each working copy ready with', 'Runs once in each new copy, for example to install what the project needs.', setup),
           settingsText('p', {className:'meta'}, 'Needs saved earlier versions in this folder. When a copy is removed, its saved changes stay in the saved earlier versions.')))));
 }
-// Sync (draft sync-card.html, Variant A): Settings › General, below Workspace. Every fact and change goes through
+// Sync (draft sync-card.html, Variant A): on the add-on's own Settings page (W-058d, W-059: one place to edit). Every fact and change goes through
 // the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
 // The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
 const SYNC = 'sync';
@@ -603,6 +604,21 @@ function syncPausedHelp(card) {
 // ---- The Sync page (fb18): where, what and when, the last 5 syncs, one plain error with one button. ----
 const syncSize = n => n >= 1e6 ? Math.round(n / 1e6) + ' MB' : n > 0 ? Math.max(1, Math.round(n / 1e3)) + ' KB' : '0 KB';
 const syncWhen = value => time(value);
+// W-058d (owner 28 Nov): where the copy goes, in a few words, and the one line the Backup page opens with:
+// "Backed up to <place>, last time <when>". The choice itself is edited on the add-on's Settings page only.
+function syncPlaceWords(card) {
+  if (!card) return 'Reading…';
+  if (card.mode === 'remote' && card.remote) return 'Your storage at ' + (syncHost(card.remote) || 'the address you gave');
+  if (card.mode === 'remote') return 'Your storage (no address yet)';
+  return card.mode === 'local' ? 'This computer only' : 'Off';
+}
+function syncInfoLine(card, withLink = true) {
+  if (!card) return null;
+  const link = withLink && !snapshot ? h('a', {className:'btn ghost sm', href:addonSettingsPlace(SYNC), 'data-key':'sync-settings-link'}, 'Backup settings →') : null;
+  if (card.mode === 'off') return h('p', {className:'status-line', 'data-key':'sync-line'}, h('span', {}, 'Backup is off: no copy is kept.'), link);
+  const place = card.mode === 'remote' && card.remote ? 'your storage at ' + (syncHost(card.remote) || 'the address you gave') : card.mode === 'remote' ? 'this computer (no storage address yet)' : 'this computer only';
+  return h('p', {className:'status-line', 'data-key':'sync-line'}, h('span', {}, 'Backed up to ' + place + ', last time ' + (syncWhen(card.last_ok) || 'not yet') + '.'), link);
+}
 function syncInfo(card) {
   if (!card || card.mode === 'off') return null;
   const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
@@ -616,7 +632,7 @@ function syncInfo(card) {
   return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
     h('div', {className:'grid-3'},
       box('sync-where-info', 'Backup destination',
-        h('strong', {}, remote ? 'Your storage repository' : card.mode === 'remote' ? 'Choose a storage address below' : 'Workspace folder only'),
+        h('strong', {}, remote ? 'Your storage repository' : card.mode === 'remote' ? 'Choose a storage address in Backup settings' : 'Workspace folder only'),
         remote ? h('div', {className:'more-text'}, h('p', {className:'meta'}, card.remote)) : null,
         h('div', {className:'more-text'}, h('p', {className:'meta'}, 'Local history: ' + (card.folder_path || (card.folder ? card.folder + '/.orch' : 'the workspace’s .orch folder')))),
         !remote ? h('p', {className:'meta'}, 'No backup on another device.') : null),
@@ -629,14 +645,30 @@ function syncInfo(card) {
     history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
       history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, capitalise(e.text || ''))))) : null);
 }
+// What needs the person on the Backup page (paused, a public address, files left out): said there, with the way to
+// the Settings page where it is fixed.
+function syncPageNeeds(card) {
+  if (!card || card.mode === 'off') return null;
+  const notSynced = array(card.not_synced), paused = card.shown === 'paused';
+  if (!paused && !card.public && !card.last_error && !notSynced.length) return null;
+  return h('section', {className:'card', 'data-key':'sync-page-needs'}, h('header', {className:'card-h'}, h('h3', {}, paused || card.public ? 'Needs you' : 'Left out'), syncStatusLine(card)),
+    paused ? h('div', {className:'card-row'}, syncPausedHelp(card)) : null,
+    card.public ? h('p', {className:'card-row'}, SYNC_PUBLIC + ' Choose what to do in Backup settings.') : null,
+    card.last_error || notSynced.length ? h('div', {className:'sync-details', 'data-key':'sync-details'}, h('ul', {}, card.last_error ? h('li', {'data-key':'sync-last-error'}, syncLastError(card)) : null, notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null);
+}
+// The add-on is off: what the card knew is dropped, the 15 s status look stops (ORCH-960), and turning it on again
+// offers "On this computer only" in the review line (wasOff).
+function syncWentOff() {
+  syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+  clearTimeout(syncUi.timer); syncUi.timer = null;
+}
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
   if (!addon || snapshot) return null;
   // aria-busy until the setting is read: orch shot waits for it instead of picturing the placeholder (ORCH-2021)
   const wrap = (body, busy = false) => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card', 'aria-busy':busy ? 'true' : 'false'}, body));
   if (!addon.active) {
-    syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
-    clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
+    syncWentOff();
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
       h('span', {className:'switch-text', 'aria-hidden':'true'}, 'Off'), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
@@ -697,21 +729,17 @@ function syncCard(settings) {
   const notSynced = array(card?.not_synced);
   const details = card && card.mode !== 'off' && (card.last_error || notSynced.length) ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
     h('ul', {}, card.last_error ? h('li', {'data-key':'sync-last-error'}, syncLastError(card)) : null, notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
-  // The Sync page's When card already says "Last: …": its own card shows the status line only when it adds something.
-  const page = route().kind === 'addon';
-  const status = card && card.mode !== 'off' && (!page || syncUi.nowBusy || card.shown !== 'synced' || notSynced.length) ? syncStatusLine(card) : null;
+  const status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
   const retry = () => { const b = button('Try again', 'outline sm', () => { syncUi.failed = false; render(); return syncLoad(); }); b.dataset.key = 'sync-unread-retry'; return b; };
   const unread = card ? null : syncUi.failed
     ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-unread'}, h('p', {}, 'Can’t read the sync setting right now. Nothing was changed.'), retry())
     : h('p', {className:'meta sync-unread', role:'status', 'data-key':'sync-unread'}, 'Reading the sync setting…');
   return wrap([
-    // On the Sync page its heading already says Sync: the card heading names the choice instead, like the cards above it.
-    page ? h('header', {className:'card-h', 'data-key':'sync-where-head'}, h('h3', {id:'sync-where-title'}, 'Where to keep a copy'), status)
-      : h('div', {className:'sync-head'}, h('h3', {}, 'Backup'), status),
+    // The card sits on the add-on's Settings page, whose heading already names the add-on: the card names the choice.
+    h('header', {className:'card-h', 'data-key':'sync-where-head'}, h('h3', {id:'sync-where-title'}, 'Where to keep a copy'), status),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
-    page ? h('fieldset', {className:'sync-where', 'aria-labelledby':'sync-where-title'}, radios)
-      : h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    h('fieldset', {className:'sync-where', 'aria-labelledby':'sync-where-title'}, radios),
     unread,
     remoteBox, review, details], !card);
 }
@@ -789,10 +817,16 @@ function signStep({title, body, here, there, value, done, run}) {
 function everydayCard(settings, phoneAddon) {
   const chosen = array(settings.agents).find(a => a.chosen);
   const go = (tab, label, key) => h('button', {type:'button', className:'btn ghost sm', 'data-action':'settings-tab', 'data-tab':tab, 'data-key':key}, label + ' →');
+  const to = (name, label, key) => h('a', {className:'btn ghost sm', href:addonSettingsPlace(name), 'data-key':key}, label + ' →');
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
+  const on = name => array(settings.addons).find(a => a.name === name && a.active);
+  const sync = on(SYNC), links = array(settings.addons).find(a => a.active && isPublish(a.name));
+  if (sync && !syncUi.card && !syncUi.loading && !syncUi.timer && !snapshot) queueMicrotask(syncLoad);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Ask your admin for a phone code.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (window.DashHelpers.mobileOn(state.mobile_mode) ? 'On' + (window.mobileEndWords && state.mobile_mode.ends_at ? ' · until ' + window.mobileEndWords(state.mobile_mode.ends_at) : '') : 'Off · switches off by itself after ' + state.mobile_mode.default_hours + ' h') : 'Ask your admin for a phone code.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null,
+    sync ? row(rowLabel(sync), syncPlaceWords(syncUi.card), to(SYNC, 'Change', 'settings-everyday-sync'), 'settings-everyday-sync-row') : null,
+    links ? row('Shared pages', 'How a page you share looks to the people who open it.', to(links.name, 'Change', 'settings-everyday-shared'), 'settings-everyday-shared-row') : null));
 }
 // Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
@@ -829,7 +863,11 @@ function phonePanel(phoneAddon, settings) {
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
     connected && workspaces.length ? h('div', {className:'card'}, workspaces.map(w => h('div', {className:'card-row', 'data-key':'phone-ws-' + w.name}, h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))))
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Your admin chooses who you can write to.')));
-  return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
+  // W-059 (owner 28 Nov): this tab is the add-on's one Settings page: its on/off and Remove rows sit here too, last
+  // (rare), so no second page holds a part of its settings.
+  const row = array(settings.addons).find(a => a.name === phoneAddon.name);
+  const own = row ? h('div', {className:'stack', 'data-key':'phone-addon'}, h('h2', {className:'set-sub'}, 'The add-on'), h('div', {className:'card'}, addonDetailRows(row, false))) : null;
+  return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed, own,
     h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open Relay →')));
 }
 // Not connected: the line from the phone link's admin page is pasted here and Connect runs it (ORCH-1693).
@@ -874,44 +912,65 @@ async function relayReconnect(control) {
 // connection, and Remove with one line about what stays. "Back to <page>" returns to where it was opened from (the
 // add-on's Settings button, settingsBack); opened from Settings › Add-ons it goes back to that list.
 // Reached from the add-on's Settings button and from a row of the Add-ons tab (#settings/addons/<name>).
-function addonDetailPage(addon) {
+// The rows every add-on has on its Settings page: on or off, its connection, its own switches, Remove last.
+function addonDetailRows(addon, connection = true) {
   const d = addon.detail, label = rowLabel(addon);
   const connected = addon.active && d?.connected;
   const row = (title, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, title), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
   // A row of the one list: what it is (bold), one plain line, its control at the right.
   const item = (title, line, control, key) => h('div', {className:'card-row set-item', 'data-key':key}, h('div', {className:'grow'}, settingsText('h3', {}, title), line ? settingsText('p', {className:'meta'}, line) : null), control);
-  const links = addons().find(a => a.name === addon.name)?.dashboard?.panel === 'links';
-  const shown = state.look ? state.look.shared_pages !== false : null;
   const settingsRows = [
     item(label + (addon.active ? ' is on' : ' is off'), addon.description || '',
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
-    addon.active && d ? item('Connection', connected && d.address ? 'Connection address: ' + d.address : '', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), 'addon-detail-connection') : null,
-    links && shown !== null ? row(label, settingsText('p', {}, 'Show workspace name and icon'),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on published pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+    connection && addon.active && d ? item('Connection', connected && d.address ? 'Connection address: ' + d.address : '', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), 'addon-detail-connection') : null,
     addon.name === 'pull-requests' && addon.active && state.settings ? releaseMergeRow(row, state.settings) : null,
   ];
-  // Typing is technical: behind "More" (ORCH-300 item 14). Connection stays in view.
-  const technical = settingsRows.splice(1, 1).filter(Boolean);
-  if (technical.length) settingsRows.push(moreSettings('addon-' + addon.name, ...technical));
+  // Typing is technical: it sits after the connection, as a plain row (W-059: no "More settings").
+  settingsRows.push(...settingsRows.splice(1, 1));
   // Remove is the list's last row, with one line about what stays; a part of orch says it cannot be removed.
   if (!snapshot && addon.name !== 'dashboard') settingsRows.push(addon.removable === false
     ? item('Remove ' + label, label + ' is part of orch. You can turn it off, but not remove it.', null, 'addon-detail-core')
     : item('Remove ' + label, 'Your tickets stay as they are. You can add it again any time.', h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove'), 'addon-detail-remove-row'));
+  return settingsRows.filter(Boolean);
+}
+function addonDetailPage(addon) {
+  const label = rowLabel(addon), settingsRows = addonDetailRows(addon);
   const back = settingsBack || {hash:'#settings/addons', label:'Add-ons'};
   const master = typeof window !== 'undefined' && window.UI?.pageBack ? window.UI.pageBack({label:'Back to ' + back.label, href:back.hash}) : null;
   if (master) master.dataset.key = 'addon-detail-back';
   const backLink = master || h('a', {className:'page-back', href:back.hash, 'data-key':'addon-detail-back'}, '← Back to ' + back.label);
   // Drawn in the Add-ons tab of Settings (the draft: Settings' tabs stay, the add-on's list sits in its tab).
+  // W-011, W-059 (owner 28 Nov): the add-on's own options live here and nowhere else; other places link to this page.
+  const own = addonOwnOptions(addon);
   return h('div', {className:'stack', 'data-key':'settings-addon-detail'}, backLink,
     settingsText('h2', {className:'set-sub addon-detail-name'}, label),
-    h('div', {className:'card'}, settingsRows));
+    h('div', {className:'card'}, settingsRows),
+    own.length ? h('div', {className:'stack', 'data-key':'addon-detail-own'}, own) : null);
+}
+// The options an add-on brings to its Settings page (drawn under its on/off list). Backup: where the copy is kept
+// (W-058d). Shared links: how a shared page looks. An add-on that is off shows none: turning it on comes first.
+function addonOwnOptions(addon) {
+  if (addon.name === SYNC && !addon.active) syncWentOff();
+  if (!addon.active || snapshot) return [];
+  const out = [];
+  if (addon.name === SYNC) out.push(syncInfoLine(syncUi.card, false), syncCard(state.settings));
+  if (addons().find(a => a.name === addon.name)?.dashboard?.panel === 'links' && sharingOn()) out.push(window.OrchLook?.settingsSection());
+  return out.filter(Boolean);
+}
+// Where an add-on's settings are edited: its part of Settings. The add-on with the phone panel has a tab of its own,
+// which is that page (one door: every link to its settings leads to the tab).
+function addonSettingsPlace(name) {
+  const phone = addons().find(a => a.dashboard?.panel === 'phone');
+  return phone && phone.name === name ? '#settings/contacts' : '#settings/addons/' + encodeURIComponent(name);
 }
 function settingsPage() {
   const settings = state.settings;
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
   if (settingsTab === 'phone' && !phoneAddon) settingsTab = 'general';
+  // W-059: the add-on with the phone panel has one Settings page, its tab: its add-on address shows that tab too
+  if (settingsTab === 'addons' && phoneAddon && settingsAddon === phoneAddon.name) settingsTab = 'phone';
   const agents = array(settings.agents).map(agent => {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
@@ -937,7 +996,7 @@ function settingsPage() {
     const about = connected && d.address ? settingsText('p', {className:'meta ad-about', 'data-key':'settings-addon-about-' + addon.name}, 'Connection address: ' + d.address) : null;
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
-      h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
+      h('a', {className:'btn ghost sm', href:addonSettingsPlace(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
       switchBusy(addon), h('span', {className:'switch-text', 'aria-hidden':'true'}, addon.active ? 'On' : 'Off'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name) || !!window.addonJobLive?.()}, addon.active ? 'On' : 'Off'));
   };
@@ -959,18 +1018,17 @@ function settingsPage() {
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {title:String(settings.folder || ''), 'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace)),
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
-      // Shared pages are files shared with a link: only once sharing is on (R1.1, ORCH-2112).
-      snapshot || !sharingOn() ? null : window.OrchLook?.settingsSection(),
       typeof menuSettingsCard === 'function' ? menuSettingsCard() : null,  // O-34: which add-on pages the menu shows, and their order (app.js)
-      syncCard(settings),
+      // W-059 (owner 28 Nov): General keeps the profile and the folder. An add-on's options are edited on that add-on's
+      // Settings page only (Backup, shared pages, the phone): here one row each that says the state and links there.
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
-      // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
-      moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
+      namedSection('sharing', 'Sharing and finished work', workflowCard(settings), autoReviewerCard(), ...prSwitchCards(settings), shareCard(settings)),
+      namedSection('copies', 'Working copies', copiesCard(settings)),
+      diagCard(settings)]),
     panel('people', [...peoplePanel(settings), terminalTypingCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
-      helperNeedsCard(), permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings)), prepareCard(settings)]),
+      helperNeedsCard(), permissionsCard(settings), namedSection('prepare', 'New tickets', prepareCard(settings)), namedSection('limits', 'Limits', helpersAtOnceCard(settings))]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
     panel('addons', detailAddon ? addonDetailPage(detailAddon) : addonsPanel),
     panel('about', aboutPanel())))
@@ -1499,7 +1557,7 @@ const addonTitle = a => a?.dashboard?.title || addonLabel(a);
 // The add-on's part of Settings (the Settings button in its page top), or null where this browser has no Settings.
 // D6 (26 Nov): an add-on's one Settings button (heading's `settings`, the master UI.settingsButton through UI.pageTop)
 // opens that add-on's part of Settings; its Back returns here (settingsBack, set when the address changes).
-const addonSettingsHref = id => snapshot || !id || id === 'dashboard' || !state?.settings || !array(state.settings.addons).some(a => a && a.name === id) ? null : '#settings/addons/' + encodeURIComponent(id);
+const addonSettingsHref = id => snapshot || !id || id === 'dashboard' || !state?.settings || !array(state.settings.addons).some(a => a && a.name === id) ? null : addonSettingsPlace(id);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
 function addonHeaderNodes(id) {
@@ -1519,7 +1577,12 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:addonSettingsHref(id)}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
+    // W-058d: the page says where the copy goes and when it last worked; the choice is edited on its Settings page
+    if (!syncUi.card && !syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);
+    const waiting = syncUi.card ? null : syncUi.failed
+      ? pageNotice({tone:'error', what:'Can’t read the backup setting right now.', still:'Nothing was changed.', action:(() => { const b = button('Try again', 'primary sm', () => { syncUi.failed = false; render(); return syncLoad(); }); b.dataset.key = 'sync-unread-retry'; return b; })(), dataKey:'sync-unread'})
+      : h('p', {className:'meta', role:'status', 'data-key':'sync-unread'}, 'Reading the backup setting…');
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {settings:addonSettingsHref(id)}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, waiting, syncInfoLine(syncUi.card), syncInfo(syncUi.card), syncPageNeeds(syncUi.card))));
   }
   // The Browser page (panel "browser", ORCH-1494): every helper's browser, drawn here (pages/livebrowse.js).
   if (panelOf(id) === 'browser' && typeof browserListPage === 'function') return browserListPage(addons().find(a => a.name === id));
