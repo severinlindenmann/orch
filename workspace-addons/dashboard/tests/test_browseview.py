@@ -396,3 +396,145 @@ def test_list_says_who_drives_and_what_the_helper_asks(fake_browse, ws, monkeypa
     _run(ws, TID, {"state": "ready", "generation": GEN, "control": {"state": "helper"}})
     row = browseview.listing(ws)["browsers"][0]
     assert "control" not in row and "asking" not in row
+
+
+# ---- O-20, O-21 (owner, 28 Nov): allowed sites on the Browser page, and a browser the person opens ----
+@pytest.fixture
+def real_browse(monkeypatch, ws):
+    """The browse add-on's own paths and filter (from its source folder), turned on in this workspace."""
+    from pathlib import Path
+
+    for name in [m for m in sys.modules if m == "orch_browse" or m.startswith("orch_browse.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "browse" / "src"))
+    monkeypatch.setattr(browseview, "_on", lambda root: True)
+    import importlib
+
+    return importlib.import_module("orch_browse.paths")
+
+
+def _sites_post(port, **body):
+    doc = {"scope": "workspace", "ticket": None, "add": "", "remove": [], "check": False, **body}
+    return post(port, "/api/browse/sites", doc)
+
+
+def test_the_page_reads_the_workspace_list_and_each_open_tickets_own(real_browse, server, ws):
+    paths = real_browse
+    paths.save_workspace_sites(ws, ["20min.ch", "sbb.ch"])
+    paths.save_sites(ws, TID, ["docs.python.org", "sbb.ch"])
+    (ws / ".orch" / "tickets" / "t_done01.json").write_text(json.dumps({"id": "t_done01", "status": "done"}))
+    paths.save_sites(ws, "t_done01", ["old.example.org"])
+    port = server()
+    code, text = get(port, "/api/browse/sites")
+    doc = json.loads(text)
+    assert code == 200 and doc["on"] is True and doc["workspace"] == ["20min.ch", "sbb.ch"]
+    # a site on both lists is the workspace's; a finished ticket's list is not shown
+    assert doc["tickets"] == [{"ticket": TID, "title": "T", "sites": ["docs.python.org"]}]
+    assert get(server(Person(False)), "/api/browse/sites")[0] == 401
+    assert get(port, "/api/browse/sites", {"Origin": "http://evil.example"})[0] == 403
+
+
+def test_a_pasted_list_is_checked_first_then_saved_as_read(real_browse, server, ws):
+    paths = real_browse
+    paths.save_workspace_sites(ws, ["sbb.ch"])
+    port = server()
+    paste = "*.20min.ch\nhttps://www.NZZ.ch/zuerich, sbb.ch\n10.0.0.1"
+    code, text = _sites_post(port, add=paste, check=True)
+    doc = json.loads(text)
+    assert (
+        code == 200
+        and doc["saved"] is False
+        and doc["new"] == ["20min.ch", "www.nzz.ch"]
+        and doc["known"] == 1
+    )
+    assert {"entry": "*.20min.ch", "site": "20min.ch"} in doc["changed"]
+    assert [r["entry"] for r in doc["refused"]] == ["10.0.0.1"] and doc["refused_count"] == 1
+    assert paths.load_workspace_sites(ws) == ["sbb.ch"]  # a check writes nothing
+    code, text = _sites_post(port, add=paste)  # with an entry that cannot be a site nothing is half added
+    assert code == 200 and json.loads(text)["saved"] is False and paths.load_workspace_sites(ws) == ["sbb.ch"]
+    code, text = _sites_post(port, add=doc["new"])  # the person adds the ones that can
+    assert code == 200 and json.loads(text)["saved"] is True
+    assert paths.load_workspace_sites(ws) == ["20min.ch", "sbb.ch", "www.nzz.ch"]
+    assert paths.load_sites(ws, TID) == ["20min.ch", "sbb.ch", "www.nzz.ch"]  # holds for every ticket
+    code, text = _sites_post(port, remove=["sbb.ch"])
+    assert json.loads(text)["removed"] == 1 and paths.load_workspace_sites(ws) == ["20min.ch", "www.nzz.ch"]
+
+
+def test_a_tickets_own_site_is_removed_on_the_same_path(real_browse, server, ws):
+    paths = real_browse
+    paths.save_sites(ws, TID, ["docs.python.org", "example.com"])
+    port = server()
+    code, _text = _sites_post(port, scope="ticket", ticket=TID, remove=["example.com"])
+    assert code == 200 and paths.load_ticket_sites(ws, TID) == ["docs.python.org"]
+    assert _sites_post(port, scope="ticket", ticket="t_nothere")[0] == 404
+    assert _sites_post(port, scope="everything")[0] == 400
+    assert _sites_post(port, ticket=TID)[0] == 400  # the workspace's list names no ticket
+
+
+def test_a_thousand_sites_save_and_read_back(real_browse, server, ws):
+    paths = real_browse
+    port = server()
+    paste = "\n".join(f"*.site{i}.example.org" for i in range(1000))
+    code, text = _sites_post(port, add=paste)
+    assert code == 200 and json.loads(text)["saved"] is True and len(json.loads(text)["new"]) == 1000
+    assert len(json.loads(get(port, "/api/browse/sites")[1])["workspace"]) == 1000
+    assert len(paths.load_sites(ws, TID)) == 1000
+
+
+@pytest.mark.parametrize("path", ["/api/browse/sites", "/api/browse/open"])
+def test_only_a_persons_own_session_changes_sites_or_opens_a_browser(real_browse, server, ws, path):
+    body = (
+        {"scope": "workspace", "ticket": None, "add": "example.com", "remove": [], "check": False}
+        if path.endswith("sites")
+        else {"address": "example.com"}
+    )
+    port = server()
+    assert post(port, path, body, secret="wrong")[0] == 403
+    assert post(port, path, body, origin="http://evil.example")[0] == 403
+    assert post(port, path, {**body, "extra": 1})[0] == 400
+    assert post(port, path, body, extra={"Content-Type": "text/plain"})[0] == 415
+    assert path not in framepass.ALL_ROOT_PATHS  # no add-on page reaches it
+    assert real_browse.load_workspace_sites(ws) == []
+
+
+def test_open_a_browser_only_on_an_allowed_site(real_browse, server, ws, monkeypatch):
+    paths = real_browse
+    import importlib
+
+    cli = importlib.import_module("orch_browse.cli")
+    opened = []
+    monkeypatch.setattr(
+        cli, "_browser", lambda root, tid, cmd, rest: (opened.append((tid, cmd, rest)), (0, "ok"))[1]
+    )
+    port = server()
+    code, text = post(port, "/api/browse/open", {"address": "example.com"})
+    assert code == 409 and "Chat" in text and opened == []  # no Chat ticket yet: nothing to hold the browser
+    monkeypatch.setattr(browseview, "own_ticket", lambda root: TID)
+    code, text = post(port, "/api/browse/open", {"address": "example.com"})
+    assert code == 409 and "No site is allowed yet" in text and opened == []
+    paths.save_workspace_sites(ws, ["20min.ch"])
+    code, text = post(port, "/api/browse/open", {"address": "https://evil.example/x"})
+    assert code == 409 and "evil.example is not on the allowed sites" in text and opened == []
+    code, text = post(port, "/api/browse/open", {"address": "10.0.0.1"})
+    assert code == 409 and opened == []
+    code, text = post(port, "/api/browse/open", {"address": "www.20min.ch"})
+    assert code == 200 and json.loads(text) == {"ticket": TID, "site": "www.20min.ch"}
+    assert opened == [(TID, "open", ["https://www.20min.ch"])]
+    code, text = post(port, "/api/browse/open", {"address": "https://20min.ch/zuerich"})
+    assert code == 200 and opened[-1] == (TID, "open", ["https://20min.ch/zuerich"])
+    monkeypatch.setattr(
+        cli,
+        "_browser",
+        lambda *a: (2, "The browser is not downloaded yet. A person runs once: orch browse setup"),
+    )
+    code, text = post(port, "/api/browse/open", {"address": "20min.ch"})
+    assert code == 409 and "orch browse setup" in text  # the add-on's own words say what to do
+
+
+def test_the_persons_own_browser_is_marked_in_the_list(fake_browse, ws, monkeypatch):
+    monkeypatch.setattr(browseview, "_on", lambda root: True)
+    monkeypatch.setattr(browseview, "own_ticket", lambda root: TID)
+    (row,) = browseview.listing(ws)["browsers"]
+    assert row["ticket"] == TID and row["own"] is True
+    monkeypatch.setattr(browseview, "own_ticket", lambda root: None)
+    assert "own" not in browseview.listing(ws)["browsers"][0]

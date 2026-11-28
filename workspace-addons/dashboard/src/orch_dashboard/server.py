@@ -384,6 +384,13 @@ BROWSE_PERSON = {
 }
 
 
+# O-20, O-21 (owner, 28 Nov): path -> (the body's exact fields, the most bytes). A person's session only.
+BROWSE_OWN = {
+    "/api/browse/sites": ({"scope", "ticket", "add", "remove", "check"}, 400 * 1024),
+    "/api/browse/open": ({"address"}, 4096),
+}
+
+
 class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -1114,7 +1121,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "/api/browse/stream",
             "/api/browse/state",
             "/api/browse/list",
-        ):  # the browser's live view (ORCH-1493)
+            "/api/browse/sites",
+        ):  # the browser's live view (ORCH-1493); the allowed sites (O-21)
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
             if not (self._frame or self._signed_in()):  # someone's browser: the sign-in, always
@@ -1133,6 +1141,15 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 from . import browseview
 
                 body = json.dumps(browseview.listing(self.root)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            if (
+                path == "/api/browse/sites"
+            ):  # which sites may open: the workspace's list and each ticket's own
+                if self._frame:  # an add-on page never reads the person's lists
+                    return self._send(403, b"forbidden", "text/plain")
+                from . import browseview
+
+                body = json.dumps(browseview.sites(self.root)).encode()
                 return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
             return self._browse_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
@@ -1729,6 +1746,44 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         code, text = browseview.stop(self.root, str(body["ticket"]), body["generation"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
 
+    def _browse_own(self, path: str):
+        """POST /api/browse/sites {scope, ticket, add, remove, check} and /api/browse/open {address} (O-20, O-21):
+        the same checks as taking over a browser: the action fence, the person's own session, never an add-on
+        frame, JSON only, a size cap, exactly these fields. Only a person changes which sites may open."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if getattr(self, "_frame", None) is not None:
+            return self._send(403, b"Only the dashboard itself can do that.", "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        fields, most = BROWSE_OWN[path]
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= most:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != fields:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        if path == "/api/browse/open":
+            code, text = browseview.open_own(self.root, body["address"])
+        else:
+            code, text = browseview.sites_change(self.root, body)
+        self._send(
+            code,
+            text.encode(),
+            "application/json" if code == 200 else "text/plain; charset=utf-8",
+            {"Cache-Control": "no-store"},
+        )
+
     def _browse_person(self, path: str):
         """POST /api/browse/take {ticket, generation, page, epoch, action: take|renew|cancel}, /api/browse/give
         {ticket, generation, page, epoch} and /api/browse/input {ticket, generation, page, epoch, w, h, events}
@@ -1925,6 +1980,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._browse_stop()
         if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)
             return self._browse_person(path)
+        if path in BROWSE_OWN:  # the allowed sites and the person's own browser (O-20, O-21)
+            return self._browse_own(path)
         if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
             return self._term_post(path)
         if path == "/api/voice/words":

@@ -63,13 +63,22 @@ function chatExcerpt(text) {
   const cut = one.slice(0, CHAT_EXCERPT), at = cut.lastIndexOf(' ');
   return (at > CHAT_EXCERPT / 2 ? cut.slice(0, at) : cut).replace(/[\s,;:.]+$/, '') + '…';
 }
+const chatShort = new Map();   // message key -> what its "Open message" shows
+if (typeof document === 'object') document.addEventListener?.('click', event => {
+  const b = event.target?.closest?.('[data-chat-open]');
+  const m = b ? chatShort.get(b.dataset.chatOpen) : null;
+  if (m) chatOpenMessage(m);
+});
 // o: {helper, summary, who, when, key, cut, status, note, detail}. helper false (a person wrote it): as written.
 function chatBody(text, o = {}) {
   const full = String(text ?? '');
   if (!o.helper || !chatIsLong(full)) return chatText('div', 'thread-line-text chat-message-text', full);
   const short = clean(o.summary || '').trim(), key = o.key || 'message';
-  const open = h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-open', 'aria-haspopup':'dialog'}, 'Open message');
-  open.addEventListener('click', () => chatOpenMessage({...o, text:full}));
+  // The page is repainted in place (app.js reconcile keeps the button it already drew), so the button only names its
+  // message; the click is handled once for the whole document and reads the newest text from chatShort.
+  if (chatShort.size > 400) chatShort.clear();
+  chatShort.set(key, {...o, text:full});
+  const open = h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-open', 'data-chat-open':key, 'aria-haspopup':'dialog'}, 'Open message');
   return h('div', {className:'stack-sm', 'data-key':key + '-short', 'data-chat-short':short ? 'summary' : 'excerpt'},
     short ? chatText('div', 'thread-line-text chat-message-text', short)
       : h('div', {className:'thread-line-text chat-message-text'}, h('span', {className:'eyebrow'}, 'Excerpt'), ' ', chatExcerpt(full)),
