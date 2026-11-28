@@ -2145,3 +2145,10 @@ def test_a_new_tickets_files_are_kept_as_the_request_and_a_later_file_is_not(ws,
     actions.run_op(ws, str(fake), "ticket.new", {"title": "T", "files": files}, True)
     actions.run_op(ws, str(fake), "ticket.attach", {"ticket": "t_abcdef", "files": files}, True)
     assert [k["request"] for k in seen] == [True, False]
+
+
+def test_w043_turn_on_is_orch_resume_by_the_person_and_takes_no_arguments():
+    argv = actions.build_argv("automation.resume", {})
+    assert argv[0] == "resume" and argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("automation.resume", {"ticket": "t_abcdef"})

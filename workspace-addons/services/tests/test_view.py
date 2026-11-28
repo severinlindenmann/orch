@@ -210,6 +210,7 @@ def test_the_open_question_is_pinned_with_restart_stop_and_a_link_to_its_ticket(
             "since": None,
             "auto": False,
             "health": {"ok": False, "text": "Not alive"},
+            "depends": ["Every helper run that has a budget"],
             "question": {
                 "ticket": "t_abc1234",
                 "id": "q1",
@@ -411,8 +412,68 @@ def test_a_failing_service_with_no_known_dependents_says_not_known(ws):
     assert [f["label"] for f in failing["panel"]["facts"]][:2] == ["State", "Depends on it"]
     assert _facts(failing)["Depends on it"]["value"] == "Not known"
     assert "Depends on it" not in _facts(fine)  # a healthy one without dependents adds no line
-    assert [b["label"] for b in failing["question"]["buttons"]] == ["Restart", "Stop", "Look into it"]
     assert "notice" not in view
+
+
+def test_a_failing_service_nothing_depends_on_offers_restart_and_remove_and_stop_stays_reachable(ws):
+    # W-054 A (owner, 28 Nov): four old draft pages failing for days had "Stop" as their row button
+    from orch_services.view import build
+
+    view = build(
+        ws, ([_failing(), _failing(id="c", name="Price page", depends=["The shop's price list"])], 0, None)
+    )
+    assert not [e.message for e in validator(VIEW_SCHEMA).iter_errors(view)]
+    alone, needed = view["blocks"][0]["groups"][0]["items"]
+    restart = {"label": "Restart", "action": {"op": "addon.act", "args": {"verb": "restart", "target": "b"}}}
+    assert alone["action"] == restart  # the row's one button
+    assert [b["label"] for b in alone["panel"]["buttons"]] == ["Restart", "Stop"]  # Stop stays reachable
+    assert alone["panel"]["danger"]["label"] == "Remove"
+    buttons = alone["question"]["buttons"]
+    assert [b["label"] for b in buttons] == ["Restart", "Remove", "Look into it"]
+    assert buttons[1]["action"] == {"op": "addon.act", "args": {"verb": "remove", "target": "b"}}
+    assert buttons[1]["confirm"]["title"] == "Remove Budget guard?"  # it says what happens before it is gone
+    assert "It stops now and leaves this list." in buttons[1]["confirm"]["lines"]
+    # a failing service that work depends on keeps Stop (with its check) as before
+    assert needed["action"]["label"] == "Stop"
+    assert [b["label"] for b in needed["panel"]["buttons"]] == ["Stop", "Restart"]
+    assert [b["label"] for b in needed["question"]["buttons"]] == ["Restart", "Stop", "Look into it"]
+
+
+def test_home_hears_of_a_failing_service_only_when_work_depends_on_it(cli, ws):
+    # W-054 A: `orch services needs --json` gives `orch needs` one row per failing service with known dependents
+    from orch_services import needs
+
+    listing = [
+        _failing(),  # failing, nothing depends on it: the Services page alone
+        _failing(
+            id="c",
+            name="Price page",
+            depends=["The shop's price list", "Ticket DM1-12"],
+            since="2026-11-26T08:00:00Z",
+        ),
+        {"id": "a", "name": "Alpha", "state": "running", "since": None, "depends": ["Everything"]},
+        {"id": "s", "name": "Old draft", "state": "stopped", "since": None, "depends": ["Nothing much"]},
+        _failing(id="i", name="Mail forwarder", important=True),  # the person relies on it
+    ]
+    rows = needs.rows(listing)
+    assert not [e.message for e in validator(CONTRACTS / "needs.schema.json").iter_errors(rows)]
+    assert [r["id"] for r in rows] == ["services:failing-c", "services:failing-i"]
+    assert rows[1]["text"] == "Mail forwarder keeps stopping. It is marked important."
+    row = rows[0]
+    assert row["text"] == "Price page keeps stopping. It is needed for: The shop's price list, Ticket DM1-12."
+    assert (row["source"], row["kind"], row["tone"], row["ticket"]) == (
+        "services",
+        "services:failing",
+        "bad",
+        None,
+    )
+    assert row["since"] == "2026-11-26T08:00:00Z"
+    assert row["actions"] == [{"label": "Restart", "verb": "restart", "target": "c"}]
+    # the command itself: a workspace with nothing failing says nothing, as JSON an empty list
+    code, out, _ = cli("needs", "--json")
+    assert code == 0 and json.loads(out) == []
+    code, out, _ = cli("needs")
+    assert code == 0 and out.strip() == "Nothing needs you here."
 
 
 def test_the_suggested_look_into_it_comes_first_and_stop_keeps_its_check(ws):

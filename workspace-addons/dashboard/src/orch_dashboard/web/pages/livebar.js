@@ -1,8 +1,9 @@
 'use strict';
 // The live bar (draft D, ORCH-337): one calm row under every page. ORCH-2198 (owner pick J b, "calmer, less
-// distraction from the task I have open"): the row holds only the page's name, one "Helpers" menu and New. The menu
-// lists every live session in three groups with their counts: Needs you, Working and Quiet (in line and idle). Each
-// row opens its pane. The menu opens inside the window: above the bar at the bottom, below it when the bar sits at the
+// distraction from the task I have open"): the row holds only the page's name, one "Helpers" menu and New. W-049
+// (owner, 28 Nov): the menu has two labelled groups. "Working helpers" lists every live session that does not wait on
+// the person, with its state (Working, In line, Idle); "Needs you" lists the sessions that wait and one link to the
+// Review page for the questions and results that are no session here. Nothing was removed. Each row opens its pane. The menu opens inside the window: above the bar at the bottom, below it when the bar sits at the
 // top (full screen).
 // The dashboard names no add-on: the live page is found by its live_session capability (pages/live.js).
 //
@@ -14,9 +15,11 @@
 // and it stays the same element (its open menu included). With the layer (window.LiveLayer.open) a row opens its
 // session there; the layer's orch:live-layer event marks the open ones; LiveBar.end(fn) fills the right end.
 const LIVEBAR_SYM = {wait:'◆', run:'●', queue:'◷', idle:'◐'};
-// The groups of the Helpers menu, in order: [id, heading]. Quiet holds the sessions in line and the idle ones.
-const LIVEBAR_GROUPS = [['wait', 'Needs you'], ['run', 'Working'], ['quiet', 'Quiet']];
+// The groups of the Helpers menu, in order: [id, heading] (W-049). The helpers first, because the menu is called
+// Helpers: working, in line and idle ones, each with its state. Then what needs the person.
+const LIVEBAR_GROUPS = [['helpers', 'Working helpers'], ['wait', 'Needs you']];
 const LIVEBAR_SEARCH_FROM = 9;  // a menu this long gets a search box (draft D)
+const LIVEBAR_FIND_TRIES = 6, LIVEBAR_FIND_WAIT = 500;  // W-047: how often and how long apart a started session is looked for
 
 // The New menu (draft D): sessions without a ticket, in its order; the core starts them (`orch session new <kind>`).
 const LIVEBAR_NEW = [
@@ -81,20 +84,23 @@ function liveFocusVerb(t, run, helperState) {
   if (o) return {run:'Watch', idle:'Open', queue:'In line'}[o.s];
   return ['done', 'dropped', 'superseded'].includes(t.status) ? '' : 'Start';
 }
-// The group of the Helpers menu a session is in: Needs you, Working, or Quiet (in line or idle).
+// The group of the Helpers menu a session is in: Needs you, or Working helpers (working, in line or idle).
 function liveBarGroup(o) {
-  return o.s === 'wait' ? 'wait' : o.s === 'run' ? 'run' : 'quiet';
+  return o.s === 'wait' ? 'wait' : 'helpers';
 }
-// The Helpers menu's groups that have something: [{g, head, rows, n}], in the order Needs you, Working, Quiet. The
-// rows keep the order of the sessions API (pinned first within a state). The Needs you count is the workspace's one
-// needs-you number (ORCH-1643: questions, results to check, helpers that wait; the Review badge shows it), so the group
-// shows even when nothing that waits is a live session here.
+// The Helpers menu's groups: [{g, head, rows, n}], Working helpers then Needs you (W-049). The rows keep the order of
+// the sessions API (working before in line and idle, pinned first within a state). Working helpers always shows, with
+// 0 too (the menu then says that no helper is working, instead of opening on a list of things to review). The Needs
+// you count is the workspace's one needs-you number (ORCH-1643: questions, results to check, helpers that wait; the
+// Review badge shows it), so that group shows even when nothing that waits is a live session here; with 0 it is left
+// out. Nothing open and nothing waiting: no groups (the menu says so in one line).
 function liveBarGroups(all, needTotal) {
   const list = Array.isArray(all) ? all : [];
-  return LIVEBAR_GROUPS.map(([g, head]) => {
+  const out = LIVEBAR_GROUPS.map(([g, head]) => {
     const rows = list.filter(o => liveBarGroup(o) === g);
     return {g, head, rows, n:g === 'wait' ? liveBarNeedCount(needTotal, rows.length) : rows.length};
-  }).filter(x => x.n > 0);
+  }).filter(x => x.n > 0 || x.g === 'helpers');
+  return out.some(x => x.n > 0) ? out : [];
 }
 // A helper without a ticket that was made and is not on now (ended, or closed after an hour idle): New starts it
 // again, and its History opens its pane (ORCH-817). A plain terminal keeps nothing, so it has none.
@@ -132,7 +138,7 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {liveBarNeedCount, liveBarGroup, liveBarGroups, liveBarHelpersName, liveBarMenuAt, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarModel, liveFocusVerb, liveBarNewOpen, liveBarNewMade, LIVEBAR_GROUPS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
-    const bar = {el:null, host:null, docked:false, end:null, panes:[], shown:null, list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
+    const bar = {el:null, host:null, docked:false, end:null, panes:[], shown:null, list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:'', fail:null};  // fail: {kind, text, again} a start that did not work, shown under its row (W-047)
     // ORCH-818: the Permissions row of the New menu (pages/live-perm.js): the tool's modes for the next start
     const permRow = kind => typeof livePermRow === 'function' ? livePermRow(state?.session_modes, kind, bar.perm) : null;
     const liveAddon = () => array(state?.addons).find(a => a.page?.live_session === true) || null;
@@ -161,7 +167,7 @@ if (typeof module === 'object' && module.exports) {
         sym(o.s, LIVEBAR_SYM[o.s]), h('span', {className:'lbar-key'}, o.key),
         // a group (ORCH-345) is one row with its helper count, the same number as its tile
         h('span', {className:'lbar-rn'}, name, o.group ? h('span', {className:'lbar-n', 'aria-label':o.line, title:o.line}, String(o.n)) : null,
-          g === 'quiet' && o.word && !o.group ? h('span', {className:'meta'}, ' · ' + o.word) : null),
+          g === 'helpers' && o.word && !o.group ? h('span', {className:'meta'}, ' · ' + o.word) : null),  // its state: Working, In line, Idle
         h('span', {className:'lbar-go', 'aria-hidden':'true'}, 'Open')),
         o.group || typeof window.liveEndMore !== 'function' ? null : window.liveEndMore(o.id, 'bar', label(o)));
     }
@@ -171,9 +177,11 @@ if (typeof module === 'object' && module.exports) {
       const out = [];
       for (const x of liveBarGroups(all, needTotal())) {
         const list = x.rows.filter(hit), rest = x.g === 'wait' && !q ? waitRest(x) : null;
-        if (!list.length && !rest) continue;
+        // W-049: with no helper at work the first group still shows and says so (never while searching)
+        const none = x.g === 'helpers' && !x.rows.length && !q ? h('p', {className:'meta lbar-none', 'data-key':'lbar-helpers-none'}, 'No helper is working. New starts one.') : null;
+        if (!list.length && !rest && !none) continue;
         out.push(h('div', {className:'lbar-gh', role:'presentation', 'data-g':x.g, 'data-key':'lbar-group-' + x.g}, h('span', {}, x.head), h('b', {}, String(x.n))),
-          ...list.map(o => row(a, o, x.g)), rest);
+          ...list.map(o => row(a, o, x.g)), none, rest);
       }
       if (out.length) return out.filter(Boolean);
       return [h('p', {className:'meta', 'data-key':'lbar-empty'}, q ? 'No helper matches.' : 'No helper is open. New starts one.')];
@@ -247,13 +255,19 @@ if (typeof module === 'object' && module.exports) {
         LIVEBAR_NEW.map(n => {
           const open = liveBarNewOpen(state.sessions, n.kind), r = permRow(n.kind), ended = open ? null : liveBarNewEnded(state.sessions, n.kind);
           const moved = open && r && bar.perm && r.running && r.cur !== r.running;  // goes on in the picked mode
-          const what = moved ? 'Open: goes on in ' + r.label : open ? 'Already open: go to it' : ended ? 'Ended: start it again' : n.what + (r ? ' · ' + r.label : '');
+          // W-047: the row says "Starting…" while orch starts it (every row is off meanwhile, so a second click starts
+          // nothing); a start that did not work stays under its row with "Try again" until the next try or the menu closes
+          const starting = bar.busy === n.kind, failed = !bar.busy && bar.fail?.kind === n.kind ? bar.fail : null;
+          const what = starting ? 'Starting…' : moved ? 'Open: goes on in ' + r.label : open ? 'Already open: go to it' : ended ? 'Ended: start it again' : n.what + (r ? ' · ' + r.label : '');
           const start = h('button', {type:'button', className:'live-opt', 'data-lbar-kind':n.kind, 'data-key':'lbar-new-' + n.kind,
-            'aria-busy':bar.busy === n.kind ? 'true' : null, disabled:!!bar.busy},
-          h('span', {className:'live-opt-t'}, h('strong', {}, n.title), h('span', {className:'meta'}, what)));
+            'aria-busy':starting ? 'true' : null, disabled:!!bar.busy},
+          h('span', {className:'live-opt-t'}, h('strong', {}, n.title), h('span', {className:'meta', role:starting ? 'status' : null, 'data-key':starting ? 'lbar-new-starting' : null}, what)),
+          starting ? h('span', {className:'spinner', 'aria-hidden':'true'}) : null);
+          const fail = failed ? h('div', {className:'lbar-newfail', role:'alert', 'data-key':'lbar-new-fail-' + n.kind}, h('span', {className:'bad'}, failed.text),
+            failed.again ? h('button', {type:'button', className:'btn sm outline', 'data-lbar-kind':n.kind, 'data-key':'lbar-new-again-' + n.kind}, 'Try again') : null) : null;
           // an ended helper (ORCH-817): its earlier conversations are one click away
-          return ended ? h('span', {className:'lbar-newrow'}, start, h('button', {type:'button', className:'btn sm ghost', 'data-lbar-hist':ended.id,
-            'data-key':'lbar-new-history-' + n.kind, 'aria-label':'History of the ' + n.title}, 'History')) : start;
+          return [ended ? h('span', {className:'lbar-newrow'}, start, h('button', {type:'button', className:'btn sm ghost', 'data-lbar-hist':ended.id,
+            'data-key':'lbar-new-history-' + n.kind, 'aria-label':'History of the ' + n.title, disabled:!!bar.busy}, 'History')) : start, fail];
         }),
         placesLine());
     }
@@ -285,7 +299,7 @@ if (typeof module === 'object' && module.exports) {
       const open = liveBarNewOpen(state.sessions, kind), pr = permRow(kind);
       const pick = pr && bar.perm && pr.cur === bar.perm ? bar.perm : '';  // a mode this kind can take, else its own
       if (open && !(pick && pr.running && pick !== pr.running)) { bar.menu = false; paint(true); openSession(a, open.id); return; }
-      bar.busy = kind; paint(true); wallPaint();
+      bar.busy = kind; bar.fail = null; paint(true); wallPaint();
       // a running one keeps its tool and model (ORCH-710): Runs on is only for a start
       const args = {...(open ? {kind} : liveBarNewArgs(kind, bar.pick, runsOnNow(), state.sessions)),
         ...(typeof livePermArgs === 'function' ? livePermArgs(kind, pick) : {})};
@@ -300,8 +314,18 @@ if (typeof module === 'object' && module.exports) {
         await window.LiveSessions?.refresh?.();
         made = liveBarNewMade(state.sessions, window.LiveSessions?.list, kind);
         if (!made && typeof refresh === 'function') { await refresh(); made = liveBarNewMade(state.sessions, window.LiveSessions?.list, kind); }
+        // W-047: still not listed (the walk saw the menu close and no pane open): look a few more times, then say so.
+        // A fixed number of looks, half a second apart: never a loop that runs on.
+        for (let i = 0; i < LIVEBAR_FIND_TRIES && !made; i++) {
+          await new Promise(done => setTimeout(done, LIVEBAR_FIND_WAIT));
+          await window.LiveSessions?.refresh?.();
+          made = liveBarNewMade(state.sessions, window.LiveSessions?.list, kind);
+        }
       }
-      bar.menu = !made && !r.ok;
+      // the menu stays open with the reason under the row; nothing here is a toast that goes away (W-047)
+      if (!r.ok) bar.fail = {kind, again:true, text:typeof liveFailText === 'function' ? liveFailText(r.text, 'It did not start.') : r.text || 'It did not start.'};
+      else if (!made) bar.fail = {kind, again:false, text:'It started, but it does not show here yet. Open it from Helpers in a moment.'};
+      bar.menu = !made;
       if (made) {
         // a session without a ticket is pinned by orch until it is unpinned (sessionprefs, ORCH-361)
         window.dispatchEvent(new CustomEvent('orch:live-pins', {detail:{key:made.id, pinned:true}}));
@@ -309,7 +333,7 @@ if (typeof module === 'object' && module.exports) {
       }
       paint(true);
       if (made) openSession(a, made.id);
-      else if (!r.ok) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'It did not start.', () => startNew(kind));
+      else bar.el?.querySelector('[data-key="lbar-new-again-' + kind + '"]')?.focus();
     }
     // the wall shows the same Runs on row (pages/livewall.js): it is drawn again when the pick changes
     const wallPaint = () => { if (typeof liveWallRepaint === 'function') liveWallRepaint(); };
@@ -343,7 +367,7 @@ if (typeof module === 'object' && module.exports) {
       window.LiveSessions?.sync();
       if (!window.LiveSessions?.ready && !bar.el) return;  // no "All calm" flash before the first answer
       const all = liveBarModel(sessions(), pins(), groups());
-      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.panes, bar.shown, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
+      const sig = JSON.stringify([a.name, addonLabel(a), all, state.sessions, state.session_modes, state?.settings?.agents, bar.menu ? [state?.runs, state?.settings?.live_max, state?.start_line] : 0, bar.perm, bar.list, bar.menu, bar.pick, bar.busy, bar.fail, bar.panes, bar.shown, bar.docked, phone(), window.innerWidth, needTotal(), window.liveEndKey?.()]);
       if (!force && sig === bar.sig && bar.el?.parentNode === host) return;
       bar.sig = sig;
       const active = document.activeElement, focusKey = bar.el?.contains(active) ? (active.dataset.key || (active.dataset.lbarQ ? 'q' : '')) : '';
@@ -393,7 +417,8 @@ if (typeof module === 'object' && module.exports) {
     document.addEventListener('click', e => {
       const nb = e.target.closest?.('[data-lbar-new]');
       if (nb && bar.el?.contains(nb)) {
-        bar.menu = !bar.menu; bar.list = ''; bar.q = ''; paint(true);
+        if (bar.busy) return;  // a start is running: the menu stays open and says "Starting…" (W-047)
+        bar.menu = !bar.menu; bar.list = ''; bar.q = ''; bar.fail = null; paint(true);
         if (bar.menu) bar.el?.querySelector('[data-lbar-kind]')?.focus();
         return;
       }
@@ -411,7 +436,7 @@ if (typeof module === 'object' && module.exports) {
         paint(true); bar.el?.querySelector('[data-lbar-perm="' + pm.dataset.lbarPerm + '"]')?.focus();
         return;
       }
-      if (bar.menu && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target)) { bar.menu = false; paint(true); }
+      if (bar.menu && !bar.busy && !bar.el?.querySelector('[data-key="lbar-new-wrap"]')?.contains(e.target)) { bar.menu = false; bar.fail = null; paint(true); }
       const b = e.target.closest?.('[data-lbar-list]');
       if (b && bar.el?.contains(b)) { toggle(b.dataset.lbarList); return; }
       // with the layer there, a chip or row opens its session in the layer instead of changing page
@@ -429,7 +454,7 @@ if (typeof module === 'object' && module.exports) {
     });
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape' || !bar.el?.contains(document.activeElement)) return;
-      if (bar.menu) { e.stopPropagation(); bar.menu = false; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
+      if (bar.menu) { e.stopPropagation(); if (bar.busy) return; bar.menu = false; bar.fail = null; paint(true); bar.el?.querySelector('[data-lbar-new]')?.focus(); }
       else if (bar.list) { e.stopPropagation(); close(true); }
     }, true);
     // the layer says which sessions are open ({mode, panes, shown: ticket ids}); the ones in sight are marked current

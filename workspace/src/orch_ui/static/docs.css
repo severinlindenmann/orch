@@ -39,6 +39,9 @@
 
 /* ---------- overview: Start here, then three still layers; a few straight lines between tiles ---------- */
 .ui-docs .dl-lead{margin:0;max-width:var(--reading-width)}
+/* W-006: the overview's page title is the master page top; the bar then holds only the groups */
+.ui-docs .dl-top{margin-bottom:var(--s2)}
+.ui-docs .dn.dn-home .dn-tabs{padding-top:0}
 .ui-docs .dl-first{display:grid;max-width:560px}
 .ui-docs .dl{position:relative;display:grid;gap:var(--s4)}
 .ui-docs .dl-band{display:grid;gap:var(--s3);align-content:start;padding:var(--s4);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-width:0}
@@ -92,14 +95,14 @@
 .ui-docs .dl-lab{position:absolute;transform:translate(-50%,-50%);display:none;padding:2px var(--s2);border:1px solid var(--brand);border-radius:99px;background:var(--surface-2);color:var(--text);font-size:12px;line-height:16px;white-space:nowrap}
 .ui-docs .dl-lab.is-on{display:block}
 @media(min-width:1100px){
-  .ui-docs .dl{gap:52px}
-  .ui-docs .dl-band{grid-template-columns:190px minmax(0,1fr);gap:var(--s4)}
-  .ui-docs .dl-head{display:grid;justify-items:start}
-  .ui-docs .dl-subs{display:flex;gap:var(--s4)}
-  .ui-docs .dl-sub{flex:var(--n) 1 0;min-width:0}
-  .ui-docs .dl-sub .dm-tiles{grid-template-columns:repeat(var(--n),minmax(0,1fr))}
-  .ui-docs .dl-sub .dl-tile{padding:var(--s2)}
-  .ui-docs .dl-sub .dl-conn-b{margin-left:22px;padding:0 var(--s1)}
+  :where(body:not([data-live-stack])) .ui-docs .dl{gap:52px}
+  :where(body:not([data-live-stack])) .ui-docs .dl-band{grid-template-columns:190px minmax(0,1fr);gap:var(--s4)}
+  :where(body:not([data-live-stack])) .ui-docs .dl-head{display:grid;justify-items:start}
+  :where(body:not([data-live-stack])) .ui-docs .dl-subs{display:flex;gap:var(--s4)}
+  :where(body:not([data-live-stack])) .ui-docs .dl-sub{flex:var(--n) 1 0;min-width:0}
+  :where(body:not([data-live-stack])) .ui-docs .dl-sub .dm-tiles{grid-template-columns:repeat(var(--n),minmax(0,1fr))}
+  :where(body:not([data-live-stack])) .ui-docs .dl-sub .dl-tile{padding:var(--s2)}
+  :where(body:not([data-live-stack])) .ui-docs .dl-sub .dl-conn-b{margin-left:22px;padding:0 var(--s1)}
 }
 @media(max-width:720px){
   .ui-docs .dm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -261,16 +264,20 @@
   .ui-docs .sl-item{min-height:40px}
   .ui-docs .sl-fold{display:none}
 }
+/* W-001: the same when the page area (not the window) is under 1100 px, beside the Focus panel (body[data-live-stack]).
+   The wide rules (the map with lines in columns, the side list, three columns under the hood) stand down there: each
+   carries :where(body:not([data-live-stack])), which adds no weight. The 40 px rows are a finger size: they stay with the window. */
+body[data-live-stack] .ui-docs .sl-fold{display:none}
 @media(min-width:1100px){
-  .ui-docs .sl-wrap{grid-template-columns:196px minmax(0,1fr);gap:var(--s5);align-items:start}
-  .ui-docs .sl-toggle{display:none}
-  .ui-docs .sl-top{position:sticky;top:calc(var(--topbar-height) + 64px)}
-  .ui-docs .sl-list{margin:0;padding:0 var(--s2) 0 0;border:0;border-right:1px solid var(--border);border-radius:0;background:none;max-height:calc(100vh - var(--topbar-height) - 96px);overflow-y:auto}
-  .ui-docs .sl-wrap.is-rail{grid-template-columns:44px minmax(0,1fr);gap:var(--s4)}
-  .ui-docs .sl-wrap.is-rail .sl-label,.ui-docs .sl-wrap.is-rail .sl-off,.ui-docs .sl-wrap.is-rail .sl-group span{display:none}
-  .ui-docs .sl-wrap.is-rail .sl-group{height:1px;margin:var(--s2) var(--s1);padding:0;background:var(--border)}
-  .ui-docs .sl-wrap.is-rail .sl-item{justify-content:center;padding:4px 0}
-  .ui-docs .sl-wrap.is-rail .sl-item.is-off{opacity:.55}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap{grid-template-columns:196px minmax(0,1fr);gap:var(--s5);align-items:start}
+  :where(body:not([data-live-stack])) .ui-docs .sl-toggle{display:none}
+  :where(body:not([data-live-stack])) .ui-docs .sl-top{position:sticky;top:calc(var(--topbar-height) + 64px)}
+  :where(body:not([data-live-stack])) .ui-docs .sl-list{margin:0;padding:0 var(--s2) 0 0;border:0;border-right:1px solid var(--border);border-radius:0;background:none;max-height:calc(100vh - var(--topbar-height) - 96px);overflow-y:auto}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail{grid-template-columns:44px minmax(0,1fr);gap:var(--s4)}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-label,:where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-off,:where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-group span{display:none}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-group{height:1px;margin:var(--s2) var(--s1);padding:0;background:var(--border)}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-item{justify-content:center;padding:4px 0}
+  :where(body:not([data-live-stack])) .ui-docs .sl-wrap.is-rail .sl-item.is-off{opacity:.55}
 }
 /* ---------- live facts ---------- */
 .ui-docs .dh-val{display:inline-flex;align-items:center;gap:6px;color:var(--text);font-weight:600}
@@ -293,7 +300,7 @@
 .ui-docs .dh-head h2{display:inline-flex;align-items:center;gap:var(--s2);margin:0;font-size:15px;line-height:22px}
 .ui-docs .dh-head h2 .ic{color:var(--text-muted)}
 .ui-docs .dh-cols{display:grid;gap:var(--s4) var(--s6);grid-template-columns:minmax(0,1fr)}
-@media(min-width:1100px){.ui-docs .dh-cols{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) minmax(0,1fr)}}
+@media(min-width:1100px){:where(body:not([data-live-stack])) .ui-docs .dh-cols{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) minmax(0,1fr)}}
 .ui-docs .dh-col{display:flex;flex-direction:column;gap:var(--s2);min-width:0}
 .ui-docs .dh-col .eyebrow{margin:0}
 .ui-docs .dh-read{margin-left:var(--s2);text-transform:none;letter-spacing:0;font-weight:400}

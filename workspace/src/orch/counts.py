@@ -91,7 +91,8 @@ def _counts(ticket: dict) -> bool:
 def quiet(root, tickets: list[dict]) -> dict:
     """ORCH-1741: {"queue": [ids], "folded": [ids]}: the tickets in Review whose Check card does not show.
     queue = a linked pull request is open and waits or runs in the merge queue, or a helper is at work on it
-    (the queue woke it to repair the pull request); it comes back once the queue gives up on it. folded = the
+    (the queue woke it to repair the pull request), or its checks only just passed (FX-04: it waits to be
+    merged); it comes back once the queue gives up on it or the usual wait is over. folded = the
     ticket has another card already: an open question (the Check card follows once it is answered) or the
     "passed its checks but was not merged" row. Never raises: what cannot be read shows its card."""
     from orch import mergequeue, stuck
@@ -103,6 +104,10 @@ def quiet(root, tickets: list[dict]) -> dict:
         ready = stuck.unmerged_ids(root, tickets, queue)
     except Exception:  # noqa: BLE001 - no cache, no row: the Check card shows
         ready = set()
+    try:
+        merging = stuck.merging_ids(root, tickets, queue)  # FX-04: checks only just passed, on its way in
+    except Exception:  # noqa: BLE001 - as above
+        merging = set()
     for t in tickets:
         if not isinstance(t, dict) or not _counts(t) or t.get("status") != "review":
             continue
@@ -113,7 +118,7 @@ def quiet(root, tickets: list[dict]) -> dict:
             )
         except Exception:  # noqa: BLE001 - a broken run record or ref: the Check card shows
             held = False
-        if held:
+        if held or t["id"] in merging:
             out["queue"].append(t["id"])
         elif t["id"] in ready or core._open_questions(t):
             out["folded"].append(t["id"])

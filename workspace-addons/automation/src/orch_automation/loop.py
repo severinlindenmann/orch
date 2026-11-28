@@ -57,6 +57,17 @@ QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left f
 KIND = "automation:failure"
 KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
+# W-043 (owner, 28 Nov): a start that core refused because automation is paused needs no person: no question
+# is asked for it, and one asked earlier is taken back once automation runs again (its start is tried again).
+PAUSED_WORDS = "automation is paused"  # core's refusal (brake.PAUSED_REFUSAL), in any case
+PAUSE_OVER = "Automation runs again, so this needs no answer. The start is tried again."
+
+
+def paused_cause(text) -> bool:
+    """The words say a start did not happen because automation is paused (`orch pause`)."""
+    return isinstance(text, str) and PAUSED_WORDS in text.lower()
+
+
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
 SKILL_REVIEW_EVERY = 3600  # seconds between two looks at the skills' review-by dates (core, no AI)
@@ -353,8 +364,34 @@ class Scheduler:
         return made["id"]
 
     def fail(self, tid: str, reason: str) -> None:
-        """A run that did not work becomes one question (kind automation:failure), asked once."""
+        """A run that did not work becomes one question (kind automation:failure), asked once. Not while
+        automation is paused (W-043): the pause is the cause, and the person already knows about it."""
+        if paused_cause(reason):
+            return
         ask_failure(self.root, tid, f"The helper could not start: {reason.rstrip('.')}.")
+
+    def close_paused(self, now: datetime) -> list[str]:
+        """W-043: automation runs again, so every open automation:failure question whose cause was the pause is
+        taken back with that reason (it leaves Review, the ticket's history says why) and the start it stood for
+        is tried once. The question is closed first, so it is never started twice for one question."""
+        started = []
+        for t in read_tickets(self.root):
+            for q in t.get("questions") or []:
+                if (
+                    q.get("kind") not in KINDS
+                    or q.get("answer") is not None
+                    or not paused_cause(q.get("text"))
+                ):
+                    continue
+                if (
+                    orchcli.call(self.root, "ask", t["id"], "--take-back", str(q.get("id")), PAUSE_OVER)
+                    is None
+                ):
+                    continue  # not closed: look again next pass
+                may = t["status"] in OPEN and t["id"] not in started and self.may_start(t)
+                if may and self.start_due(t["id"], "automation runs again", now) == "started":
+                    started.append(t["id"])
+        return started
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:
         """A planned start (wait over, cron due, Try again): the ticket's script when it names one, every script of
@@ -663,7 +700,8 @@ class Scheduler:
             self.doctor_soon(now)
             self.wake.clear()
             return []
-        started: list[str] = self.act_on_answers(now)
+        started: list[str] = self.close_paused(now)
+        started += [t for t in self.act_on_answers(now) if t not in started]
         self.limit_waits(now)
         started += self.phone_tickets(now)
         started += self.queued_input(now, skip=started)

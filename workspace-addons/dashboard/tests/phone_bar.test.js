@@ -79,7 +79,7 @@ test('UI.shortGroup: header with count, rows with number, title, fact and one si
 const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, dataset:{}, append(...k) { this.children.push(...k); }});
 function listCtx(list, extra = {}) {
   const groups = [];
-  const UI = {shortGroup:o => { groups.push(o); return {o, querySelectorAll:() => [], querySelector:() => null}; }, statusIcon:n => h('svg', {className:'st ' + n})};
+  const UI = {...require('./kit_state.js'), shortGroup:o => { groups.push(o); return {o, querySelectorAll:() => [], querySelector:() => null}; }, statusIcon:n => h('svg', {className:'st ' + n})};
   const c = {h, window:{DashHelpers:helpers, UI}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), state:{runs:{}}, starting:new Set(), now:() => Date.now(),
     needsList:() => [], tickets:() => list, name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){},
@@ -90,7 +90,7 @@ function listCtx(list, extra = {}) {
 }
 const text = n => !n ? '' : typeof n === 'string' || typeof n === 'number' ? String(n) : (n.children || []).map(text).join('');
 
-test('phone list: groups as short rows, Answer where the person is needed, steps as n/m, the rest a fact', () => {
+test('phone list: groups as short rows, the state mark on the right (never a button), the rest a fact', () => {
   const list = [
     {id:'q', key:'WS-1', title:'Services', status:'waiting', questions:[{id:'q1', text:'Start?'}], updated_at:new Date().toISOString()},
     {id:'a', key:'WS-2', title:'Count', status:'active', checklist:[{done:true}, {}, {}], updated_at:new Date().toISOString()},
@@ -103,10 +103,12 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   const need = groups[0].rows[0];
   assert.equal(need.key, 'WS-1');
   assert.match(need.fact, /^Question/);
-  assert.equal(text(need.side), 'Answer');
+  assert.equal(text(need.side), 'Question');
+  assert.equal(need.href, c.href('q') + '?tab=questions', 'the row opens the ticket at its question');
   assert.equal(groups[1].icon, 'working');
-  assert.equal(text(groups[1].rows[0].side), '1/3');
-  assert.equal(groups[2].rows[0].side, null, 'no steps: nothing on the right');
+  assert.equal(text(groups[1].rows[0].side), 'In progress');
+  assert.equal(text(groups[2].rows[0].side), 'Backlog');
+  assert.ok(groups.flatMap(g => g.rows).every(r => r.side && r.side.tag !== 'button' && r.side.tag !== 'a'), 'no button on a row (O-15 C)');
 });
 
 test('phone list: a long group shows 8 rows and "n more"; a folded group no rows', () => {

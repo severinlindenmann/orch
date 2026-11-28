@@ -13,6 +13,7 @@ skill = "skills/orch-services"
 agents_block = "skills/orch-services/AGENTS-block.md"
 gitignore = [".orch/addons/services/"]
 background = true                          # orch services start|stop|status (no id): the regular check
+needs = true                               # orch services needs --json: a failing service work depends on
 
 [dashboard]
 label = "Services"

@@ -178,18 +178,30 @@ UI.bulkBar=o=>{o=o||{};const bar=el('div','bulk-bar');bar.setAttribute('role','r
  const a=el('div','bulk-actions');(o.actions||[]).forEach(n=>{if(n)a.append(n)});bar.append(c,a);
  let x=o.clear;if(x&&!(x instanceof Node)){const b=el('button','btn ghost sm',x.label||'Clear');b.type='button';if(x.onClick)b.addEventListener('click',x.onClick);x=b}
  if(x){x.classList.add('bulk-clear');bar.append(x)}return bar};
+/* The room a page really has (W-001, owner 28 Nov). A page lays out for its page area, not for the window: beside the
+   Focus panel a 1440 px window leaves the page 617 px. CSS first: the shell marks the body (body[data-live-narrow] under
+   900 px, body[data-live-stack] under 1100 px) and a narrow layout is written for the width query and for the mark. Code
+   that must choose between two drawings asks here, and listens on window for 'orch:page-room' (sent when a mark changes).
+   UI.pageRoom() -> the page area's width in px (the window's width where there is no shell);
+   UI.pageRoom.under(px) -> true when the window or the page area is narrower than px. */
+UI.pageRoom=()=>{const m=document.querySelector('main');return m&&m.clientWidth?m.clientWidth:window.innerWidth};
+UI.pageRoom.under=px=>window.innerWidth<px||UI.pageRoom()<px;
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
 /* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
    then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
    the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
-   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+   W-006 (owner, 28 Nov, the walk's measurements as the checklist): one place for a page's tag ("Preview"): `tag` puts
+   it after the name, on the title's middle, the same on every page; the name and the sentence are 4 px apart; the
+   Settings button is 32 px on every page (touch sizes follow the window, never the frame).
+   UI.pageTop({title, tag, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
 const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>'};
 const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
 /* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
 UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
 UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
  if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
- const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const h1=el('h1','',o.title||'');if(o.tag){const t=el('span','badge page-tag',String(o.tag));h1.append(' ',t)}
+ left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
  const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
  if(st&&(st.href||st.onClick))acts.push(UI.settingsButton(st));
  (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
@@ -217,7 +229,7 @@ UI.pageNotice=o=>{o=o||{};const b=el('div','banner page-notice '+(o.tone==='erro
  return b};
 UI.settingsButton=o=>{o=o||{};const link=!!o.href||!o.onClick,a=el(link?'a':'button','btn outline sm page-settings settings-btn');if(link){a.href=o.href||'#settings/addons';if(o.top)a.target='_top'}else a.type='button';
  if(o.onClick)a.addEventListener('click',o.onClick);a.dataset.key=o.dataKey||'page-settings';
- a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>'),el('span','',o.label||'Settings'));return a};
+ a.append(svg('ic','<circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>'),el('span','',o.label||'Settings'));return a};
 /* An add-on page drawn inside the dashboard's frame (Factory, Usage, Files, Skills, Personal, Insights ...) marks the
    place of its Settings button in its own top: <span data-settings-for="skills"></span>. It becomes the same
    UI.settingsButton, leading the dashboard (target _top; frame.js hands the move up) to that add-on's part of Settings. */
@@ -332,7 +344,8 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
    dashboard's answered list say the same */
 UI.ideasWord=(sorted,total)=>{const k=(sorted&&sorted.keep||[]).length,no=(sorted&&sorted.no||[]).length,l=Math.max(0,(total||0)-k-no);return k+' kept, '+no+' no'+(l?', '+l+' for later':'')};
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
- let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,ticked=(o.ticked||[]).slice(0,2),pairSide=0,picking=!!o.picking,showing=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
+ let idx=o.start||0,overlay=null,overlayBack=null,cur=null,busy=false,pairSide=0,showing=false;const canCompare=o.compare!==false;/* O-06 (owner, 28 Nov): o.compare:false is a deck with no Compare: no button, no ticks, no pair */
+ let ticked=canCompare?(o.ticked||[]).slice(0,2):[],picking=canCompare&&!!o.picking;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
  Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
  host.classList.add('swipe','swipe-'+mode);host.tabIndex=0;host.addEventListener('blur',()=>host.classList.remove('quiet-focus'));
  const focusHost=()=>{host.classList.add('quiet-focus');host.focus({preventScroll:true})};host.setAttribute('role','region');host.setAttribute('aria-label','Review, one item at a time');
@@ -350,8 +363,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* ORCH-1847: one card has no "0 answered · 1 waiting", bar, All or "1 of 1" (the page says how many wait); Undo shows
     while it works. Many cards, or one whose option pictures can be compared, keep the whole row. */
  /* one card with nothing to compare: no count, bar, All, "1 of 1" or side list to steer with (ORCH-1847) */
- const lone=()=>items.length===1&&!optionRefs(items[0]).length;
- const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone();[count,bar,allBtn,jumpRow].forEach(x=>{x.hidden=one});undoBtn.hidden=one&&undoBtn.disabled;top.hidden=one&&undoBtn.hidden&&note.hidden};
+ const lone=()=>items.length===1&&!(canCompare&&optionRefs(items[0]).length);
+ /* W-038 (owner, 28 Nov): the count, the bar and Undo appear with the first answer: before it the row says nothing new
+    (the page names how many wait) and a greyed-out Undo is noise. A move that can be taken back (Later) shows Undo. */
+ const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone(),fresh=!Object.keys(ans).length;[allBtn,jumpRow].forEach(x=>{x.hidden=one});[count,bar].forEach(x=>{x.hidden=one||fresh});undoBtn.hidden=(one||fresh)&&undoBtn.disabled;
+  top.classList.toggle('is-fresh',fresh&&undoBtn.hidden&&note.hidden);top.hidden=one&&undoBtn.hidden&&note.hidden};
  /* a phone: "All cards · 1 of N" and ← → above the card (the whole list with its ticks is one tap away) */
  const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','',o.listTitle||'All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
  jAll.onclick=()=>openOverview();jPrev.onclick=()=>step(-1);jNext.onclick=()=>step(1);jumpRow.append(jAll,jPrev,jNext);
@@ -464,7 +480,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
  /* due within a day (it.dueAt) shows amber; any other deadline stays quiet */
  const soon=it=>{const t=it&&it.dueAt!=null?+new Date(it.dueAt):NaN;return isFinite(t)&&t-Date.now()<864e5};
- const metaLine=it=>{const m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''));m.append(k);
+ /* FX-05: work that stopped wears the one Stuck pill (UI.helperPill, as on Home and Tickets), never a pause mark with a grey word */
+ const stuckPill=it=>UI.helperPill('stuck',it.kindLabel||'Stuck');
+ const metaLine=it=>{const m=el('div','swipe-meta');let k;if(it.kind==='stuck')k=stuckPill(it);else{k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),el('span','',it.kindLabel||it.kind||''))}m.append(k);
   if(it.need)m.append(el('span','swipe-need'+(soon(it)?' soon':''),it.need));if(it.ticket)m.append(el('span','swipe-key',it.ticket));return m};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);c.dataset.item=it.id;if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   /* title first, then ONE quiet line: type · deadline · ticket key (ORCH-477 round 2: no routine time stamp, no group, no
@@ -593,11 +611,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const pairRefs=()=>{const p=ticked.map(parseRef).filter(Boolean);return p.length===2?p:null};
  const pairNow=()=>showing?pairRefs():null;
  const syncOverview=headOnly=>{if(overlay&&overlay.draw)overlay.draw(headOnly)};
- const tick=ref=>{if(overlay&&!overlay.classList.contains('swipe-overview'))return;const on=ticked.includes(ref);if(!on&&(ticked.length>=2||!parseRef(ref)))return;ticked=on?ticked.filter(x=>x!==ref):ticked.concat(ref);picking=true;pairSide=0;
+ const tick=ref=>{if(!canCompare)return;if(overlay&&!overlay.classList.contains('swipe-overview'))return;const on=ticked.includes(ref);if(!on&&(ticked.length>=2||!parseRef(ref)))return;ticked=on?ticked.filter(x=>x!==ref):ticked.concat(ref);picking=true;pairSide=0;
   if(showing&&!pairRefs()){showing=false;render()}else change();syncBoxes();syncOverview(true)};
- const compare=refs=>{ticked=(refs||[]).filter(r=>parseRef(r)).slice(0,2);showing=ticked.length===2;picking=ticked.length>0;pairSide=0;closeOverlay(true);render();syncBoxes()};
+ const compare=refs=>{if(!canCompare)return;ticked=(refs||[]).filter(r=>parseRef(r)).slice(0,2);showing=ticked.length===2;picking=ticked.length>0;pairSide=0;closeOverlay(true);render();syncBoxes()};
  const showPair=()=>{if(!pairRefs())return;showing=true;pairSide=0;closeOverlay(true);render()};
- const setPicking=on=>{picking=!!on;if(!picking){ticked=[];if(showing){showing=false;render();syncOverview();return}}change();syncOverview()};
+ const setPicking=on=>{if(!canCompare)return;picking=!!on;if(!picking){ticked=[];if(showing){showing=false;render();syncOverview();return}}change();syncOverview()};
  const syncBox=cb=>{const on=ticked.includes(cb.dataset.ref);cb.checked=on;cb.disabled=!on&&ticked.length>=2};
  const syncBoxes=()=>{if(overlay)overlay.querySelectorAll('.review-tick-box').forEach(syncBox)};
  /* the checkbox both "All cards" lists use (the page's list beside the deck and the deck's own overview) */
@@ -699,7 +717,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     page's list beside the deck (deck.drawList) and the phone's full list (the overview) draw the same rows. */
  const groupOf=it=>it.laneName||it.group||it.ticketTitle||it.ticket||'';/* a lane (Review: what holds up work first, then by what you do) groups before a set or a ticket */
  const sameName=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
- const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title',o.listTitle||'All cards'),acts);
+ const listHead=()=>{const hd=el('div','review-list-head'),acts=el('div','review-list-acts');hd.append(el('h2','review-list-title',o.listTitle||'All cards'),acts);if(!canCompare)return hd;
   if(!picking){const c=btn('btn outline sm review-list-compare',[ic('compare',16),el('span','','Compare')]);c.setAttribute('aria-pressed','false');c.onclick=()=>setPicking(true);acts.append(c);return hd}
   const two=!!pairRefs(),go=btn('btn sm review-list-compare '+(two?'primary':'outline'),[el('span','','Compare')]),no=btn('btn ghost sm review-list-cancel',[el('span','','Cancel')]);
   go.disabled=!two;go.onclick=()=>showPair();no.onclick=()=>setPicking(false);acts.append(no,go);
@@ -711,8 +729,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   return [why,it.ticket].filter(Boolean).join(' · ')};
  const listRow=i=>{const it=items[i],a=ans[it.id],now=i===idx&&!pairNow()&&idx<items.length,r=btn('review-row'+(now?' is-current':'')+(a?' is-done':''),[]);
   r.dataset.item=it.id;r.title=it.title;if(now)r.setAttribute('aria-current','true');
-  const ico=el('span','review-row-icon');ico.append(ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
-  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
+  const stuck=it.kind==='stuck',ico=el('span','review-row-icon'+(stuck?' failed':''));ico.append(stuck?UI.statusIcon('needs'):ic(it.icon||'file',16));const txt=el('span','review-row-text');txt.append(el('span','review-row-title',it.title));
+  if(a)txt.append(el('span','review-row-sub',ansWord(a)));else if(stuck){const sb=el('span','review-row-sub review-row-stuck');sb.append(stuckPill(it));const rest=[it.need,it.ticket].filter(Boolean).join(' · ');if(rest)sb.append(el('span','',rest));txt.append(sb)}
+  else{const sb=rowSub(it);if(sb)txt.append(el('span','review-row-sub'+(it.need&&soon(it)?' soon':''),sb))}
   r.append(ico,txt);r.onclick=()=>jump(i);
   const li=el('div','review-li');li.setAttribute('role','listitem');
   if(!picking||a){li.append(r);return li}
@@ -864,15 +883,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
 /* Attention tiles (ORCH-2184, Focused review C; owner's words of 26 Nov). UI.attentionTiles(groups, o) -> .stat-row of three
    tile buttons (in a .attn-tiles-wrap with the deadline as one line under them on a phone): Quick look, Short decision, Take your time. groups: [{group, name, count, hold (cards that hold up work),
    deadline ("Next deadline: <card> · <time>", only on the tile that holds the next one)}]. A tile with nothing in it
-   says "Nothing waits here" and does nothing. o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
+   is not shown (W-038, owner 28 Nov: no "Quick look 0 · Nothing waits here"). o.onPick(group) starts a round. No minutes (plan: no real timings yet). */
 UI.attentionTiles=(groups,o)=>{o=o||{};const SAY={quick:'Each one can be taken back afterwards.',short:'One clear question each.',time:'Big, public or hard to take back.'};
  const row=el('div','stat-row attn-tiles');row.setAttribute('role','group');row.setAttribute('aria-label','Pick where to start');
- (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0),b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
-  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',n?SAY[g.group]||'':'Nothing waits here'));
+ (groups||[]).forEach(g=>{const n=Math.max(0,g.count|0);if(!n)return;const b=el('button','stat-tile attn-tile');b.type='button';b.dataset.group=g.group;b.dataset.row='';
+  b.append(el('span','stat-label',g.name),el('span','stat-value',String(n)),el('span','stat-delta',SAY[g.group]||''));
   if(n&&g.hold)b.append(el('span','attn-tile-line',g.hold+(g.hold===1?' holds':' hold')+' up work'));
   if(n&&g.deadline){const d=el('span','attn-tile-line attn-due');if(window.icon){const t=document.createElement('template');t.innerHTML=window.icon('clock',14);d.append(t.content)}d.append(g.deadline);b.append(d)}
   /* no aria-label: the name is the text on the tile, so voice control can say it (label in name, WCAG 2.5.3) */
-  if(!n){b.setAttribute('aria-disabled','true');b.classList.add('is-empty')}
   b.onclick=()=>{if(n&&typeof o.onPick==='function')o.onPick(g.group)};row.append(b)});
  /* a phone has no room for the deadline inside a tile: one line under the three (.phone-only) */
  const due=(groups||[]).find(g=>(g.count|0)>0&&g.deadline),wrap=el('div','attn-tiles-wrap');wrap.append(row);

@@ -14,7 +14,10 @@ module.exports = {
     const card = () => page.locator('.swipe-card:not(.under):not(.under2)', { hasText: 'autumn price list' }).first();
     await open('#review?card=' + encodeURIComponent(id));
     await page.locator('.swipe-card:not(.under):not(.under2)').first().waitFor();
-    if (!(await card().isVisible())) await page.locator('.review-side').getByText(/autumn price list/).first().click();  // the first load may show another card
+    if (!(await card().isVisible())) {  // the first load may show another card; the list shows five rows at a time (O-05): All shows the rest
+      if (await page.locator('.review-side [data-review-more="all"]').count()) await page.locator('.review-side [data-review-more="all"]').click();
+      await page.locator('.review-side').getByText(/autumn price list/).first().click();
+    }
     await card().waitFor();
     const host = await page.locator('[data-review-host]').elementHandle();
 

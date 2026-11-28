@@ -36,6 +36,7 @@ module.exports = {
     await card.waitFor();
     // R6 A (ORCH-2173): a result card is titled with the helper's first summary sentence, the ticket's name is not repeated
     if (!(await card.innerText()).includes('Most customers like our staff.')) {  // the first load may still show the first card
+      if (await page.locator('.review-side [data-review-more="all"]').count()) await page.locator('.review-side [data-review-more="all"]').click();  // O-05: five rows at a time
       await page.locator('.review-side').getByText('Most customers like our staff.').first().click();
       await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Most customers like our staff.'}).first().waitFor();
     }
@@ -61,19 +62,25 @@ module.exports = {
       });
       must(!overlap, `expand overlaps progress at ${width}`);
     }
-    // ORCH-2316: on a phone the pinned answer bar never covers the card's Open ticket (under the title; above it at 480 and less)
+    // W-042 A (owner, 28 Nov; before: ORCH-2316 put the link under or above the title): a phone card reads question,
+    // evidence, explanation with its links, then the answers. The pinned answer bar never keeps Open ticket covered:
+    // brought into view, the link is clear of the bar and takes the tap
     for (const [width, height] of [[480,844], [390,844], [320,844]]) {
       await page.setViewportSize({width,height});
       await page.evaluate(() => window.scrollTo(0,0));
       await page.waitForTimeout(300);
       const tl = card.locator('a.swipe-ticket').first();
       if (await tl.count()) {
+        await tl.evaluate(b => b.scrollIntoView({block:'center'}));
+        await page.waitForTimeout(200);
+        const order = await card.evaluate(c => { const t = q => { const n = c.querySelector(q); return n && n.offsetParent ? n.getBoundingClientRect().top : null; }; return {head:t('.swipe-head'), foot:t('.swipe-foot:not(.empty)')}; });
+        must(order.foot == null || order.foot > order.head, `the card's foot is above its title at ${width}: ${JSON.stringify(order)}`);
         const hit = await tl.evaluate(b => { const r=b.getBoundingClientRect(), e=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
           const bar=document.querySelector('.swipe-actions:not([hidden])');
           return {visible:r.top>=0&&r.bottom<=innerHeight&&b.contains(e),top:r.top,bottom:r.bottom,on:e&&(e.closest('[class]')||e).className,
             barTop:bar&&Math.round(bar.getBoundingClientRect().top)}; });
         // a margin, not a 1 px touch: fonts on Linux wrap wider than on a Mac
-        must(hit.visible && (hit.barTop == null || hit.bottom <= hit.barTop - 24), `Open ticket covered at ${width}x${height}: ${JSON.stringify(hit)}`);
+        must(hit.visible && (hit.barTop == null || hit.bottom <= hit.barTop), `Open ticket covered at ${width}x${height}: ${JSON.stringify(hit)}`);
       }
     }
     await page.setViewportSize({width:1280,height:800});

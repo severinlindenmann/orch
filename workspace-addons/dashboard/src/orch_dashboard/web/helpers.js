@@ -449,6 +449,22 @@
     }
     return out.sort((a, b) => HELPER_ORDER.indexOf(a.state) - HELPER_ORDER.indexOf(b.state));
   }
+  /* CX-01 (28 Nov: Home said "1 helper working" above a Stuck row with Stop for work that was finished): ONE reading of
+     a Helpers row, for the row and for the number beside it. A row on a ticket that is not finished is the core's
+     state as it is (Remind on an idle or stuck one). On a finished ticket: nothing running is "Finished" with Open
+     ticket (no Stuck, no Stop); a process that still runs says so and keeps Stop; a run that cannot be read says so.
+     -> {state, word, meta (null = the widget's own line), act: 'open' | 'stop' | 'remind' | null}. */
+  function helperShown(row) {
+    const r = row || {}, quiet = r.state === 'idle' || r.state === 'stuck';
+    if (!r.finished || r.state === 'you' || r.state === 'limit') return {state: r.state, word: r.word, meta: null, act: !r.finished && quiet ? 'remind' : null};
+    if (['working', 'starting', 'waiting'].includes(r.state)) return {state: r.state, word: r.word, meta: 'Ticket finished; helper still running', act: 'stop'};
+    // the core says since when nothing runs (idle minutes, or "Nothing running for 27 min"); without either it is not known
+    const known = r.state === 'idle' || r.idle != null || /^nothing running/i.test(r.detail || '');
+    if (!known) return {state: 'unknown', word: 'Not known', meta: 'Ticket finished; orch cannot tell if a helper still runs', act: 'stop'};
+    return {state: 'finished', word: 'Finished', meta: /^nothing running/i.test(r.detail || '') ? r.detail : 'Nothing running', act: 'open'};
+  }
+  /* How many helpers work now: the rows of the Helpers list that say Working or Starting, so the number and the list agree. */
+  const helpersWorking = rows => arr(rows).filter(r => ['working', 'starting'].includes(helperShown(r).state)).length;
   /* Links to other running pages of this workspace (label and address come from the services data). */
   function serviceLinks(services, ownOrigin) {
     return arr(services).filter(s => s && s.running === true && typeof s.url === 'string' && /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/.test(s.url)
@@ -548,6 +564,15 @@
     const rest = arr(ids).filter(id => id !== moved), at = before == null ? -1 : rest.indexOf(before);
     rest.splice(at < 0 ? rest.length : at, 0, moved);
     return rest;
+  }
+  /* The menu's add-on pages (O-34). `pins` is what the person chose, in their order (it keeps add-ons that are turned
+     off now); `names` is what exists. menuShown: the pages in the menu, in the person's order. menuStep: the choice
+     after `name` moved one place up (-1) or down (1) among the pages shown. */
+  const menuShown = (pins, names) => [...new Set(arr(pins))].filter(n => arr(names).includes(n));
+  function menuStep(pins, names, name, dir) {
+    const shown = menuShown(pins, names), at = shown.indexOf(name), to = at + (dir < 0 ? -1 : 1);
+    if (at < 0 || to < 0 || to >= shown.length) return arr(pins).slice();
+    return laneReorder(arr(pins), name, dir < 0 ? shown[to] : (shown[to + 1] ?? null));
   }
   const plainFileName = value => String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
   const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/(?:[\w-]+\/)*[\w-]+\.(?:md|txt|html?|csv|json|pdf|png|jpe?g|webp)\b/gi, name => plainFileName(name)).replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
@@ -1107,5 +1132,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, askerLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, backgroundWhy, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needApprove, needStoppedWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {menuShown, menuStep, calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, helperShown, helpersWorking, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, askerLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, backgroundWhy, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needApprove, needStoppedWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });
