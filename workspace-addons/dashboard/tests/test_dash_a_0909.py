@@ -9,7 +9,8 @@ def test_home_has_no_next_step_line_and_lists_the_whole_needs_list():
     assert "'Send back'" not in home and "'Mark done'" not in home  # Dash 04: sign-off is in the result view
     # UX round 15 Nov, item 4: no fold; one row and one button per further item, notices are one quiet line
     assert "needsOpen" not in home and "' more questions'" not in home
-    assert "needListRow" in home and "notesLine" in home
+    # O-01 D (28 Nov): no question or result row at all; what is neither blocked nor on Review is a quiet row
+    assert "needListRow" not in home and "noteRow" in home and "notesLine" in home
 
 
 def test_new_ticket_button_stays_right_with_hidden_switch():

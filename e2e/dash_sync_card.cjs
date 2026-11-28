@@ -192,18 +192,15 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       assert.deepEqual(errors, []);
       await context.close();
     }
-    // 5. Home › Needs you: the three sync rows and the sign step of Keep theirs
+    // 5. Home: the three sync rows and the sign step of Keep theirs
     for (const width of [1440, 390]) {
       const {context, page, fake, errors} = await open(browser, width, {});
       await page.goto(BASE + '/#home');
-      await page.locator('#needs-you').waitFor();
-      const showAll = page.locator('#needs-you').getByRole('button', {name: 'Show all'});   // only when Home folds the list
-      if (await showAll.count()) await showAll.click();
-      const rows = page.locator('.home-need.need-acts');
+      const rows = page.locator('main .home-need.need-acts');
       await rows.first().waitFor();
       assert.equal(await rows.count(), 3);
       assert.deepEqual((await rows.locator('.sig').allTextContents()).map(t => t.trim()), ['Needs your OK', 'Needs your OK', 'Needs your OK']);
-      await page.locator('#needs-you').screenshot({path: path.join(OUT, `needs-${width}.png`)});
+      await page.locator('main').screenshot({path: path.join(OUT, `needs-${width}.png`)});
       await rows.nth(0).getByRole('button', {name: 'Keep theirs'}).click();
       const dialog = page.locator('dialog.confirm-step');
       await dialog.waitFor();

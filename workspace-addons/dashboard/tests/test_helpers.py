@@ -420,7 +420,8 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
 
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = webjs.all_js()
-    assert "openCard('in-progress', 'In progress'" in src and "Getting started…" in src
+    # O-01 D (28 Nov): In progress is one of the numbers of Home's one row, no card of its own
+    assert "part('in-progress', inProgress, 'in progress'" in src and "Getting started…" in src
     assert "needsYou(needCount)" in src  # 5A: the badge says what it counts
 
 
@@ -646,11 +647,9 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert (
-        "if (!list.length) return null;" in src
-    )  # an empty In progress or Not started card is hidden (ORCH-2140)
+    assert "openCard(" not in src  # O-01 D: Home has no In progress or Not started card (the numbers are one row)
     assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
-    assert "plainWhy(question" in src  # Needs-you rows carry no command text
+    assert "plainWhy(said, 'The helper')" in src  # a quiet Home row carries no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert (
         "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]

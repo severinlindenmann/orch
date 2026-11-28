@@ -662,11 +662,11 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "button('Add helper'",
         "'Let the helper do everything?'",
         "' is now the default helper.'",
-        "alive ? 'Remind' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
+        "click('Remind', 'Message sent'",  # O-01 D: one action per row of Blocked now
         "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
-        "plainWhy(question, 'The helper')",
+        "plainWhy(said, 'The helper')",
         "One short line about what this workspace is for.",
     ):
         assert text in js, text
@@ -713,13 +713,10 @@ def test_v1_home_and_ticket_controls():
     js = webjs.all_js()
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
-    assert "row.answer.recommended" in home and "'Suggested'" in home
-    assert "className:'answer-options'" in home  # the question card carries answer buttons
-    assert (
-        "act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option})"
-        in home
-    )
-    assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
+    # O-01 D (28 Nov): Home draws no question card and sends no answer; one line opens Review, where they are
+    assert "answer-options" not in home and "act('answer'" not in home
+    assert "'Open Review'" in home and "href:'#review'" in home
+    assert "locks.delete(key)" in home
     assert "function skeletonFor(" in js and "'data-key':'loading'" in js
     assert "function connectionNotice(connectionEl, hadState, kind = 'offline')" in home
     assert "connectionNotice(connection, !!state, failKind)" in js
@@ -754,7 +751,7 @@ def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):
 def test_a_refused_change_from_an_old_page_tells_the_person_to_reload():
     js = webjs.all_js()
     err = js[js.index("function changeError") :]
-    err = err[: err.index("function ticketTitle")]
+    err = err[: err.index("const finishedAt")]
     assert (
         "This ticket changed since you opened it. Look at it again, then accept." in err
         and "Read it again" in err

@@ -129,7 +129,8 @@ function needActionsRow(row, key) {
 // merge that waits, a helper that waits for an OK on its screen or keeps failing, an idle helper, a service work
 // depends on. Questions and results are never rows here: they are one line that opens Review.
 function blockedRow(key, kind, what, why, action, attrs = {}) {
-  return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-blocked':kind, ...attrs},
+  // data-counts: how much of THE number (the Review badge) the row carries; the browser check adds them up (ORCH-476)
+  return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-blocked':kind, 'data-counts':'0', ...attrs},
     h('div', {className:'grow'}, h('p', {}, what), why ? h('p', {className:'meta'}, why) : null),
     action ? h('div', {className:'acts'}, action) : null);
 }
@@ -569,7 +570,7 @@ function home() {
   // an add-on's own row that says something is broken and offers the fix (a service work depends on, W-054 A)
   const broken = groups.filter(g => !isHelperRow(g.row) && g.row.tone === 'bad' && needActs(g.row).length);
   const signIns = blockedLogins(logins.stopped);
-  const mark = (el, kind) => { el.setAttribute?.('data-blocked', kind); return el; };
+  const mark = (el, kind) => { el.setAttribute?.('data-blocked', kind); el.setAttribute?.('data-counts', '0'); return el; };
   const blocked = [...signIns.map(loginStoppedRow), stoppedServicesRow(), ...broken.map(g => mark(needActionsRow(g.row, 'need-' + g.row.id), 'addon')),
     ...failed.map(([t, sf]) => startFailedRow(t, sf)), ...stopped.map(g => stoppedRow(g.row))].filter(Boolean);
   // THE number (the Review badge) minus the blocked rows that are part of it: what the Review line says
