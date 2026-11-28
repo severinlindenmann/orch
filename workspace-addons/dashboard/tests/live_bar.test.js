@@ -134,6 +134,7 @@ test('the Focus button word: Answer, Watch, Open, In line, Start; none on a fini
   assert.equal(verb(t('t_a', 'ORCH-1'), run('you')), 'Answer');
   assert.equal(verb(t('t_b', 'ORCH-2'), run('working')), 'Watch');
   assert.equal(verb(t('t_c', 'ORCH-3'), run('idle')), 'Open');
+  assert.equal(verb(t('t_w', 'ORCH-30'), run('waiting')), 'Watch', 'ORCH-2347: on hold for its own command is a running session, not In line');
   assert.equal(verb(t('t_d', 'ORCH-4'), {running:false, hold:'Waits for a free place'}), 'In line');
   assert.equal(verb(t('t_e', 'ORCH-5', {status:'ready'}), undefined), 'Start');
   assert.equal(verb(t('t_f', 'ORCH-6', {status:'waiting', ...ask}), undefined), 'Answer', 'an open question with no helper');

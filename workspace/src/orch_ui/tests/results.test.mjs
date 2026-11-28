@@ -77,6 +77,21 @@ test('every kind builds small and big in every state', () => {
   }
 });
 
+test('ORCH-2347: a pull request card says the live state word; a conflict says when its checks start', () => {
+  const words = item => UI.result(Object.assign({type: 'pr', name: 'Pull request 7'}, item), {size: 'lg'}).textContent;
+  const c = words({status: 'conflict'});
+  assert.match(c, /Conflict/); assert.match(c, /Checks start after the base branch is merged in/); assert.doesNotMatch(c, /No checks yet|Open/);
+  assert.match(words({status: 'conflict', base: 'develop'}), /Checks start after develop is merged in/);
+  assert.match(words({status: 'open'}), /Open.*No checks yet/);
+  assert.match(words({}), /Open.*No checks yet/, 'no state known yet');
+  for (const [status, word] of [['checks failed', 'Checks failed'], ['checks running', 'Checks running'], ['ready to merge', 'Ready to merge'], ['blocked', 'Blocked'], ['behind', 'Behind'], ['merged', 'Merged'], ['closed', 'Closed']]) {
+    const w = words({status});
+    assert.match(w, new RegExp(word), status); assert.doesNotMatch(w, /No checks yet/, status + ': the word already says where it stands');
+  }
+  assert.match(words({status: 'draft', checks: [{name: 'Tests', state: 'pass'}, {name: 'Words', state: 'fail'}]}), /Draft.*1 of 2 checks green/);
+  assert.match(words({status: '<b>x'}), /Open/, 'a word that is no plain state is not shown');
+});
+
 test('the state follows the content: nothing in it is empty, over the limit is too big', () => {
   assert.equal(UI.result({type: 'md', name: 'e.md', text: '  '}).dataset.state, 'empty');
   assert.equal(UI.result({type: 'table', name: 't.csv', text: 'only,a,header'}).dataset.state, 'empty');

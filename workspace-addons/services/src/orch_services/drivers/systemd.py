@@ -190,6 +190,14 @@ class Systemd(Driver):
         v = cp.stdout.strip().partition("=")[2] if cp.returncode == 0 else ""
         return int(v) if v.isdigit() else None
 
+    def last_exit(self, spec: Spec) -> int | None:
+        """The exit code of the unit's last run (`ExecMainStatus`), None while it never ran to an end by
+        itself (`ExecMainCode` is 1 only for a process that exited, not one that was killed)."""
+        cp = self._run("show", unit_name(spec), "--property=ExecMainCode", "--property=ExecMainStatus")
+        v = dict(x.partition("=")[::2] for x in cp.stdout.splitlines()) if cp.returncode == 0 else {}
+        code = v.get("ExecMainStatus", "")
+        return int(code) if v.get("ExecMainCode") == "1" and code.isdigit() else None
+
     def uninstall(self, spec: Spec) -> None:
         if (
             spec.external

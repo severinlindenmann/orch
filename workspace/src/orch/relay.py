@@ -3258,6 +3258,8 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     tid = t["id"]
     b = msg.get("body", {})
     ext = {"origin": "workspace", "from": msg["from"], "allow_message": msg["id"]}
+    if named := _shown_name(root, msg["from"], ""):
+        ext["from_name"] = named  # shown as who asked (Home: "<Name> asked"); a label only, never checked
     tickets.ext_set(root, tid, "relay", json.dumps(ext), by)
     action = {
         "message": msg["id"],

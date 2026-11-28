@@ -204,9 +204,10 @@ function needNoticeRow(row, key) {
     h('div', {className:'grow'}, h('p', {}, clean(row.text || row.title)), h('p', {className:'meta'}, typeof capitalise === 'function' ? capitalise(row.source || 'orch') : 'orch')),
     h('div', {className:'acts'}, later));
 }
-// Who asked: the agent stored on the question (orch ask), else the agent of the run on the ticket, else "Helper" (ORCH-2023).
+// Who asked: the agent stored on the question (orch ask), else the agent of the run on the ticket, else "Helper" (ORCH-2023);
+// for a task another workspace sent, that workspace (ORCH-2167).
 function whoAsked(t, q) {
-  return window.DashHelpers.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, state?.runs?.[t?.id]?.claim) : 'Helper';
+  return window.DashHelpers.askerLabel ? window.DashHelpers.askerLabel(state?.settings, q, state?.runs?.[t?.id]?.claim, t) : 'Helper';
 }
 // The display name of an add-on from its id ("sync" -> "Sync"): its dashboard label, else the id with a capital.
 function addonName(id) {

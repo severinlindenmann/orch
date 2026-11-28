@@ -12,7 +12,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import config, runs, tickets
+from orch import cli_run, config, runs, runs_live, tickets
 from orch.errors import Refused
 
 NEW = "7f3c2a9e-1b4d-4c6e-9a21-5d0e8f7b3c11"
@@ -847,3 +847,94 @@ def test_a_start_killed_before_its_wrapper_ran_does_not_block_the_next_start(pro
     # the claim is free again for the next start
     again = runs.claim(proj, tid, "human:p", "generic")
     assert again["run"] != left["run"]
+
+
+# ---------------------------------------------------------------- the line (ORCH-2295, ORCH-2296)
+
+
+def _in_line(proj, tid, by="human:tester"):
+    runs_live._queue_for_slot(proj, tid, by, "human asked for more work on this ticket")
+
+
+def test_status_of_a_start_in_line_says_why_it_waits_and_how_to_leave(proj, new_ticket, run, monkeypatch):
+    """ORCH-2296: a start waiting in line is not 'Nothing will start it'; Next is not the same start."""
+    a, b = new_ticket("a"), new_ticket("b")
+    _in_line(proj, a)
+    _in_line(proj, b)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": "the computer is very busy")
+    key = tickets.load(proj, b)["key"]
+    code, out, _ = run("run", "status", b)
+    text, _, nxt = out.partition("\nNext: ")
+    assert code == 0
+    assert "Nothing will start it" not in out
+    assert f"{key} waits in line for a free helper place (number 2 of 2): the computer is very busy." in text
+    assert f"Take it out of the line: orch run stop {key}" in text
+    assert "orch run tend" in text and nxt.strip() == "start the line: orch run tend"  # no add-on runs here
+    monkeypatch.setattr(cli_run, "_background_runs", lambda root: True)
+    code, out, _ = run("run", "status", b)
+    text, _, nxt = out.partition("\nNext: ")
+    assert "It starts by itself when a place is free." in text and "orch run tend" not in out
+    assert nxt.strip() == "see the line: orch run list"
+    code, out, _ = run("run", "status", b, "--json")
+    assert json.loads(out)["line"] == {
+        "at": 2,
+        "of": 2,
+        "why": "the computer is very busy",
+        "watched": True,
+    }
+
+
+def test_status_with_waiting_input_never_says_nothing_will_start_it_while_an_addon_runs(
+    proj, new_ticket, run, monkeypatch
+):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "phone", "message", "hello")
+    monkeypatch.setattr(cli_run, "_background_runs", lambda root: True)
+    code, out, _ = run("run", "status", tid)
+    key = tickets.load(proj, tid)["key"]
+    assert code == 0 and out.split("\nNext: ")[0].strip() == (
+        f"1 message waiting for the helper; no helper is working on it now. Start one: orch run start {key}"
+    )
+
+
+def test_a_closed_ticket_leaves_the_line(proj, new_ticket, run):
+    """ORCH-2295: answer -> queued start -> Done. The Done ticket no longer stands first in line."""
+    a, b = new_ticket("a"), new_ticket("b")
+    run("ask", a, "Which one?", "--option", "A", "--option", "B", "--recommend", "A", "--because", "x")
+    code, _, err = run("answer", a, "q1", "A", "--by", "human:tester")
+    assert code == 0, err
+    _in_line(proj, a)  # the start the answer asks for, with every place taken
+    _in_line(proj, b)
+    assert [t for t, _ in runs_live.waiting_line(proj)] == [a, b]
+    tickets.set_status(proj, a, "done", "human:tester")
+    assert [t for t, _ in runs_live.waiting_line(proj)] == [b]
+    assert not [i for i in runs.undelivered(proj, a) if i.get("via") == "slots"]
+    code, out, _ = run("run", "list")
+    assert tickets.load(proj, a)["key"] not in out.split("in this order:")[1]
+
+
+def test_a_dropped_ticket_leaves_the_line_and_an_older_place_is_never_shown(proj, new_ticket):
+    a, b = new_ticket("a"), new_ticket("b")
+    _in_line(proj, a)
+    tickets.set_status(proj, a, "dropped", "agent:helper")  # whoever closes it
+    assert runs_live.waiting_line(proj) == []
+    tickets.set_status(proj, b, "done", "human:tester")
+    _in_line(proj, b)  # a place written by an older orch for a ticket that is Done
+    assert runs_live.waiting_line(proj) == []
+    assert runs_live.start_waiting(proj) == []
+    assert not [i for i in runs.undelivered(proj, b) if i.get("via") == "slots"]
+
+
+def test_run_stop_takes_a_waiting_start_out_of_the_line(proj, new_ticket, run):
+    """ORCH-2295: a person can take a ticket out of the line; their own waiting message stays."""
+    tid = new_ticket()
+    key = tickets.load(proj, tid)["key"]
+    msg = runs.pending_add(proj, tid, "human:tester", "message", "one more thing")
+    _in_line(proj, tid)
+    code, out, _ = run("run", "stop", tid, "--by", "human:tester")
+    assert code == 0
+    assert f"no longer waits in line. Start it when you want: orch run start {key}" in out
+    assert runs_live.waiting_line(proj) == []
+    assert [i["id"] for i in runs.undelivered(proj, tid)] == [msg["id"]]
+    code, out, _ = run("run", "stop", tid, "--by", "human:tester", "--json")
+    assert json.loads(out) == {"stopped": False, "left_line": False}

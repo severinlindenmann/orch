@@ -1351,6 +1351,14 @@ def _set_state(root: Path, tid: str, run: str, state: str, asks: str | None = No
 ATTENTION_CLEAR_SECONDS = 3.0  # the dialog must stay gone this long before a person's OK no longer counts
 
 
+def attention_clear_seconds() -> float:
+    """ATTENTION_CLEAR_SECONDS; ORCH_RUN_ATTENTION_CLEAR_SECONDS changes it (tests, ORCH-2305)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_ATTENTION_CLEAR_SECONDS", ATTENTION_CLEAR_SECONDS))
+    except ValueError:
+        return ATTENTION_CLEAR_SECONDS
+
+
 def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
     """The tool asked for a person's OK on the screen after it was up (attention, no first-run screen) and the
     dialog went away without a Stop or a new prompt: the tool took a decision by itself (it blocked the call
@@ -1380,7 +1388,7 @@ def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | Non
     if since != live.get("since"):
         memo["attention_gone"] = (live.get("since"), t)
         return False
-    if t - first < ATTENTION_CLEAR_SECONDS:
+    if t - first < attention_clear_seconds():
         return False
     memo.pop("attention_gone", None)
     with runs.locked(root, tid):
@@ -1998,6 +2006,55 @@ def stop_hidden(root: Path) -> list[str]:
     return done
 
 
+def stop_all(root: Path) -> list[str]:
+    """`orch uninstall` (ORCH-2299): end everything orch started for this workspace: every helper session
+    and run (the hidden Chat helper's and the Manager's too) and the sessions' own background program.
+    Nothing waiting in line is started in its place. The run this command runs inside is never stopped from
+    within. Returns the names of what was stopped (a ticket's key, or "Chat"); never raises."""
+    names: list[str] = []
+    inside = False
+    for rec in records(root):
+        tid = rec.get("ticket")
+        try:
+            if not isinstance(tid, str):
+                continue
+            if _inside_run(rec) or os.environ.get("ORCH_TICKET") == tid:
+                inside = True
+                continue
+            was = runs.state(rec)
+            with runs.locked(root, tid):
+                cur = runs.read(root, tid)
+                if not cur or cur["run"] != rec["run"]:
+                    continue
+                cur["stop_requested"] = tickets.now()
+                runs._write(root, cur)
+            _close(root, cur, interrupt=True)
+            if was != "dead":
+                names.append(_session_name(root, tid))
+        except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+            continue
+    if inside or shutil.which("tmux") is None:
+        return names
+    with contextlib.suppress(Exception):  # sessions without a run record, then the program that held them
+        left = tmux(root, "list-sessions", "-F", "#{session_name}")
+        if left.returncode == 0:
+            for sid in left.stdout.split():
+                name = _session_name(root, sid) if re.fullmatch(r"t_[a-z0-9]+", sid) else "a helper"
+                if name not in names:
+                    names.append(name)
+            tmux(root, "kill-server")
+    return names
+
+
+def _session_name(root: Path, tid: str) -> str:
+    with contextlib.suppress(Exception):
+        if tickets.is_general(root, tid):
+            return "Chat"
+        if tickets.is_manager(root, tid):
+            return "the Manager"
+    return ref(root, tid)
+
+
 def _inside_run(rec: dict) -> bool:
     """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
     stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET
@@ -2295,10 +2352,11 @@ def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
     return min(asked)
 
 
-def waiting_line(root: Path) -> list[tuple[str, str]]:
+def waiting_line(root: Path, closed: list[str] | None = None) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
     low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
-    then the oldest first. [(ticket id, priority)]"""
+    then the oldest first. [(ticket id, priority)]. A Done or Dropped ticket is never in it; `closed`
+    collects those."""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -2306,6 +2364,11 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if runs.read(root, tid):
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
+        if items and _status(root, tid) in ("done", "dropped"):
+            # ORCH-2295: a closed ticket never starts by itself (ORCH-247), so it holds no place in line
+            if closed is not None:
+                closed.append(tid)
+            continue
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
@@ -2322,10 +2385,31 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
+def leave_line(root: Path, tid: str) -> bool:
+    """Take the ticket out of the line for a free helper place (ORCH-2295): its queued start is removed, so
+    nothing starts it by itself. A person's own waiting messages stay. True when it stood in line."""
+    with runs.locked(root, tid):
+        items = runs._pending_read(root, tid)
+        keep = [i for i in items if i.get("delivered_at") or i.get("via") != "slots"]
+        if len(keep) == len(items):
+            return False
+        runs._pending_write(root, tid, keep)
+        rec = runs.read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            runs._write(root, rec)
+        return True
+
+
 def start_waiting(root: Path) -> list[str]:
     """Slots opened: start the tickets waiting in line, in priority order, while slots are free."""
     started: list[str] = []
-    for tid, _ in waiting_line(root):
+    closed: list[str] = []
+    line = waiting_line(root, closed)
+    for tid in closed:  # a place an older orch left for a ticket that is Done: it goes (ORCH-2295)
+        with contextlib.suppress(Exception):
+            leave_line(root, tid)
+    for tid, _ in line:
         if _full(root) or _held(root):
             break
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]

@@ -1756,3 +1756,38 @@ def test_remove_orphaned_moves_a_copy_while_holding_the_copies_state_lock(repo, 
     monkeypatch.setattr(worktrees, "_to_trash", spy)
     assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
     assert held == [True]
+
+
+def test_uninstall_takes_back_empty_copies_and_lists_copies_that_hold_work(repo, run):
+    """ORCH-2299 (R8.5): the helpers' separate copies and their orch/<ticket> lines stayed behind after
+    `orch uninstall`, unnamed. A copy that holds nothing goes; one with work stays and is listed with the
+    command that removes it."""
+    empty, full = make(repo, 0), make(repo, 1)
+    (full / "notes.md").write_text("half done\n")
+    t0, t1 = repo.tids[0], repo.tids[1]
+    k0, k1 = tickets.load(repo, t0)["key"], tickets.load(repo, t1)["key"]
+    code, out, err = run("uninstall")
+    assert code == 0, out + err
+    assert not empty.exists() and branches(repo) == ["+", f"orch/{t1}"]  # + : its copy is still there
+    assert f"The separate copy of {k0} (nothing was in it)" in out
+    assert full.exists() and (full / "notes.md").read_text() == "half done\n"
+    assert f"The separate copy of {k1} holds work that is not in your project ({full})." in out
+    assert f'git worktree remove --force "{full}" ; git branch -D orch/{t1}' in out
+    assert "uv tool uninstall" in out.splitlines()[-1]
+
+
+def test_uninstall_json_names_what_it_left(repo, run):
+    full = make(repo, 0)
+    git(full, "commit", "--allow-empty", "-qm", "work that is not in the project")
+    code, out, _ = run("uninstall", "--json")
+    res = json.loads(out)
+    assert code == 0 and res["stopped"] == []
+    assert [(k["ticket"], k["path"]) for k in res["left"]] == [(repo.tids[0], str(full))]
+    assert full.exists()
+
+
+def test_uninstall_with_no_copies_leaves_no_copies_folder(repo, run):
+    copy = make(repo, 0)
+    code, out, _ = run("uninstall")
+    assert code == 0 and not copy.exists() and not copy.parent.exists()
+    assert branches(repo) == [] and "Still there" not in out

@@ -72,3 +72,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - Title "Publish" (RP8 B). Each row: file, your note (or "No note"), the ticket and "Ends in N days"; a link that ends within a day gets a warning chip ("Ends tomorrow"). The line below says orch checks each file for passwords first.
 - `?state=connect`: not connected yet. The page is the paste box (the admin's whole text, Connect, one inline sentence when no connect line is found); the heading shows "Not connected yet" instead of Share a file.
 - `?state=offline`: publish can't be reached. The rows come from this workspace's record (the fallback label is “From this workspace’s record” when no date is known), a banner says what that means, and Share a file, Copy link, Extend and Stop sharing wait (disabled).
+
+## Rows fit a phone (ORCH-2213, 28 Nov)
+
+- The "Shared now" rows are the master `card-row` (file name, note, then ticket and end on one line; the buttons in `actions`). They wrap by themselves, so nothing is cut at 390 and 320 px, also in `?state=offline`. The old mockup-only row grid is gone from `mockup.css`; the buttons are always visible, as in the product.

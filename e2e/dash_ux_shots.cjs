@@ -210,7 +210,7 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
     assert.equal(chat.titleRowOne, true, `chat-${w}: the thread title row is one row`);
     assert.ok(chat.earlierGap <= 1, `chat-${w}: Earlier is right on the title row (${chat.earlierGap}px)`);
     assert.ok(chat.headRows <= 2, `chat-${w}: thread header rows ${chat.headRows}`);
-    assert.equal(chat.topbarHelperShown, w > 720, `chat-${w}: the header button is there when it fits`);
+    assert.equal(chat.topbarHelperShown, false, `chat-${w}: no Chat button in the top bar on the Chat page itself (ORCH-2176)`);
     assert.deepEqual(earlier.previews.filter(p => /:$/.test(p)), [], `chat-earlier-${w}: no preview ends on a colon`);
     assert.ok(earlier.finished.length >= 1 && earlier.live.length >= 1, `chat-earlier-${w}: live and finished groups`);
     assert.deepEqual(earlier.live.filter(id => earlier.finished.includes(id)), [], `chat-earlier-${w}: no group is live and finished`);

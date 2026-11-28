@@ -203,13 +203,25 @@ def just_started(root: Path, sid: str) -> bool:
     return t is not None and 0 <= clock() - t < START_GRACE
 
 
-def health(rec: dict, st: drivers.Status | None, wanted: bool = True, starting: bool = False) -> dict:
-    """{"ok", "how", "text"} in plain words (the mockup's health line). `starting`: just started through orch."""
+ENDED_TEXT = "Ended by itself without an error"
+
+
+def health(
+    rec: dict,
+    st: drivers.Status | None,
+    wanted: bool = True,
+    starting: bool = False,
+    ended: bool = False,
+) -> dict:
+    """{"ok", "how", "text"} in plain words (the mockup's health line). `starting`: just started through orch.
+    `ended`: it ran once and ended cleanly (exit 0) and the computer did not start it again: not a failure."""
     port = rec.get("port")
     how = "answers on its address" if port else "process alive"
     alive = bool(st and st.running)
     if not wanted and not alive:
         return {"ok": False, "how": how, "text": "Stopped, so not checked"}
+    if not alive and ended:
+        return {"ok": False, "ended": True, "how": how, "text": ENDED_TEXT}
     if not alive:
         return {"ok": False, "how": how, "text": "Not alive"}
     if port and not port_answers(port):
@@ -286,7 +298,7 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     state = read_state(root, rec["id"])
     w = _watch(state)
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
-    h = health(rec, st, wanted, just_started(root, rec["id"]))
+    h = health(rec, st, wanted, just_started(root, rec["id"]), w.get("ended") is True)
     failing = w["failing"] and wanted
     age = _stamp_age(w.get("checked_at")) if w.get("checked_at") else None
     stale = age is not None and age > STALE
@@ -506,6 +518,23 @@ def _runs(drv, spec) -> int | None:
     return n if isinstance(n, int) and n >= 0 else None
 
 
+def _ended_cleanly(drv, spec, st, runs: int | None, last: object) -> bool:
+    """The job is not alive because it finished: its last exit code is 0 and the computer has not started it
+    again since the last look (a job that ends at once with exit 0 is done, not failing: issue 3362). False
+    when the platform cannot say how it ended."""
+    if st is None or st.running or st.starting:
+        return False
+    if isinstance(runs, int) and isinstance(last, int) and runs > last:
+        return False
+    f = getattr(drv, "last_exit", None)
+    if f is None:
+        return False
+    try:
+        return f(spec) == 0
+    except Refused:
+        return False
+
+
 def _rebase(drv, spec, w: dict) -> None:
     """A start through orch is not a failure: count the computer's own restarts from here."""
     w["runs"] = _runs(drv, spec)
@@ -528,7 +557,10 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
 
     st = drv.status(spec)
     wanted = wanted_running(root, sid, st)
-    h = health(rec, st, wanted, just_started(root, sid))
+    runs = _runs(drv, spec)
+    ended = wanted and _ended_cleanly(drv, spec, st, runs, w.get("runs"))
+    w["ended"] = ended  # the list says the same as this check (row_extra)
+    h = health(rec, st, wanted, just_started(root, sid), ended)
     if not wanted:  # stopped by the person: nothing to watch; an open question is no longer needed
         if w["question"] and w["question"].get("open"):
             _take_back(root, w, f"{rec['name']} was stopped.")
@@ -539,11 +571,10 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
 
     events = [t for t in w["events"] if t > now - WINDOW]
     new = 0
-    runs = _runs(drv, spec)
     last = w.get("runs")
     if isinstance(runs, int) and isinstance(last, int) and runs > last:
         new = min(runs - last, MAX_EVENTS)  # the computer started it again by itself
-    if not h["ok"] and not h.get("starting"):
+    if not h["ok"] and not h.get("starting") and not ended:  # a clean end is not a failure
         new = max(new, 1)  # one stop seen twice (not alive now, and started again) is still one failure
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]
@@ -601,9 +632,8 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
         "health": h,
         "failing": w["failing"],
         "did": did,
-        "unhealthy": not h[
-            "ok"
-        ],  # `check` says it even before it counts as failing (never "all as expected")
+        # `check` says it even before it counts as failing (never "all as expected"); a clean end is expected
+        "unhealthy": not h["ok"] and not ended,
     }
 
 

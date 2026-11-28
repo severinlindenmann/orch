@@ -11,7 +11,7 @@ const run = (mode = 'live') => ({running:true, claim:{mode}});
 
 test('places count every working helper (live and one-step), the limit and the line', () => {
   const p = S.liveStartPlaces({a:run(), b:run(), c:{running:false}, d:run('oneshot')}, {live_max:3}, {waiting:['t_x']});
-  assert.deepEqual({...p, waiting:[...p.waiting]}, {used:3, max:3, waiting:['t_x'], full:true});
+  assert.deepEqual({...p, waiting:[...p.waiting]}, {used:3, working:3, max:3, waiting:['t_x'], full:true});
   assert.equal(S.liveStartPlaces({a:run(), b:run()}, {live_max:2}, null).full, true);
   assert.equal(S.liveStartPlaces({}, {live_max:null}, null).max, null);  // no limit (the default)
   assert.equal(S.liveStartPlaces(null, null, null).used, 0);
@@ -27,6 +27,14 @@ test('the places line says it plainly, singular and plural right', () => {
   assert.equal(t(1, null), '1 helper is working now.');
   assert.equal(t(3, null, ['a']), '3 helpers are working now. 1 ticket waits in line.');
   assert.doesNotMatch(t(1, 6) + t(1, null), /\b1 (helpers|places|tickets)\b/);
+});
+
+test('ORCH-2314: idle helpers hold a place but are not counted as working', () => {
+  const h = state => ({running:true, helper:{state}});
+  const p = S.liveStartPlaces({a:h('idle'), b:h('idle'), c:h('you')}, {live_max:null}, null);
+  assert.equal(p.used, 3); assert.equal(p.working, 0);
+  assert.equal(S.liveStartPlacesText(p), 'No helper is working now.');
+  assert.equal(S.liveStartPlacesText(S.liveStartPlaces({a:h('working'), b:h('idle'), c:{running:true}}, {}, null)), '2 helpers are working now.');
 });
 
 test('where a ticket stands in the line', () => {

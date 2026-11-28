@@ -80,8 +80,8 @@ A message to a running helper goes in after its current step; to a stopped helpe
 Stop and End do the same as `orch run start`, `orch run interrupt` and `orch run stop`. Close the browser and the helper
 keeps working.
 
-Two switches in Settings, Add-ons, Live, both off by default: **Typing** lets you type into a helper's live screen, and
-the plain terminal has its own typing switch.
+Two switches in Settings: **Typing** (Add-ons, Live; on by default) lets you click into a helper's live screen and
+type; turn it off to watch only. The plain terminal has its own typing switch, off by default.
 
 The Focus add-on itself has no page or server: it only opens the right place in the dashboard and tells Needs you when a
 helper waits for your OK on its screen.

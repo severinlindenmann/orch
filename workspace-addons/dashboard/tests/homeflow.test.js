@@ -196,3 +196,20 @@ test('Needs you names who asked the question; unknown is Helper, not the chosen 
   assert.match(asked({}), /^Helper asked/, 'nothing known: never the chosen agent');
   assert.match(asked({asked_by:'human:anna'}), /^Helper asked/);
 });
+// ORCH-2167: a task from another workspace was asked by that workspace: Home names it, never a helper here.
+test('Needs you names the other workspace for a task it sent, never a helper', () => {
+  const settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
+  const row = {id:'n1', ticket:'t1', since:'2026-11-14T09:00:00Z', title:'Task from Sales: price list', answer:{question:'q1', digest:'d', options:['Allow once', 'No']}};
+  const asked = (q, ext, runs = {}) => {
+    const tickets = [{id:'t1', key:'KP-2', title:'Sales wants to: price list', status:'waiting', ext, questions:[{id:'q1', text:'Task from Sales: price list', ...q}]}];
+    const c = ctx({state:{settings, runs, services:[]}, needsList:() => [row], tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id)});
+    return text(nodes(c.needRow(row, 'n1')).find(n => /question-context/.test(n.attrs.className || '')));
+  };
+  const by = 'agent:relay from ws_9f2c';
+  assert.match(asked({kind:'relay:allow', asked_by:by}, {relay:{origin:'workspace', from:'ws_9f2c', from_name:'Sales'}}), /^Sales asked/);
+  assert.match(asked({kind:'relay:allow', asked_by:by}, {relay:{from_name:'Sales'}}, {t1:{claim:{agent:'claude'}}}), /^Sales asked/, 'never the run on the ticket');
+  for (const ext of [{relay:{origin:'workspace', from:'ws_9f2c'}}, {relay:{from_name:'  '}}, {relay:{from_name:7}}, undefined])
+    assert.match(asked({kind:'relay:allow', asked_by:by}, ext), /^Another workspace asked/, 'no stored name: no raw id, no helper');
+  assert.match(asked({asked_by:by}, undefined), /^Another workspace asked/, 'an older question without the kind');
+  assert.doesNotMatch(asked({kind:'relay:allow', asked_by:by}, {relay:{from:'ws_9f2c'}}), /ws_9f2c|Claude|Relay from/);
+});

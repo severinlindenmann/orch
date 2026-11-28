@@ -94,6 +94,32 @@ def home_said(over: dict[str, str], used: dict[str, str]) -> str:
     return f"HOME {used.get('HOME', '(not set)')} ({where})"
 
 
+TMUX_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")  # where a person's tmux sits on a Mac (Homebrew) or Linux
+
+
+def with_tmux(env: dict[str, str], dirs: tuple[str, ...] | None = None) -> dict[str, str]:
+    """The environment of a background service, with the folder of an installed tmux at the END of PATH when
+    PATH does not lead to one. A service started with a short PATH (at login, by an update that ran in the
+    background) found no tmux although it is installed: every helper it started then worked in the background,
+    with no screen to watch, and the page never said why (report r-1127-1221-t_7eoocm, ORCH-2367). The folder
+    goes last, so it never changes which program any other name means. Nothing changes on Windows (no tmux),
+    or when PATH already leads to tmux."""
+    if os.name == "nt":
+        return env
+    parts = [p for p in (env.get("PATH") or "").split(os.pathsep) if p]
+
+    def has(folder: str) -> bool:
+        cand = os.path.join(folder, "tmux")
+        return os.path.isfile(cand) and os.access(cand, os.X_OK)
+
+    if any(has(p) for p in parts):
+        return env
+    for d in TMUX_DIRS if dirs is None else dirs:
+        if d not in parts and has(d):
+            return {**env, "PATH": os.pathsep.join([*parts, d])}
+    return env
+
+
 def differs(recorded: object, used: dict[str, str]) -> list[str]:
     """Which of HOME/PATH the service was started with differ from what the restart uses."""
     rec = clean(recorded)

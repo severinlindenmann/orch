@@ -800,7 +800,7 @@ function offerStart(id) {
   const look = {align:'start'};
   look.style = 'ghost';  // a quiet button in a notice
   if (!startButtonIn(start, ticketOf(id), look)) return;
-  toast.querySelector('button[aria-label="Dismiss notification"]')?.before(start);
+  toastAction(toast, start);
 }
 /* ORCH-235: Done on a ticket whose sub-tickets are not all finished asks once (no typed word): "Mark Done anyway"
    or Cancel. Resolves true to go on. */
@@ -815,6 +815,14 @@ function confirmOpenKids(t, open) {
       h('p', {}, (open.length === 1 ? '1 sub-ticket is' : open.length + ' sub-tickets are') + ' not done yet: ' + names + '.')), actions);
     d.showModal();
   });
+}
+// ORCH-2149 (1): a button in a toast (Undo, Start helper) sits before its Dismiss button. The master toast's
+// Dismiss carries its word, the older one an aria-label; with neither the button goes last. It was looked up by
+// the aria-label only, so 'Moved to Done' had no Undo.
+function toastAction(toast, button) {
+  const all = toast?.querySelectorAll ? [...toast.querySelectorAll('button')] : [];
+  const dismiss = all.find(b => b.getAttribute?.('aria-label') === 'Dismiss notification' || b.textContent === 'Dismiss');
+  if (dismiss) dismiss.before(button); else toast?.append?.(button);
 }
 function moveTicket(id, status, undoing = false, extra = {}) {
   if (status === 'done' && !undoing && extra.quiet !== true && !extra.kids_ok) {
@@ -845,7 +853,7 @@ function moveTicket(id, status, undoing = false, extra = {}) {
   if (!undoing && toast?.querySelector) {
     const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
     undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true, {data:before}); });
-    toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+    toastAction(toast, undo);
   }
   const run = (async () => {
     let result;
@@ -998,7 +1006,7 @@ function bulkNotice(text, ok, failed, undo) {
     if (undo && toast?.querySelector) {
       const back = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
       back.addEventListener('click', () => { toast.remove(); undo(); });
-      toast.querySelector('button[aria-label="Dismiss notification"]')?.before(back);
+      toastAction(toast, back);
     }
   }
   if (failed) window.orch.toast((failed === 1 ? '1 ticket' : failed + ' tickets') + ' could not be saved. Try again, or change them on their tickets.', 'error');

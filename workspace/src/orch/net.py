@@ -153,7 +153,7 @@ def call(
         data = body
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
-    host = urllib.parse.urlsplit(url).netloc
+    host = shown_host(url)  # also what the refusals below print: never the part before an @
     silent = _NO_ANSWER.get()
     if silent is not None and host in silent:  # gave no answer earlier in this command: no second wait
         err = Refused(f"Can't reach {host} right now. Check your internet and try again.")
@@ -219,7 +219,19 @@ def clean_url(url: str) -> str:
     url = url.strip().rstrip("/")
     if not url.startswith(("http://", "https://")):
         raise Refused("The address must start with https:// (or http:// for a local test server).")
+    if "@" in urllib.parse.urlsplit(url).netloc:
+        # R5.2: an address is printed (status, errors, the Relay page): a password inside it would be too
+        raise Refused(
+            "The address must not hold a user name or password (the part before @). "
+            "Give the plain address; the token goes in --token."
+        )
     return url
+
+
+def shown_host(url: str) -> str:
+    """The server part of an address for a person to read: host and port, never a user name or password an
+    older saved address may still hold before the @ (R5.2)."""
+    return urllib.parse.urlsplit(url).netloc.rsplit("@", 1)[-1]
 
 
 # ---- files under .orch/ -------------------------------------------------------------------------
@@ -333,7 +345,7 @@ def admin_call(admin_url: str, token: str, method: str, path: str, body=None):
             raise Refused("The admin page did not take that admin token. Check it and try again.") from None
         if 300 <= (getattr(e, "status", None) or 0) < 400:
             raise Refused(
-                f"{urllib.parse.urlsplit(url).netloc} sent orch somewhere else; orch did not follow, so the "
+                f"{shown_host(url)} sent orch somewhere else; orch did not follow, so the "
                 "admin token stayed here. Pass the admin page's own address with --admin-url."
             ) from None
         raise

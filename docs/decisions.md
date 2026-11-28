@@ -99,3 +99,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   families (Decide, Look at the result, Only you can press it, Needs you in person), picked by orch from what a card
   carries; the list shows what holds up work first. `orch ask` refuses a question over 40 words and a report of a
   state. "Nothing closes by itself" is the Reviewer mode `workflow.reviewer_mode = propose`; the default stays accept.
+- 2026-11-27 (ORCH-2188, owner pick B a; ORCH-2314): typing into a helper's live screen is on by default, with no
+  switch on the screen: a click into the terminal types. Watch only is a setting (`focus.session_typing off`). A
+  config file that cannot be read counts as watch only. The plain terminal keeps its own switch, off (ORCH-261).
