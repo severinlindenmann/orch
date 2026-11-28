@@ -428,8 +428,9 @@ const STUCK_CAUSE = {'helper:unmerged':'Pull request not merged', 'helper:idle':
 function reviewCauseOf(it) {
   const cause = it?.raw?.cause;
   if (typeof cause === 'string' && STUCK_CAUSE[cause]) return {key:'cause:' + cause, label:STUCK_CAUSE[cause]};
+  // the same words on cards of one kind (a release recorded three times); a card without words of its own is never folded
   const title = clean(it?.title || '').replace(/\s+/g, ' ').trim();
-  return title ? {key:'title:' + title.toLowerCase(), label:title} : null;
+  return title && title !== 'Review' ? {key:'title:' + String(it.kind || '') + ':' + title.toLowerCase(), label:title} : null;
 }
 // {total, rows, all, from, more, back}: the waiting cards in the deck's order, five rows at a time; two or more cards
 // with one cause are one group row. The five shown are the ones that hold the card on screen when it changes.
@@ -981,18 +982,20 @@ let reviewKeepY = null, reviewPanelWas = null;  // null: the page was just opene
 function reviewKeepPlace(main) {
   const open = snapshot ? '' : reviewTicketId();
   if (reviewKeepY != null && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-    const y = reviewKeepY; reviewKeepY = null;
-    setTimeout(() => window.scrollTo(0, y), 0);  // after the shell's own scroll at the end of this paint
+    const keep = reviewKeepY; reviewKeepY = null;
+    // only the paint that follows the click at once (a click that changed nothing must not pull a later paint back)
+    if (Date.now() - keep.at < 1500) setTimeout(() => window.scrollTo(0, keep.y), 0);  // after the shell's own scroll at the end of this paint
   }
   if (open !== reviewPanelWas) {
-    const to = reviewPanelWas == null ? '' : open ? '[data-key="review-ticket-close"]' : reviewPanelWas ? '[data-review-host] .swipe-more summary' : '';
+    // the keyboard moves only when the panel opens or closes; a panel that follows the next card leaves it on the deck
+    const to = reviewPanelWas == null ? '' : open && !reviewPanelWas ? '[data-key="review-ticket-close"]' : !open && reviewPanelWas ? '[data-review-host] .swipe-more summary' : '';
     reviewPanelWas = open;
     if (to) setTimeout(() => (main.querySelector(to) || main.querySelector('#deck'))?.focus?.({preventScroll:true}), 0);
   }
 }
 function reviewCloseTicket() {
   if (typeof location === 'undefined' || !reviewTicketId()) return false;
-  reviewKeepY = typeof window !== 'undefined' ? window.scrollY || 0 : 0;
+  reviewKeepY = {y:typeof window !== 'undefined' ? window.scrollY || 0 : 0, at:Date.now()};
   location.hash = reviewTicketHref('');
   return true;
 }
@@ -1000,13 +1003,14 @@ if (typeof document !== 'undefined' && document.addEventListener) {
   // a click that opens, closes or changes the ticket beside the card: remember where the page stands
   document.addEventListener('click', e => {
     const a = e.target.closest?.('a[href^="#review"]');
-    if (a && typeof route === 'function' && route().kind === 'review' && (/[?&]ticket=/.test(a.getAttribute('href')) || reviewTicketId())) reviewKeepY = window.scrollY || 0;
+    if (a && typeof route === 'function' && route().kind === 'review' && (/[?&]ticket=/.test(a.getAttribute('href')) || reviewTicketId())) reviewKeepY = {y:window.scrollY || 0, at:Date.now()};
     // Waiting / Answered (also the empty page's "See answers"): the page's own blocks follow the view on screen
     if (e.target.closest?.('[data-review-nav],[data-review-host]')) setTimeout(() => { if (reviewViewNow() !== reviewView && typeof route === 'function' && route().kind === 'review') render(); }, 0);
   }, true);
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || e.defaultPrevented || typeof route !== 'function' || route().kind !== 'review' || !reviewTicketId()) return;
-    if (document.querySelector('dialog[open]') || e.target.closest?.('textarea,input,select,[contenteditable],.swipe-viewer,.swipe-overview,.swipe-sheet')) return;
+    // Esc first closes what is open on top (a dialog, a menu, a sheet of the card) and leaves a text field alone
+    if (document.querySelector('dialog[open]') || e.target.closest?.('textarea,input,select,[contenteditable],details[open],[role="menu"],[role="listbox"],.swipe-viewer,.swipe-sheet')) return;
     if (reviewCloseTicket()) e.preventDefault();
   });
 }

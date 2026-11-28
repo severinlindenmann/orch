@@ -55,7 +55,7 @@ const items=new URLSearchParams(location.search).has('one')?[window.SWIPE_ONE]:w
    Next five / All, cards that wait for one cause as one row with Open, no Compare; then the merge line and the Reviewer's line. */
 let listFrom=0,listAll=false,listCur='';const listOpen=new Set(),CAUSE={'helper:unmerged':'Pull request not merged'};
 const mk=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n};
-const causeOf=it=>it.cause&&CAUSE[it.cause]?{key:'cause:'+it.cause,label:CAUSE[it.cause]}:{key:'title:'+String(it.title).toLowerCase(),label:it.title};
+const causeOf=it=>it.cause&&CAUSE[it.cause]?{key:'cause:'+it.cause,label:CAUSE[it.cause]}:{key:'title:'+it.kind+':'+String(it.title).toLowerCase(),label:it.title};
 function drawSide(follow){if(!deck)return;const wait=deck.items.map((it,i)=>({it,i,now:i===deck.index,c:causeOf(it)})).filter(x=>!deck.answers[x.it.id]),n=new Map(),rows=[],gs=new Map();
  wait.forEach(x=>n.set(x.c.key,(n.get(x.c.key)||0)+1));
  wait.forEach(x=>{if(n.get(x.c.key)<2){rows.push(x);return}let g=gs.get(x.c.key);if(!g){g={group:x.c.key,label:x.c.label,rows:[],now:false};gs.set(x.c.key,g);rows.push(g)}g.rows.push(x);g.now=g.now||x.now});

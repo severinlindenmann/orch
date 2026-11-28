@@ -118,18 +118,22 @@ test('O-05: the list shows five compact rows and the count; Next five shows the 
 test('O-05: cards that wait for one cause are one row with Open (their cards under it), never a button that answers them all', () => {
   const c = ctx({}), queue = h('div');
   const items = [{id:'s1', title:'Export', ticket:'DT-1', raw:{cause:'helper:unmerged'}}, {id:'q', title:'Which colour?', ticket:'DT-2', raw:{}},
-    {id:'s2', title:'Import', ticket:'DT-3', raw:{cause:'helper:unmerged'}}, {id:'r1', title:'Recorded as passed for release 53', raw:{}}, {id:'r2', title:'Recorded as passed for release 53', raw:{}}];
+    {id:'s2', title:'Import', ticket:'DT-3', raw:{cause:'helper:unmerged'}}, {id:'r1', kind:'check', title:'Recorded as passed for release 53', raw:{}}, {id:'r2', kind:'check', title:'Recorded as passed for release 53', raw:{}},
+    {id:'n1', kind:'draft', title:'Review', raw:{}}, {id:'n2', kind:'draft', title:'Review', raw:{}}, {id:'d1', kind:'draft', title:'Recorded as passed for release 53', raw:{}}];
   const deck = listDeck(0, {items, index:2});
   c.document.querySelector = () => queue;
   c.reviewDrawSide(queue, deck);
   const group = key => buttons(queue).find(b => b.attrs['data-review-group'] === key);
   assert.equal(text(group('cause:helper:unmerged')), '2 · Pull request not mergedOpen');
-  assert.equal(text(group('title:recorded as passed for release 53')), '2 · Recorded as passed for release 53Open');
+  assert.equal(text(group('title:check:recorded as passed for release 53')), '2 · Recorded as passed for release 53Open');
   assert.match(group('cause:helper:unmerged').attrs.className, /is-now/, 'the card on screen is in this group');
-  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['q'], 'a lone cause stays its own row');
-  assert.equal(c.reviewListModel(deck).all, 3, 'three rows for five cards');
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['q', 'n1', 'n2'], 'a lone cause stays its own row (rows 1 to 5: two groups, then three single rows)');
+  assert.equal(c.reviewListModel(deck).all, 6, 'two groups and four single rows for eight cards');
+  vm.runInContext('reviewListAll = true', c); c.reviewDrawSide(queue, deck);
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['q', 'n1', 'n2', 'd1'], 'cards without words of their own, or of another kind, are never folded');
+  vm.runInContext('reviewListAll = false', c); c.reviewDrawSide(queue, deck);
   group('cause:helper:unmerged').onclick();
-  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['s1', 's2', 'q']);
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']).slice(0, 3), ['s1', 's2', 'q']);
   assert.equal(text(group('cause:helper:unmerged')), '2 · Pull request not mergedClose'); assert.equal(group('cause:helper:unmerged').attrs['aria-expanded'], 'true');
   assert.deepEqual(buttons(queue).map(text).filter(t => /merge all|answer all/i.test(t)), [], 'every decision stays its own');
 });
@@ -812,4 +816,24 @@ test('O-04: the layout watcher draws the page again only when the layout really 
   const other = ctx({review:{cards:[]}}, {document:{addEventListener(){}, getElementById:() => null, body:{dataset:{liveNarrow:''}}}, route:() => ({kind:'home'}), render:() => { renders++; }});
   other.reviewPage(); delete other.document.body.dataset.liveNarrow;
   assert.equal(other.reviewLayoutChanged(), false, 'another page is on screen');
+});
+test('W-039: the keyboard moves only when the ticket panel opens or closes, and a scroll kept for a click is used once and soon', () => {
+  const focused = [], timers = [];
+  const at = hash => ({location:{hash, origin:'', pathname:'/'}});
+  const c = ctx({review:{cards:[]}}, {...at('#review'), setTimeout:fn => timers.push(fn), window:{DashHelpers:helpers, UI:kit.UI, orch:{toast(){}}, scrollTo:(x, y) => focused.push('scroll:' + y), scrollY:0}});
+  const main = {querySelector:sel => ({focus:() => focused.push(sel)})};
+  const run = () => { while (timers.length) timers.shift()(); };
+  c.reviewKeepPlace(main); run();
+  assert.deepEqual(focused, [], 'the page just opened: nothing moves');
+  c.location.hash = '#review?ticket=t_abcdef'; c.reviewKeepPlace(main); run();
+  assert.deepEqual(focused, ['[data-key="review-ticket-close"]'], 'opened: to the panel');
+  c.location.hash = '#review?ticket=t_aaaa01'; c.reviewKeepPlace(main); run();
+  assert.equal(focused.length, 1, 'the panel followed the next card: the keyboard stays on the deck');
+  c.location.hash = '#review'; c.reviewKeepPlace(main); run();
+  assert.equal(focused[1], '[data-review-host] .swipe-more summary', 'closed: back to the card');
+  vm.runInContext('reviewKeepY = {y:240, at:Date.now()}', c); c.reviewKeepPlace(main); run();
+  assert.equal(focused[2], 'scroll:240');
+  c.reviewKeepPlace(main); run(); assert.equal(focused.length, 3, 'used once');
+  vm.runInContext('reviewKeepY = {y:99, at:Date.now() - 5000}', c); c.reviewKeepPlace(main); run();
+  assert.equal(focused.length, 3, 'an old one is dropped');
 });
