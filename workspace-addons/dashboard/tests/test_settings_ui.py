@@ -17,7 +17,7 @@ def test_settings_navigation_and_cards():
         "'Connection'",
         "function addonDetailPage(addon)",
         "'Remove ' + label",  # D6: one list ends with Remove and what stays (no 'About this add-on')
-        "OrchLook?.settingsSection()",
+        "OrchLook?.settingsSection('Shared pages')",  # W-059: on the sharing add-on's own Settings page
         "agent-card",
         "role:'status', className:'meta test-note'",
         "'data-action':'agent-test'",
