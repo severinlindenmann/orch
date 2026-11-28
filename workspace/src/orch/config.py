@@ -917,6 +917,33 @@ def set_live_idle_minutes(root: Path, value: str) -> int:
     return int(value)
 
 
+def set_background_max(root: Path, value: str) -> int:
+    """[workspace] background_max: how many background tasks orch runs at once here (procs.bg_limits)."""
+    from orch import procs
+
+    v = value.strip()
+    if not (v.isascii() and v.isdigit()) or not 1 <= int(v) <= procs.BG_MAX_MOST:
+        raise Refused(
+            f"Give a whole number from 1 to {procs.BG_MAX_MOST} (the default is {procs.BG_MAX_DEFAULT})."
+        )
+    set_key(root, "workspace", "background_max", int(v))
+    return int(v)
+
+
+def set_background_load(root: Path, value: str) -> float:
+    """[workspace] background_load: the load per processor core over which background work waits."""
+    from orch import procs
+
+    try:
+        x = float(value.strip())
+    except ValueError:
+        x = 0.0
+    if not 0.1 <= x <= 100:
+        raise Refused(f"Give a number from 0.1 to 100 (the default is {procs.BG_LOAD_DEFAULT:g}).")
+    set_key(root, "workspace", "background_load", x)
+    return x
+
+
 def set_live_max(root: Path, value: str) -> int | None:
     """`none` (also off, 0) = no limit; 2 to 10 = that many helpers at once."""
     v = value.strip().lower()

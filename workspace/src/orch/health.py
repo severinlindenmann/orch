@@ -753,12 +753,16 @@ def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
                 return False
         except OSError:
             pass
-        mark.parent.mkdir(parents=True, exist_ok=True)
-        mark.touch()
-        os.utime(mark, (now, now))
         from orch import procs
 
-        subprocess.Popen(  # due only: each check keeps its own interval; a helper that failed checks all
+        if procs.bg_depth() >= 1:  # inside background work: it never starts more (ORCH-2407)
+            return False
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.touch()  # also when the start is skipped below: asked again after ASK_EVERY, not at once
+        os.utime(mark, (now, now))
+        # due only: each check keeps its own interval; a helper that failed checks all
+        started = procs.background_start(
+            root,
             procs.orch_python_argv("logins", "--json", *(() if force else ("--due-only",))),
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
             env={**os.environ, "ORCH_ROOT": str(root)},
@@ -767,6 +771,6 @@ def soon(root: Path, *, force: bool = False, now: float | None = None) -> bool:
             stderr=subprocess.DEVNULL,
             start_new_session=os.name != "nt",
         )
-        return True
+        return started
     except Exception:  # noqa: BLE001  a check that cannot start never holds up a helper or a page
         return False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import socket
@@ -79,6 +80,239 @@ def background_popen_kwargs() -> dict[str, int | bool]:
             "close_fds": True,
         }
     return {"start_new_session": True, "stdin": subprocess.DEVNULL}
+
+
+# ---- orch limits its own power (ORCH-2407) ------------------------------------------------------------
+# Release 52 had an `orch needs` that started itself again without end and filled a computer until it had to
+# be restarted (ORCH-2372). Three brakes, all here, so every background start of orch's own passes them:
+#   1. one budget per workspace: at most `workspace.background_max` background processes at once, each
+#      holding a slot file in .orch/run/bg/ (a slot whose process is gone is taken over);
+#   2. a busy computer: while the 1-minute load per core is over `workspace.background_load`, background
+#      work is not started (it is started by a later command);
+#   3. no start from inside: a background process carries ORCH_BG_DEPTH and never starts another one.
+
+BG_DEPTH = "ORCH_BG_DEPTH"  # set for every background process orch starts: how deep under a command it runs
+BG_MAX_DEFAULT = 4  # background processes at once per workspace ([workspace] background_max)
+BG_MAX_MOST = 64
+BG_LOAD_DEFAULT = 1.5  # 1-minute load per core over which background work waits ([workspace] background_load)
+BG_OVER = 16  # slots past the limit for a start a person asked for (never skipped, still counted)
+BG_OLD = 600  # a slot older than this is checked for a pid that now belongs to another program
+_BG_LOCK_WAIT = 1.0  # the longest a start waits for the slot lock; then it is skipped
+
+
+def bg_depth() -> int:
+    """0 in a command a person or a helper typed; 1 in a background process orch started; 2 in its child."""
+    try:
+        return max(0, int(os.environ.get(BG_DEPTH) or 0))
+    except ValueError:
+        return 1  # set, but not a number: counts as inside
+
+
+def bg_env(env: dict | None = None) -> dict:
+    """The environment of a background child: one level deeper than this process."""
+    return {**(os.environ if env is None else env), BG_DEPTH: str(bg_depth() + 1)}
+
+
+def bg_limits(root: Path | None) -> tuple[int, float]:
+    """(background processes at once, load per core) as config.toml says, else the defaults. Never raises."""
+    most, load = BG_MAX_DEFAULT, BG_LOAD_DEFAULT
+    try:
+        from orch import config
+
+        table = config.read(Path(root)).get("workspace") if root is not None else None
+    except Exception:  # noqa: BLE001  a file that cannot be read: the safe defaults
+        table = None
+    if isinstance(table, dict):
+        m, lo = table.get("background_max"), table.get("background_load")
+        if type(m) is int and 1 <= m <= BG_MAX_MOST:
+            most = m
+        if type(lo) in (int, float) and lo > 0:
+            load = float(lo)
+    return most, load
+
+
+def _load_per_core() -> float | None:
+    """The 1-minute load average per core; None where the system has none (Windows). Tests replace this."""
+    try:
+        return os.getloadavg()[0] / (os.cpu_count() or 1)
+    except (OSError, AttributeError):
+        return None
+
+
+def bg_busy(root: Path | None) -> bool:
+    """True while this computer is too busy for background work. Windows has no load average: there only
+    the budget counts. ORCH_NO_LOAD_HOLD=1 (test runners): never held back by the machine's load."""
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        return False
+    load = _load_per_core()
+    return load is not None and load > bg_limits(root)[1]
+
+
+def _bg_dir(root: Path) -> Path:
+    return Path(root) / ".orch" / "run" / "bg"
+
+
+@contextlib.contextmanager
+def _bg_lock(root: Path):
+    """The slot files are read and written by one process at a time. Yields False when the lock could not be
+    had in _BG_LOCK_WAIT (the start is skipped). The lock ends with its process: never left behind."""
+    d = _bg_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / "lock", "a+b") as f:
+        end = time.monotonic() + _BG_LOCK_WAIT
+        got = False
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                got = True
+                break
+            except OSError:
+                if time.monotonic() > end:
+                    break
+                time.sleep(0.01)
+        try:
+            yield got
+        finally:
+            if got and os.name == "nt":
+                import msvcrt
+
+                with contextlib.suppress(OSError):
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            # POSIX: closing the file ends the lock
+
+
+def _slot_pid(slot: Path) -> int | None:
+    try:
+        return int(slot.read_text(encoding="ascii").split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _slot_held(slot: Path) -> bool:
+    """True while the slot's process runs. A slot nobody can read counts as held (never over the limit); an
+    old slot whose pid now belongs to a program that started after the slot was written is free."""
+    try:
+        age = time.time() - slot.stat().st_mtime
+    except OSError:
+        return False  # gone meanwhile
+    pid = _slot_pid(slot)
+    if pid is None:
+        return age < BG_OLD  # half written, or damaged: held for a while, then taken over
+    from orch import services
+
+    if not services.pid_alive(pid):
+        return False
+    if age > BG_OLD:
+        started = pid_started(pid)
+        if started:
+            with contextlib.suppress(ValueError):
+                born = datetime.strptime(started, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+                if born > slot.stat().st_mtime + APPROX_SECONDS:
+                    return False
+    return True
+
+
+def bg_count(root: Path) -> int:
+    """How many background processes of this workspace run right now (slots whose process is alive)."""
+    try:
+        return sum(1 for s in _bg_dir(root).glob("*.slot") if _slot_held(s))
+    except OSError:
+        return 0
+
+
+def bg_claim(root: Path, *, over: bool = False) -> Path | None:
+    """Take one free slot for a background process about to start, or None when the budget is used up.
+    The slot names this process until bg_bind hands it to the child. `over`: a start a person asked for
+    takes a slot past the limit instead of being skipped. Never raises."""
+    try:
+        most = bg_limits(root)[0]
+        with _bg_lock(root) as got:
+            if not got:
+                return None
+            d = _bg_dir(root)
+            for i in range(most + (BG_OVER if over else 0)):
+                slot = d / f"{i}.slot"
+                if slot.exists() and _slot_held(slot):
+                    continue
+                slot.write_text(str(os.getpid()), encoding="ascii")
+                return slot
+    except OSError:
+        pass
+    return None
+
+
+def bg_bind(slot: Path, pid: object) -> None:
+    """The slot now belongs to the started child: held until that process ends. Never raises."""
+    try:
+        if type(pid) is int and pid > 1:
+            slot.write_text(str(pid), encoding="ascii")
+        else:
+            slot.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def bg_release(slot: Path | None, pid: int | None = None) -> None:
+    """Give the slot back at once (the child `pid` has ended, or never started). Only while the slot still
+    names that child or this process: one taken over by another start meanwhile is left alone. Without the
+    lock it is left as well (a slot whose process is gone is free anyway). Never raises."""
+    if slot is None:
+        return
+    try:
+        with _bg_lock(slot.parent.parent.parent.parent) as got:
+            if got and _slot_pid(slot) in (pid, os.getpid()):
+                slot.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def background_start(
+    root: Path, argv: list[str], *, env: dict | None = None, person: bool = False, **popen
+) -> bool:
+    """THE way orch starts background work of its own (a refresh, a look, a check, a cleanup). True when it
+    was started; False when not: this process is itself background work (it never starts more), the
+    computer is busy, or the workspace's budget is used up. Callers treat False as "not now": a later
+    command starts it. `person`: a start a person asked for (a sign-in they pressed) is never
+    held back by the load or the budget, only counted. Raises what Popen raises."""
+    if bg_depth() >= 1:
+        return False
+    if not person and bg_busy(root):
+        return False
+    slot = bg_claim(root, over=person)
+    if slot is None:
+        return False
+    try:
+        p = subprocess.Popen(argv, env=bg_env(env), **popen)  # noqa: S603
+    except BaseException:
+        bg_release(slot)
+        raise
+    bg_bind(slot, getattr(p, "pid", None))
+    return True
+
+
+def power_words(root: Path) -> str:
+    """One plain sentence for `orch doctor`: the limits and how much background work runs now."""
+    most, load = bg_limits(root)
+    n = bg_count(root)
+    now = "none runs now" if n == 0 else f"{n} run{'s' if n == 1 else ''} now"
+    per = _load_per_core()
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        busy = " The load check is turned off (ORCH_NO_LOAD_HOLD)."
+    elif per is None:
+        busy = " This system reports no load, so only that limit counts."
+    else:
+        state = "over it: background work waits" if per > load else "under it"
+        busy = f" It waits while the load per processor core is over {load:g} (now {per:.1f}, {state})."
+    return f"orch runs at most {most} background tasks at once in this workspace ({now}).{busy}"
 
 
 def _win_processes() -> list[tuple[int, int, str]]:
