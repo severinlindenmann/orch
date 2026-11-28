@@ -1084,12 +1084,15 @@ def test_the_hook_command_takes_the_tools_payload_on_stdin(tool_run, monkeypatch
 @pytest.mark.skipif(os.name == "nt", reason="no process-tree proof on Windows yet (TODO W2b 1.7: VM proof)")
 def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(subprocess_home, tool_run):
     """The exact line from the run's settings, run by a shell below this run's process as the tool runs it: it
-    passes the run check and stops only at the writer (a child has no registered hider and no keys here)."""
+    passes the run check and stops only at the writer because the temporary key store is unreadable."""
     import subprocess
 
     from orch import adapters
+    from orch import home as orch_home
 
     root, run, _ = tool_run
+    # An empty store supports recording (ORCH-297); damage this test store to exercise refusal.
+    orch_home._write_private(orch_home.key_dir(root) / "keys.json", "{broken")
     cmd = adapters.reminder_doc("claude", root)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     r = subprocess.run(
         cmd, shell=True, cwd=root, input=line(), capture_output=True, text=True, timeout=60,
@@ -1097,7 +1100,7 @@ def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(sub
     )  # fmt: skip
     assert r.returncode == 0 and r.stderr == "orch: Recording is off until key hiding is ready.\n"
     assert "hider_off" in lost_notes(root)  # a proven caller: the trace is under the run
-    assert record.read_run(root, run).value is None  # nothing raw, nothing at all (no key folder: unverified)
+    assert record.read_run(root, run).value is None  # nothing raw when key hiding cannot be verified
 
 
 # ---------------------------------------------------------------- the oneshot wrapper feeds its collector
