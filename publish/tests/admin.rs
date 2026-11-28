@@ -331,6 +331,23 @@ fn portal_shows_small_sizes_in_bytes_like_the_public_page() {
     assert!(js.contains("value === 1 ? 'byte' : 'bytes'"));
 }
 
+// PCX-01 (owner 28 Nov): the workspace right `public` is named by what it changes (an internet app may open without
+// its access link); "private" and "public" stay words for an app's network reach and are not used for this choice.
+#[test]
+fn portal_names_the_access_link_right_not_reach() {
+    let js = include_str!("../web/portal.js");
+    assert!(js.contains(r#"<label for="sharing">Internet apps without an access link</label>"#));
+    assert!(js.contains(">Not allowed</option>") && js.contains(">Allowed</option>"));
+    assert!(js.contains("An app's network reach is chosen separately."));
+    assert!(js.contains("'Internet apps may open without an access link' : 'Internet apps require an access link'"));
+    // the same field name and values as before: no policy change
+    assert!(js.contains(r#"<select id="sharing" name="public""#));
+    assert!(js.contains("public: data.get('public') === 'true'"));
+    for old in ["Private only", "Public links allowed", "Private apps open only with their access link"] {
+        assert!(!js.contains(old), "old wording: {old}");
+    }
+}
+
 #[test]
 fn portal_markup_respects_csp() {
     let html = include_str!("../web/portal.html");
