@@ -19,7 +19,8 @@ module.exports = {
     const parked = s => (s.parked || []).some(r => r.ticket === tid);
     await open('#home');
     await until(asks, 'the question in the page state');
-    must(/1 question waits in Review/.test(await page.locator('[data-key="review-line"]').innerText()), 'Home does not say one question waits in Review');
+    const saysOne = () => page.waitForFunction(() => /\b1 question\b.* waits? in Review/.test(document.querySelector('[data-key="review-line"]')?.innerText || ''), null, { timeout: 15000 }).then(() => true, () => false);
+    must(await saysOne(), 'Home does not say one question waits in Review: ' + await page.locator('[data-key="review-line"]').innerText());
     await open('#review?card=' + encodeURIComponent('core:q:' + tid + ':q1'));
     const card = page.locator('[data-key="review-host"] article.swipe-card:not(.under):not(.under2)').first();
     await card.getByText('Did the notebook kit work on your notebook?').waitFor({ timeout: 15000 });
@@ -45,7 +46,7 @@ module.exports = {
     await act('ticket.patch', () => page.locator('[data-key="parked-back-' + tid + '"]').click());
     await until(s => asks(s) && !parked(s), 'the question back in the needs list');
     await reload();
-    must(/1 question waits in Review/.test(await page.locator('[data-key="review-line"]').innerText()), 'the question is not back in Home\'s Review line after Bring back and a reload');
+    must(await saysOne(), 'the question is not back in Home\'s Review line after Bring back and a reload');
     orchAsPerson('answer', tid, 'q1', 'It worked');  // leave nothing open for the click-throughs after this one
   },
 };

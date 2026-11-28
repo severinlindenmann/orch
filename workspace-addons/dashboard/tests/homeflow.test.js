@@ -119,7 +119,11 @@ test('O-01 D: Home lists blocked work first, one line and one action each; quest
   const line = key(page, 'review-line');
   assert.equal(text(line), '2 questions, 3 results and 1 more wait in ReviewOpen Review');
   assert.equal(key(page, 'review-all').attrs.href, '#review');
-  assert.match(key(page, 'review-all').attrs.className, /outline/, 'the sign-in row is the main thing to do: Open Review is not filled beside it');
+  assert.match(key(page, 'review-all').attrs.className, /primary/, 'the one filled button of the page');
+  // a blocked row with a filled button of its own (orch can renew that sign-in) is the main thing: Open Review steps back
+  const renew = homeCtx(tickets, rows, state, {renewButton:() => h('button', {className:'btn primary sm'}, 'Renew')}).home();
+  assert.match(key(renew, 'review-all').attrs.className, /outline/);
+  assert.equal(nodes(renew).filter(n => /\bprimary\b/.test(n.attrs?.className || '')).length, 1, 'exactly one filled button');
   // THE number (the Review badge) is the rows of Blocked now that it counts plus the Review line
   const sum = nodes(page).reduce((n, x) => n + (Number(x.attrs?.['data-counts']) || 0), 0);
   assert.equal(c.needsToday().count, 10); assert.equal(sum, 10);
