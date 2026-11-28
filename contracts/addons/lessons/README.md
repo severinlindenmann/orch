@@ -28,25 +28,30 @@ at: 2026-11-15T18:02:11Z
 ticket: t_k3m9q2
 changed_by: human:severin
 changed_at: 2026-11-16T08:40:00Z
+reviewed_by: human:severin
+reviewed_at: 2026-11-20T09:00:00Z
 ---
 Run the web tests with npm run test:web; plain npm test skips them.
 ```
-  `by` and `at` are required; `ticket`, `changed_by`, `changed_at` optional. Unknown keys are kept on edit.
+  `by` and `at` are required; `ticket`, `changed_by`, `changed_at`, `reviewed_by`, `reviewed_at` optional.
+  A lesson is **outdated** (`outdated: true` in `list`) when its latest of `at`, `changed_at`, `reviewed_at` is more than 90 days ago. Unknown keys are kept on edit.
 - A file that cannot be read (no front matter, bad id, text out of bounds) is skipped everywhere and counted
-  (`unreadable` in `list`); it is never rewritten or deleted by orch except by `rm <id>`.
+  (`unreadable` in `list`); only `*.md` files and not hidden ones count, so a `notes.txt` is ignored; it is never rewritten or deleted by orch except by `rm <id>`.
 
 ## Commands (all take `--json`; exit 0 ok, 2 refused with `{"error"}`, 1 bug; CLI contract of addon-manifest.md)
 | Command | Does |
 |---|---|
 | `orch lessons add "<text>" [--ticket <id or key>] [--by <actor>]` | Stores a new lesson. `by` defaults to `agent:<ORCH_AGENT or "helper">` inside a run, else `human:<user>`. The same text (case and spaces ignored) already stored → no new file, answer `{"lesson": …, "added": false}`. Else `{"lesson": …, "added": true}` |
-| `orch lessons list` | `list.schema.json`: `{"lessons": [...], "bytes", "cap", "shown", "unreadable"}`, newest first |
+| `orch lessons list` | `list.schema.json`: `{"lessons": [...], "bytes", "cap", "shown", "unreadable"}`, newest first. Text output: id, date added, text, and `[outdated: …]` on outdated ones |
 | `orch lessons edit <id> "<text>" [--by <actor>]` | Replaces the text, sets `changed_by`/`changed_at`; refused when another lesson already has that text. `{"lesson": …}` |
+| `orch lessons review <id> [--by <actor>]` | Marks the lesson as still true (`reviewed_by`/`reviewed_at`); text unchanged. `{"lesson": …}` |
 | `orch lessons rm <id>` | Deletes that one file. `{"removed": "<id>"}` |
 | `orch lessons act edit\|rm --by <actor> [--value "<text>"] --json -- <id>` | The dashboard's buttons (`addon.act`); same as `edit` / `rm`, recorded as `--by` |
 | `orch lessons view` | Dashboard page blocks (`addon-view.schema.json`), read only |
 
 Text output of every write ends with the next step (R2.7), e.g. `Saved. Helpers read it from their next start.`
 While the lessons are over 3 KB, `add` and `edit` (text and `--json` field `next`) say: `Lessons are over 3 KB; helpers see only the newest. Merge or remove old ones with orch lessons edit / orch lessons rm.` The helper does it; nothing waits for the person.
+Two `add` calls at once store one lesson (a `.lock` file in the lessons folder, broken after 30 s).
 `add` from a separate copy (`~/.orch-work/…`) writes to the workspace home, like `orch check` does.
 Unknown id → refused `No lesson <id>. See them: orch lessons list`.
 
@@ -78,6 +83,7 @@ or `>`) when its file reads, so the opened row links to it,
 Over the cap: `notice` "The list is too long: helpers see only the newest lessons. Shorten or delete old ones.",
 `notice_tone` `warn`. Else, when files could not be read: `notice` "2 lesson files could not be read and are left out.
 Fix or delete them in the folder .orch/addons/lessons." (singular for one), `notice_tone` `warn`.
+An outdated lesson's `subtitle` adds " · last reviewed <date>, check it still holds" (before the ticket).
 
 ## Out of scope (later owner decisions)
 Sharing lessons through Sync or the relay; Factory proposing lessons; "not used for 60 days" (no use signal exists);

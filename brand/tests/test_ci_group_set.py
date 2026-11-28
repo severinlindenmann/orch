@@ -278,7 +278,10 @@ def test_the_e2e_smoke_runs_next_to_the_others_when_ci_would_run_it():
     # never the internet: W0 installs GitHub's develop (a green group went red on 22 Nov when GitHub dropped it)
     assert light.E2E_SMOKE_STEP["cmd"] == "e2e/run.sh smoke-offline --mode local"
     main = (ROOT / "e2e" / "main.py").read_text(encoding="utf-8")
-    assert 'SMOKE_OFFLINE = [s for s in SMOKE if s != "W0"]' in main and '"smoke-offline"' in main
+    assert 'SMOKE_OFFLINE = [s for s in SMOKE if s != "W0"]' in main
+    # the selection lives in e2e/parts.py (ORCH-2399), main.py hands it both smoke sets
+    assert "parts.select(a.what, REGISTRY, SMOKE, SMOKE_OFFLINE)" in main
+    assert 'what == "smoke-offline"' in (ROOT / "e2e" / "parts.py").read_text(encoding="utf-8")
 
 
 def test_the_page_smoke_runs_only_when_the_group_touches_focus_or_insights():

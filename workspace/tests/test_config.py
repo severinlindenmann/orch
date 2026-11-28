@@ -114,8 +114,9 @@ def test_orch_agents_nothing_found_nothing_chosen(proj, run, fake_path):
 @pytest.mark.skipif(os.name == "nt", reason="shell script stubs")
 def test_init_yes_takes_first_found(proj, run, fake_path):
     _stub(fake_path, "codex", "0.163.0")
-    code, out, _ = run("init", "--yes")
-    assert code == 0 and "Agent: Codex (found first)." in out
+    code, out, err = run("init", "--yes")
+    # the output is in the message: run 46063443606 failed here with exit 2 and nothing to say why (ORCH-2395)
+    assert code == 0 and "Agent: Codex (found first)." in out, (code, out, err)
     assert config.agent_name(proj) == "codex"
     code, out, _ = run("init", "--yes")  # asked once: the second run keeps it
     assert "Agent: Codex." in out and _toml(proj).count("agent =") == 1

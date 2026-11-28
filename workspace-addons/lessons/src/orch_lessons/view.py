@@ -49,6 +49,8 @@ def build(root) -> dict:
     items = []
     for r in data["lessons"][:MAX_ROWS]:
         sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
+        if r["outdated"]:
+            sub += f" · last reviewed {_day(store.last_checked(r))}, check it still holds"
         src = _ticket(root, r["ticket"]) if r.get("ticket") else None
         if src:
             sub += f" · from {src.get('key') or src['id']}"

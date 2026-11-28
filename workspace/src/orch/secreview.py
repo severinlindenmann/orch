@@ -636,21 +636,60 @@ def _kept_rec(head: str, line: str, came: str) -> dict:
     }
 
 
-def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_numbers: set[int]):
+def _member_ok(sec: dict, verdicts: dict, m: int, mh: str, heads: dict[int, str] | None) -> bool:
+    """A group member's review counts for the group: an OK for its head in the group, or (ORCH-2399) a
+    "problems" verdict for that head whose linked fix is merged in this release with its own security OK
+    (_fix). Release 52: #3328's finding was fixed by #3421, which touches no guarded file; #3328 had come in
+    through group #3400, and the hold on that group never ended by itself."""
+    me = sec["prs"].get(str(m))
+    if not (me and me.get("sha") == mh):
+        return False
+    got = _effective(me, verdicts.get(str(m)))
+    if got in OK:
+        return True
+    return (
+        got == "problems"
+        and heads is not None
+        and _fix(sec, verdicts, verdicts.get(str(m)), heads)[0] is not None
+    )
+
+
+def _fix_linked(verdicts: dict, m: int) -> int:
+    """The pull request linked as the fix of #m's finding (0: none)."""
+    try:
+        return max(0, int((verdicts.get(str(m)) or {}).get("fixed_by") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _group_fixed(w, sec: dict, verdicts: dict, n: int, head: str, pats, heads: dict[int, str]) -> list[int]:
+    """The fixes that make queue group #n count without a review of its own (ORCH-2399): every member with
+    guarded files has its OK or a finding fixed by a merged fix with an OK, and at least one is such a fix.
+    [] otherwise (also: not a group)."""
+    need = [(m, mh) for m, mh, hits in w.group_steps(n, head, pats) or [] if hits]
+    if not need or not all(_member_ok(sec, verdicts, m, mh, heads) for m, mh in need):
+        return []
+    return sorted({_fix_linked(verdicts, m) for m, mh in need if not _member_ok(sec, verdicts, m, mh, None)})
+
+
+def _reuse(
+    w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_numbers: set[int],
+    heads: dict[int, str] | None = None,
+):  # fmt: skip
     """ORCH-1591, for a head with no review yet: ("kept", lines, None) when the OK is kept (only develop came
     in since the head with an OK, or a queue group whose members all have their OK); ("wait", [line], None)
     when a group waits for a member's own review; (None, lines, since) otherwise: a review, of the change
-    since `since` only when that is set. Every doubt ends in a review."""
+    since `since` only when that is set. Every doubt ends in a review. `heads`: the merged heads of this
+    release, so a member whose finding a merged fix with an OK fixed counts as well (_member_ok); a member
+    whose linked fix has no OK yet is waited for, never a reason to review the whole group."""
     n, head = int(pr["number"]), str(pr.get("headRefOid") or "")
     base = {"title": str(pr.get("title") or "")[:120], "url": pr.get("url"), "at": tickets.now()}
     steps = w.group_steps(n, head, pats)
     if steps:
         need = [(m, mh) for m, mh, hits in steps if hits]
-        missing = []
-        for m, mh in need:
-            me = sec["prs"].get(str(m))
-            if not (me and me.get("sha") == mh and _effective(me, verdicts.get(str(m))) in OK):
-                missing.append((m, me))
+        missing = [
+            (m, sec["prs"].get(str(m))) for m, mh in need if not _member_ok(sec, verdicts, m, mh, heads)
+        ]
         if not missing:
             names = ", ".join(f"#{m}" for m, _ in need) or "no member with guarded files"
             rec = _kept_rec(head, f"kept: the group's members have their own OK ({names})", f"group {names}")
@@ -660,9 +699,23 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
                 return "kept", [f"#{n}: queue group, security OK kept from its members ({names})"], None
             return None, [], None
         m, me = missing[0]
-        running = me and me.get("sha") == dict((x[0], x[1]) for x in steps).get(m) and _open(w, me.get("tid"))
+        mh = dict((x[0], x[1]) for x in steps).get(m)
+        running = me and me.get("sha") == mh and _open(w, me.get("tid"))
         if running or m in open_numbers:
             return "wait", [f"#{n}: waits for the security review of its member #{m}"], None
+        fix = _fix_linked(verdicts, m)
+        if (
+            heads is not None
+            and fix
+            and me
+            and me.get("sha") == mh
+            and _effective(me, verdicts.get(str(m))) == "problems"
+        ):
+            return (
+                "wait",
+                [f"#{n}: waits for #{fix}, the fix of its member #{m}, to be merged with a security OK"],
+                None,
+            )
         return None, [f"#{n}: queue group, member #{m} has no security OK: the group is reviewed"], None
     if not e:
         return None, [], None
@@ -701,8 +754,9 @@ def _drop_stale(w, n: int, old: str, e: dict) -> list[str]:
     return [f"#{n}: the review of its older commit ({old}) ended, replaced by {e.get('key') or e.get('tid')}"]
 
 
-def _members_ok(sec: dict, e: dict, verdicts: dict) -> bool:
-    """Every member a group's kept OK came from still has its OK for the head in the group (no list: no)."""
+def _members_ok(sec: dict, e: dict, verdicts: dict, heads: dict[int, str] | None = None) -> bool:
+    """Every member a group's kept OK came from still has its OK for the head in the group, or its finding is
+    still fixed by a merged fix with an OK (_member_ok) (no list: no)."""
     if not isinstance(e.get("members"), list):
         return False
     for item in e["members"]:
@@ -710,8 +764,7 @@ def _members_ok(sec: dict, e: dict, verdicts: dict) -> bool:
             m, mh = int(item[0]), str(item[1])
         except (TypeError, ValueError, IndexError):
             return False
-        me = sec["prs"].get(str(m))
-        if not (me and me.get("sha") == mh and _effective(me, verdicts.get(str(m))) in OK):
+        if not _member_ok(sec, verdicts, m, mh, heads):
             return False
     return True
 
@@ -820,7 +873,7 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
         head = pr.get("headRefOid")
         since = None
         if head and (not e or e.get("sha") != head):  # ORCH-1591: keep an OK, or review only what is new
-            what, more, since = _reuse(w, sec, pr, e, pats, verdicts, open_numbers)
+            what, more, since = _reuse(w, sec, pr, e, pats, verdicts, open_numbers, heads)
             lines += more
             if what == "wait":
                 if is_merged:
@@ -829,7 +882,7 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
             if what == "kept":
                 verdicts = w.security_verdicts()
                 e = sec["prs"].get(str(n))
-        elif e and e.get("kept") == "group" and not _members_ok(sec, e, verdicts):
+        elif e and e.get("kept") == "group" and not _members_ok(sec, e, verdicts, heads):
             w.withdraw_kept(n, str(head))  # a member lost its OK: the group's OK goes with it
             sec["prs"].pop(str(n), None)
             lines.append(f"#{n}: a member of the queue group lost its security OK; looked at again")
@@ -838,6 +891,21 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
             continue
         elif e and e.get("call") and not e.get("helper") and _open(w, e.get("tid")):
             lines += _call_gone(w, n, e, verdicts)
+        if (
+            is_merged
+            and fixers
+            and e
+            and e.get("sha") == head
+            and _effective(e, verdicts.get(str(n))) is None
+        ):
+            # a group whose own review was started before its member's fix was linked (ORCH-2399)
+            fixed = _group_fixed(w, sec, verdicts, n, str(head), pats, heads)
+            if fixed:
+                names = ", ".join(f"#{m}" for m in fixed)
+                lines.append(
+                    f"#{n}: queue group, its members' findings are fixed by {names}: nothing holds it"
+                )
+                continue
         ended = bool(e) and not _open(w, e.get("tid")) and _effective(e, verdicts.get(str(n))) is None
         if ended and e.get("sha") == head and int(e.get("tries") or 1) >= 2:
             lines.append(f"#{n}: the security review ended twice without a verdict")

@@ -1,4 +1,4 @@
-"""orch lessons add|list|edit|rm|act|view (contract: contracts/addons/lessons/README.md)."""
+"""orch lessons add|list|edit|rm|review|act|view (contract: contracts/addons/lessons/README.md)."""
 
 from __future__ import annotations
 
@@ -120,12 +120,21 @@ def run(args) -> int:
         store.remove(root, args.id)
         nxt = "Removed. Helpers no longer see it from their next start."
         return _emit(args, {"removed": args.id, "next": nxt}, nxt)
+    if cmd == "review":
+        row = store.review(root, args.id, _actor(args.by))
+        nxt = "Marked as still true. Edit or remove the others flagged outdated: orch lessons list"
+        return _emit(args, {"lesson": row, "next": nxt}, nxt)
     if cmd == "list":
         d = store.load(root)
         if args.json:
             print(json.dumps(d, ensure_ascii=False))
             return 0
-        lines = [f"{r['id']}  {r['text']}" for r in d["lessons"]] or ["No lessons yet."]
+        lines = [
+            f"{r['id']}  {r['at'][:10]}  {r['text']}"
+            + (f"  [outdated: last reviewed {store.last_checked(r)[:10]}; keep: orch lessons review {r['id']}]"
+               if r["outdated"] else "")
+            for r in d["lessons"]
+        ] or ["No lessons yet."]  # fmt: skip
         if d["unreadable"]:
             lines.append(
                 f"{d['unreadable']} file(s) in .orch/addons/lessons could not be read and are skipped."
@@ -162,6 +171,9 @@ def main(argv=None) -> int:
     s.add_argument("--by")
     s = p("rm")
     s.add_argument("id")
+    s = p("review")
+    s.add_argument("id")
+    s.add_argument("--by")
     p("view")
     s = p("act")
     s.add_argument("verb", choices=("edit", "rm"))

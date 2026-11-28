@@ -69,7 +69,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, mergequeue, runs, secdelta, secreview, tickets
+from orch import brake, config, ghmerge, mergequeue, runs, secdelta, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -108,7 +108,7 @@ REQUIRED_FALLBACK = ["gate"]
 # to a release branch, never required. Its checks never count for a release pull request; a red nightly run
 # opens one "later" ticket (quarantine_red).
 QUARANTINE_WORKFLOW = "quarantine"
-QUARANTINE_FILE = "quarantine.yml"
+QUARANTINE_FILE = ghmerge.QUARANTINE_FILE  # the Merge click tells its checks by this file as well
 QUARANTINE_WORDS = "Quarantined CI checks are red (later)"
 # A job GitHub stopped at its timeout-minutes (the check run's annotation) whose log has no failed test runs
 # once more per release before the release is blocked or closed (ORCH-1050).
@@ -352,6 +352,7 @@ def ts(s) -> datetime | None:
 
 
 SHARD = re.compile(r", [0-9]{1,3}/[0-9]{1,3}\)")
+PART_ONLY = re.compile(r" \([0-9]{1,3}/[0-9]{1,3}\)")
 
 
 def known_name(name: str, names) -> str | None:
@@ -362,6 +363,10 @@ def known_name(name: str, names) -> str | None:
         return name
     for n in names:  # only a part number ("3/6") is added; another matrix axis is another job
         if n.endswith(")") and name.startswith(n[:-1] + ", ") and SHARD.fullmatch(name[len(n) - 1 :]):
+            return n
+        # a job whose only matrix axis is its part: "e2e" covers "e2e (1/2)" (the full e2e runs in parts,
+        # ORCH-2399)
+        if name.startswith(n + " (") and PART_ONLY.fullmatch(name[len(n) :]):
             return n
     return None
 
@@ -1061,17 +1066,26 @@ class World:
         """{check name: "<ticket>[, until <date>]"} of checks that may be red: a recorded exception until its
         end date, or a --known-red job, each only while its ticket is not done yet."""
         table = self.sim.get("known_red", self.known_table) if self.sim is not None else self.known_table
-        rows: dict[str, tuple[str, str | None]] = {job: (key, None) for job, key in table.items()}
-        for check, e in self.exceptions().items():
-            if isinstance(e, dict) and e.get("ticket"):
-                rows[check] = (str(e["ticket"]), e.get("until"))
         status = {t.get("key"): t.get("status") for t in self.tickets()}
         status.update({t.get("id"): t.get("status") for t in self.tickets()})
         today = now().date().isoformat()
+
+        def holds(key: str, until) -> bool:
+            return (status.get(key) or "open") not in DONE and not (until and str(until) < today)
+
+        rows: dict[str, tuple[str, str | None]] = {job: (key, None) for job, key in table.items()}
+        for check, e in self.exceptions().items():
+            if not (isinstance(e, dict) and e.get("ticket")):
+                continue
+            # ORCH-2399: an exception that ended (its date passed, or its ticket is done) never takes the
+            # place of a --known-red flag for the same job; release 52 was judged red and reset over one
+            if check in rows and not holds(str(e["ticket"]), e.get("until")):
+                continue
+            rows[check] = (str(e["ticket"]), e.get("until"))
         return {
             job: key + (f", until {until}" if until else "")
             for job, (key, until) in rows.items()
-            if (status.get(key) or "open") not in DONE and not (until and str(until) < today)
+            if holds(key, until)
         }
 
     def winvm_results(self) -> list[tuple[str, str]]:

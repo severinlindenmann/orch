@@ -47,6 +47,13 @@ jobs:
     needs: route
     # a failed route (checkout, timeout) never skips the run: GitHub's machines
     if: ${{ !cancelled() }}
+    # The full run is two jobs (ORCH-2399): one job with every scenario no longer fits the 60 minutes (release 52:
+    # A24 alone took 1325 s and run 46079037055 was cut with no scenario red). 1/2 is `rest`, 2/2 is `long` (the
+    # scenarios that take minutes each, e2e/parts.py); together they are exactly `all`. A named scenario is one job.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON((inputs.scenario || 'all') == 'all' && '["1/2", "2/2"]' || '["1/1"]') }}
     runs-on: ${{ fromJSON(needs.route.outputs.machine || '["ubuntu-latest"]')[0] }}
     timeout-minutes: 60  # about 2.5x slower on orch edge than on GitHub's machines
     steps:
@@ -74,4 +81,6 @@ jobs:
           fi
       - run: npm install -g playwright@1.64.1
       - run: playwright install $([ "$RUNNER_ENVIRONMENT" = self-hosted ] || echo --with-deps) chromium
-      - run: PW_DIR="$(npm root -g)" e2e/run.sh "${{ inputs.scenario || 'all' }}" --mode local
+      - env:
+          WHAT: ${{ (inputs.scenario || 'all') != 'all' && inputs.scenario || (matrix.part == '2/2' && 'long' || 'rest') }}
+        run: PW_DIR="$(npm root -g)" e2e/run.sh "$WHAT" --mode local

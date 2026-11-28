@@ -24,10 +24,10 @@ def gen(proj, monkeypatch, subprocess_home, child_trust):
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
     monkeypatch.setenv("GENERIC_AGENT_LOG", str(log))
 
-    def _set(extra=""):
+    def _set(extra="", name="fake"):
         cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(AGENT))} {extra} {{prompt}}"
-        config.add_agent(proj, "fake", cmd, approve=True)
-        config.set_key(proj, "workspace", "agent", "fake")
+        config.add_agent(proj, name, cmd, approve=True)
+        config.set_key(proj, "workspace", "agent", name)
         return log
 
     return _set
@@ -106,7 +106,9 @@ def test_second_start_gets_exit_2_and_the_event_goes_in_after_exactly_once(proj,
 
 
 def test_killed_wrapper_with_a_live_agent_still_holds_the_ticket(proj, run, gen):
-    log = gen("--silent 1.5")
+    # the agent lives until this test ends it: with 1.5 s of life it was gone on a loaded runner before the
+    # second start asked, which then started a second agent (ORCH-2395, run 46063443606 try 2)
+    log = gen("--silent 60")
     tid = _ticket_with_check(proj, run)
     run("run", "start", tid, "--mode", "oneshot")
     _wait(proj, tid, gone=False)
@@ -122,10 +124,12 @@ def test_killed_wrapper_with_a_live_agent_still_holds_the_ticket(proj, run, gen)
     assert runs.state(runs.read(proj, tid)) == "alive"  # the agent still works: never two agents
     code, out, _ = run("run", "start", tid, "--mode", "oneshot", "--json")
     assert code == 2 and json.loads(out)["pending"] is True
-    end = time.monotonic() + 15
+    os.kill(rec["agent_pid"], signal.SIGKILL)  # the agent ends (nobody is left to collect it but init)
+    end = time.monotonic() + 30
     while runs.state(runs.read(proj, tid)) != "dead" and time.monotonic() < end:
         time.sleep(0.1)
     assert runs.state(runs.read(proj, tid)) == "dead"
+    gen("--silent 0.2", name="fake-short")  # the next agent is a short one
     assert "Use CHF" in " ".join(i["text"] for i in runs.undelivered(proj, tid))
     code, out, _ = run(
         "run", "start", tid, "--mode", "oneshot", "--json"

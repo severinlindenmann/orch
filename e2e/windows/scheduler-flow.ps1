@@ -36,11 +36,21 @@ function WaitFinish($out, $from) {
     }
     return $false
 }
+# One retry of the helper start (ORCH-2406): on a loaded VM the automation's `orch run start` once took longer than the
+# 120 s it gets (the step took 758 s, 375 s when idle), and the automation asked "The helper could not start: orch could
+# not be run (TimeoutExpired). (Try again / Leave it)". The flow then answers Try again ONCE, as a person would, and
+# waits the same time again. A start that fails a second time, or any other reason, is a real failure.
 function DoneWithin($tid, $sec) {
-    $t0 = Get-Date
+    $t0 = Get-Date; $retried = $false
     while (((Get-Date) - $t0).TotalSeconds -lt $sec) {
         $s = O ticket show $tid | Out-String
         if ($s -match '1 of 1 done') { return $true }
+        if (-not $retried -and $s -match 'The helper could not start: orch could not be run \(TimeoutExpired\)[^\r\n]*\[(q\d+)\]') {
+            $retried = $true; $q = $Matches[1]
+            L "the helper start timed out once: answering Try again ($q), one retry"
+            L (O answer $tid $q '"Try again"' --by human:owner | Out-String)
+            if ($LASTEXITCODE -eq 0) { $t0 = Get-Date } else { L "the answer was refused (exit $LASTEXITCODE): no retry" }
+        }
         Start-Sleep 5
     }
     L (O ticket show $tid | Out-String); return $false

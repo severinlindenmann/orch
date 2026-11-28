@@ -351,3 +351,112 @@ def test_the_merge_reads_github_again_and_refuses_a_red_check_outside_the_except
         ghmerge.merge(PR, HEAD, excused=ok)
     _rollup(gh, ROLL, WIN)
     assert ghmerge.merge(PR, HEAD, excused=ok)["already"] is False and gh.merges
+
+
+# ORCH-2399 (release 52): the quarantine workflow's checks (ORCH-2363: flaky ones out of the merge queue,
+# never required) counted against a release pull request, so the Merge click and tend-releases refused it.
+
+Q_RUN, CI_RUN = "9001", "9002"
+
+
+def _check(name, word, run, workflow="ci", status="COMPLETED"):
+    c = {"name": name, "workflowName": workflow, "status": status,
+         "detailsUrl": f"https://github.com/acme/app/actions/runs/{run}/job/5"}  # fmt: skip
+    return {**c, "conclusion": word} if status == "COMPLETED" else c
+
+
+def _with_quarantine(gh, *more):  # noqa: F811
+    gh.rollup = [
+        _check("workspace / lint", "SUCCESS", CI_RUN),
+        _check("clock / workspace", "FAILURE", Q_RUN, "quarantine"),
+        _check("clickthroughs", "", Q_RUN, "quarantine", status="IN_PROGRESS"),
+        *more,
+    ]
+    gh.quarantine_runs = [Q_RUN]
+
+
+def _asked_for_quarantine(gh):  # noqa: F811
+    return [c for c in gh.calls if c[0] == "api" and "/actions/workflows/quarantine.yml/runs" in c[1]]
+
+
+def test_red_and_running_quarantine_checks_do_not_count_for_a_release(tk, run, gh):  # noqa: F811
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    _with_quarantine(gh)
+    got = ghmerge.checks(PR)
+    assert got["green"] is True and got["failed"] == []
+    res = review.tend_releases(root)  # the real read at GitHub, no stand-in
+    row = res["actions"][0]
+    assert row["verdict"] == "merge" and row["done"] is True and row["why"] == "every check is green"
+    assert gh.merges and _q(root, tid)["answer"] == "Merge"
+
+
+def test_the_merge_click_works_with_red_quarantine_checks(gh):  # noqa: F811
+    _with_quarantine(gh)
+    assert ghmerge.merge(PR, HEAD)["already"] is False and gh.merges
+    asked = _asked_for_quarantine(gh)
+    assert asked and all(
+        f"head_sha={HEAD}" in c[1] for c in asked
+    )  # the runs of that file on the card's commit
+
+
+def test_a_real_red_check_still_refuses_and_only_it_is_named(gh):  # noqa: F811
+    _with_quarantine(gh, _check("relay / test", "FAILURE", CI_RUN))
+    assert ghmerge.checks(PR)["failed"] == [("relay / test", "FAILURE")]
+    with pytest.raises(ghmerge.Refused, match=r"1 check failed: relay / test\)"):
+        ghmerge.merge(PR, HEAD)
+    assert not gh.merges
+
+
+def test_the_display_name_alone_excuses_nothing(gh):  # noqa: F811
+    """Any workflow can call itself "quarantine": only a run of the quarantine workflow FILE is left out."""
+    gh.rollup = [
+        _check("workspace / lint", "SUCCESS", CI_RUN),
+        _check("anything", "FAILURE", "9003", "quarantine"),
+    ]
+    gh.quarantine_runs = [Q_RUN]
+    assert ghmerge.checks(PR)["green"] is False
+    gh.quarantine_runs = None  # a repository without that workflow, or GitHub did not say
+    assert ghmerge.checks(PR)["failed"] == [("anything", "FAILURE")]
+    with pytest.raises(ghmerge.Refused, match="1 check failed: anything"):
+        ghmerge.merge(PR, HEAD)
+    assert not gh.merges
+
+
+def test_green_checks_ask_github_nothing_more(gh):  # noqa: F811
+    gh.rollup = [_check("workspace / lint", "SUCCESS", CI_RUN)]
+    gh.quarantine_runs = [Q_RUN]
+    assert ghmerge.checks(PR)["green"] is True
+    assert ghmerge.merge(PR, HEAD)["already"] is False
+    assert not _asked_for_quarantine(gh)
+
+
+def test_a_red_check_of_another_workflow_asks_github_nothing_more(gh):  # noqa: F811
+    """An ordinary pull request with a red or running check costs no extra read (orch needs asks often)."""
+    gh.rollup = [_check("relay / test", "FAILURE", CI_RUN), _check("lint", "", CI_RUN, status="IN_PROGRESS")]
+    gh.quarantine_runs = [Q_RUN]
+    assert ghmerge.checks(PR)["green"] is False and not _asked_for_quarantine(gh)
+    with pytest.raises(ghmerge.Refused):
+        ghmerge.merge(PR, HEAD)
+    assert not _asked_for_quarantine(gh)
+
+
+def test_named_exceptions_and_quarantine_together(tk, run, gh):  # noqa: F811
+    root, tid = tk
+    _ask(run, tid, "--release")
+    _on(run)
+    _with_quarantine(gh, _check(ROLL, "FAILURE", CI_RUN), _check(WIN, "FAILURE", CI_RUN))
+    gh.rollup.pop(2)  # nothing still runs
+    res = review.tend_releases(root, known_red=KNOWN)
+    row = res["actions"][0]
+    assert row["verdict"] == "merge" and row["done"] is True and "clock" not in row["why"]
+    assert f"{WIN} (ORCH-32, until 2026-11-30)" in row["why"]
+
+
+def test_the_merge_card_words_leave_quarantine_out(gh):  # noqa: F811
+    _with_quarantine(gh)
+    gh.rollup.pop(2)
+    gh.summary = {"title": "Release 52", "baseRefName": "main", "headRefOid": HEAD, "commits": [],
+                  "statusCheckRollup": gh.rollup}  # fmt: skip
+    assert ghmerge.summary(PR, HEAD)["checks"] == ("done", "The check passed")
