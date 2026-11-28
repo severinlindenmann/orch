@@ -271,14 +271,15 @@ def bg_bind(slot: Path, pid: object) -> None:
 
 
 def bg_release(slot: Path | None, pid: int | None = None) -> None:
-    """Give the slot back at once (the child `pid` has ended, or never started). Only while the slot still
-    names that child or this process: one taken over by another start meanwhile is left alone. Without the
-    lock it is left as well (a slot whose process is gone is free anyway). Never raises."""
+    """Give the slot back at once: the child `pid` has ended, or (no pid) the start never happened and the
+    slot still names this process. Only while the slot names exactly that process: a slot that became free
+    and was taken by another start meanwhile is left alone. Without the lock it is left as well (a slot
+    whose process is gone is free anyway). Never raises."""
     if slot is None:
         return
     try:
         with _bg_lock(slot.parent.parent.parent.parent) as got:
-            if got and _slot_pid(slot) in (pid, os.getpid()):
+            if got and _slot_pid(slot) == (os.getpid() if pid is None else pid):
                 slot.unlink(missing_ok=True)
     except OSError:
         pass

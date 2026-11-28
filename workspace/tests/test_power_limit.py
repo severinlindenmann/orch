@@ -447,3 +447,16 @@ def test_a_start_a_person_asked_for_takes_no_task_slot(ws, monkeypatch):
     assert procs.background_start(ws, ["x"], person=True) is True  # a sign-in that waits for its code
     assert [procs.background_start(ws, ["x"]) for _ in range(5)] == [True] * 4 + [False]
     assert procs.bg_count(ws) == 5 and len(f.started) == 5
+
+
+def test_a_late_release_never_frees_a_slot_another_start_took_meanwhile(ws):
+    """Seen on Windows (5 tasks with a budget of 4): a task ended, its slot was taken by the next start, and
+    only then the first task's release came. It must leave the slot alone."""
+    slot = procs.bg_claim(ws)  # the next start holds it (this process, until its child is bound)
+    procs.bg_release(slot, 654_321)  # the release for the task that held it before
+    assert slot.exists() and procs.bg_count(ws) == 1
+    procs.bg_bind(slot, 654_322)
+    procs.bg_release(slot)  # "my start never happened": not true any more, the child has it
+    assert slot.exists()
+    procs.bg_release(slot, 654_322)
+    assert not slot.exists()
