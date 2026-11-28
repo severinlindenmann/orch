@@ -1428,12 +1428,12 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .doc-risk{display:inline-block;margin-left:8px;padding:0 6px;border-radius:999px;border:1px solid currentColor;font-family:var(--font-sans,inherit);font-size:11px;white-space:nowrap}
 .doc-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}.doc-details summary{cursor:pointer;color:var(--text-muted);font-size:13px}.doc-details p{margin:8px 0 0}
 /* ---- Live bar (draft D, ORCH-337; ORCH-2198): one calm row under every page: the page's name, one Helpers menu
-   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) lists the sessions in groups (.lbar-gh:
-   Needs you, Working, Quiet, with counts); each row opens its pane. It opens on the side of the bar with room
+   (.lbar-helpers, a ◆ when something needs you) and New. The menu (.lbar-pop) has two labelled groups (.lbar-gh, with
+   counts; W-049): Working helpers (each with its state) and Needs you; each row opens its pane. It opens on the side of the bar with room
    (data-at=above|below, set by the page), so it stays inside the window with the bar at the bottom or the top (full
    screen). It never wraps: data-fold 3 and up shows New as an icon. Fixed under the page beside the side bar; at phone
    width above the tab bar (--lbar-bottom, set by the page). .lbar-sample shows it inline in the gallery. ---- */
-.lbar{position:fixed;left:var(--sidebar-width);right:0;bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
+.lbar{position:fixed;left:var(--sidebar-width);right:var(--frame-gutter,0px);bottom:var(--lbar-bottom,0px);z-index:40;display:flex;flex-wrap:nowrap;gap:var(--s3);align-items:center;min-height:var(--s8);padding:var(--s2) var(--s4);border-top:1px solid var(--border-strong);background:var(--sidebar);color:var(--text)}
 .lbar.lbar-docked{position:relative;left:auto;right:auto;bottom:auto;z-index:auto}
 .lbar.lbar-sample{position:relative;left:auto;right:auto;bottom:auto;z-index:auto;border:1px solid var(--border);border-radius:var(--r2)}
 .lbar-home{display:inline-flex;flex:none;align-items:center;min-height:var(--s6);padding:var(--s1) var(--s2);border-radius:var(--r1);color:var(--text);font-weight:600;white-space:nowrap;text-decoration:none}
@@ -1466,6 +1466,13 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-key{font-family:var(--font-mono);font-size:var(--fs-meta);color:var(--text-muted);white-space:nowrap}
 .lbar-rn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lbar-pop .meta{margin:0}
+/* W-049: with no helper at work the Working helpers group says so in one line, on the rows' own left edge */
+.lbar-pop .lbar-none{padding:var(--s1) var(--s3)}
+/* W-047: a start that did not work stays under its row of the New menu: the reason, then Try again */
+.lbar-newfail{display:flex;gap:var(--s2);align-items:center;justify-content:space-between;padding:0 var(--s1) var(--s1);font-size:var(--fs-meta);line-height:18px}
+.lbar-newfail>.bad{min-width:0;overflow-wrap:anywhere}
+.lbar-newfail>.btn{flex:none}
+.live-opt>.spinner{flex:none;margin-left:auto}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
 body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}

@@ -337,11 +337,16 @@ says "Can't preview this file." with Try again and Download, too big says so and
 `.lbar` is the one row under every dashboard page while the new Focus is in Preview (dashboard `pages/livebar.js`).
 It holds the page's name, one **Helpers** menu button (`.lbar-helpers`) and New: no chips, no counts in the row
 (owner pick J b, 26 Nov: calmer). The button shows an orange ◆ when something needs you, never a number (the number is
-on the Review badge). The menu (`.lbar-pop`) lists every session in groups (`.lbar-gh`, heading and count): Needs you,
-Working, Quiet (in line and idle); each `.lbar-row` has its symbol, key, name and "Open", opens its pane, and has More
-(Stop, End). A pinned session comes first in its group; an open one is marked (`aria-current`). Search from 9
+on the Review badge). The menu (`.lbar-pop`) has two labelled groups (`.lbar-gh`, heading and count; W-049, owner 28
+Nov): **Working helpers**, every session that does not wait on you with its state (Working, In line, Idle), and
+**Needs you**, the sessions that wait plus one link to Review for the rest. Working helpers always shows: with none it
+says "No helper is working. New starts one." Each `.lbar-row` has its symbol, key, name and "Open", opens its pane, and
+has More (Stop, End). A pinned session comes first in its state; an open one is marked (`aria-current`). Search from 9
 sessions. The menu opens inside the window on the side of the bar with room (`data-at` above or below: below when the
 bar sits at the top in full screen) and scrolls there. On a phone New is an icon (`data-fold` 3), above the tab bar.
+Starting from New (W-047): the row says "Starting…" with a spinner and every row is off, so a second click starts
+nothing; the menu stays open until the pane opens with the session. A start that did not work stays under its row
+(`.lbar-newfail`: the reason and **Try again**), never a toast that goes away.
 The pinned mark is the `pinned` icon (a thumbtack); `pin` is a place.
 At its right end **New** opens a `.live-pop` of four `.live-opt` choices for a session without a ticket (Empty helper,
 Chat helper, Plain terminal, Manager), each a `.live-opt-t`: the name, then what it does as `.meta`; one already open

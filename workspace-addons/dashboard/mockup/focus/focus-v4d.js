@@ -546,9 +546,10 @@
   /* ---------- the layer: bar on every page, a panel (bottom, right, full) split in up to 3, or closed to the side ---------- */
   function inList(o, l) { var w = o.s === 'wait'; return l === 'helpers' ? true : l === 'wait' ? w : (l === 'pin' ? !!o.pin && !w : (!w && !o.pin && (l === 'more' || grp(o) === l))); }
   var LIST = { helpers: ['', 'helpers', 'Helpers'], wait: ['◆', 'need you', 'Needs you'], pin: ['', 'pinned', 'Pinned'], run: GRP.run, queue: GRP.queue, idle: GRP.idle, more: ['', 'more', 'More sessions'] };
-  /* ORCH-2198 (owner pick J b, "calmer"): the Helpers menu groups every session as Needs you, Working, Quiet (in line, idle) */
-  var HGROUPS = [['wait', 'Needs you'], ['run', 'Working'], ['quiet', 'Quiet']];
-  function hgroup(o) { return o.s === 'wait' ? 'wait' : (grp(o) === 'run' ? 'run' : 'quiet'); }
+  /* ORCH-2198 (owner pick J b, "calmer") and W-049 (owner, 28 Nov, option A): the Helpers menu has two labelled groups:
+     Working helpers (every session that does not wait on you, with its state) and Needs you */
+  var HGROUPS = [['helpers', 'Working helpers'], ['wait', 'Needs you']];
+  function hgroup(o) { return o.s === 'wait' ? 'wait' : 'helpers'; }
   function chip(o) {
     var on = shownIn(o);
     return btn('mw-swb', 'switch', stat(o, true) + '<span class="mw-cn">' + esc(o.name || o.k) + '</span>', { 'data-k': o.k, 'data-s': o.s, 'aria-pressed': String(on), title: nm(o) });
@@ -571,7 +572,8 @@
     if (st.list === 'helpers') {
       var out = HGROUPS.map(function (g) {
         var rows = l.filter(function (o) { return hgroup(o) === g[0]; });
-        return rows.length ? '<div class="lbar-gh" data-g="' + g[0] + '"><span>' + g[1] + '</span><b>' + rows.length + '</b></div>' + rows.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow mw-hrow', 'switch', '<span class="mw-st" data-s="' + o.s + '"><span class="mw-sym" aria-hidden="true">' + ST[o.s][0] + '</span></span><span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + (g[0] === 'quiet' ? '<span class="meta"> · ' + esc(word(o)) + '</span>' : '') + '</span><span class="lbar-go">Open</span>', { 'data-k': o.k, 'aria-current': shownIn(o) ? 'true' : null }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '';
+        var none = g[0] === 'helpers' && !rows.length && !q ? '<p class="meta lbar-none">No helper is working. New starts one.</p>' : '';
+        return rows.length || none ? '<div class="lbar-gh" data-g="' + g[0] + '"><span>' + g[1] + '</span><b>' + rows.length + '</b></div>' + none + rows.map(function (o) { return '<div class="mw-lrw">' + btn('mw-opt mw-lrow mw-hrow', 'switch', '<span class="mw-st" data-s="' + o.s + '"><span class="mw-sym" aria-hidden="true">' + ST[o.s][0] + '</span></span><span class="mw-key">' + esc(o.k) + '</span><span class="mw-rn">' + esc(nm(o)) + (g[0] === 'helpers' ? '<span class="meta"> · ' + esc(word(o)) + '</span>' : '') + '</span><span class="lbar-go">Open</span>', { 'data-k': o.k, 'aria-current': shownIn(o) ? 'true' : null }) + (live(o) ? pmBtn(o, 'bar', I.more, 'Stop or end ' + o.k) : '') + '</div>'; }).join('') : '';
       }).join('');
       return out || '<p class="meta">' + (q ? 'No helper matches.' : 'No helper is open. New starts one.') + '</p>';
     }
