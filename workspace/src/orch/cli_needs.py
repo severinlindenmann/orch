@@ -16,6 +16,12 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
     # orch's own detached run: saves a fresh answer of an add-on that was late (needs.refresh), prints nothing
     x.add_argument("--refresh-addon", metavar="NAME", help=argparse.SUPPRESS)
+    x.add_argument(
+        "--parked",
+        action="store_true",
+        help="list what is parked instead: in Backlog with a question, or waiting on a time, a ticket or "
+        "something outside. A parked ticket asks nothing until it comes back",
+    )
     sub.add_parser(
         "counts", parents=[common], help="the numbers every page shows (needs you, working, stuck)"
     )
@@ -125,6 +131,18 @@ def _keys(root: Path, rows: list[dict]) -> dict[str, str]:
     return out
 
 
+def _parked_text(rows: list[dict]) -> str:
+    """`orch needs --parked`: each parked ticket with its reason and the one line that brings it back."""
+    if not rows:
+        return "Nothing is parked."
+    pad, out = " " * 14, [f"Parked ({len(rows)})"]
+    for r in rows:
+        held = f" ({r['questions']} open {'question' if r['questions'] == 1 else 'questions'})"
+        out.append(f"  {r['key']:<10}  {r['title']}: {r['reason']}{held if r['questions'] else ''}")
+        out.append(f"{pad}bring it back: {r['cli']}")
+    return "\n".join(out)
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd == "counts":
         from orch import counts
@@ -143,8 +161,13 @@ def dispatch(args, root: Path) -> bool:
     if args.refresh_addon:
         needs_mod.refresh(root, args.refresh_addon)
         return True
-    from orch import ticketindex
+    from orch import parked, ticketindex
 
+    if args.parked:
+        rows = parked.rows(root)
+        nextstep.remember(args, {"parked": len(rows)})
+        print(json.dumps(rows, indent=2, ensure_ascii=False) if args.json else _parked_text(rows))
+        return True
     # one read-only pass: the ticket files are looked at once, not once per list (ORCH-2289: the rows, the
     # shown fields and the results to review each stat'ed all 10,000 files again)
     with ticketindex.reuse():
@@ -155,10 +178,13 @@ def dispatch(args, root: Path) -> bool:
             return True
         more = _person_rows(root, rows)
         nextstep.remember(args, {"rows": rows, "more": len(more)})
+        rest = len(parked.rows(root))
         if not rows and not more:
             print("Nothing needs you.")
         else:
             print(f"Needs you ({len(rows) + len(more)})")
             keys = _keys(root, rows)
             print("\n".join([*(_line(r, keys) for r in rows), *(_person_line(i, t) for i, t in more)]))
+        if rest:  # ORCH-2431: nothing is lost, one line says where the parked ones are
+            print(f"{rest} parked, not listed here: orch needs --parked")
     return True

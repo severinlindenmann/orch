@@ -104,11 +104,16 @@ def start(root: Path) -> int:
     root = root.resolve()
     nonce = secrets.token_hex(16)
     # -P: the workspace folder is never on the import path (a planted orch_usage.py there is not run)
-    from orch.procs import background_popen_kwargs
+    from orch.procs import (
+        background_popen_kwargs,
+        service_start,  # ORCH-2409: the one door for a long-running start
+    )
 
     with runfiles.open_append(d / "usage.log") as out:
-        proc = subprocess.Popen(
+        proc = service_start(
+            root,
             [sys.executable, "-P", "-m", "orch_usage", "--dir", str(root), "run"],
+            start=subprocess.Popen,
             cwd=root,
             stdout=out,
             stderr=subprocess.STDOUT,

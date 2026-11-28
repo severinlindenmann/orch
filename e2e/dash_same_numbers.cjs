@@ -71,6 +71,7 @@ function makeState() {
   const failing = s.tickets.find(t => t.key === 'PIL-55');
   const run = at => ({type: 'command', ref: 'make check', exit: 1, at});
   failing.checklist = [{id: 'c1', text: 'Check the backups', evidence: [run('2026-11-13T08:00:00Z'), run('2026-11-13T08:05:00Z')]}];
+  failing.status = 'active';  // ORCH-2431: in Backlog it would be parked and give no row (the core then counts none)
   s.needs.push({id: `core:failing:${failing.id}`, source: 'core', kind: 'helper:failing', ticket: failing.id, title: failing.title,
     text: 'The check failed 2 times in a row on the step "Check the backups".', tone: 'bad', since: '2026-11-13T08:05:00Z', cli: `orch ticket show ${failing.key}`});
   s.counts = coreCounts(s.tickets, s.runs, s.needs);

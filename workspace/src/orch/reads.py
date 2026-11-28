@@ -207,6 +207,10 @@ def _answer(root: Path, argv: list[str]):
         from orch import needs
 
         return json.loads(json.dumps(needs.needs(root), ensure_ascii=False))
+    if a == ["needs", "--parked"]:  # ORCH-2431: the parked list, from the ticket index alone
+        from orch import parked
+
+        return json.loads(json.dumps(parked.rows(root), ensure_ascii=False))
     if a[:2] == ["chat", "list"] and (len(a) == 2 or (len(a) == 4 and a[2] == "--reader")):
         from orch import ticketchats
 

@@ -75,7 +75,13 @@ $ orch needs
 `orch needs` is one list of everything that waits for a person: open questions first, then failed runs and add-on
 rows (for example "automation is not running"). The same list is on the dashboard and the phone.
 
-To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
+To park a ticket: `orch ticket wait <id> --until 2026-12-01T08:00:00+01:00` (until a time), `--on ticket:<key>`
+(until another ticket is finished) or `--on external:"<what>"` (until you bring it back). A parked ticket, and every
+ticket in Backlog, asks nothing: no row in `orch needs`, on Home or Review, and it is not in the Needs you number.
+Its questions are kept and show again when the time has come, the other ticket is finished, you bring it back
+(`orch ticket wait <id> --clear`) or it moves to To do. `orch needs --parked` lists what is parked, with the reason;
+on the dashboard a question has "Not now" and Home lists the parked tickets with "Bring back". One ticket gives at
+most one row: its own question, else its first row of work that stopped, else a wait that is past its time.
 
 When the agent asks: only when a step cannot be undone, costs money, touches production, deletes real data or is
 visible to people outside this workspace and its connected workspaces; everything else it just does. To change that

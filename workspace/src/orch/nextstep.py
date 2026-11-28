@@ -216,6 +216,8 @@ def _ask(data, args) -> str:
 def _needs(data, args) -> str:
     """ORCH-2140: the rows wait for a person; a Next line never fills in the person's answer."""
     d = data if isinstance(data, dict) else {"rows": data or [], "more": 0}
+    if "parked" in d:  # orch needs --parked
+        return "a parked ticket asks nothing until it comes back: orch needs"
     n = len(d.get("rows") or []) + int(d.get("more") or 0)
     if n == 1:
         return "this one waits for a person, not for a helper."

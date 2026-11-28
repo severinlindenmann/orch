@@ -1666,8 +1666,11 @@ def _ask_merge(root: Path, tid: str, url: str) -> str | None:
 
 
 def _make_card(root: Path, tid: str, key: str, url: str) -> None:
-    """The card through the core in this process; when the loaded core does not fit this add-on's code (a long
-    running queue after an update: no tickets.PRIORITIES, #2576), through the installed `orch ask` instead."""
+    """The card through the core in this process; when the loaded core does not fit itself or this add-on's
+    code (a long running queue after an update: no tickets.PRIORITIES, #2576; a newer cli_review, loaded on
+    this first card, calling the older tickets.ask loaded at the start: "ask() got an unexpected keyword
+    argument 'if_wait'", ORCH-2422), through the installed `orch ask` instead. Nothing was written when such
+    a call fails (the question is the last step), and the same open question is never asked twice."""
     argv = ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
             "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]  # fmt: skip
     try:
@@ -1675,10 +1678,9 @@ def _make_card(root: Path, tid: str, key: str, url: str) -> None:
         from orch import cli_review
 
         ns = core.build_parser().parse_args(argv)
-    except (AttributeError, ImportError):
+        cli_review.ask_card(ns, root, tid, BY)
+    except (AttributeError, ImportError, TypeError):  # old and new core modules mixed in this process
         _ask_installed(root, argv)
-        return
-    cli_review.ask_card(ns, root, tid, BY)
 
 
 def _ask_installed(root: Path, argv: list[str]) -> None:

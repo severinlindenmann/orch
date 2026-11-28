@@ -107,3 +107,12 @@ Home: the question is body text; answering moves the card out, the next one in, 
   Relay page." with source "Relay" and a quiet "OK" button (same row pattern as `need-notice`). Added because RP8 B
   lets a contact the admin connected show up without a click. Relay task questions use the RP4 words
   ("Allow this task", "Always allow tasks from <name>", "Decline"); see `relay/relay.html`.
+
+## 28 Nov 2026 (ORCH-2431, parked tickets)
+
+- The first question has a quiet "Not now" beside "Write your own": it parks the ticket (a dialog asks until when:
+  tomorrow, next Monday, in a week, a day and time, or "When I bring it back"). A parked ticket, and every ticket in
+  Backlog, gives no row on Home or Review and is not in the Needs you number; its question is kept.
+- Needs area: one quiet line "2 parked, they ask nothing until they come back" with Show (same row pattern as the
+  sync notes line). Show lists each parked ticket with its reason ("Until Mon 09:00", "Until you bring it back",
+  "In Backlog") and one "Bring back" button. On Review the question card has the same quiet "Not now" in its foot.

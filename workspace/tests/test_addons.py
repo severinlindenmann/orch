@@ -707,8 +707,10 @@ def test_agents_block_cannot_forge_markers(tmp_path):
         assert not (root / ".orch/harness/AGENTS.orch.md").exists() and not (root / "AGENTS.md").exists()
 
 
-def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
-    monkeypatch.delenv("ORCH_HOME_STRICT")  # the old, non-strict fallback
+def test_orch_home_must_be_plain_folder_under_home(proj, run, monkeypatch, capfd):
+    """ORCH-2410: an ORCH_HOME that is not trusted is refused, with what to do. Never the real folder in its
+    place (before: a note on stderr, and the command ran on the person's own orch folder)."""
+    monkeypatch.delenv("ORCH_HOME_STRICT")  # a person's own shell: no test switch
     h = addons.real_home()
     real = h / ".orch-tool"
     for bad in (
@@ -717,14 +719,29 @@ def test_orch_home_must_be_plain_folder_under_home(proj, monkeypatch, capfd):
         h.parent,
     ):  # in project / outside home / above home
         monkeypatch.setenv("ORCH_HOME", str(bad))
-        assert addons.home() == real
-    assert "ignored" in capfd.readouterr().err
+        with pytest.raises(Refused, match="is not a trusted folder") as e:
+            addons.home()
+        assert str(bad) in str(e.value) and "or unset it" in str(e.value)
+        assert "ORCH_HOME_STRICT" not in str(e.value)  # no word about a switch the person never set
     # an ancestor between ORCH_HOME and home holds .git / .orch / .agents (a repo aiming at its parent)
     for marker in (".git", ".orch", ".agents"):
         repo = h / f"repo-{marker[1:]}"
         (repo / marker).mkdir(parents=True)
         monkeypatch.setenv("ORCH_HOME", str(repo / "sub" / "home"))
-        assert addons.home() == real, marker
+        with pytest.raises(Refused, match="is not a trusted folder"):
+            addons.home()
+    # a throwaway home in the temp folder (a try-out of `orch doctor`): refused out loud, and nothing is
+    # written to the real folder
+    away = proj.parent / "throwaway-home"
+    monkeypatch.setenv("ORCH_HOME", str(away))
+    code, out, err = run("addon", "list")  # a command that needs the orch folder
+    assert code != 0 and "is not a trusted folder" in err and str(away) in err
+    # doctor still answers (it is what a person runs when something is wrong) and names it as a problem
+    code, out, err = run("doctor")
+    assert "problem  ORCH_HOME (" in out and str(away) in out and "or unset it" in out
+    assert "Nothing wrong." not in out
+    assert "ignored" not in capfd.readouterr().err
+    assert not real.exists()  # the person's own orch folder was not made, read or written
     monkeypatch.setenv("HOME", str(proj / "fakehome"))  # $HOME is not what counts
     assert addons.real_home() == h
     ok = h / "cfg" / "orchhome"
@@ -745,10 +762,11 @@ def test_strict_untrusted_orch_home_is_an_error_and_writes_nothing(proj, run, mo
         code, out, err = run("addon", "list")
         assert code != 0 and "ORCH_HOME_STRICT" in err and str(bad) in err
         assert (sorted(real.rglob("*")) if real.exists() else None) == seen and not bad.exists()
-        # without the switch the old fallback stays (a note, then the real folder)
+        # without the switch it is refused as well (ORCH-2410): never the real folder in its place
         monkeypatch.delenv("ORCH_HOME_STRICT")
-        assert addons.home() == real
-    assert not real.exists() or not any(real.rglob("*"))  # the fallback writes nothing there (non-strict)
+        with pytest.raises(Refused, match="is not a trusted folder"):
+            addons.home()
+    assert not real.exists() or not any(real.rglob("*"))
 
 
 def test_strict_cwd_above_the_home_is_an_error(proj, monkeypatch):
@@ -854,12 +872,13 @@ def test_fallback_trace_never_writes_into_the_real_home(proj, monkeypatch, tmp_p
     monkeypatch.setenv("ORCH_HOME", str(link))
     monkeypatch.delenv("ORCH_HOME_STRICT")
     before = _listing(h)
-    assert addons.home() == h / ".orch-tool"
+    with pytest.raises(Refused, match="is not a trusted folder"):  # ORCH-2410: refused, no fallback
+        addons.home()
     monkeypatch.delenv("ORCH_HOME")
     assert addons.home() == h / ".orch-tool"
     assert _listing(h) == before  # no new file, no rotation, no touched folder
     assert not (h / ".orch-tool").exists()
-    assert [x["reason"] for x in _trace_lines(h)] == ["untrusted:outside-home", "unset"]
+    assert [x["reason"] for x in _trace_lines(h)] == ["unset"]
     if os.name != "nt":  # no file modes on Windows
         assert addons._trace_log_path().stat().st_mode & 0o777 == 0o600
     assert list(target.iterdir()) == []
@@ -935,18 +954,21 @@ def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj
     h = addons.real_home()
     _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME_STRICT")
-    monkeypatch.setenv("ORCH_HOME", str(proj / "inside"))
-    addons.home()
-    monkeypatch.setenv("ORCH_HOME", str(h.parent / "elsewhere"))
-    addons.home()
-    assert [x["reason"] for x in _trace_lines(h)] == ["untrusted:cwd", "untrusted:outside-home"]
+    for bad in (
+        proj / "inside",
+        h.parent / "elsewhere",
+    ):  # ORCH-2410: refused, so there is no fallback to trace
+        monkeypatch.setenv("ORCH_HOME", str(bad))
+        with pytest.raises(Refused, match="is not a trusted folder"):
+            addons.home()
+    assert _trace_lines(h) == []
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     with pytest.raises(Refused):
         addons.home()
-    assert len(_trace_lines(h)) == 2
+    assert _trace_lines(h) == []
     monkeypatch.setenv("ORCH_HOME", str(h / "ok"))  # trusted: no line either
     addons.home()
-    assert len(_trace_lines(h)) == 2
+    assert _trace_lines(h) == []
 
 
 def test_fallback_trace_is_bounded_over_256kb_without_rotating(proj, monkeypatch):

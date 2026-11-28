@@ -40,16 +40,19 @@ def is_active(root):
     return any(isinstance(a, dict) and a.get("name") == "sync" and bool(a.get("active")) for a in data)
 
 
-def spawn(args, out, env):
+def spawn(root, args, out, env):
     """`<this python> -P -m orch_sync <args>` in the background, in the add-on's own folder (-P: no working
-    folder on the import path). The interpreter path must be absolute: nothing is looked up."""
-    from orch.procs import background_popen_kwargs
+    folder on the import path). The interpreter path must be absolute: nothing is looked up. Through the
+    core's one door for a long-running start (ORCH-2409: never from inside background work, counted)."""
+    from orch.procs import background_popen_kwargs, service_start
 
     exe = sys.executable
     if not exe or not os.path.isabs(exe):
         raise OSError("This Python does not know its own path; sync cannot start in the background")
-    return _popen(
+    return service_start(
+        root,
         [exe, "-P", "-m", "orch_sync", *args],
+        start=_popen,
         cwd=HOME,
         stdout=out,
         stderr=subprocess.STDOUT,

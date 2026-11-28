@@ -605,11 +605,11 @@ def test_core_is_this_python_never_orch_bin_or_path(root, tmp_path, monkeypatch)
 def test_loop_spawn_uses_an_absolute_python_outside_the_workspace(root, monkeypatch):
     seen = []
     monkeypatch.setattr(orchcli, "_popen", lambda argv, **kw: seen.append((argv, kw)))
-    orchcli.spawn(["--dir", str(root), "run"], None, {})
+    orchcli.spawn(root, ["--dir", str(root), "run"], None, {})
     argv, kw = seen[0]
     assert argv[:4] == [sys.executable, "-P", "-m", "orch_sync"] and os.path.isabs(argv[0])
     assert kw["cwd"] == orchcli.HOME and root.resolve() not in (kw["cwd"], *kw["cwd"].parents)
     monkeypatch.setattr(sys, "executable", "python3")
     with pytest.raises(OSError):
-        orchcli.spawn(["run"], None, {})
+        orchcli.spawn(root, ["run"], None, {})
     assert len(seen) == 1
