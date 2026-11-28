@@ -20,6 +20,7 @@ from orch import (
     runs,
     runs_live,
     runwatch,
+    services,
     session_history,
     sharedfolder,
     tend,
@@ -315,6 +316,45 @@ def _status(args, root: Path) -> None:
     _out(args, {"runs": out}, "\n".join(lines))  # orch.reads.run_status: the same answer, in-process
 
 
+def _background_runs(root: Path) -> bool:
+    """True when a background add-on of this workspace runs now (it may look after the line and waiting
+    input). Never raises: unknown reads as no."""
+    try:
+        here = str(root.resolve())
+        return any(e.get("workspace") == here for e in services.running())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _line_place(root: Path, tid: str, line: list[str]) -> dict:
+    """Where a start stands in the line for a free helper place, why it waits, and whether something here
+    starts it by itself: {at, of, why, watched}."""
+    why = None
+    with contextlib.suppress(Exception):
+        why = runs_live._held(root)
+        if not why and (hit := runs_live._full(root)):
+            why = f"{hit} helpers are working at once, the most you allowed"
+    return {
+        "at": line.index(tid) + 1,
+        "of": len(line),
+        "why": why or "a place is free now",
+        "watched": _background_runs(root),
+    }
+
+
+def _line_text(n: str, place: dict) -> str:
+    at = f"number {place['at']} of {place['of']}"
+    text = f"{n} waits in line for a free helper place ({at}): {place['why']}. "
+    if place["watched"]:
+        text += "It starts by itself when a place is free. "
+    else:
+        text += f"It starts when another helper finishes, or when you start the line: {LINE_START}. "
+    return text + f"Take it out of the line: orch run stop {n}"
+
+
+LINE_START = "orch run tend"
+
+
 def status_of(root: Path, tid: str) -> tuple[dict, str]:
     n = tickets.load(root, tid).get("key") or tid  # how a person names it in the commands below
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
@@ -330,7 +370,16 @@ def status_of(root: Path, tid: str) -> tuple[dict, str]:
         data["waiting_input"] = _waiting_input(root, tid)
         data["sent_input"] = _sent_input(root, tid)
         data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
-        if waiting:  # input is really queued for a run
+        line = [t for t, _ in runs_live.waiting_line(root)]
+        if tid in line:  # ORCH-2296: its start waits in line; say why, and who starts it
+            data["line"] = _line_place(root, tid, line)
+            text = _line_text(n, data["line"])
+        elif waiting and _background_runs(root):  # something here may pick it up: never "nothing will"
+            text = (
+                f"{waiting} message{'s' if waiting != 1 else ''} waiting for the helper; no helper is "
+                f"working on it now. Start one: orch run start {n}"
+            )
+        elif waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "
                 f"Start it: orch run start {n}"
@@ -586,11 +635,16 @@ def dispatch(args, root: Path) -> bool:
         ok = runs_live.stop(  # a person's stop (also --by focus) holds what waits; the automation's own never
             root, tid, hold=by != runs_live.AUTOMATION_BY
         )
+        # ORCH-2295: nothing runs, but its start waits in line: the stop takes it out of the line
+        left = not ok and runs_live.leave_line(root, tid)
+        n = tickets.load(root, tid).get("key") or tid
         _out(
             args,
-            {"stopped": ok},
+            {"stopped": ok, "left_line": left},
             f"Stopped {_name(root, tid)}. The work done so far is kept."
             if ok
+            else f"{_name(root, tid)} no longer waits in line. Start it when you want: orch run start {n}"
+            if left
             else f"Nothing is running on {_name(root, tid)}.",
         )
     elif sub == "interrupt":

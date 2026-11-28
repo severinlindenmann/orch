@@ -31,6 +31,7 @@ FAKE_TUI = r"""
 import json, os, select, sys, time, tty
 out, deaf = sys.argv[1], float(sys.argv[2])
 slow, hint = float(sys.argv[3]), sys.argv[4]
+ready_file, drop_enters = sys.argv[5], int(sys.argv[6])
 t0 = time.monotonic()
 tty.setraw(0)
 START, END = b"\x1b[200~", b"\x1b[201~"
@@ -42,6 +43,8 @@ def record(kind, text):
         f.write(json.dumps({"kind": kind, "text": text}) + "\n")
 
 def starting():
+    if ready_file:
+        return not os.path.exists(ready_file)
     return time.monotonic() - t0 < slow
 
 def draw():
@@ -82,6 +85,9 @@ while True:
             break
         elif buf[:1] == b"\r":
             buf = buf[1:]
+            if drop_enters:
+                drop_enters -= 1
+                continue
             if time.monotonic() - t0 < deaf:
                 continue  # dropped, like a tool that is not ready yet
             if box:
@@ -104,13 +110,22 @@ def tui(proj, tmp_path, monkeypatch):
     script.write_text(FAKE_TUI, encoding="utf-8")
     out = tmp_path / "tui.jsonl"
 
-    def start(tid: str, agent: str = "claude", deaf: float = 0.0, slow: float = 0.0, hint: str = "") -> dict:
+    def start(
+        tid: str,
+        agent: str = "claude",
+        deaf: float = 0.0,
+        slow: float = 0.0,
+        hint: str = "",
+        ready_file=None,
+        drop_enters: int = 0,
+    ) -> dict:
         r = runs_live.tmux(
             proj, "new-session", "-d", "-x", "200", "-y", "50", "-s", tid,
             "--", sys.executable, str(script), str(out), str(deaf), str(slow), hint,
+            str(ready_file) if ready_file else "", str(drop_enters),
         )  # fmt: skip
         assert r.returncode == 0, r.stderr
-        _until(lambda: ("starting" if slow else "ready") in _pane(proj, tid), "fake TUI up")
+        _until(lambda: ("starting" if slow or ready_file else "ready") in _pane(proj, tid), "fake TUI up")
         rec = runs.claim(proj, tid, "human:t", agent, "live", pid=os.getpid())
         rec["live"] = {"state": "idle", "since": tickets.now()}
         rec["up"] = True
@@ -216,10 +231,12 @@ def test_a_slow_starting_helper_gets_its_first_task_once_it_is_ready(proj, run, 
     sent again, and the task is submitted exactly once without a person."""
     start, out = tui
     tid = _ticket(run)
-    rec = start(tid, slow=1.5, deaf=4.5)
+    ready_file = out.with_suffix(".ready")
+    rec = start(tid, ready_file=ready_file, drop_enters=1)
     runs.pending_add(proj, tid, "orch", "event", "Work on the ticket.", "start")
     assert runs_live.deliver(proj, tid) == 0
     assert runs.read(proj, tid)["hold"]["why"] == "nobox"  # still starting: nothing typed
+    ready_file.touch()  # release startup only after the hold was observed, regardless of runner load
     _watch(proj, tid, rec, lambda: _got(out, "submit"))
     assert _got(out) == [runs_live.notice_line(tid, True)]  # once, typed, never pasted
     assert any(

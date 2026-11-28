@@ -148,6 +148,16 @@
       if (head.children.length) box.append(head);
       if (at) {
         box.append(el('p', 'meta', name + ' is number ' + at.at + ' of ' + at.of + ' in line. It starts by itself when a place is free.'));
+        /* ORCH-2295: a way out of the line, one click (the same path as `orch run stop`; nothing runs, so nothing is lost) */
+        const lb = attr(el('button', 'btn outline sm', 'Take out of the line'), {type: 'button', 'aria-label': 'Take ' + name + ' out of the line'});
+        lb.dataset.start = 'leave';
+        lb.addEventListener('click', async () => {
+          lb.disabled = true;
+          const r = await sendNow('run.stop', {ticket: o.ticket}).catch(() => null);
+          if (r && r.ok) { isOpen = false; toast(name + ' no longer waits in line.', 'ok'); }
+          else { lb.disabled = false; toast((r && r.text) || 'Could not take ' + name + ' out of the line. Try again.', 'error'); }
+        });
+        box.append(lb);
         return box;
       }
       if (waits) { box.append(waitsActions(hasLast, name)); if (freshOpen) box.append(freshList(hasLast)); const e0 = earlier(v); if (e0) box.append(e0); return box; }

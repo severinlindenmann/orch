@@ -98,6 +98,23 @@ def _add(args, root: Path) -> None:
             print(w)
 
 
+def _open_sessions(root: Path) -> list[tuple[str, str]]:
+    """(name, the command that ends it) for every helper session open in this workspace now. Never raises."""
+    out: list[tuple[str, str]] = []
+    try:
+        from orch import runs, runs_live
+
+        for rec in runs_live.records(root):
+            if rec.get("mode") != "live" or runs.state(rec) != "alive":
+                continue
+            name = runs_live._session_name(root, rec["ticket"])
+            hidden = name != runs_live.ref(root, rec["ticket"])  # Chat, the Manager: no ticket to name
+            out.append((name, "orch stop" if hidden else f"orch run stop {name}"))
+    except Exception:  # noqa: BLE001
+        return []
+    return out
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "addon":
         return False
@@ -134,7 +151,18 @@ def dispatch(args, root: Path) -> bool:
             _out(args, {"ok": True, "uninstalled": True}, f"{args.name} is uninstalled.")
             return True
         addons.remove(root, args.name, args.purge)
-        _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
+        # ORCH-2299: a helper session that is open stays open when an add-on goes: say so, with the way out
+        still = _open_sessions(root)
+        _out(
+            args,
+            {"ok": True, **({"sessions_open": [n for n, _ in still]} if still else {})},
+            f"{args.name} is turned off in this workspace."
+            + (
+                " A helper session stays open: " + ", ".join(f"{n} (end it: {cmd})" for n, cmd in still) + "."
+                if still
+                else ""
+            ),
+        )
     else:
         addons.tool_env_change_ok()
         addons.uninstall(root, args.name)

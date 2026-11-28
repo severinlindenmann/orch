@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import jrun
 
+from orch_services import watch
 from orch_services.watch import _lsof as REAL_LSOF
 from orch_services.watch import listeners as REAL_LISTENERS  # the autouse fixture replaces it in every test
 
@@ -741,3 +742,56 @@ def test_a_question_without_a_count_or_with_a_bad_check_stamp_still_names_the_im
     assert row["question"]["suggested"] == "Restart"
     assert row["question"]["text"].startswith("Affected: Demo for Lea.")
     assert row["question"]["text"].endswith("Suggested: Restart.")
+
+
+def test_a_job_that_ended_cleanly_once_is_not_failing_and_gets_no_question(cli, fake, ws, clock, orch):
+    """ORCH-2328 (issue 3362): `-- /bin/sh -c "exit 0"` ran once and ended with exit 0; the computer does not
+    start it again. Every check found it not alive and counted one more failure, then asked 'keeps stopping'."""
+    fake.run_counts["budget"] = 1
+    _add(cli)
+    fake.entries["budget"]["running"] = False  # it ended by itself; launchd `runs` stays 1
+    fake.exit_codes["budget"] = 0
+    for i in range(5):
+        clock["t"] = T0 + 60 * (i + 1)
+        res = _check(cli)
+        assert res["failing"] is False and res["unhealthy"] is False
+        assert res["health"]["text"] == "Ended by itself without an error"
+    assert not orch.asks() and not orch.ticket()["questions"]
+    assert watch.read_state(ws, "budget")["watch"]["events"] == []
+    _code, out = jrun(cli, "list")
+    row = out["services"][0]
+    assert row["failing"] is False and row["question"] is None
+    assert row["health"]["text"] == "Ended by itself without an error"
+
+
+def test_a_job_that_ended_with_an_error_or_was_started_again_still_counts(cli, fake, ws, clock, orch):
+    fake.run_counts["budget"] = 1
+    _add(cli)
+    fake.entries["budget"]["running"] = False
+    fake.exit_codes["budget"] = 3  # ended with an error: a failure on every check, as before
+    clock["t"] = T0 + 60
+    assert _check(cli)["unhealthy"] is True
+    assert len(watch.read_state(ws, "budget")["watch"]["events"]) == 1
+    fake.exit_codes["budget"] = 0  # exit 0, but the computer started it again: it keeps stopping
+    fake.run_counts["budget"] = 2
+    clock["t"] = T0 + 120
+    assert _check(cli)["health"]["text"] == "Not alive"
+    assert len(watch.read_state(ws, "budget")["watch"]["events"]) == 2
+    clock["t"] = T0 + 180
+    fake.run_counts["budget"] = 3
+    assert _check(cli)["failing"] is True and len(orch.asks()) == 1
+
+
+def test_systemd_last_exit_reads_the_code_of_a_run_that_exited(monkeypatch):
+    import subprocess
+
+    from orch_services.drivers.systemd import Systemd
+
+    d = Systemd()
+    out = {"text": "ExecMainCode=1\nExecMainStatus=0\n"}
+    monkeypatch.setattr(d, "_run", lambda *a: subprocess.CompletedProcess([], 0, out["text"], ""))
+    assert d.last_exit(_spec()) == 0
+    out["text"] = "ExecMainCode=2\nExecMainStatus=15\n"  # killed by a signal: not an exit code
+    assert d.last_exit(_spec()) is None
+    out["text"] = "ExecMainCode=0\nExecMainStatus=0\n"  # never ran to an end
+    assert d.last_exit(_spec()) is None
