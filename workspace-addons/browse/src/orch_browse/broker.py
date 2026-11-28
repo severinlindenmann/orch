@@ -716,22 +716,24 @@ class Broker:
         ev.set()
 
     def _ctl_changed(self) -> None:
-        """After every change of owner (on the loop): waiters look again, every watcher hears its own view of it,
-        the state file says it for the dashboard's list (no page ids in it)."""
+        """After every change of owner (on the loop): waiters look again, the state file says it for the
+        dashboard's list (no page ids in it), then every watcher hears its own view of it. The file is saved
+        before a watcher hears: whoever reads the state on hearing the change finds it there (ORCH-2396: the
+        other order let a reader see the old state for a moment)."""
         if self.control.state != "person" and self.sends:
             self._flush_sends()
         if self.control.state != "person" and self.person_stops:
             self._flush_stops()
         self._wake_turn()
-        with self.wlock:
-            watchers = list(self.watchers)
-        for w in watchers:
-            w.put(self._control_msg(w.page))
         snap = self.control.snapshot()
         doc = {**self.state_doc, "control": {k: snap[k] for k in ("state", "asking") if k in snap}}
         with contextlib.suppress(OSError):
             if self.state_doc and not self.stop_why:  # never over the "ended" a closing broker writes
                 paths.write_state(self.run, doc)
+        with self.wlock:
+            watchers = list(self.watchers)
+        for w in watchers:
+            w.put(self._control_msg(w.page))
 
     def _control_msg(self, page: str | None) -> dict:
         """Who drives, for one watcher. The page in control also gets the ticket's site list (to tick the one

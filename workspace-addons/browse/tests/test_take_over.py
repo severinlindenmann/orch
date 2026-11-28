@@ -126,6 +126,17 @@ def setup_take(ws, capsys, address="http://site.test/signin"):
     return d, w, hello["generation"], c["epoch"]
 
 
+def saved_control(d, pred, secs=10):
+    """The control part of the saved state file once `pred` holds for it (None: never within `secs`)."""
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
+        c = paths.read_state(d).get("control") or {}
+        if pred(c):
+            return c or True
+        time.sleep(0.05)
+    return None
+
+
 def take(d, w, gen, epoch):
     ok, snap = person(d, "take", gen, w.page, epoch, "take")
     assert ok, snap
@@ -296,7 +307,9 @@ def test_ask_person_returns_after_the_give_back_or_nobody(world, ws, capsys):
     asker = Helper(d, "ask", ["Please sign in to the portal"])
     c = a.control(lambda c: c.get("asking"))
     assert c and c["asking"] == "Please sign in to the portal"
-    assert paths.read_state(d)["control"]["asking"] == "Please sign in to the portal"
+    # the saved state says it too (ORCH-2396: saved before a watcher hears; read until it shows, a reader on
+    # Windows can hold the file for a moment)
+    assert saved_control(d, lambda c: c.get("asking") == "Please sign in to the portal")
     epoch = take(d, a, gen, c["epoch"])
     assert "asking" not in a.control()  # taken: the card goes, the helper still waits
     assert not asker.done(1)
@@ -307,7 +320,7 @@ def test_ask_person_returns_after_the_give_back_or_nobody(world, ws, capsys):
     # nobody comes (the test home waits 4 s instead of 30 min)
     asker = Helper(d, "ask", ["Please sign in again"])
     assert asker.done(15) and asker.r["out"] == takeover.NOBODY
-    assert "asking" not in paths.read_state(d)["control"]
+    assert saved_control(d, lambda c: c and "asking" not in c)
 
 
 def test_a_page_id_named_by_the_caller_is_never_taken(world, ws, capsys):
