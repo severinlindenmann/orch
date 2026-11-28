@@ -3,10 +3,26 @@
 import json
 import os
 
+import pytest
+
 from orch_dashboard import sessiontalk
 
 SID = "0364ced3-ceac-463a-a68d-53a565d7e9df"
 OLD = "11111111-ceac-463a-a68d-53a565d7e9df"
+
+
+class _NoKeys:
+    """The hider of a workspace with no stored keys (the test folder is no orch home, so none is read)."""
+
+    def hide_text(self, s):
+        return s
+
+
+@pytest.fixture(autouse=True)
+def _no_stored_keys(monkeypatch):
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: _NoKeys())
 
 
 def _ticket(sessions):
@@ -127,7 +143,9 @@ def test_secrets_in_a_turn_show_as_hidden(tmp_path, monkeypatch):
     texts = [t["text"] for t in sessiontalk.talk(tmp_path, "t_abcdef")["turns"]]
     joined = "\n".join(texts)
     assert token not in joined and "s3cr3t" not in joined and stored not in joined
-    assert texts[0].startswith("I read the file.\n") and texts[0].endswith("\nDone.") and "[hidden]" in texts[0]
+    assert (
+        texts[0].startswith("I read the file.\n") and texts[0].endswith("\nDone.") and "[hidden]" in texts[0]
+    )
     assert "[hidden]" in texts[1] and texts[2] == "use [hidden] for the shop"
     assert texts[3] == "First line.\n\n- one\n- two"  # plain text keeps its lines
 
@@ -140,3 +158,14 @@ def test_a_scrub_that_fails_shows_nothing_of_the_turn(tmp_path, monkeypatch):
     _conv(tmp_path, monkeypatch, [{"type": "assistant", "message": {"content": "anything"}}])
     _load(monkeypatch, _ticket([{"agent": "claude", "id": SID, "last_used": "2026-11-26T09:00:00Z"}]))
     assert [t["text"] for t in sessiontalk.talk(tmp_path, "t_abcdef")["turns"]] == ["[hidden]"]
+
+
+def test_stored_keys_that_cannot_be_read_show_no_conversation(tmp_path, monkeypatch):
+    sessiontalk._CACHE.clear()
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+    _conv(tmp_path, monkeypatch, [{"type": "assistant", "message": {"content": "anything"}}])
+    _load(monkeypatch, _ticket([{"agent": "claude", "id": SID, "last_used": "2026-11-26T09:00:00Z"}]))
+    assert sessiontalk.talk(tmp_path, "t_abcdef") == {"available": False, "turns": [], "more": False}
+    assert not sessiontalk._CACHE  # asked again next time
