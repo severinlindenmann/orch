@@ -956,7 +956,7 @@ function addonOwnOptions(addon) {
   if (!addon.active || snapshot) return [];
   const out = [];
   if (addon.name === SYNC) out.push(syncInfoLine(syncUi.card, false), syncCard(state.settings));
-  if (addons().find(a => a.name === addon.name)?.dashboard?.panel === 'links' && sharingOn()) out.push(window.OrchLook?.settingsSection());
+  if (addons().find(a => a.name === addon.name)?.dashboard?.panel === 'links' && sharingOn()) out.push(window.OrchLook?.settingsSection('Shared pages'));
   return out.filter(Boolean);
 }
 // Where an add-on's settings are edited: its part of Settings. The add-on with the phone panel has a tab of its own,

@@ -322,7 +322,7 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
     for gone in ("OrchLook?.settingsSection()", "syncCard(settings)", "moreSettings("):
         assert gone not in part, gone
     own = src[src.index("function addonOwnOptions(") : src.index("function addonSettingsPlace(")]
-    assert "OrchLook?.settingsSection()" in own and "syncCard(state.settings)" in own
+    assert "OrchLook?.settingsSection('Shared pages')" in own and "syncCard(state.settings)" in own
     assert (
         "const panel = (id, body) =>" in src[: src.index("function settingsPage")]
         or "const panel = (id, body) =>" in src

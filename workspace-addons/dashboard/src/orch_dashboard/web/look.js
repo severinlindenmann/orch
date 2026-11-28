@@ -291,12 +291,15 @@
         n('p', {className: 'meta'}, owner ? 'Taken from “You” in the sidebar. Only you see it here; it is not sent to other workspaces.' : 'Pick your name in the sidebar. Only you see it here; it is not sent to other workspaces.')));
   }
 
+  let sectionTitle = null;
   function section() {
     if (!look) return null;
     const on = look.shared_pages !== false;
     return n('div', {className: 'stack', 'data-key': 'settings-look', 'data-testid': 'settings-look'},
       // the sharing add-on's own menu name (RP8 B: one word for it everywhere); the page code never names an add-on
-      n('h2', {className: 'set-sub'}, (typeof addons === 'function' && typeof addonLabel === 'function' && addons().some(a => a.dashboard?.panel === 'links')) ? addonLabel(addons().find(a => a.dashboard?.panel === 'links')) : 'Shared pages'),
+      // On the sharing add-on's own Settings page (W-059) the page already names the add-on: the heading says what the
+      // rows are about (`sectionTitle`, kept for the repaint after a click).
+      n('h2', {className: 'set-sub'}, sectionTitle || ((typeof addons === 'function' && typeof addonLabel === 'function' && addons().some(a => a.dashboard?.panel === 'links')) ? addonLabel(addons().find(a => a.dashboard?.panel === 'links')) : 'Shared pages')),
       n('div', {className: 'card'},
         ownerRow(),
         // Like every other switch row: the words left, the switch right, one row at any width.
@@ -405,6 +408,6 @@
   window.OrchLook = {
     badge, resolve, defaultColor, letter, faviconHref,
     current: () => look, name: () => name,
-    settingsSection: () => section(), profileCard: () => profileCard(),
+    settingsSection: title => { sectionTitle = typeof title === 'string' && title ? title : null; return section(); }, profileCard: () => profileCard(),
   };
 })();
