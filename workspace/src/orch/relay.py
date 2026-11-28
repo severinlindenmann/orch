@@ -1424,7 +1424,7 @@ def _question_task(root: Path, ticket: dict, q: dict) -> dict:
 
 
 def _question_decision(root: Path, q: dict) -> dict:
-    """body.decision_first, body.if_wait and body.facts (relay-api.md 'Questions', ORCH-2187 Focused review F).
+    """body.decision_first, body.if_wait and body.facts (relay-api.md 'Questions', ORCH-2187).
     With [workflow] decision_first on, the phone draws the card as the dashboard does: "You decide" first,
     then "If you wait" and the "What matters" lines the helper gave (orch ask --if-wait --fact). Each line is
     hidden and cut like the title; one that cannot be shown safely is left out. Off: nothing (RULE A)."""
