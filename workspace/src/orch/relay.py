@@ -296,22 +296,11 @@ def _mark_seen(root: Path, mid: str) -> bool:
 
 
 def _break_stale(lock: Path) -> bool:
-    """Claim a stale lock by renaming it to a name only we know (atomic: one waiter wins), then check that
-    what we took is really old. A fresh lock a faster waiter just made is put back."""
-    mine = lock.with_name(f"{lock.name}.{secrets.token_hex(4)}")
-    try:
-        os.replace(lock, mine)
-    except OSError:
-        return False
-    try:
-        if time.time() - mine.stat().st_mtime > LOCK_STALE:
-            return True
-        with contextlib.suppress(OSError):
-            os.link(mine, lock)  # no-clobber put-back
-        return False
-    finally:
-        with contextlib.suppress(OSError):
-            mine.unlink()
+    """A lock left behind (its holder is gone, or it is older than LOCK_STALE) is taken over the way the
+    core's ticket lock is (tickets._break_stale, ORCH-2369): under a marker, judged again there, removed in
+    place. Before (ORCH-2411) it was renamed away and put back, and in that gap another writer could make a
+    lock of its own, so two held it."""
+    return tickets._break_stale(lock, after=LOCK_STALE)
 
 
 _WINDOWS = os.name == "nt"
@@ -323,7 +312,10 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
     Only the owner removes it again (a token in the file), so a slow holder never frees a successor's lock."""
     lock = root / ".orch" / name
     lock.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(8).encode()
+    from orch import procs
+
+    token = procs.lock_token()  # names its holder: a holder that died frees the lock at once
+    looked: dict[str, float] = {}
     end = time.monotonic() + wait
     while True:
         try:
@@ -340,11 +332,7 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
                 raise Refused("The relay inbox is busy right now. Try again in a moment.") from None
             time.sleep(0.02)
         except FileExistsError:
-            try:
-                stale = time.time() - lock.stat().st_mtime > LOCK_STALE
-            except OSError:
-                continue
-            if stale and _break_stale(lock):
+            if tickets._left_behind(lock, LOCK_STALE, looked) and _break_stale(lock):
                 continue
             if time.monotonic() > end:
                 raise Refused("The relay inbox is busy right now. Try again in a moment.") from None
@@ -354,7 +342,7 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
     finally:
         with contextlib.suppress(OSError):
             if lock.read_bytes() == token:
-                lock.unlink()
+                procs.unlink(lock)
 
 
 def _allows_path(root: Path) -> Path:

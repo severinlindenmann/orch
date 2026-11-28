@@ -501,6 +501,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn '+(isLive(it)?'outline':'ghost')+' sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),isLive(it)?'See the changes':'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  /* ORCH-2431: o.notNow(item) gives a click handler when the card's ticket can be parked: a quiet "Not now" button in the card's foot (never folded into More: it must be easy to find). The page asks until when. */
+  const nn=!layer&&typeof o.notNow==='function'?o.notNow(it):null;
+  if(typeof nn==='function'){const b=el('button','btn ghost sm swipe-not-now','Not now');b.type='button';b.dataset.key='not-now';b.title='Take this ticket off Home and Review until a day you pick';b.addEventListener('pointerdown',e=>e.stopPropagation());b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();nn(it,e)});row.append(b)}
   /* ORCH-1804: o.ticketLink(item) gives the address that shows the card's ticket beside the deck (the Review page's side panel); it takes the place of the plain Open */
   const tl=!layer&&typeof o.ticketLink==='function'?o.ticketLink(it):'';
   if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}

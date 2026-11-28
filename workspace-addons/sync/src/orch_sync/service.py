@@ -172,7 +172,7 @@ def start(root, wait=15.0):
     nonce = secrets.token_hex(16)
     env = {**os.environ, "ORCH_ROOT": str(root), NONCE_ENV: nonce}
     with _log(root) as out:
-        proc = orchcli.spawn(["--dir", str(root), "run"], out, env)
+        proc = orchcli.spawn(root, ["--dir", str(root), "run"], out, env)
     end = time.monotonic() + wait
     died = None
     while time.monotonic() < end:

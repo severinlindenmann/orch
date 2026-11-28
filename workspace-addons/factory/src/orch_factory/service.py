@@ -147,16 +147,24 @@ def start(root: Path, wait: float = 20) -> int:
 def _spawn(root: Path, d: Path) -> int:
     nonce = secrets.token_hex(16)
     # -P: the workspace folder is never on the import path (a planted orch_factory.py there is not run)
+    try:
+        from orch.procs import service_start  # ORCH-2409: the core's one door for a long-running start
+    except ImportError:  # no orch in this Python (the add-on's own test env): started as before
+        service_start = None
     with runfiles.open_append(d / "factory.log") as out:
-        proc = subprocess.Popen(
-            [sys.executable, "-P", "-m", "orch_factory", "--dir", str(root), "watch"],
-            cwd=root,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "ORCH_ROOT": str(root), NONCE_ENV: nonce},
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-        )
+        argv = [sys.executable, "-P", "-m", "orch_factory", "--dir", str(root), "watch"]
+        kw = {
+            "cwd": root,
+            "stdout": out,
+            "stderr": subprocess.STDOUT,
+            "env": {**os.environ, "ORCH_ROOT": str(root), NONCE_ENV: nonce},
+            "start_new_session": True,
+            "stdin": subprocess.DEVNULL,
+        }
+        if service_start is None:
+            proc = subprocess.Popen(argv, **kw)
+        else:
+            proc = service_start(root, argv, start=subprocess.Popen, **kw)
     end = time.time() + 15
     while time.time() < end:
         rec = runfiles.read_json(d / RECORD)

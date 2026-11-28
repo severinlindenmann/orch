@@ -873,27 +873,11 @@ STATE_LOCK_STALE = 10  # no more than the wait: a lock left by a holder that die
 
 
 def _break_stale_lock(lock: Path) -> bool:
-    """Take away a lock left by a holder that died (older than STATE_LOCK_STALE; it is only ever held for one
-    file write). Rename first, so only one waiter wins; what was taken must still be the old one, else (a new
-    holder's fresh lock) it is put back without clobbering."""
-    try:
-        if time.time() - lock.stat().st_mtime <= STATE_LOCK_STALE:
-            return False
-        mine = lock.with_name(f"{lock.name}.{os.getpid()}.{time.monotonic_ns()}")
-        os.replace(lock, mine)
-    except OSError:
-        return False
-    try:
-        if time.time() - mine.stat().st_mtime > STATE_LOCK_STALE:
-            return True
-        with contextlib.suppress(OSError):
-            os.link(mine, lock)  # a live holder's lock: put it back (fails if a newer one is there already)
-        return False
-    except OSError:
-        return False
-    finally:
-        with contextlib.suppress(OSError):
-            mine.unlink()
+    """Take away a lock left by a holder that died (gone, or older than STATE_LOCK_STALE; it is only ever
+    held for one file write), the way the core's ticket lock is taken over (tickets._break_stale, ORCH-2369):
+    under a marker, judged again there, removed in place. Before (ORCH-2411) it was renamed away and put
+    back, and in that gap another writer could make a lock of its own."""
+    return tickets._break_stale(lock, after=STATE_LOCK_STALE)
 
 
 @contextlib.contextmanager
@@ -904,7 +888,10 @@ def _state_locked(root: Path, wait: float = 10.0):
     lock = net.secrets_dir(root) / "phone-views.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + wait
-    token = f"{os.getpid()}-{time.monotonic_ns()}".encode()
+    from orch import procs
+
+    token = procs.lock_token()  # names its holder: a holder that died frees the lock at once
+    looked: dict[str, float] = {}
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -913,8 +900,11 @@ def _state_locked(root: Path, wait: float = 10.0):
             finally:
                 os.close(fd)
             break
-        except FileExistsError:
-            if _break_stale_lock(lock):
+        except (
+            FileExistsError,
+            PermissionError,
+        ):  # Windows: a lock being deleted refuses with PermissionError
+            if tickets._left_behind(lock, STATE_LOCK_STALE, looked) and _break_stale_lock(lock):
                 continue
             if time.monotonic() > end:
                 raise Refused("The phone view state is busy. Try again in a moment.") from None
@@ -922,28 +912,10 @@ def _state_locked(root: Path, wait: float = 10.0):
     try:
         yield
     finally:
-        # only our own lock goes, never one a later holder made: take it aside first (atomic), then check
-        mine = lock.with_name(f"{lock.name}.{token.decode()}.rel")
-        try:
-            os.replace(lock, mine)
-        except OSError:
-            mine = None  # nothing taken aside: nothing to remove
-        if mine is not None:
-            try:
-                ours = mine.read_bytes() == token
-            except OSError:
-                ours = False  # can not tell: treat it as someone else's
-            if not ours:  # put it back; dropped only if a newer one is there already
-                try:
-                    os.link(mine, lock)
-                except FileExistsError:
-                    pass
-                except OSError:  # no hard links on this file system: rename back when the place is still free
-                    with contextlib.suppress(OSError):
-                        if not lock.exists():
-                            os.rename(mine, lock)
-            with contextlib.suppress(OSError):
-                mine.unlink()
+        # only our own lock goes, never one a later holder made (a holder removes the lock it made itself)
+        with contextlib.suppress(OSError):
+            if tickets._names(lock, token):
+                procs.unlink(lock)
 
 
 def update_state(root: Path, fn) -> dict:

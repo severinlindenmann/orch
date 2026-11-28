@@ -154,6 +154,7 @@ def test_orch_counts_counts_a_stuck_ticket(proj, run):
     assert run("init")[0] == 0
     a = json.loads(run("ticket", "new", "Keeps failing", "--json")[1])["id"]
     assert run("check", "add", a, "Build it")[0] == 0
+    assert run("ticket", "status", a, "ready")[0] == 0  # in Backlog it would give no row (ORCH-2431)
     for _ in range(2):
         assert run("check", "record", a, "c1", "--cmd", "make", "--exit", "1")[0] == 0
     c = json.loads(run("counts", "--json")[1])

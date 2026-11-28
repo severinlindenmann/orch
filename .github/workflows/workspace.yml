@@ -157,6 +157,14 @@ jobs:
           if [ "$RUNNER_ENVIRONMENT" = self-hosted ] && [ "$RUNNER_OS" = Linux ]; then
             export PATH="$(uv tool dir --bin):$PATH"
           fi
+          if [ "${ORCH_MAC_RUNNER:-}" = 1 ]; then
+            # ORCH-2410: orch trusts an ORCH_HOME only under the account's own home (never $HOME, which a job can
+            # set). On this Mac's runner the job's throwaway home is elsewhere, so the installed orch refused it
+            # ("ORCH_HOME is not a trusted folder"); the tests above never saw it, they fake the account home.
+            # The smoke gets an orch folder of its own under the runner account's home, removed again after.
+            export ORCH_HOME="$(eval echo "~$(id -un)")/orch-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            mkdir -p "$ORCH_HOME"; trap 'rm -rf "$ORCH_HOME"' EXIT
+          fi
           d="$RUNNER_TEMP/smoke"; mkdir -p "$d"; cd "$d"
           ORCH_AGENT=claude orch init  # no agent is installed on the runner; this one links its skills folder
           orch ticket new "smoke" --json

@@ -371,25 +371,50 @@ def _unsure_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
     return rows
 
 
+def _not_parked(tickets_: list[dict]) -> list[dict]:
+    from orch import parked
+
+    try:
+        return parked.without(tickets_)
+    except Exception:  # noqa: BLE001 - what waits for a person must always be listed
+        return tickets_
+
+
+def _one_per_ticket(rows_: list[dict], tickets_: list[dict]) -> list[dict]:
+    """ORCH-2431: one row per ticket at most. A ticket whose own question waits has that question as its
+    row; of several rows of work that stopped the first stays (a helper waiting for an OK, a failing step,
+    the Reviewer not sure, a pull request left open, an idle helper)."""
+    asked = {t.get("id") for t in tickets_ if isinstance(t, dict) and _open_question(t)}
+    out, seen = [], set(asked)
+    for r in rows_:
+        if r["ticket"] not in seen:
+            seen.add(r["ticket"])
+            out.append(r)
+    return out
+
+
 def stuck_rows(root: Path, tickets_: list[dict], now: float | None = None) -> list[dict]:
-    """Only the stuck tickets (STUCK_KINDS), for the phone. Never raises."""
+    """Only the stuck tickets (STUCK_KINDS), for the phone. Never raises. A parked ticket (parked.py) gives
+    no row (ORCH-2431)."""
     now = time.time() if now is None else now
+    tickets_ = _not_parked(tickets_)
     out: list[dict] = []
     for make in (_permission_rows, _failing_rows, _unsure_rows):
         try:
             out += make(root, tickets_, now)
         except Exception:  # noqa: BLE001, S112 - what waits for a person must always be listed
             continue
-    return out
+    return _one_per_ticket(out, tickets_)
 
 
 def rows(root: Path, tickets_: list[dict], now: float | None = None) -> list[dict]:
     """The rows for `orch needs`. A broken run record or cache never breaks the list."""
     now = time.time() if now is None else now
+    tickets_ = _not_parked(tickets_)
     out: list[dict] = stuck_rows(root, tickets_, now)
     for make in (_unmerged_rows, _idle_rows):
         try:
             out += make(root, tickets_, now)
         except Exception:  # noqa: BLE001, S112 - what waits for a person must always be listed
             continue
-    return out
+    return _one_per_ticket(out, tickets_)

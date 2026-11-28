@@ -113,3 +113,16 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   error; a later command starts it. A start a person asked for is counted, never skipped. `orch doctor` names both.
   The add-ons a command asks for their needs, and the refresh of a late one, are bounded by a pool of their own
   (eight times `background_max`) and not by the load, so `orch needs` never waits behind background work.
+- 2026-11-28 (ORCH-2431, owner): a parked ticket (in Backlog, or waiting on a time, a ticket or something
+  outside) gives no row in `orch needs`, on Home or Review and is not in the Needs you number; its questions are kept
+  and come back when the wait ends, a person brings it back or it moves to To do. One rule (`orch/parked.py`) for
+  every surface; `orch needs --parked` and Home list what is parked. One row per ticket at most.
+- 2026-11-28 (ORCH-2409, follow-up of ORCH-2407): an add-on's long-running process (its service loop, the merge
+  queue's runner, sync's loop) starts through `procs.service_start`: never from inside orch's own background work,
+  and at most 32 at once per workspace. It is not held back by the load and is no task of the budget (a person's
+  `orch start` asked for it and nothing would start it later). Every other detached start of an add-on is named in
+  `workspace/tests/test_addon_power_limit.py` with the rule that bounds it; a new one fails that test.
+- 2026-11-28 (ORCH-2410): an `ORCH_HOME` that is not trusted (outside the account's home, inside the current folder
+  or a repo) is refused with what to do, in every mode. Before, a note went to stderr and the command ran on the
+  real `~/.orch-tool`; a folder that was asked for is used or refused, never replaced. `orch doctor` still answers
+  and names it as a problem. The Mac runner's wheel smoke gets its orch folder under the runner account's home.
