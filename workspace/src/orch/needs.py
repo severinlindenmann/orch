@@ -611,14 +611,17 @@ def needs(root: Path) -> list[dict]:
     seen = {r["id"] for r in core}
     from orch import parked
 
-    resting = parked.ids(root) if pulls else set()
+    resting: set[str] | None = None  # read only when an add-on names a ticket (not once per caller)
     answered = {(r["ticket"], r["answer"]["question"]) for r in core if "answer" in r}
     rows = list(core)
     for name, p in pulls.items():
         budget = FAST_BUDGET if _cache_path(root, name).is_file() else PULL_TIMEOUT + 1
         for r in _saved(root, name, p) if isinstance(p, list) else _settle(root, name, p, start + budget):
-            if r["ticket"] is not None and r["ticket"] in resting:
-                continue  # ORCH-2431: an add-on's row on a parked ticket waits with it
+            if r["ticket"] is not None:
+                if resting is None:
+                    resting = parked.ids(root)
+                if r["ticket"] in resting:
+                    continue  # ORCH-2431: an add-on's row on a parked ticket waits with it
             ans = r.get("answer")
             same_q = isinstance(ans, dict) and (r["ticket"], ans.get("question")) in answered
             if r["id"] in seen or same_q:
