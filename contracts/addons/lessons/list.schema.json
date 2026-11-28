@@ -26,6 +26,9 @@
         "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
         "changed_by": { "$ref": "#/$defs/actor" },
         "changed_at": { "$ref": "#/$defs/time" },
+        "reviewed_by": { "$ref": "#/$defs/actor" },
+        "reviewed_at": { "$ref": "#/$defs/time" },
+        "outdated": { "type": "boolean", "description": "true = added, edited and reviewed more than 90 days ago: the person keeps it (`review`), edits it or removes it." },
         "shown": { "type": "boolean", "description": "false = left out of the AGENTS text (over the cap)." }
       }
     }
