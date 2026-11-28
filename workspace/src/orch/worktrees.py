@@ -4023,7 +4023,8 @@ def _spawn_clean(root: Path, flag: str) -> None:
     neutral = Path(os.path.realpath(tempfile.gettempdir()))
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["ORCH_ROOT"] = str(root)
-    subprocess.Popen(
+    procs.background_start(  # False = not now (busy, budget used up): the next cleanup takes it along
+        root,
         procs.orch_python_argv("copy", "clean", flag),
         cwd=neutral,
         env=env,

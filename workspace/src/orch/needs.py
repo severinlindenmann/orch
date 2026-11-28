@@ -296,6 +296,9 @@ def _parse(name: str, out: str) -> list[dict] | None:
     return [x for x in (_valid_row(name, y) for y in data) if x]
 
 
+_OWN_SLOT = Path()  # marks: no slot of its own, the process already holds one (the background refresh)
+
+
 class _Pull(threading.Thread):
     """One add-on's `needs --json` in its own child, read by a daemon thread, so all add-ons and the core
     rows are made at the same time. `rows` is None until a good answer came; `stop()` ends a late child."""
@@ -308,9 +311,40 @@ class _Pull(threading.Thread):
         self._lock = threading.Lock()
         self._stopped = False
 
+    def _slot(self) -> Path | None:
+        """A slot of the workspace's background budget for this child (ORCH-2407), waited for until one is
+        free or this pull is stopped (its caller then answers from the saved rows). None: not started."""
+        from orch import procs
+
+        if procs.bg_depth() >= 2:  # the child of background work never starts one more
+            return None
+        if procs.bg_depth() == 1:  # the background refresh: its one child runs in the refresh's own slot
+            return _OWN_SLOT
+        end = time.monotonic() + PULL_TIMEOUT
+        while True:
+            slot = procs.bg_claim(self.root, "ask")
+            if slot is not None or self._stopped or time.monotonic() > end:
+                return slot
+            time.sleep(0.05)
+
     def run(self) -> None:
+        from orch import procs
+
+        slot = self._slot()
+        if slot is None:
+            return
+        try:
+            self._run(slot)
+        finally:
+            if slot is not _OWN_SLOT:
+                procs.bg_release(slot, self.proc.pid if self.proc is not None else None)
+
+    def _run(self, slot: Path) -> None:
+        from orch import procs
+
         env = {
             **os.environ,
+            procs.BG_DEPTH: str(procs.bg_depth() + 1),
             "ORCH_ADDON": self.name_,
             INSIDE: "1",
             "ORCH_ROOT": str(self.root),
@@ -338,6 +372,8 @@ class _Pull(threading.Thread):
                     errors="replace",
                     **own_group,
                 )
+                if slot is not _OWN_SLOT:
+                    procs.bg_bind(slot, self.proc.pid)
             out, _ = self.proc.communicate(timeout=PULL_TIMEOUT)
         except subprocess.TimeoutExpired:
             self.stop()
@@ -423,20 +459,27 @@ def _spawn_refresh(root: Path, name: str) -> bool:
                 mark.unlink()  # left by a refresh that never finished
         except OSError:
             pass
+        from orch import procs
+
+        if procs.bg_depth() >= 1:  # inside background work (ORCH-2407): no mark, no start
+            return False
         try:
             os.close(os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # one caller wins
         except FileExistsError:
             return False
-        from orch import procs
-
-        subprocess.Popen(
+        started = procs.background_start(
+            root,
             procs.orch_python_argv("needs", "--refresh-addon", name),
+            light=True,
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
             env={**os.environ, "ORCH_ROOT": str(root)},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             **procs.background_popen_kwargs(),
         )
+        if not started:  # the pool of asked add-ons is used up: a later needs starts it
+            mark.unlink(missing_ok=True)
+            return False
         return True
     except Exception:  # noqa: BLE001  a refresh that cannot start never holds up needs
         return False

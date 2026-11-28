@@ -23,6 +23,7 @@ from orch import (
     ghlimit,
     history,
     nextstep,
+    procs,
     releasekeeper,
     report_tickets,
     tickets,
@@ -40,6 +41,8 @@ KEYS = (
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workspace.live_max",
+    "workspace.background_max",
+    "workspace.background_load",
     "workflow.agents_may_finish",
     "workflow.reviewer",
     "workflow.auto_reviewer",
@@ -310,6 +313,8 @@ def _config(args, root: Path) -> None:
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workspace.live_max": lambda: config.live_max(root) or "none",
+            "workspace.background_max": lambda: procs.bg_limits(root)[0],
+            "workspace.background_load": lambda: procs.bg_limits(root)[1],
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
             "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
@@ -706,6 +711,21 @@ def _config(args, root: Path) -> None:
             "Saved: workspace.live_max = none. Any number of helpers may work at once."
             if n is None
             else f"Saved: workspace.live_max = {n}. When {n} helpers work at once, the next waits in line.",
+        )
+    elif args.sub == "set" and args.key == "workspace.background_max":
+        n = config.set_background_max(root, args.value)
+        _out(
+            args,
+            {"workspace.background_max": n},
+            f"Saved: workspace.background_max = {n}. orch runs at most {n} background tasks at once here.",
+        )
+    elif args.sub == "set" and args.key == "workspace.background_load":
+        x = config.set_background_load(root, args.value)
+        _out(
+            args,
+            {"workspace.background_load": x},
+            f"Saved: workspace.background_load = {x:g}. Background work waits while the load per processor "
+            f"core is over {x:g}.",
         )
     elif args.sub == "set" and args.key == "workspace.live_idle_minutes":
         mins = config.set_live_idle_minutes(root, args.value)

@@ -117,6 +117,8 @@ agent = "my-agent"          # who does the work here: a built-in adapter (agents
 code = "MEC"                # ticket keys MEC-1, MEC-2, … (Ticket keys, above)
 live_idle_minutes = 60      # default 60: a live session idle this long, or on a ticket Done this long, is closed (Continue resumes)
 live_max = 4                # default: no line = no limit; 2 to 10 = that many helpers at once, the next waits in line (Settings > Helper)
+background_max = 4          # default 4 (1 to 64): background tasks orch itself runs at once in this workspace (below)
+background_load = 1.5       # default 1.5: orch starts no background task while the 1-minute load per processor core is over this
 
 [agents.my-agent]
 adapter = "generic"         # whose rules apply (agent-adapter.schema.json)
@@ -125,6 +127,20 @@ interactive = "my-agent"    # optional: start it interactively, so runs can be l
 prompt = "stdin"            # optional: the task goes on stdin instead of the command line (default "arg")
 ```
 
+- **orch limits its own power** (ORCH-2407): every background task orch starts by itself (the look at pull requests,
+  the login checks, the scheduled checks, the cleanup of copies) holds one
+  slot file `.orch/run/bg/<n>.slot` (the process id; runtime state, never synced). At most `background_max` run at once
+  per workspace; a slot that its process has ended is free again. The add-ons a command asks for their needs
+  (`needs --json` children, and the background refresh of a late one) have a pool of their own, eight times as large
+  (`ask-<n>.slot`): one `orch needs` asks all its add-ons side by side and never waits behind background work or the
+  load, and many commands at once stay bounded.
+  While the computer's 1-minute load per processor core is over `background_load`, no such background task is started
+  (Windows reports no load: there only `background_max` counts). A start that is skipped is not an error: a later command
+  starts it. Every such process gets `ORCH_BG_DEPTH` in its environment and never starts background work itself, so no
+  command can start itself again. A start a person asked for (Renew a sign-in) has slots of its own
+  (`person-<n>.slot`): counted, never skipped, and it never takes a background task's place.
+  `orch doctor` names both limits and the current count. Set them with `orch config set workspace.background_max 4` and
+  `orch config set workspace.background_load 1.5`.
 - **Permissions**: the mode (ask | auto | full, default auto) is NOT in config.toml (a committed or agent-edited file could raise it; a `permissions` key there is ignored). It is kept per machine in the orch home, `permissions.json`, keyed by the workspace's real path, and set by `orch config set workspace.permissions <mode>`; an agent (`--by agent:*` or an agent tool in the environment) may lower it, never raise it. It is mapped to tool flags only by the adapter's `permissions` data (agents.json). Claude:
   ask = the tool's default mode (it asks), auto = `--permission-mode auto` when the installed tool's `--help` lists it, else
   `--permission-mode acceptEdits`, full = `--dangerously-skip-permissions`. The orch `--allowedTools` list stays in every mode.

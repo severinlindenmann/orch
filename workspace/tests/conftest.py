@@ -287,6 +287,11 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(addons, "real_home", lambda: fake)
     monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    # a busy test machine never decides whether background work starts (procs.bg_busy; test_power_limit.py
+    # checks the back-off with a faked load). Not ORCH_NO_LOAD_HOLD: test_busy_check.py needs that one unset.
+    from orch import procs
+
+    monkeypatch.setattr(procs, "_load_per_core", lambda: None)
     # a test that turns the fallback trace on writes its own file, never the shared one in the temp folder
     trace = tmp_path_factory.mktemp("trace") / "orch-fallback-trace.log"
     monkeypatch.setattr(addons, "_trace_log_path", lambda: trace)
