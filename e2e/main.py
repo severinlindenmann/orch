@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import lib  # noqa: E402
+import parts  # noqa: E402
 from lib import Admin, Fail, Resp, Skip, check, http  # noqa: E402
 
 REGISTRY = lib.REGISTRY
@@ -330,22 +331,7 @@ def main() -> int:
     a = ap.parse_args()
     import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue, scenarios_people, scenarios_msgsig  # noqa: F401,E401
 
-    if a.what == "smoke":
-        ids = list(SMOKE)
-    elif a.what == "smoke-offline":
-        ids = list(SMOKE_OFFLINE)
-    elif a.what == "all":
-        ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
-    else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
-        ids = []
-        for w in a.what.split(","):
-            if w in ("V2", "V3"):  # every v2 / v3 scenario (V2-*, V3-*)
-                ids += [k for k in REGISTRY if k.startswith(w + "-") and k != "V3-SIM"]
-            else:
-                ids += [k for k in REGISTRY if k[0] == w] if len(w) == 1 else [w]
-    # run order: W A P R M F  (A0 before A4/A5)
-    order = {"W": 0, "A": 1, "P": 2, "R": 3, "M": 4, "F": 5}
-    ids = sorted(ids, key=lambda s: (order.get(s[0], 9), int("".join(c for c in s[1:] if c.isdigit()) or 0), s))
+    ids = parts.select(a.what, REGISTRY, SMOKE, SMOKE_OFFLINE)
     for s in ids:
         if s not in REGISTRY:
             print(f"unknown scenario {s}; known: {', '.join(sorted(REGISTRY))}")
