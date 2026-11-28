@@ -51,6 +51,24 @@ module.exports = {
     must((await side.locator('[data-review-row][aria-current="true"]').innerText()).includes('Week 7'), 'the row of the card on screen is marked');
     await side.getByRole('button', {name:'First five'}).click();
     must(await rows.count() + await side.locator('[data-review-group]').count() === 5, 'First five folds the list again');
+    // W-003: answer one card: the menu badge, the heading, the Waiting tab and the list drop together at once (the
+    // answer itself is saved after the Undo time); Undo brings all four back
+    const numbers = () => page.evaluate(() => ({
+      badge: Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0),
+      line: Number((/(\d+) things? needs? you/.exec(document.querySelector('main [data-key="heading"]')?.innerText || '') || [])[1] || 0),
+      tab: Number(document.querySelector('[data-review-nav] button[data-show="deck"] .meta')?.textContent || 0),
+      list: Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0)}));
+    const n0 = await numbers();
+    await side.locator('[data-review-row]', {hasText:'Week 2'}).first().click();
+    await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Week 2'}).first().waitFor();
+    await page.locator('.swipe-actions').getByRole('button', {name:/Looks good/}).first().click();
+    await page.waitForFunction(n => Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0) === n, n0.badge - 1, {timeout: 3000});
+    const n1 = await numbers();
+    must(n1.line === n1.badge && n1.tab === n0.tab - 1 && n1.list === n0.list - 1, 'the numbers did not drop together: ' + JSON.stringify([n0, n1]));
+    await page.locator('.swipe-top').getByRole('button', {name:/Undo/}).click();
+    await page.waitForFunction(n => Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0) === n, n0.badge, {timeout: 20000});
+    const n2 = await numbers();
+    must(JSON.stringify(n2) === JSON.stringify(n0), 'Undo did not bring every number back: ' + JSON.stringify([n0, n2]));
     // Answered and back
     await page.locator('[data-review-nav] button[data-show="answered"]').click();
     await page.locator('#answered:not([hidden])').waitFor();
@@ -94,6 +112,16 @@ module.exports = {
     await shot('phone');
     await page.setViewportSize(size);
     await side.locator('[data-review-row]').first().waitFor();
+
+    // O-04: beside the Focus panel the shell marks a tight page area (data-live-narrow): the list moves after the card
+    // without a reload, and back beside it when the mark goes
+    await page.evaluate(() => { document.body.dataset.liveNarrow = ''; });
+    await next.locator('[data-review-row]').first().waitFor();
+    must(await page.evaluate(() => document.querySelector('#deck').getBoundingClientRect().top < document.querySelector('[data-review-next]').getBoundingClientRect().top), 'beside the panel the list is not after the card');
+    await shot('beside-panel');
+    await page.evaluate(() => { delete document.body.dataset.liveNarrow; });
+    await side.locator('[data-review-row]').first().waitFor();
+    must(await page.locator('[data-review-next]').count() === 0, 'two lists on a wide page');
 
     // W-043: paused: one line on top; Turn on is one click
     orchAsPerson('pause', '--reason', 'Disk almost full');

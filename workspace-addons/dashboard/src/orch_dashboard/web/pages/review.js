@@ -195,8 +195,38 @@ function acceptTicketOf(it) {
   const m = REVIEW_ID.exec(String(it?.id || ''));
   return m && m[3] ? m[3] : null;  // only a Check card (core:review:<ticket>) moves a ticket to Done
 }
+// W-003 (owner, 28 Nov: "one count everywhere, updated together"): a card answered here leaves the deck at once, but
+// its answer is saved a few seconds later (the Undo time), so the menu badge and the heading still counted it. The
+// answered card's item is taken out of the state's one count (counts.needs_you.items, what needsToday() adds up) while
+// its answer waits or is being saved; Undo or a refusal puts it back. Work that stopped and a Factory draft are not
+// answers: they stay counted.
+const reviewHeld = new Set();  // review card ids answered here whose answer is not in the server's state yet
+function reviewHeldItem(i) {
+  if (!i || typeof i.ticket !== 'string') return false;
+  if (i.question) return reviewHeld.has('core:q:' + i.ticket + ':' + i.question);
+  return !i.stopped && !i.start && reviewHeld.has('core:review:' + i.ticket);
+}
+function reviewHeldOverlay(next) {
+  const items = next?.counts?.needs_you?.items;
+  if (!reviewHeld.size || !Array.isArray(items) || !items.some(reviewHeldItem)) return next;
+  return {...next, counts:{...next.counts, needs_you:{...next.counts.needs_you, items:items.filter(i => !reviewHeldItem(i))}}};
+}
+function reviewHold(it) {
+  const id = String(it?.id || '');
+  if (snapshot || !REVIEW_ID.test(id) || reviewHeld.has(id)) return;
+  reviewHeld.add(id);
+  if (state) { state = reviewHeldOverlay(state); render(); }
+}
+// back: Undo or a refusal (the server's state says how it is); saved: the answer's own state already left it out
+function reviewUnhold(it, back) {
+  if (!reviewHeld.delete(String(it?.id || '')) || !back) return;
+  if (state) state = {...state, rev:''};  // the count comes back with the server's whole state, taken even when nothing changed there
+  wantFull = true;
+  refresh();
+}
 // Called by accept() in app.js on every new state: a ticket whose Looks good is still being saved stays Done.
 function acceptOverlay(next) {
+  next = reviewHeldOverlay(next);
   if (!Array.isArray(next?.tickets) || !next.tickets.some(t => t && (acceptSaving.has(t.id) || t.accept_saving))) return next;
   return {...next, tickets:next.tickets.map(t => {
     if (!t) return t;
@@ -353,8 +383,8 @@ function reviewApi() {
     },
     showTerminal: id => runCardTerminal(id),
     typing: row => runCardTyping(row, {node:null}),
-    hold: (it, verdict) => acceptHold(it, verdict),
-    release: it => acceptRelease(it, false),
+    hold: (it, verdict) => { reviewHold(it); acceptHold(it, verdict); },
+    release: it => { reviewUnhold(it, true); acceptRelease(it, false); },
     answer: async ({id, digest, verdict, picked, note}) => {
       if (STUCK_CARD.test(String(id || ''))) return snapshot ? {ok:false, error:{code:'refused', message:'Nothing can be changed here.'}} : reviewStuckAnswer(id, digest, picked);
       const draft = REVIEW_DRAFT_ID.exec(String(id || ''));
@@ -370,7 +400,7 @@ function reviewApi() {
       if (picked) args.picked = picked;
       if (note) args.note = note;
       const r = await act('review.answer', args);
-      if (r.ok) { acceptRelease({id}, true); return {ok:true}; }
+      if (r.ok) { reviewUnhold({id}, false); acceptRelease({id}, true); return {ok:true}; }
       if (r.status === 403) return {ok:false, error:{code:'needs_person', message:r.text}};
       try {
         const body = JSON.parse(r.text);

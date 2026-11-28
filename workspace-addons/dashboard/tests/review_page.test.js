@@ -757,3 +757,29 @@ test('FX-04: the quiet line under the list says how many wait to be merged', () 
   assert.equal(text(two.reviewQueueLine()), '2 wait to be merged, nothing to do');
   assert.equal(ctx({review:{cards:[]}}).reviewQueueLine(), null);
 });
+test('W-003: a card answered on Review leaves the one count at once (badge, heading, Home), and Undo brings it back', async () => {
+  const c = stuckHome();
+  let refreshed = 0;
+  vm.runInContext('var wantFull = false;', c); c.refresh = () => { refreshed++; };
+  c.state.counts = {needs_you:{count:3, questions:1, results:2, failed:0, stopped:0, tickets:[], queue:[],
+    items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}, {ticket:'t_aaaa05', question:null}, {ticket:'t_aaaa02', question:null, stopped:'helper:idle', row:'core:idle:t_aaaa02'}]}};
+  const before = c.needsYouTotal(), api = c.reviewApi();
+  assert.match(c.reviewSubtitle(), new RegExp('^' + before + ' things need you'));
+  api.hold({id:'core:q:t_abcdef:q3'}, 'ok');
+  assert.equal(c.needsYouTotal(), before - 1, 'the question is out of the number while its answer waits for Undo');
+  assert.match(c.reviewSubtitle(), new RegExp('^' + (before - 1) + ' things need you'));
+  api.hold({id:'core:review:t_aaaa01'}, 'no');
+  assert.equal(c.needsYouTotal(), before - 2, 'a result sent back too');
+  api.hold({id:'stuck:core:idle:t_aaaa02'}, 'ok');
+  assert.equal(c.needsYouTotal(), before - 2, 'work that stopped is not answered by a button: it stays counted');
+  // a new state from the server while the answers wait: still left out
+  const next = c.acceptOverlay({...c.state, counts:{needs_you:{...c.state.counts.needs_you, items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}, {ticket:'t_aaaa05', question:null}]}}});
+  assert.deepEqual(next.counts.needs_you.items.map(i => i.ticket), ['t_aaaa05']);
+  // Undo: the whole state is read again, so every place shows the card again
+  api.release({id:'core:q:t_abcdef:q3'});
+  assert.ok(refreshed >= 1); assert.equal(c.state.rev, '');
+  assert.deepEqual(c.acceptOverlay({counts:{needs_you:{items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}]}}}).counts.needs_you.items.map(i => i.ticket), ['t_abcdef']);
+  // saved: nothing more to hide
+  await api.answer({id:'core:review:t_aaaa01', digest:ID, verdict:'no'});
+  assert.equal(c.acceptOverlay({counts:{needs_you:{items:[{ticket:'t_aaaa01', question:null}]}}}).counts.needs_you.items.length, 1);
+});
