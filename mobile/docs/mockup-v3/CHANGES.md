@@ -1,3 +1,6 @@
+# 28 Nov Review card: the decision first (ORCH-2187)
+- New page `review-decision-first.html`: when a workspace has decision first turned on, the phone's Review card leads with "You decide: <the question>", then "If you wait: ..." and one "What matters" box (at most four facts). Switch off or an older workspace: the card as before.
+- The card for a finished result is named "Test results" (chip and the count under Review); it keeps leading with the result.
 # 25 Nov invitation opened on a paired phone (ORCH-2127)
 - An invitation link opened while the phone is already paired opens the Add workspace confirmation (Add this workspace?) over Chats. Closing it adds nothing and keeps the pairing.
 - An invitation for another server is never sent: the sheet says "This invitation is for another server" with "Use a different link". Review trigger: Add workspace › Pairing errors › Another server.
