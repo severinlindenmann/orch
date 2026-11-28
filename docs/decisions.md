@@ -111,5 +111,5 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   1-minute load per processor core is over `workspace.background_load` (default 1.5; Windows has no load, there only
   the count), and a background process (`ORCH_BG_DEPTH` set) never starts another one. A skipped start is not an
   error; a later command starts it. A start a person asked for is counted, never skipped. `orch doctor` names both.
-  The add-ons a command asks for their needs are bounded by a pool of their own (four times `background_max`), so
-  one `orch needs` never waits behind background work.
+  The add-ons a command asks for their needs, and the refresh of a late one, are bounded by a pool of their own
+  (eight times `background_max`) and not by the load, so `orch needs` never waits behind background work.

@@ -48,7 +48,9 @@ class _Fakes:
 
             def __init__(self, argv, **kw):
                 self.pid = next(ids)
-                self.detached = kw.get("stdout") != procs.subprocess.PIPE
+                # a detached task of the budget; an asked add-on and the refresh of one share the other pool
+                self.detached = kw.get("stdout") != procs.subprocess.PIPE and "--refresh-addon" not in argv
+                self.waited_for = kw.get("stdout") == procs.subprocess.PIPE
                 self.ended = threading.Event()
                 with fakes.lock:
                     fakes.started.append(list(argv))
@@ -57,7 +59,7 @@ class _Fakes:
                     fakes.kinds[self.pid] = self.detached
                     now = sum(1 for p in fakes.alive if fakes.kinds[p] == self.detached)
                     fakes.most[self.detached] = max(fakes.most[self.detached], now)
-                if self.detached:  # nobody waits for it: it ends by itself
+                if not self.waited_for:  # nobody waits for it: it ends by itself
                     t = threading.Timer(job_seconds, self._end)
                     t.daemon = True  # never keeps the test run open
                     t.start()
@@ -180,7 +182,7 @@ def test_200_needs_calls_at_once_stay_under_the_budget(ws, monkeypatch):
     assert 1 <= asks <= cap * procs.BG_ASK_TIMES, (
         f"{asks} add-ons asked at once, {cap * procs.BG_ASK_TIMES} may be"
     )
-    assert tasks + asks <= 20  # 200 callers, two add-ons each: never the 400 processes of release 52
+    assert tasks + asks <= 36  # 200 callers, two add-ons each: never the 400 processes of release 52
     assert len(f.started) < 400
     assert any("--look-at-pulls" in a for a in f.started) and any("needs" in a for a in f.started)
 
@@ -194,18 +196,35 @@ def test_background_work_waits_while_the_computer_is_busy(ws, monkeypatch):
     load = {"now": 9.0}
     monkeypatch.setattr(procs, "_load_per_core", lambda: load["now"])
     assert procs.bg_busy(ws) is True
-    needs_mod._write_cache(ws, "hello", [])
-    assert needs_mod._spawn_refresh(ws, "hello") is False
-    assert not needs_mod._refresh_mark(ws, "hello").exists()  # nothing left that holds the next start back
     stuck._spawn_look(ws)
     worktrees._spawn_clean(ws, "--trash")
     assert health.soon(ws, force=True) is False
+    assert _doctorpass_soon(ws) is False
     assert procs.background_start(ws, ["x"]) is False
     assert f.started == []
     load["now"] = 0.4  # the load is gone: the next command starts the work
     assert procs.bg_busy(ws) is False
+    stuck._spawn_look(ws)
+    assert len(f.started) == 1 and "--look-at-pulls" in f.started[0]
+
+
+def test_the_refresh_of_needs_is_light_and_not_held_back_by_the_load(ws, monkeypatch):
+    """Seen in the Focus page smoke on a busy machine: with the refresh held back, a late add-on's rows went
+    out of date and the page drew itself again and again. The refresh is what `orch needs` would otherwise
+    wait for itself, so only its pool bounds it."""
+    f = _Fakes(monkeypatch, job_seconds=3600)
+    monkeypatch.delenv("ORCH_NO_LOAD_HOLD", raising=False)
+    assert all(procs.background_start(ws, ["x"]) for _ in range(4))  # the task budget is used up as well
+    monkeypatch.setattr(procs, "_load_per_core", lambda: 9.0)
+    needs_mod._write_cache(ws, "hello", [])
     assert needs_mod._spawn_refresh(ws, "hello") is True
-    assert len(f.started) == 1
+    assert f.started[-1][-2:] == ["--refresh-addon", "hello"] and f.envs[-1][procs.BG_DEPTH] == "1"
+    assert procs.bg_count(ws) == 4 and procs.bg_count(ws, "ask") == 1  # in the pool of the asked add-ons
+    pool = procs.bg_limits(ws)[0] * procs.BG_ASK_TIMES
+    assert (
+        sum(needs_mod._spawn_refresh(ws, f"a{i}") for i in range(pool + 5)) == pool - 1
+    )  # bounded all the same
+    assert not needs_mod._refresh_mark(ws, f"a{pool + 4}").exists()  # a skipped one leaves no mark behind
 
 
 def test_the_load_limit_is_a_setting_and_a_system_without_load_is_never_busy(ws, run, monkeypatch):

@@ -461,7 +461,7 @@ def _spawn_refresh(root: Path, name: str) -> bool:
             pass
         from orch import procs
 
-        if procs.bg_depth() >= 1 or procs.bg_busy(root):  # not now (ORCH-2407): no mark, no start
+        if procs.bg_depth() >= 1:  # inside background work (ORCH-2407): no mark, no start
             return False
         try:
             os.close(os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # one caller wins
@@ -470,13 +470,14 @@ def _spawn_refresh(root: Path, name: str) -> bool:
         started = procs.background_start(
             root,
             procs.orch_python_argv("needs", "--refresh-addon", name),
+            light=True,
             cwd=Path(os.path.realpath(tempfile.gettempdir())),
             env={**os.environ, "ORCH_ROOT": str(root)},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             **procs.background_popen_kwargs(),
         )
-        if not started:  # busy computer, budget used up, or inside background work: a later needs asks
+        if not started:  # the pool of asked add-ons is used up: a later needs starts it
             mark.unlink(missing_ok=True)
             return False
         return True

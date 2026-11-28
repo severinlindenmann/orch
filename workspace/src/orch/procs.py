@@ -90,15 +90,15 @@ def background_popen_kwargs() -> dict[str, int | bool]:
 #      holding a slot file in .orch/run/bg/ (a slot whose process is gone is taken over). The add-ons a
 #      command asks for their needs have a pool of their own, BG_ASK_TIMES as large: one `orch needs` asks
 #      all its add-ons side by side and never waits behind background work, yet many at once stay bounded;
-#   2. a busy computer: while the 1-minute load per core is over `workspace.background_load`, background
-#      work is not started (it is started by a later command);
+#   2. a busy computer: while the 1-minute load per core is over `workspace.background_load`, heavy
+#      background work (checks, looks, cleanups) is not started (it is started by a later command);
 #   3. no start from inside: a background process carries ORCH_BG_DEPTH and never starts another one.
 
 BG_DEPTH = "ORCH_BG_DEPTH"  # set for every background process orch starts: how deep under a command it runs
 BG_MAX_DEFAULT = 4  # background processes at once per workspace ([workspace] background_max)
 BG_MAX_MOST = 64
 BG_LOAD_DEFAULT = 1.5  # 1-minute load per core over which background work waits ([workspace] background_load)
-BG_ASK_TIMES = 4  # add-ons asked at once (their `needs --json` children): this many times background_max
+BG_ASK_TIMES = 8  # add-ons asked at once (`needs --json` children, their refreshes): times background_max
 BG_OVER = 16  # slots of their own for a start a person asked for (never skipped, still counted)
 BG_OLD = 600  # a slot older than this is checked for a pid that now belongs to another program
 _BG_LOCK_WAIT = 1.0  # the longest a start waits for the slot lock; then it is skipped
@@ -286,18 +286,27 @@ def bg_release(slot: Path | None, pid: int | None = None) -> None:
 
 
 def background_start(
-    root: Path, argv: list[str], *, env: dict | None = None, person: bool = False, **popen
+    root: Path,
+    argv: list[str],
+    *,
+    env: dict | None = None,
+    person: bool = False,
+    light: bool = False,
+    **popen,
 ) -> bool:
     """THE way orch starts background work of its own (a refresh, a look, a check, a cleanup). True when it
     was started; False when not: this process is itself background work (it never starts more), the
     computer is busy, or the workspace's budget is used up. Callers treat False as "not now": a later
     command starts it. `person`: a start a person asked for (a sign-in they pressed) is never
-    held back by the load or the budget, only counted. Raises what Popen raises."""
+    held back by the load or the budget, only counted. `light`: the refresh of one add-on's needs, which
+    is what a command would otherwise wait for itself: it shares the pool of the asked add-ons and is not
+    held back by the load (the rows people look at must not go out of date on a busy computer). Raises
+    what Popen raises."""
     if bg_depth() >= 1:
         return False
-    if not person and bg_busy(root):
+    if not (person or light) and bg_busy(root):
         return False
-    slot = bg_claim(root, "person" if person else "task")
+    slot = bg_claim(root, "person" if person else "ask" if light else "task")
     if slot is None:
         return False
     try:
