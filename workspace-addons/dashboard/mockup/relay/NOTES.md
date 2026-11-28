@@ -87,3 +87,14 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   Declined". No reason and no name comes back. No new component. Mirrors relay_view.py.
 - The notice for one waiting message reads "1 message waits ...". A waiting message goes out when the page looks
   again (the page's own view sends it), so "goes out by itself" is true without a terminal.
+
+## 28 Nov 2026 (owner walk: O-26 A and W-055 A)
+
+- O-26: the conversations with workspaces are in Chat (`../chat/chat-workspace.html`). The page keeps the
+  connection ("Connected", "Open Chat"), "Workspaces" (who is connected and what each may do; "Send a message" opens
+  the conversation in Chat) and "Recent messages": a short log, one row per message with its state ("Passed on to
+  MKT-12", "Not sent yet", "Picked up · ORCH-21", "Waiting for Marketing"). The list and the thread side by side
+  (`.split-view`) are gone from this page; the incoming task card on top is unchanged.
+- W-055: a row of a text opens that message in full on a click (the chevron row, the block's "Open a message to read
+  all of it"): the dialog of `../chat/chat-message.html`, Close is back at the list. A file or a task row has
+  nothing more to read and no link. Mirrors relay_view.py (`_log_rows`, link `app:chat/<workspace>/<message>`).
