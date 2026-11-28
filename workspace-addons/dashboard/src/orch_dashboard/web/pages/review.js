@@ -1,7 +1,10 @@
 'use strict';
 // Review (#review): everything that waits for a decision, one card at a time (the kit's UI.reviewPage), with the
-// "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
-// `orch review list`); an answer is a plain click (op review.answer).
+// waiting list beside it on a wide screen and after it on a narrow one. The cards and the decisions come with the
+// state (state.review, from `orch review list`); an answer is a plain click (op review.answer).
+// Owner's walk of 28 Nov: the card comes first and the list shows five rows at a time (W-036, O-04, O-05), there is no
+// Compare (O-06), what the Reviewer did is on Answered (W-036), a card shows its evidence and what a paid click costs
+// (W-040, CX-02), and the heading says the menu badge's number (W-003).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
 // ORCH-524: a Test results card's file as the ticket lists it (its time and size, when known here), so its link names
 // its version and the browser keeps the picture; unknown: a plain link that asks again by content hash.
@@ -22,6 +25,27 @@ const STUCK_CARD = /^stuck:(.{1,200})$/;
 function reviewStuckRows() {
   if (!state || typeof needsToday !== 'function') return [];
   return needsToday().stuck.map(g => g.row).filter(row => !(row.kind === 'reviewer:unsure' && ticketOf(row.ticket)?.status === 'review'));
+}
+// W-040, CX-02: what a click that starts paid helper work costs, in the card's own words: the ticket's estimate when
+// the helper gave one, else the plain truth. Never an invented number.
+function reviewCostWords(t) {
+  const est = t && typeof t.estimate === 'object' && t.estimate ? t.estimate : {}, D = window.DashHelpers || {}, parts = [];
+  if (Number.isInteger(est.minutes) && est.minutes > 0 && D.durationWords) parts.push(D.durationWords(est.minutes * 60));
+  if (typeof est.cost === 'number' && est.cost >= 0.005 && D.moneyWords) parts.push(D.moneyWords(est.cost));
+  return parts.length ? "this ticket's estimate: about " + parts.join(' · ') : 'cost not known';
+}
+const REVIEW_SEND_BACK = 'Sends your changes for a helper to work on';
+function reviewSendBackWords(t) { return REVIEW_SEND_BACK + ' · ' + reviewCostWords(t) + '.'; }
+// W-040: one evidence line on a pull request card: which pull request, its check and merge state, how fresh that is.
+function reviewPullNumber(url) { const m = /\/pull\/([0-9]{1,9})(?:[/?#]|$)/.exec(String(url || '')); return m ? ' #' + m[1] : ''; }
+function reviewStuckEvidence(row) {
+  if (row.kind !== 'helper:unmerged') return '';
+  const pull = row.pull || {}, at = typeof pull.checked_at === 'string' && pull.checked_at ? pull.checked_at : '';
+  return ['Pull request' + reviewPullNumber(pull.url), 'checks passed, not merged', row.since ? 'passed ' + time(row.since) : '', at ? 'looked at ' + time(at) : ''].filter(Boolean).join(' · ');
+}
+function reviewStuckLinks(row) {
+  const url = String(row.pull?.url || '');
+  return row.kind === 'helper:unmerged' && /^https:\/\//.test(url) ? [{label:'Open pull request' + reviewPullNumber(url), url}] : [];
 }
 function reviewStuckAnswers(row) {
   if (row.kind === 'helper:permission' || row.kind === 'reviewer:unsure') return [];  // the answer is on the ticket page: Open
@@ -47,10 +71,12 @@ function reviewStuckCards() {
   return reviewStuckRows().map(row => {
     const t = ticketOf(row.ticket), id = 'stuck:' + row.id, done = reviewStuckDoneOf(row);
     const title = clean(t?.title || row.title || ''), about = reviewStuckAbout(t), step = reviewStuckStep(t);
-    const why = [done ? done.word + ' ' + time(new Date(done.at).toISOString()) + '.' : '', step].filter(Boolean).join(' ');
+    // the card reads: what happened (text), the evidence (why), what the buttons do and cost (hint), the buttons (W-042)
+    const why = [reviewStuckEvidence(row), done ? done.word + ' ' + time(new Date(done.at).toISOString()) + '.' : '', step].filter(Boolean).join(' · ');
+    const links = reviewStuckLinks(row);
     return {id, ticket:row.ticket, ticket_key:typeof t?.key === 'string' && t.key ? t.key : row.ticket, ticket_title:title,
-      key:'stuck', since:row.since, digest:reviewStuckDigest(row), href:'#ticket/' + encodeURIComponent(row.ticket),
-      text:clean(row.text), ...(about ? {about} : {}),
+      key:'stuck', cause:String(row.kind || ''), since:row.since, digest:reviewStuckDigest(row), href:'#ticket/' + encodeURIComponent(row.ticket),
+      text:clean(row.text), ...(about ? {about} : {}), ...(links.length ? {links} : {}),
       card:{kind:'stuck', title:title || clean(row.text), hint:reviewStuckHint(row), ...(why ? {why} : {})}, answers:reviewStuckAnswers(row)};
   });
 }
@@ -70,8 +96,10 @@ function reviewStuckStep(t) {
 function reviewStuckHint(row) {
   if (row.kind === 'helper:permission') return 'Open the ticket to see what the helper asks and answer it there.';
   if (row.kind === 'reviewer:unsure') return 'Open the ticket to review the result yourself.';
-  if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (state.runs?.[row.ticket]?.running === true ? 'Nudge asks' : 'Start helper starts a helper that asks') + ' it to merge or say why it stays open.';
-  return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.';
+  // W-040: a button that starts paid helper work says what it costs (the estimate, or that it is not known)
+  const cost = reviewCostWords(typeof ticketOf === 'function' ? ticketOf(row.ticket) : null), running = state.runs?.[row.ticket]?.running === true;
+  if (row.kind === 'helper:unmerged') return 'Merge puts the pull request in. ' + (running ? 'Nudge asks the helper' : 'Start helper starts paid helper work (' + cost + ') that asks it') + ' to merge or say why it stays open.';
+  return 'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket (' + cost + ').';
 }
 async function reviewStuckAnswer(id, digest, picked) {
   const m = STUCK_CARD.exec(String(id || '')), row = m && reviewStuckRows().find(r => r.id === m[1]);
@@ -109,9 +137,19 @@ function reviewDraftCards() {
 }
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
 // lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
+// W-040 / CX-02: a result to review shows its pull request (state and Open) and says that Send back is paid helper work.
+function reviewCheckCard(c) {
+  if (c?.card?.kind !== 'check' || typeof c.ticket !== 'string') return c;
+  const t = typeof ticketOf === 'function' ? ticketOf(c.ticket) : null, have = new Set(array(c.links).map(l => l && l.url));
+  const pulls = array(t?.refs).filter(r => r && typeof r.url === 'string' && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[0-9]+/.test(r.url) && !have.has(r.url))
+    .map(r => ({label:('Pull request' + reviewPullNumber(r.url) + (r.status ? ' · ' + clean(r.status) : '')).slice(0, 60), url:r.url}));
+  const links = [...array(c.links), ...pulls].slice(0, 5);
+  const card = c.card.hint || c.card.blocked ? c.card : {...c.card, hint:'Send back: ' + reviewSendBackWords(t).replace(/^S/, 's')};
+  return {...c, card, ...(links.length ? {links} : {})};
+}
 function reviewPlainCard(c) {
   const p = c && typeof c.text === 'string' ? window.DashHelpers?.factoryStart?.(c.text) : null;
-  if (!p) return c;
+  if (!p) return reviewCheckCard(c);
   // Home's own buttons (owner 17 Nov, choice B): Not now, Change it, Start, none filled; each answers with Factory's word.
   const answers = (window.DashHelpers.factoryStartOptions?.(c.options) || []).map(o => ({label:o.label, picked:o.answer}));
   const card = {...(c.card || {}), title:"Start '" + p.title + "'?"};
@@ -124,16 +162,17 @@ function reviewPlainCard(c) {
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: work that stopped, every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
 function reviewCount() { return reviewCards().length; }
-// The subtitle shows THE needs-you number (needsYouTotal: open questions, results to check and work that stopped; the
-// Review menu entry, the top bar, Home and the live bar show the same one, ORCH-63, ORCH-705).
-// While the deck is open, the heading says what its Waiting tab says (cards answered here leave both at once, ORCH-476).
-let reviewWaiting = null;
+// W-003 (owner, 28 Nov: menu badge 31, subtitle 27 in one picture): the subtitle reads THE needs-you number
+// (needsYouTotal: open questions, results to review and work that stopped), the very number of the Review menu badge,
+// the top bar, Home and the live bar (ORCH-63, ORCH-705). It no longer follows the deck's own count.
+let reviewWaiting = null;  // the cards waiting in the deck now (null before it is drawn): the list's "N waiting"
+function reviewShown() { return (reviewWaiting != null ? reviewWaiting : reviewCount()) + reviewExtraRows().length; }
 function reviewSubtitle() {
-  // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
-  // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
-  // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
-  const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
-  if (!n) return 'Nothing waits for you.';
+  const n = typeof needsYouTotal === 'function' ? needsYouTotal() || 0 : reviewShown(), shown = reviewShown();
+  if (!n && !shown) return 'Nothing waits for you.';
+  // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the page names
+  // that part instead of saying "Nothing waits" above cards (ORCH-420), and never another number than the badge
+  if (!n) return 'Nothing new needs you. ' + shown + (shown === 1 ? ' card you put off is still here.' : ' cards you put off are still here.');
   // ORCH-2316 (R2 A, draft r2-a): "10 things need you. 2 hold up work now." (the second sentence only when any does)
   const laneOf = window.UI?.review?.laneOf || (c => c?.card_kind?.lane), held = reviewCards().filter(c => laneOf(c) === 'holds_up').length;
   return n + (n === 1 ? ' thing needs you.' : ' things need you.') + (held ? ' ' + held + (held === 1 ? ' holds up work now.' : ' hold up work now.') : '');
@@ -341,12 +380,116 @@ function reviewApi() {
     }
   };
 }
-// The "All cards" list beside the deck is the kit's own (deck.drawList, ORCH-477 round 2): a row opens its card; the
-// "Compare" button in its header turns on the ticks (at most two), then Compare opens them side by side and Cancel ends
-// it. One section per set (the helper's group, else the ticket); the phone's full list draws the same rows.
+// ---- The waiting list (owner's walk of 28 Nov) ----
+// O-05 D: five compact rows and the count, with "Next five" and "All"; cards that wait for the same cause fold into
+// one row with Open (it shows its cards), never a button that answers several at once: every decision stays its own.
+// O-06 D: no Compare button and no ticks; a card that holds a before and an after still shows both on the card.
+// O-04 D / W-036: the page draws the list (not the kit's deck.drawList): beside the card on a wide screen, after the
+// card in the same page scroll on a narrow one, and under it one line that leads to what the Reviewer did.
+const REVIEW_PAGE = 5;
+let reviewListShown = REVIEW_PAGE;   // rows the list shows now
+const reviewListOpen = new Set();    // the causes whose cards are listed
+let reviewDeck = null;               // the deck on screen (the list is drawn from it)
+const STUCK_CAUSE = {'helper:unmerged':'Pull request not merged', 'helper:idle':'Helper stopped working', 'helper:failing':'Checks keep failing',
+  'helper:permission':'Helper waits for your OK', 'reviewer:unsure':'Reviewer was not sure'};
+// what a card waits for, when other cards can wait for the same: a kind of stopped work, else the card's own words
+function reviewCauseOf(it) {
+  const cause = it?.raw?.cause;
+  if (typeof cause === 'string' && STUCK_CAUSE[cause]) return {key:'cause:' + cause, label:STUCK_CAUSE[cause]};
+  const title = clean(it?.title || '').replace(/\s+/g, ' ').trim();
+  return title ? {key:'title:' + title.toLowerCase(), label:title} : null;
+}
+// {total, rows, more}: the waiting cards in the deck's order; two or more with one cause are one group row
+function reviewListModel(deck, shown = reviewListShown, open = reviewListOpen) {
+  const items = array(deck?.items), answers = deck?.answers || {}, cur = deck?.index;
+  const waiting = items.map((it, i) => ({it, i, now:i === cur, cause:reviewCauseOf(it)})).filter(x => x.it && !answers[x.it.id]);
+  const count = new Map();
+  waiting.forEach(x => { if (x.cause) count.set(x.cause.key, (count.get(x.cause.key) || 0) + 1); });
+  const rows = [], groups = new Map();
+  for (const x of waiting) {
+    if (!x.cause || count.get(x.cause.key) < 2) { rows.push(x); continue; }
+    let g = groups.get(x.cause.key);
+    if (!g) { g = {group:x.cause.key, label:x.cause.label, rows:[], now:false, open:open.has(x.cause.key)}; groups.set(x.cause.key, g); rows.push(g); }
+    g.rows.push(x); g.now = g.now || x.now;
+  }
+  const page = rows.slice(0, Math.max(REVIEW_PAGE, shown));
+  return {total:waiting.length, rows:page, more:rows.length - page.length, all:rows.length};
+}
+function reviewListJump(id) {
+  const i = array(reviewDeck?.items).findIndex(it => it.id === id);
+  if (i >= 0 && typeof reviewDeck.jump === 'function') reviewDeck.jump(i);
+}
+function reviewListRow(x, sub) {
+  const b = h('button', {type:'button', className:'btn ghost review-queue-row' + (x.now ? ' is-now' : ''), title:clean(x.it.title), 'aria-current':x.now ? 'true' : null, 'data-review-row':x.it.id},
+    h('span', {className:'review-queue-title'}, clean(x.it.title)), x.it.ticket ? h('span', {className:'meta'}, clean(x.it.ticket)) : null);
+  b.onclick = () => reviewListJump(x.it.id);
+  return h('div', {className:'review-queue-item' + (sub ? ' sub' : ''), role:'listitem'}, b);
+}
+function reviewListGroup(g) {
+  const b = h('button', {type:'button', className:'btn ghost review-queue-row' + (g.now && !g.open ? ' is-now' : ''), 'aria-expanded':g.open ? 'true' : 'false', title:g.label, 'data-review-group':g.group},
+    h('span', {className:'review-queue-title'}, g.rows.length + ' · ' + g.label), h('span', {className:'meta'}, g.open ? 'Close' : 'Open'));
+  b.onclick = () => { if (reviewListOpen.has(g.group)) reviewListOpen.delete(g.group); else reviewListOpen.add(g.group); reviewDrawList(); };
+  return [h('div', {className:'review-queue-item', role:'listitem'}, b), ...(g.open ? g.rows.map(x => reviewListRow(x, true)) : [])];
+}
+// The Reviewer's line under the list (W-036): what it did today in one line; Look opens Answered, where each entry
+// has its reason and Undo.
+function reviewReviewerLine() {
+  const rows = reviewAccepted().filter(a => !a.earlier && a.undone !== true && !reviewUndone.has(reviewRowKey(a)));
+  if (!rows.length) return null;
+  const acc = rows.filter(a => !a.answer && !a.back).length, back = rows.filter(a => a.back).length, ans = rows.filter(a => a.answer).length;
+  const parts = [acc ? 'accepted ' + acc : '', back ? 'sent back ' + back : '', ans ? 'answered ' + ans : ''].filter(Boolean);
+  const look = h('button', {type:'button', className:'btn ghost sm', 'data-review-look':''}, 'Look');
+  look.onclick = () => reviewShow('answered');
+  return h('p', {className:'meta', 'data-review-reviewer':''}, 'The Reviewer ' + parts.join(', ') + ' for you today · ', look);
+}
+function reviewListNodes(deck) {
+  const m = reviewListModel(deck), queue = reviewQueueLine(), reviewer = reviewReviewerLine();
+  // one card alone needs no list; the lines under it still show
+  if (m.total < 2 && !queue && !reviewer) return [];
+  const step = (word, n, key) => { const b = h('button', {type:'button', className:'btn ' + (key === 'next' ? 'outline' : 'ghost') + ' sm', 'data-review-more':key}, word); b.onclick = () => { reviewListShown = n; reviewDrawList(); }; return b; };
+  const foot = m.more > 0 ? h('div', {className:'row'}, step('Next five', reviewListShown + REVIEW_PAGE, 'next'), step('All ' + m.total, 1e6, 'all'))
+    : m.all > REVIEW_PAGE ? h('div', {className:'row'}, step('First five', REVIEW_PAGE, 'five')) : null;
+  return [
+    h('div', {className:'review-list-head'}, h('h2', {className:'review-list-title'}, 'Needs you'), m.total ? h('span', {className:'review-group-count'}, m.total + ' waiting') : null),
+    h('div', {className:'review-list-groups'},
+      m.total > 1 ? h('div', {className:'review-group', role:'list', 'aria-label':'Waiting'}, m.rows.flatMap(r => r.group ? reviewListGroup(r) : [reviewListRow(r)])) : null,
+      foot, queue, reviewer)];
+}
+// draws the list into its place on the page (the aside beside the card, or the card after it); an empty list hides it
 function reviewDrawSide(queue, deck) {
-  if (!queue || !deck || typeof deck.drawList !== 'function') return;
-  deck.drawList(queue);
+  if (!queue) return;
+  reviewDeck = deck || null;
+  const kids = reviewListNodes(reviewDeck), ae = typeof document === 'object' ? document.activeElement : null;
+  if (queue.dataset) queue.dataset.reviewTotal = String(reviewListModel(reviewDeck).total);  // every waiting card, also those behind Next five or in a group
+  const held = ae && queue.contains?.(ae) ? ae.dataset?.reviewRow || ae.dataset?.reviewGroup || ae.dataset?.reviewMore || '' : '';
+  if (typeof queue.replaceChildren === 'function') queue.replaceChildren(...kids); else queue.children = kids;
+  const box = queue.closest?.('[data-review-next]');
+  if (box) box.hidden = !kids.length;
+  // the keyboard stays on the row or button it was on (a redraw makes new ones)
+  if (held && queue.querySelectorAll) [...queue.querySelectorAll('button')].find(b => [b.dataset.reviewRow, b.dataset.reviewGroup, b.dataset.reviewMore].includes(held))?.focus({preventScroll:true});
+}
+function reviewDrawList() {
+  const queue = typeof document === 'object' && document.querySelector ? document.querySelector('[data-review-queue]') : null;
+  reviewDrawSide(queue, reviewDeck);
+}
+// O-04 D: under 721 px, or beside the Focus panel when the page area is tight, the list comes after the card in the
+// page's own scroll (the shell marks those with data-live-narrow / data-live-stack); wider, it stands beside the card.
+function reviewNarrow() {
+  if (typeof document !== 'object' || !document.body) return false;
+  const d = document.body.dataset || {};
+  return d.liveNarrow != null || d.liveStack != null || (typeof matchMedia === 'function' && matchMedia('(max-width:720px)').matches);
+}
+// Waiting or Answered (the kit's two views): what the page draws around them follows the view on screen
+let reviewView = 'deck';
+function reviewViewNow() {
+  const a = typeof document === 'object' && document.getElementById ? document.getElementById('answered') : null;
+  return a && a.hidden === false ? 'answered' : 'deck';
+}
+function reviewShow(view) {
+  const page = typeof mounts === 'undefined' || typeof document !== 'object' ? null : mounts.get(document.querySelector('[data-review-host]'))?.page;
+  page?.show?.(view);
+  reviewView = view;
+  render();
 }
 // "What the Reviewer did" (ORCH-77, renamed ORCH-1835): what the Reviewer, the Auto Reviewer and Away mode did today; each
 // row says Accepted, Sent back or Answered, and one tap sends an accepted ticket back with a short note.
@@ -404,7 +547,8 @@ function reviewAcceptedRow(a) {
     const close = () => { if (busy) return; comp?.destroy?.(); locks.delete(key); host.replaceChildren(head); open.focus(); };
     const cancel = h('button', {type:'button', className:'btn ghost sm'}, 'Cancel');
     cancel.onclick = close;
-    host.replaceChildren(head, box, h('div', {className:'row'}, cancel));
+    // CX-02: Send back asks for paid helper work; the box says so, with the estimate when one is known
+    host.replaceChildren(head, h('p', {className:'meta', 'data-key':key + '-cost'}, reviewSendBackWords(typeof ticketOf === 'function' ? ticketOf(a.ticket) : null)), box, h('div', {className:'row'}, cancel));
     if (!window.UI?.composer || typeof FEEDBACK_BOX === 'undefined') return;
     comp = window.UI.composer(box, {...FEEDBACK_BOX, label:'What should change?', placeholder:'What should change?', sendLabel:'Send back', interrupt:false, hint:'',
       emptyError:'Write what should change, or add a file or a voice note.', dropTarget:host, dropLabel:'Drop to send back with this', sendingText:'Sending…',
@@ -423,10 +567,50 @@ function reviewAcceptedRow(a) {
   };
   return host;
 }
+// W-036 / O-04: the first block of the Answered view (no longer a column under the list): every entry with its reason,
+// Send back and Undo. What the Reviewer may accept is unchanged.
 function reviewAcceptedCard() {
   const rows = reviewAccepted();
   if (!rows.length) return null;
   return card('review-accepted', 'What the Reviewer did', '', rows.map(reviewAcceptedRow));
+}
+// W-043: questions that closed by themselves today because their cause is gone (a helper or the automation took its
+// own question back, with the reason): Answered says so in one line each.
+function reviewClosedRows() {
+  const day = v => { const d = new Date(v); return Number.isNaN(d.getTime()) ? '' : d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
+  const today = day(typeof now === 'function' ? now() : new Date());
+  return array(state?.tickets).flatMap(t => array(t?.questions).filter(q => q && q.taken_back && typeof q.taken_back === 'object' && day(q.taken_back.at) === today).map(q => ({t, q})))
+    .sort((a, b) => String(b.q.taken_back.at).localeCompare(String(a.q.taken_back.at)));
+}
+function reviewClosedCard() {
+  const rows = reviewClosedRows();
+  if (!rows.length) return null;
+  return card('review-closed', 'Closed without you', '', rows.map(({t, q}) => h('div', {className:'card-row', 'data-key':'review-closed-' + t.id + '-' + q.id},
+    h('div', {className:'grow'}, h('a', {href:'#ticket/' + encodeURIComponent(t.id)}, clean([t.key, t.title].filter(Boolean).join(' · '))),
+      h('p', {className:'meta'}, clean(q.text || '')),
+      h('p', {className:'meta'}, 'Closed by itself · ' + clean(q.taken_back.reason || 'its cause is gone'))))));
+}
+// W-043: a paused automation is one line on top (never a card per ticket), with the click that turns it on again.
+let reviewResuming = false;
+async function reviewResume() {
+  if (snapshot || reviewResuming) return null;
+  reviewResuming = true; render();
+  const r = await act('automation.resume', {});
+  reviewResuming = false;
+  window.orch.toast(r.ok ? 'Automation is on again' : String(r.text || 'Could not turn it on. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
+  if (r.ok && state) state.paused = null;
+  render();
+  return r;
+}
+function reviewPausedLine() {
+  const p = state?.paused;
+  if (!p || typeof p !== 'object' || snapshot) return null;
+  const n = array(state.tickets).filter(t => t && t.status === 'ready').length, why = clean(p.reason || '').replace(/[.\s]+$/, '');
+  const on = h('button', {type:'button', className:'btn outline sm', 'data-key':'review-paused-on', disabled:reviewResuming}, 'Turn on');
+  on.onclick = reviewResume;
+  return h('div', {className:'banner attn', role:'status', 'data-key':'review-paused'},
+    h('p', {className:'grow'}, h('strong', {}, 'Automation is paused' + (why ? ': ' + why : '') + '.'),
+      ' Nothing starts by itself.' + (n ? ' ' + n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' for a helper.' : '')), on);
 }
 // The Auto Reviewer and Away (ORCH-425): two switches, each saves at once (only a person turns them on;
 // `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
@@ -443,7 +627,7 @@ const REVIEW_SWITCHES = {
   propose:{op:'reviewer_mode.set', field:'reviewer_propose_on', action:'reviewer-mode-set', title:'Nothing closes by itself',
     meta:'The Reviewer only proposes: finished work it checked waits under Checked by the Reviewer, and you accept or send it back with one click.'}
 };
-const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
+const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it on Review under Answered.';
 function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
   return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
@@ -686,31 +870,48 @@ function reviewTicketFollow(deck) {
   return true;
 }
 function reviewPage() {
-  // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'Needs you'},
-    reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
-  const open = snapshot ? '' : reviewTicketId();
+  const open = snapshot ? '' : reviewTicketId(), narrow = reviewNarrow(), answered = (reviewView = reviewViewNow()) === 'answered';
+  // the page's own list: an aside beside the card (wide), or a card after it in the same scroll (narrow). The kit's
+  // deck.drawList with its Compare button is not used any more (O-06).
+  const queue = () => h('div', {className:'review-queue', 'data-review-queue':''});
+  const side = narrow ? null : h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'Needs you'}, queue());
+  const next = narrow ? h('section', {className:'card', 'data-key':'review-next', 'data-review-next':'', 'data-review-side':'', 'aria-label':'Needs you', hidden:true}, queue()) : null;
+  // Same order in every layout (W-036): the card with its buttons, the list, the Reviewer's line. What has no card of
+  // its own is listed after the card (W-039: never pushed in above the decision); the Reviewer's history and what
+  // closed by itself are the first blocks of Answered (O-04).
+  const main = h('div', {className:'review-main stack', 'data-key':'review-main'},
+    h('div', {'data-review-nav':'', 'data-key':'review-nav'}),
+    answered ? reviewAcceptedCard() : null, answered ? reviewClosedCard() : null,
+    h('div', {'data-review-host':'', 'data-key':'review-host'}),
+    answered ? null : reviewExtraCard(), answered ? null : next);
+  const rail = h('div', {className:'stack review-rail', 'data-key':'review-rail'}, side, reviewAutoCard());
   return fragment(
     heading('Review', reviewSubtitle()),
-    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477); an open ticket takes the list's place (ORCH-1804)
-    h('div', {className:'review-layout' + (open ? ' with-ticket' : ''), 'data-key':'review-layout'},
-      open ? reviewTicketPanel(open) : null,
-      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
-      h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
+    reviewPausedLine(),
+    // wide: the list on the left, the card on the right; an open ticket takes the list's place (ORCH-1804). Narrow:
+    // one column, the card first.
+    h('div', {className:'review-layout' + (open ? ' with-ticket' : ''), 'data-key':'review-layout', 'data-narrow':narrow ? 'yes' : null},
+      open ? reviewTicketPanel(open) : null, ...(narrow ? [main, rail] : [rail, main])));
 }
-// ORCH-1741: results whose pull request waits in the merge queue have no card here: one quiet line at the top of All cards.
+// FX-04: results whose pull request is on its way in (in the merge queue, or its checks only just passed) have no card
+// here: one quiet line under the list.
 function reviewQueueLine() {
   const n = array(state?.counts?.needs_you?.queue).length;
-  return n ? h('p', {className:'meta', 'data-key':'review-queue-line'}, n + ' in the merge queue, nothing to do') : null;
+  return n ? h('p', {className:'meta', 'data-key':'review-queue-line'}, n + (n === 1 ? ' waits' : ' wait') + ' to be merged, nothing to do') : null;
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
+  if (reviewListShown > REVIEW_PAGE && reviewWaiting != null && reviewWaiting <= REVIEW_PAGE) reviewListShown = REVIEW_PAGE;
   const sub = main.querySelector('[data-key="heading"] p.muted');
   if (sub && sub.textContent !== reviewSubtitle()) sub.textContent = reviewSubtitle();
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
-  main.querySelectorAll('[data-review-side]').forEach(s => { if (!mounts.has(s)) mounts.set(s, {destroy() {}}); });
+  // the list's place and the place of the Waiting / Answered switch are filled once and left alone by the paint
+  main.querySelectorAll('[data-review-side],[data-review-nav]').forEach(s => { if (!mounts.has(s)) mounts.set(s, {destroy() {}}); });
+  // a list place the paint just made (the window crossed a width, the Focus panel opened) is drawn from the deck on screen
+  main.querySelectorAll('[data-review-queue]').forEach(q => { if (!q.childNodes?.length && reviewDeck) reviewDrawSide(q, reviewDeck); });
+  reviewKeepPlace(main);
   // the one-click question rows: the paint leaves a mounted host alone; its card redraws only when the question changes
   main.querySelectorAll('[data-review-ask]').forEach(box => {
     if (!mounts.has(box)) mounts.set(box, {destroy() {}});
@@ -718,15 +919,58 @@ function mountReview(main) {
   });
   main.querySelectorAll('[data-review-host]').forEach(host => {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
-    const queue = main.querySelector('[data-review-queue]');
+    const queue = () => main.querySelector('[data-review-queue]');  // looked up at each change: a narrow page has another place
+    const nav = main.querySelector('[data-review-nav]') || undefined;
     const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), notNow:snapshot ? undefined : reviewNotNow, decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
-    mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
+    // nav: the switch stands above the Reviewer's blocks of Answered; compare:false: no Compare in the kit's own lists (O-06)
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, nav, compare:false, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue(), deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), notNow:snapshot ? undefined : reviewNotNow, decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
+    mounts.set(host, {destroy() { reviewWaiting = null; reviewDeck = null; reviewListShown = REVIEW_PAGE; reviewListOpen.clear(); page.destroy(); }, page});
   });
   mountReviewPanel(main);
+}
+// W-039: opening or closing the ticket beside the card keeps the page where it is (the shell scrolls a changed address
+// to the top), the keyboard goes to the panel's Close and back to the card, and Esc closes the panel.
+let reviewKeepY = null, reviewPanelWas = '';
+function reviewKeepPlace(main) {
+  const open = snapshot ? '' : reviewTicketId();
+  if (reviewKeepY != null && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    const y = reviewKeepY; reviewKeepY = null;
+    setTimeout(() => window.scrollTo(0, y), 0);  // after the shell's own scroll at the end of this paint
+  }
+  if (open !== reviewPanelWas) {
+    const to = open ? '[data-key="review-ticket-close"]' : reviewPanelWas ? '[data-review-host] .swipe-more summary' : '';
+    reviewPanelWas = open;
+    if (to) setTimeout(() => (main.querySelector(to) || main.querySelector('#deck'))?.focus?.({preventScroll:true}), 0);
+  }
+}
+function reviewCloseTicket() {
+  if (typeof location === 'undefined' || !reviewTicketId()) return false;
+  reviewKeepY = typeof window !== 'undefined' ? window.scrollY || 0 : 0;
+  location.hash = reviewTicketHref('');
+  return true;
+}
+if (typeof document !== 'undefined' && document.addEventListener) {
+  // a click that opens, closes or changes the ticket beside the card: remember where the page stands
+  document.addEventListener('click', e => {
+    const a = e.target.closest?.('a[href^="#review"]');
+    if (a && typeof route === 'function' && route().kind === 'review' && (/[?&]ticket=/.test(a.getAttribute('href')) || reviewTicketId())) reviewKeepY = window.scrollY || 0;
+    // Waiting / Answered (also the empty page's "See answers"): the page's own blocks follow the view on screen
+    if (e.target.closest?.('[data-review-nav],[data-review-host]')) setTimeout(() => { if (reviewViewNow() !== reviewView && typeof route === 'function' && route().kind === 'review') render(); }, 0);
+  }, true);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || e.defaultPrevented || typeof route !== 'function' || route().kind !== 'review' || !reviewTicketId()) return;
+    if (document.querySelector('dialog[open]') || e.target.closest?.('textarea,input,select,[contenteditable],.swipe-viewer,.swipe-overview,.swipe-sheet')) return;
+    if (reviewCloseTicket()) e.preventDefault();
+  });
+}
+// the list changes its place when the page area crosses a width or the Focus panel opens beside it
+if (typeof window !== 'undefined' && typeof document !== 'undefined' && document.body) {
+  const again = () => { if (typeof route === 'function' && typeof render === 'function' && route().kind === 'review') render(); };
+  if (typeof matchMedia === 'function') matchMedia('(max-width:720px)').addEventListener?.('change', again);
+  if (typeof MutationObserver === 'function') new MutationObserver(again).observe(document.body, {attributes:true, attributeFilter:['data-live-narrow', 'data-live-stack']});
 }
 // Answer on a helper that asks on its screen: its session opens in the live layer over the Review page
 if (typeof document !== 'undefined' && document.addEventListener) {

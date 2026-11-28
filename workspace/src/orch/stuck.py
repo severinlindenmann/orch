@@ -235,7 +235,8 @@ def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
                 "tone": "needs-you",
                 "since": _iso(float(seen.get("green_since") or seen.get("at") or now)),
                 "cli": f"orch run start {key}",
-                "pull": {"url": url, "head": seen["head"]},
+                # W-040: when GitHub was last asked (the card says how fresh its "checks passed" is)
+                "pull": {"url": url, "head": seen["head"], "checked_at": _iso(float(seen.get("at") or now))},
                 "helper": helper,
             }
         )

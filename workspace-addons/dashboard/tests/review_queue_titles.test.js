@@ -6,12 +6,13 @@ const review = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/p
 const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
 
 const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.js'), 'utf8');
-// persona test F4: the "All cards" list cut every title to one line, so cards looked repeated. ORCH-477 round 2: the
-// list is the kit's (deck.drawList); a row shows its title up to two lines, the whole title on hover.
+// persona test F4: the "All cards" list cut every title to one line, so cards looked repeated. O-05 (28 Nov): the
+// page draws the list (compact rows, the kit's .review-queue-row); a row shows its title up to two lines, the whole
+// title on hover.
 test('a list row shows the whole title on hover and wraps to two lines instead of one cut line', () => {
-  assert.match(review, /deck\.drawList\(queue\)/);
+  assert.match(review, /review-queue-row[^\n]*title:clean\(x\.it\.title\)/);
   assert.match(kit, /r\.dataset\.item=it\.id;r\.title=it\.title;/);
-  const rule = css.split('\n').find(l => l.startsWith('.review-row-title{'));
+  const rule = css.split('\n').find(l => l.startsWith('.review-queue-row>.review-queue-title{'));
   assert.ok(rule);
   assert.match(rule, /-webkit-line-clamp:2/);
   assert.doesNotMatch(rule, /white-space:nowrap/);
