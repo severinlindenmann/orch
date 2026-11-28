@@ -25,7 +25,10 @@ mkdir -p "$ACCT_HOME/.orch-test"
 chmod 700 "$ACCT_HOME/.orch-test"
 TMP=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-XXXX")
 OHOME=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-home-XXXX")
-trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
+. "$HERE/cleanup.sh"  # ends what the run left alive, removes both folders, keeps the run's exit code (ORCH-2397)
+trap e2e_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$TMP/home"
 
 BINS='{}'
