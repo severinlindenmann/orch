@@ -28,7 +28,7 @@ test('O-34: the menu has no "Change this list" row; Settings has the Menu sectio
   assert.ok(!/Change this list/.test(app) && !/nav-change/.test(app), 'the row is gone');
   assert.match(app, /'Edit menu'/);
   assert.match(app, /function menuSettingsCard\(/);
-  assert.match(fs.readFileSync(path.join(WEB, 'pages/settings.js'), 'utf8'), /menuSettingsCard\(\)/);
+  assert.match(fs.readFileSync(path.join(WEB, 'pages/settings.js'), 'utf8'), /menuSettingsCard\(\) : null/);
   assert.match(app, /Hide from menu/);
   assert.match(app, /Show in menu/);
 });
