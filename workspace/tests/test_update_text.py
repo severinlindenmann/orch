@@ -713,6 +713,8 @@ def test_code_loading_variables_are_never_taken_from_a_record(name):
 
 def test_call_adds_the_overrides_to_the_callers_environment(proj, monkeypatch):
     seen = {}
+    # Installed tmux folders are covered in test_services; do not depend on this machine's Homebrew.
+    monkeypatch.setattr(services.launchenv, "TMUX_DIRS", ())
 
     def fake_run(cmd, **kw):
         seen.update(kw["env"])
