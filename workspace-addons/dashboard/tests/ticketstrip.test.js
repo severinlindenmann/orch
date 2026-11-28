@@ -346,15 +346,21 @@ test('Sent back and paused: the sentence says the button\'s word, the pill says 
   assert.equal(text(nodes(fresh).find(n => n.attrs?.['data-key'] === 'ticket-sentence')), 'Your helper begins when you press Start helper.');
   assert.equal(pillOf(fresh), 'Not started');
 });
-test('Done when: a long one is cut to three lines with Show more, and stays editable (ORCH-1696)', () => {
+test('W-031 (B): Properties has every label above its value; a long Done when shows whole, no More and no Show more', () => {
   const seen = [];
   const c = ctx();
   c.window.UI.moreText = (t, o) => { seen.push(t); return h('div', {className:'more-text clamped'}, o.node, h('button', {}, 'Show more')); };
   const long = Array.from({length:20}, (_, i) => 'Line ' + (i + 1)).join('\n');
-  const row = nodes(c.detail({...base, status:'open', done_when:long})).find(n => n.attrs?.['data-key'] === 'prop-done-when-t_one');
-  assert.deepEqual(seen, [long]);
-  assert.ok(nodes(row).some(n => /more-text/.test(n.attrs?.className || '')));
-  assert.ok(nodes(row).some(n => n.attrs?.['data-key'] === 'inline-done_when-t_one' || /inline/.test(n.attrs?.className || '')), 'the editable field is inside');
+  const tree = nodes(c.detail({...base, status:'open', done_when:long, due:'2026-12-01', priority:'high', kind:{name:'bug'}, model:{name:'opus', by:'human:Anna'}, release:true, summary:long}));
+  const props = tree.find(n => n.tag === 'aside' && /properties/.test(n.attrs.className || ''));
+  const rows = nodes(props).filter(n => n.tag === 'div' && n.children.some(k => k.tag === 'dt')).map(n => [text(n.children.find(k => k.tag === 'dt')), n.attrs.className || '']);
+  assert.deepEqual(rows, [['Release', ''], ['I review the result', ''], ['Owner', 'rail-long'], ['Due', 'rail-long'], ['Done when', 'rail-long'], ['Priority', 'rail-long'], ['Helper strength', 'rail-long'], ['Kind', 'rail-long']],
+    'label above value on every row; a switch keeps its label beside it');
+  const row = tree.find(n => n.attrs?.['data-key'] === 'prop-done-when-t_one');
+  assert.match(text(row), /Line 20/, 'the whole text');
+  assert.deepEqual(seen, [], 'nothing is cut to three lines, in Properties or in the summary');
+  assert.ok(!nodes(props).some(n => n.tag === 'details' && !/props-add/.test(n.attrs.className || '')), 'the only menu is + Add');
+  assert.doesNotMatch(text(props), /Show more|More$/);
 });
 
 // ORCH-1850: "Is anyone doing this now, and where did they stop?" A marked task is a handover, not a process.

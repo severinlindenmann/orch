@@ -702,7 +702,7 @@ test('ticket page: brief heading, Repeats in Properties, plain values with a pen
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What was asked'\)/);
   assert.doesNotMatch(ticket, /'What you asked'/, 'ORCH-415: one heading for the ask');
-  assert.match(ticket, /field\('Done when', doneWhenField\(t\), 'done-when', 'rail-long'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\), 'done-when'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\), 'cost'\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);

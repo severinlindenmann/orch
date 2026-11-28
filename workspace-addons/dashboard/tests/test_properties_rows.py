@@ -1,4 +1,4 @@
-"""ORCH-1715: a Properties label stays on the line of its value; an add-on word starts with a capital."""
+"""Properties rows: every label above its value (W-031); an add-on word starts with a capital (ORCH-1715)."""
 
 import pathlib
 
@@ -7,11 +7,14 @@ PAGE = ROOT / "workspace-addons/dashboard/src/orch_dashboard/web/pages/ticket.js
 CSS = ROOT / "workspace/src/orch_ui/static/widgets.css"
 
 
-def test_helper_strength_row_keeps_its_label_on_the_first_line():
+def test_every_property_row_has_its_label_above_its_value():
+    """W-031 (owner chose B, 28 Nov): the column is rebuilt with labels above values, on the master's row."""
     page = PAGE.read_text(encoding="utf-8")
-    assert "field('Helper strength', modelField(t), 'model', 'rail-top')" in page
+    assert "const RAIL_ROW = 'rail-long';" in page
+    assert "field('Helper strength', modelField(t), 'model') : null" in page
+    assert "'rail-top'" not in page
     css = CSS.read_text(encoding="utf-8")
-    assert ".rail-sheet dl>div.rail-top{align-items:start}" in css
+    assert ".rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}" in css
 
 
 def test_addon_property_word_is_capitalised():

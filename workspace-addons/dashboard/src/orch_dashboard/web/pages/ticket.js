@@ -79,7 +79,7 @@ function addonPropertyRows(t) {
     const v = typeof v0 === 'string' ? v0.charAt(0).toUpperCase() + v0.slice(1) : v0;  // a stage word reads 'Running', not 'running'
     const editable = !snapshot && addon === repeatsAddon();
     const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
-    return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
+    return h('div', {className:'rail-long', 'data-key':'prop-' + addon + '-' + r.field + '-' + t.id}, h('dt', {}, r.label), h('dd', {}, value));
   });
 }
 // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/refs.py):
@@ -309,7 +309,7 @@ function fieldSections(t) {
         const node = h('button', {type:'button', className:'ed ed-plain' + (shown ? '' : ' empty-v'), title:'Click to change', 'data-action':'field', 'data-ticket':t.id, 'data-addon':a.name, 'data-field':f.key}, shown || 'Add', shown ? iconEl('pencil') : null);
         value = h('span', {className:'inline-host', 'data-key':'field-' + a.name + '-' + f.key + '-' + t.id}, node);
       }
-      return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
+      return h('div', {className:'rail-long'}, h('dt', {}, clean(f.title)), h('dd', {}, value));
     });
     return h('section', {className:'rail-group addon-fields', 'data-key':'fields-' + a.name},
       h('div', {className:'rail-sheet-h'}, h('h2', {}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
@@ -1944,12 +1944,11 @@ function sinceThenLine(t) {
   const said = x => 'pull request ' + x.number + (['merged', 'closed'].includes(x.word) ? ' ' + x.word : ' changed to ' + x.word) + ' on ' + localStamp(new Date(x.at).toISOString(), false);
   return h('p', {className:'meta', 'data-key':'since-then-' + t.id}, 'Since then: ', rows.flatMap((x, i) => [i ? ', ' : null, h('a', {href:safeHref(x.url), target:'_blank', rel:'noopener noreferrer'}, said(x))]), '.');
 }
-// "In short": the helper's summary as written (a long one is cut to three lines, the master's UI.moreText), and under
-// it the computed "Since then" line (W-033).
+// "In short": the helper's summary as written, whole (no Show more toggle), and under it the computed "Since then"
+// line (W-033).
 function overviewInShort(t) {
   if (!t.summary) return null;
-  const line = h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary));
-  return [!snapshot && window.UI?.moreText ? window.UI.moreText(clean(t.summary), {node:line}) : line, typeof sinceThenLine === 'function' ? sinceThenLine(t) : null];
+  return [h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)), sinceThenLine(t)];
 }
 // ORCH-2140 W4 (owner accepted A) and O-07 / W-028 (28 Nov): one Result card, short enough that Looks good / Send back
 // are on the first screen. In short, the result (one file shows itself, the others are rows), one tasks line, the
@@ -2033,8 +2032,12 @@ function addonUsed(t, a) {
 }
 const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
 const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
+// W-031 (owner chose B, 28 Nov): the column is rebuilt with every label above its value (the master's .rail-long row),
+// so a value has the whole width of the rail and nothing pushes it sideways. Nothing folds: no "More" under Helper
+// strength, no "Show more" on a long Done when. A switch keeps its label beside it (one line reads as one switch).
+const RAIL_ROW = 'rail-long';
 function ticketProperties(t, parent) {
-  const field = (label, value, key, cls) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
+  const field = (label, value, key, cls = RAIL_ROW) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done';
   const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
@@ -2042,23 +2045,18 @@ function ticketProperties(t, parent) {
       snapshot ? null : ticketButton(iconEl('x'), 'ghost icon sm narrow-only', () => railToggle(t, false), {'aria-label':'Close Properties', 'data-key':'props-close-' + t.id})),
     h('dl', {className:'ticket-details ed-list'},
       show('partOf', !!parent) ? field('Part of', snapshot ? h('a', {href:href(parent.id)}, partName(parent)) : partOfField(t, parent), 'part-of') : null,
-      show('release', !!t.release) ? field('Release', releaseField(t), 'release') : null,
-      field('I review the result', humanReviewField(t)),
+      show('release', !!t.release) ? field('Release', releaseField(t), 'release', '') : null,
+      field('I review the result', humanReviewField(t), 'human-review', ''),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', doneWhenField(t), 'done-when', 'rail-long') : null,
-      costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      costValue(t) ? field('Time · cost', costValue(t), 'cost') : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
-      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null,
       show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
-}
-// ORCH-1696: a long Done when reads three lines, then Show more (the master's UI.moreText); a click on it still edits it.
-function doneWhenField(t) {
-  const field = inlineField(t, 'done_when');
-  return window.UI?.moreText ? window.UI.moreText(clean(t.done_when), {node:field}) : field;
 }
 // Created and updated (or finished) in one quiet line at the foot of the rail.
 function railStamp(t) {
@@ -2622,7 +2620,7 @@ function modelField(t) {
   const m = modelChoice(t);
   const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
   if (snapshot) return el('span', 'ed-ro', said);
-  // Plain choices; the model names sit behind "More" (ORCH-300, owner's word list item 31).
+  // Plain choices (ORCH-300, owner's word list item 31); which model each one is reads plainly under them (W-031: no "More").
   const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id},
     h('option', {value:'auto'}, 'Auto'),
     h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
@@ -2633,9 +2631,8 @@ function modelField(t) {
     const result = await act('ticket.model', {ticket:t.id, model:select.value});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
   };
-  const more = h('details', {className:'disclosure', 'data-key':'model-more-' + t.id}, h('summary', {}, 'More'),
-    el('p', 'meta', 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.'));
-  return h('div', {className:'stack'}, select, more);
+  const names = h('p', {className:'meta', 'data-key':'model-names-' + t.id}, 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.');
+  return h('div', {className:'stack'}, select, names);
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
