@@ -2130,6 +2130,14 @@ for case in rqvec["cases"]:
     if case["do"] not in ("accept", "changes", "nothing") or (case["do"] == "changes" and not case.get("note")):
         fails.append(f"review-question vector {case['name']}: bad outcome")
 
+# Decision-first lines of a question (relay-api.md, Questions; ORCH-2187): additive, and the schema bounds them.
+dfvec = json.loads((HERE / "vectors" / "question-decision-first-v1.json").read_text(encoding="utf-8"))
+for v in dfvec["valid"]:
+    check("message", v["message"], True, f"question-decision-first vector valid {v['name']}")
+for v in dfvec["invalid"]:
+    bad = {**dfvec["valid"][0]["message"], "body": {**dfvec["valid"][0]["message"]["body"], **v["body"]}}
+    check("message", bad, False, f"question-decision-first vector invalid {v['name']}")
+
 # Ticket proposal question (relay-api.md, Ticket proposal question).
 pqvec = json.loads((HERE / "vectors" / "proposal-question-v1.json").read_text(encoding="utf-8"))
 for v in pqvec["valid"]:

@@ -966,7 +966,7 @@ def _update_title(root: Path, ticket: str) -> str | None:
     return _phone_line(root, title)
 
 
-def _phone_line(root: Path, raw_text) -> str | None:
+def _phone_line(root: Path, raw_text, limit: int = 120) -> str | None:
     """One line of ticket text for a phone, hidden and cut like the title (fail closed: None)."""
     from orch import phone_results, phone_view
 
@@ -993,7 +993,7 @@ def _phone_line(root: Path, raw_text) -> str | None:
     line = h.hide_text(phone_view.redact(h.hide_text(line)))
     if not stable(line):
         return None
-    line = line[:120].strip()  # a cut can only drop text, never join: but check the cut text as well
+    line = line[:limit].strip()  # a cut can only drop text, never join: but check the cut text as well
     return line if line and stable(line) else None
 
 
@@ -1423,6 +1423,30 @@ def _question_task(root: Path, ticket: dict, q: dict) -> dict:
     return {"task": cid, "about": about} if about else {}
 
 
+def _question_decision(root: Path, q: dict) -> dict:
+    """body.decision_first, body.if_wait and body.facts (relay-api.md 'Questions', ORCH-2187 Focused review F):
+    with [workflow] decision_first on, the phone draws the card as the dashboard does: "You decide" first,
+    then "If you wait" and the "What matters" lines the helper gave (orch ask --if-wait --fact). Each line is
+    hidden and cut like the title; one that cannot be shown safely is left out. Off: nothing (RULE A)."""
+    from orch import config
+
+    if not config.decision_first_on(root):
+        return {}
+    out: dict = {"decision_first": True}
+    wait = q.get("if_wait")
+    if isinstance(wait, str) and (line := _phone_line(root, wait, tickets.BECAUSE_MAX)):
+        out["if_wait"] = line
+    raw = q.get("facts") if isinstance(q.get("facts"), list) else []
+    facts = [
+        line
+        for f in raw[: tickets.FACTS_MAX]
+        if isinstance(f, str) and (line := _phone_line(root, f, tickets.BECAUSE_MAX))
+    ]
+    if facts:
+        out["facts"] = facts
+    return out
+
+
 def send_question(
     root: Path,
     ticket: dict,
@@ -1448,6 +1472,7 @@ def send_question(
         if val is not None:
             body[key] = val
     body.update(_question_task(root, ticket, q))
+    body.update(_question_decision(root, q))
     msg = _message(root, "phones", "question", body, ticket["id"])
     rec = {
         "ticket": ticket["id"],
