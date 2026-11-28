@@ -85,7 +85,12 @@ fields on every chat line (only in `tickets.add_history`, the one append point):
   NOT a person field: it proves nothing, `by` stays the actor and every rule above reads only `by`. A line shown
   as `agent:sync` (not proven here) is shown without its `by_name`.
 
-Neither field is allowed on a line that is not a chat line (ticket.schema.json). Old lines have neither and stay
+- `summary` (optional, added 28 Nov 2026): the writer's own short line of a long message, one line, 1-200
+  characters after cleaning (`orch chat reply --summary "<line>"`). A chat shows a helper's long message as this
+  line, or, when there is none, as a labelled excerpt of its start; the whole text opens on a click. orch never
+  writes a summary itself (no program or model shortens a message). A person's message is always shown as written.
+
+None of these fields is allowed on a line that is not a chat line (ticket.schema.json). Old lines have neither and stay
 valid; readers never require them (example `examples/ticket/valid-chat-line-name-and-id.json` holds a new chat
 line, an old chat line and an old line from before the flag).
 

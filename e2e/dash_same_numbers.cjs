@@ -155,9 +155,11 @@ test('same numbers: every page shows the same count, date and state for the same
         card: card ? (card.querySelector('h2') || card).innerText.split('\n')[0] : '',
         all: (/All (\d+) tickets/.exec(t) || [])[1] || '',
         rows: [...main.querySelectorAll('[data-need-row]')].length,
-        // ORCH-476: every row of "Needs you" says how much of the number it carries; added up they are the title
-        weights: [...(card ? card.querySelectorAll('[data-counts]') : [])].map(e => Number(e.getAttribute('data-counts'))),
-        unweighed: card ? [...card.querySelectorAll('[data-need-row]')].filter(e => !e.closest('[data-counts]')).length : 0,
+        // ORCH-476, O-01 D (28 Nov): every row of "Blocked now" and the one Review line say how much of the number
+        // they carry; added up they are the Review badge
+        weights: [...main.querySelectorAll('[data-counts]')].map(e => Number(e.getAttribute('data-counts'))),
+        unweighed: [...main.querySelectorAll('[data-blocked]')].filter(e => !e.closest('[data-counts]')).length + (main.querySelector('[data-key="review-line"][data-counts]') ? 0 : 1),
+        asked: main.querySelectorAll('[data-need-row^="core:q:"], .answer-option').length,
         helperSum: document.querySelector('.helper-list .helper-sum')?.innerText.trim() || '',
         helperRows: [...document.querySelectorAll('.helper-list .helper-row')].map(r => ({
           title: r.querySelector('.helper-title')?.getAttribute('title') || '', meta: r.querySelector('.meta')?.innerText.trim() || '', state: r.dataset.state})),
@@ -168,7 +170,7 @@ test('same numbers: every page shows the same count, date and state for the same
     // ORCH-1616 (owner, less noise): the number shows in ONE place, the Review badge; Home's heading, the top bar,
     // the menu button and the Tickets header never repeat it
     noise('Home title', home.title);
-    noise('Home "Needs you" card', /\d/.test(home.card) ? home.card : '');
+    noise('Home "Blocked now" card', /\d/.test(home.card) ? home.card : '');
     noise('Home line under the heading', home.line[0] || '');  // ORCH-1616: the date alone, no counts
     noise('top bar', homeChrome.topBar);
     noise('menu button', /\d/.test(homeChrome.menuButton) ? homeChrome.menuButton : '');
@@ -177,22 +179,23 @@ test('same numbers: every page shows the same count, date and state for the same
 
     // ---- Review
     await visit('#review');
-    await page.waitForSelector('[data-review-queue] .review-row', {timeout: 10_000}).catch(() => null);
+    await page.waitForSelector('[data-review-queue][data-review-total]', {timeout: 10_000}).catch(() => null);
     const review = await page.evaluate(() => {
       const main = document.querySelector('main');
       // ORCH-2316 (R2 A): the line reads "N things need you."; older builds said "N things wait on you"
       return {line: (/(\d+) things? (?:needs?|waits?) (?:on )?you/.exec(main.innerText) || [])[0] || '', chrome: null,
         waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
-        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length,
-        // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed above
+        // O-05 (28 Nov): the list shows five rows at a time and folds one cause into a row; its count is every waiting card
+        queue: Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0),
+        // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed after the card
         extra: document.querySelectorAll('[data-key="review-extra"] [data-what]').length};
     });
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
     note('needs you', 'Review Waiting tab (cards + rows listed above them, ORCH-2339)', int(review.waiting));
-    note('needs you', 'Review "All cards" rows waiting + rows listed above the cards', review.queue + review.extra);
-    note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
+    note('needs you', 'Review list count + rows listed after the card', review.queue + review.extra);
+    note('needs you', 'Home: blocked rows and the Review line added up', home.weights.reduce((a, b) => a + b, 0));
     noise('top bar (on Review)', reviewChrome.topBar);
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));
 
@@ -330,7 +333,8 @@ test('same numbers: every page shows the same count, date and state for the same
     }
     for (const key of Object.keys(SAMPLE)) if (!tickets.rows[key]) problems.push(`${key}: not in the Tickets list`);
     // ORCH-476: the number against the rows it stands for
-    if (home.unweighed) problems.push(`Home: ${home.unweighed} "Needs you" rows say nothing about the number`);
+    if (home.unweighed) problems.push(`Home: ${home.unweighed} blocked rows (or the Review line) say nothing about the number`);
+    if (home.asked) problems.push(`Home: ${home.asked} question cards or answer buttons; questions are on Review only (O-01 D)`);
     if (needs.value !== state.counts.needs_you.count) problems.push(`needs you: the pages show ${needs.value}, the core counts ${state.counts.needs_you.count}`);
     const pil2 = state.tickets.find(t => t.key === 'PIL-2'), pil80 = state.tickets.find(t => t.key === 'PIL-80');
     const step = state.counts.tickets[pil2.id].step, prog = state.counts.tickets[pil2.id].progress;

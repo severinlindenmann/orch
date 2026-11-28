@@ -16,6 +16,7 @@ module.exports = {
     const shown = async () => {
       await card().waitFor();
       if (!(await card().innerText()).includes('spring newsletter')) {  // the first load may still show another card
+        if (await page.locator('.review-side [data-review-more="all"]').count()) await page.locator('.review-side [data-review-more="all"]').click();  // O-05: five rows at a time
         await page.locator('.review-side').getByText(/spring newsletter/).first().click();
         await page.locator('.swipe-card:not(.under):not(.under2)', { hasText: 'spring newsletter' }).first().waitFor();
       }

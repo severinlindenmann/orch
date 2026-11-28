@@ -117,7 +117,8 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   assert.match(UI.helperPill('stuck', 'Stuck').className, /pill helper-pill failed/);
 });
 
-test('Home: the Helpers side card replaces Working now, with Remind on idle rows and Stop on finished idle ones, none for a ticket in Review', () => {
+// CX-01 (28 Nov): finished work whose session is still open is Finished with Open ticket, never an idle helper with Stop.
+test('Home: the Helpers side card replaces Working now, with Remind on idle rows, Finished with Open ticket on finished idle ones, none for a ticket in Review', () => {
   const items = [
     {id:'w', key:'ORCH-56', title:'Fix flaky test', status:'active', checklist:[{state:'doing'}]},
     {id:'i', key:'ORCH-32', title:'Windows suite', status:'active'},
@@ -141,8 +142,8 @@ test('Home: the Helpers side card replaces Working now, with Remind on idle rows
   assert.deepEqual(seen.map(r => [r.key, r.word, r.meta, r.actions.map(a => a.label).join()]), [
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
     ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Remind'],
-    ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
-  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Test results, no Helpers row and no Stop
+    ['ORCH-40', 'Finished', 'Nothing running for 3 min', 'Open ticket'],
+  ]);  // ORCH-407: ORCH-314 waits for review: it is the person's result, no Helpers row and no Stop
 });
 
 test('ticket page: the state pill, the last activity line and a Stop that says when the helper is idle', () => {

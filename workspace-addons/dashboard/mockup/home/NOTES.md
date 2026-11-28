@@ -116,3 +116,10 @@ Home: the question is body text; answering moves the card out, the next one in, 
 - Needs area: one quiet line "2 parked, they ask nothing until they come back" with Show (same row pattern as the
   sync notes line). Show lists each parked ticket with its reason ("Until Mon 09:00", "Until you bring it back",
   "In Backlog") and one "Bring back" button. On Review the question card has the same quiet "Not now" in its foot.
+
+## Home after the walk of 28 Nov (O-01 D, CX-01, W-017, W-054 A)
+
+- `home.html`: blocked work first ("Blocked now": one line and one action per row: a sign-in that stopped, a service work depends on, a helper that could not start, a merge that waits, a helper that waits for an OK). Questions and results are one line that opens Review ("8 questions and 18 results wait in Review"); no question or result card on Home. The numbers are one row. Finished is the five newest titles with one short result each. No "What changed", "In progress" or "Not started" card.
+- Helpers (CX-01): a finished ticket with nothing running reads "Finished" with Open ticket; one whose process still runs says "Ticket finished; helper still running" and keeps Stop; a run that cannot be read says "Not known".
+- Preview controls: Loaded, Loading, Day one (W-017: "Write your first ticket", one filled New ticket), Blocked, Nothing blocked. `?paused` shows the calm line of a paused automation, `?line` the full start line, `?login=soon` a login that runs out soon (quiet row at the foot).
+- The rows use the product's own page sheet (`pages/home.css`), linked like `chat.html` links its page sheet.

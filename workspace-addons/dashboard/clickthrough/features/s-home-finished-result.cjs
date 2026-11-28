@@ -1,5 +1,5 @@
-// Home (ORCH-1849): a ticket finished today is named once, in Finished, with its result right under the title, on the
-// phone and on the desktop; What changed never repeats it, and the title still opens the ticket.
+// Home (ORCH-1849; O-01 D, 28 Nov): a finished ticket is named once, in Finished, with one short line of its result
+// under the title, on the phone and on the desktop; no second list repeats it, and the title still opens the ticket.
 const idOf = out => (/\[(t_[A-Za-z0-9]+)\]/.exec(out) || [])[1];
 
 module.exports = {

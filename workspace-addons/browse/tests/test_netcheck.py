@@ -180,3 +180,36 @@ def test_nat64_every_reading_counts():
     # A discovered /64 prefix with 127.0.0.1 in the /96 position is refused as well.
     pref = [ipaddress.ip_network("2001:db8:1:2::/64")]
     assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:5d:b8:7f00:1"), (), pref)
+
+
+# ---- O-21 (owner, 28 Nov): a pasted list, wildcards, a permanent workspace list ----
+def test_a_pasted_list_is_read_as_it_would_be_stored():
+    text = "*.20min.ch, https://www.SBB.ch/de/fahrplan\n20min.ch.\n  docs.python.org;10.0.0.1 localhost\nexample.com"
+    read = nc.norm_many(text)
+    assert read["sites"] == ["20min.ch", "www.sbb.ch", "docs.python.org", "example.com"]
+    assert read["repeats"] == 1  # "20min.ch." says 20min.ch again
+    assert {"entry": "*.20min.ch", "site": "20min.ch"} in read["changed"]
+    assert {"entry": "https://www.SBB.ch/de/fahrplan", "site": "www.sbb.ch"} in read["changed"]
+    assert not any(c["entry"] in ("docs.python.org", "example.com") for c in read["changed"])
+    assert [r["entry"] for r in read["refused"]] == ["10.0.0.1", "localhost"]
+    assert all(r["why"] for r in read["refused"])
+    assert nc.norm_many(["  ", "", None]) == {"sites": [], "changed": [], "refused": [], "repeats": 0}
+
+
+def test_a_wildcard_means_the_site_and_every_part_of_it():
+    (site,) = nc.norm_many("*.20min.ch")["sites"]
+    assert nc.site_allowed("20min.ch", [site]) and nc.site_allowed("www.20min.ch", [site])
+    assert nc.site_allowed("a.b.20min.ch", [site]) and not nc.site_allowed("evil20min.ch", [site])
+    assert not nc.site_allowed("20min.ch.evil.com", [site])
+
+
+def test_a_thousand_sites_match_fast_and_exactly():
+    import time
+
+    sites = nc.norm_many("\n".join(f"*.site{i}.example.org" for i in range(1000)))["sites"]
+    assert len(sites) == 1000
+    start = time.perf_counter()
+    for _ in range(200):
+        assert nc.check_target("www.site999.example.org", 443, sites) is None
+        assert "site list" in nc.check_target("www.site1000.example.org", 443, sites)
+    assert time.perf_counter() - start < 2.0  # 400 checks against 1000 sites: far below a page's own time

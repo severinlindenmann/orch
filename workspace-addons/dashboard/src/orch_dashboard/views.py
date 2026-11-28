@@ -36,7 +36,7 @@ BLOCKS = (
 )
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
-    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|http://(127\.0\.0\.1|localhost):[0-9]{1,5}/?|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
+    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|http://(127\.0\.0\.1|localhost):[0-9]{1,5}/?|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2}|app:chat/ws_[a-z0-9]{10}(/m_[a-z0-9]{16})?)$"""
 )
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

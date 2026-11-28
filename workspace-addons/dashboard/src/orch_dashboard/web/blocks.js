@@ -12,7 +12,8 @@ const OrchBlocks = (() => {
   const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
-  const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
+  // a page of the dashboard (hash route); also the conversation with a workspace in Chat, or one message of it (O-26, W-055)
+  const APP = /^app:(?:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}|chat\/ws_[a-z0-9]{10}(\/m_[a-z0-9]{16})?)$/;
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   const shownAll = new Set();   // tables whose "Show more" was pressed (by title), kept while the page is open
@@ -253,7 +254,48 @@ const OrchBlocks = (() => {
     return finish();
   }
 
+  // The room the page has (W-001): under 900 px of page area (beside the right panel, or a small window) a row with
+  // buttons is drawn as the master's short row (kit .short-row): the name, one quiet line, and the buttons and the
+  // switch always in view (W-051, O-25, owner 28 Nov). A phone-width window (up to 720 px) keeps its own card form.
+  const ROOM_NARROW = 900, PHONE = 720;
+  function roomNarrow() {
+    if (typeof window === 'undefined') return false;
+    const w = Number(window.innerWidth) || 0;
+    if (w && w <= PHONE) return false;
+    const room = window.UI && window.UI.pageRoom;
+    return room && typeof room.under === 'function' ? !!room.under(ROOM_NARROW) : !!w && w < ROOM_NARROW;
+  }
+  // One short row: {title, link, hover, facts: [text | node], side: [node], below: [node]}. `side` stays at the right of
+  // the name (a switch, one or two buttons); `below` is a line of whole buttons under the quiet line (never squeezed
+  // beside the name, never broken inside a word).
+  function shortRow(o) {
+    const row = el('div', 'short-row'), grow = el('span', 'grow');
+    const t = linked('short-title', o.link, keepRefs(o.title));
+    t.title = String(o.hover || o.title);
+    grow.append(t);
+    const facts = arr(o.facts).filter(x => x != null && x !== '');
+    if (facts.length) {
+      const f = el('span', 'short-fact');
+      facts.forEach((x, i) => { if (i) f.append(' · '); f.append(x); });
+      f.title = facts.map(x => typeof x === 'string' ? x : x.textContent).join(' · ');
+      grow.append(f);
+    }
+    if (arr(o.below).length) { const acts = el('div', 'row'); acts.append(...o.below); grow.append(acts); }
+    row.append(grow);
+    if (arr(o.side).length) { const side = el('span', 'short-side'); side.append(...o.side); row.append(side); }
+    return row;
+  }
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
+  // O-25 (owner 28 Nov): the same row in a page area under 900 px: the name, its note and facts on one quiet line, then
+  // the buttons on a line of their own (whole buttons that wrap, never a word broken letter by letter).
+  function compactShort(it) {
+    const acts = [];
+    for (const a of arr(it.actions)) { const b = rowButton(a); if (b) acts.push(...openFirst(b)); }
+    const facts = [it.subtitle, ...arr(it.meta)].map(x => String(x ?? '').trim()).filter(Boolean);
+    const row = shortRow({title: it.title, link: it.link, facts, below: acts, side: arr(it.chips).slice(0, 1).map(c => toneChip(c.tone, String(c.label)))});
+    row.setAttribute('role', 'listitem');
+    return row;
+  }
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
     const t = linked('li-title compact-title', it.link, keepRefs(it.title));
@@ -556,10 +598,16 @@ const OrchBlocks = (() => {
       if (b.above) s.append(host);
       if (!arr(b.items).length && b.empty) { host.append(emptyState(b.empty)); return s; }
       if (!arr(b.items).length) ul.append(el('li', 'blk-none', 'Nothing here.'));
+      if (b.compact && arr(b.items).length && roomNarrow()) {
+        const box = el('div', 'blk-short cal-list'); box.setAttribute('role', 'list');   // kit .cal-list: no line above the first short row
+        box.append(...arr(b.items).map(compactShort)); host.append(box);
+        if (b.more > 0) host.append(el('p', 'blk-more', `+${b.more} more`));
+        return s;
+      }
       arr(b.items).forEach((it, n) => {
         if (b.compact) { ul.append(compactItem(it)); return; }
         if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
-          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + n)); return;
+          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + (n + (b.at || 0)))); return;
         }
         const body = el('span', 'li-main'); body.append(el('span', 'li-title', it.title));
         if (it.subtitle) body.append(el('small', 'li-sub', it.subtitle));
@@ -752,6 +800,7 @@ const OrchBlocks = (() => {
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
+      if (b.compact && (hasActions || hasToggle) && !b.filter && !b.fold && roomNarrow()) return shortTable(s, b, cols, rowsList);
       // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
       // words sit beside each switch on its card.
       const toggleText = String((rowsList.find(r => r.toggle && r.toggle.text) || {toggle:{}}).toggle.text || 'On');
@@ -866,6 +915,86 @@ const OrchBlocks = (() => {
     },
   };
 
+  // W-051 (owner 28 Nov): a compact table whose rows have buttons or a switch, in a page area under 900 px: each row is
+  // two lines (the name, then the other cells as one quiet line that ends in "…", so the last cell drops first), with
+  // the buttons and the switch always in view at the right. The first quiet cell stands alone (the plan); the ones
+  // after it carry their column's name ("Next time: …").
+  function shortTable(s, b, cols, rowsList) {
+    const list = el('div', 'blk-short'), key = String(b.title || cols.map(c => c.key).join(','));
+    const show = Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+    const later = [];
+    rowsList.forEach((r, n) => {
+      const links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+      const main = cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {};
+      const facts = [];
+      for (const c of cols) {
+        if (c.key === main.key) continue;
+        const td = cell(c, (r.cells || {})[c.key]), text = td.textContent;
+        if (!text || /cell-none/.test(td.className)) continue;
+        const said = facts.length ? c.label + ': ' + text : text;
+        facts.push(c.type === 'text' && TONES.includes(tones[c.key]) ? toneChip(tones[c.key], said) : said);
+      }
+      if (r.subtitle) facts.push(String(r.subtitle));
+      const side = [];
+      for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) side.push(...openFirst(btn)); }
+      const sw = r.toggle ? toggleEl(r.toggle) : null;
+      if (sw) side.push(sw);
+      const title = String((r.cells || {})[main.key] ?? '');
+      const row = shortRow({title, link: typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link)) ? r.link : null, hover: title + (r.subtitle ? ' · ' + r.subtitle : ''), facts, side});
+      if (n >= show) { row.hidden = true; later.push(row); }
+      list.append(row);
+    });
+    s.append(list);
+    if (show < rowsList.length) {
+      const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
+      btn.type = 'button';
+      btn.onclick = () => { shownAll.add(key); later.forEach(x => { x.hidden = false; }); btn.remove(); };
+      s.append(btn);
+    }
+    if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
+    return s;
+  }
+
+  // ---- A list in pages (W-052). `listAt`: the page shown per list title, kept while the dashboard is open.
+  const listAt = new Map();
+  const pagesOf = blocks => {   // [{title, pages}] for every paged list of a view
+    const out = [], all = arr(blocks);
+    for (let i = 0; i < all.length; i++) {
+      const b = all[i]; if (!b || b.type !== 'list' || typeof b.title !== 'string') continue;
+      let n = 1; while (all[i + 1] && all[i + 1].type === 'list' && all[i + 1].title === b.title) { n++; i++; }
+      if (n > 1) out.push({title: b.title, pages: n});
+    }
+    return out;
+  };
+  const pageAt = (title, n) => Math.max(0, Math.min(n - 1, listAt.get(title) || 0));
+  // The next page of the view's first paged list that has one: true when it moved (the page then draws again).
+  function listOlder(blocks) {
+    const l = pagesOf(blocks).find(x => pageAt(x.title, x.pages) < x.pages - 1);
+    if (!l) return false;
+    listAt.set(l.title, pageAt(l.title, l.pages) + 1);
+    return true;
+  }
+  const listHasOlder = blocks => pagesOf(blocks).some(x => pageAt(x.title, x.pages) < x.pages - 1);
+  function pagedList(pages) {
+    const first = pages[0], at = pageAt(first.title, pages.length), size = arr(first.items).length;
+    const from = pages.slice(0, at).reduce((n, p) => n + arr(p.items).length, 0), shown = arr(pages[at].items).length;
+    const listed = pages.reduce((n, p) => n + arr(p.items).length, 0), total = Number.isInteger(first.count) && first.count >= listed ? first.count : listed;
+    const s = draw.list({...pages[at], count: first.count, meta: first.meta, at: from});
+    s.dataset.listPage = String(at + 1);
+    const nav = el('nav', 'row blk-pager'); nav.setAttribute('aria-label', first.title + ': pages');
+    const go = (label, to) => {
+      const b = el('button', 'btn outline sm', label); b.type = 'button'; b.dataset.listPage = first.title; b.dataset.to = String(to);
+      if (to < 0 || to >= pages.length) { b.disabled = true; b.setAttribute('aria-disabled', 'true'); }
+      return b;
+    };
+    const where = el('span', 'meta', `${from + 1}\u2013${from + shown} of ${total} \u00b7 page ${at + 1} of ${pages.length}`); where.setAttribute('role', 'status');
+    nav.append(go('Previous page', at - 1), go('Next page', at + 1), where);
+    s.append(nav);
+    return s;
+  }
+  // A pager button was pressed (the page binds the click): remember the page; the page then draws the view again.
+  function listGo(title, to) { if (typeof title !== 'string' || !Number.isInteger(to) || to < 0) return false; listAt.set(title, to); return true; }
+
   // Stats sit together in one row; everything else follows in order. Unknown types are skipped.
   function render(blocks, options) {
     opts = options || {};
@@ -874,9 +1003,18 @@ const OrchBlocks = (() => {
     // A view that is one empty list is an empty page: the empty page alone, never a box in a box naming the page twice (D4).
     const only = arr(blocks).filter(b => b && Object.prototype.hasOwnProperty.call(draw, b.type));
     if (only.length === 1 && only[0].type === 'list' && !arr(only[0].items).length && only[0].empty && !only[0].above) { root.append(emptyState(only[0].empty)); return root; }
-    for (const b of arr(blocks)) {
+    const all = arr(blocks);
+    for (let i = 0; i < all.length; i++) {
+      let b = all[i];
       const f = b && Object.prototype.hasOwnProperty.call(draw, b.type) ? draw[b.type] : null;
       if (!f) continue;
+      // W-052 (owner 28 Nov): list blocks one after the other with the same title are the pages of ONE list. One page
+      // shows at a time, with "Previous page" / "Next page" under it; the page stays over refreshes (listAt, by title).
+      if (b.type === 'list' && typeof b.title === 'string') {
+        const pages = [b];
+        while (all[i + 1] && all[i + 1].type === 'list' && all[i + 1].title === b.title) pages.push(all[++i]);
+        if (pages.length > 1) { root.append(pagedList(pages)); stats = null; pair = null; settings = null; continue; }
+      }
       if (b.type === 'stat') { if (!stats) { stats = el('div', 'stats'); root.append(stats); } stats.append(f(b)); continue; }
       stats = null;
       const node = f(b);
@@ -892,6 +1030,6 @@ const OrchBlocks = (() => {
     return root;
   }
   const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
-  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent};
+  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent, roomNarrow, listOlder, listHasOlder, listGo};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;

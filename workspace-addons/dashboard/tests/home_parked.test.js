@@ -29,17 +29,6 @@ function make(tickets, extra = {}, state = {}) {
   return c;
 }
 
-test('the question card on Home has a quiet "Not now" that asks until when for its ticket', () => {
-  const asked = [], t1 = T('t1', {questions:[{id:'q1', text:'Did it work?', answer:null}]});
-  const c = make([t1], {askNotNow:t => asked.push(t.id)});
-  const now = nodes(c.needRow(row, row.id)).filter(n => n.tag === 'button' && text(n) === 'Not now');
-  assert.equal(now.length, 1);
-  assert.match(now[0].attrs.className, /quiet/);
-  now[0].onclick();
-  assert.deepEqual(asked, ['t1']);
-  const snap = make([t1], {askNotNow() {}}); vm.runInContext('snapshot = true', snap);
-  assert.equal(nodes(snap.needRow(row, row.id)).filter(n => text(n) === 'Not now' && n.tag === 'button').length, 0, 'a read-only copy offers nothing');
-});
 
 test('the parked line: one quiet row, Show lists each ticket with its reason and Bring back', () => {
   const back = [], tickets = [T('t1'), T('t2', {status:'open'})];

@@ -499,8 +499,10 @@
       v.share ? h('div', {className: 'settings-row'}, h('p', {className: 'meta', text: 'Without a share, helpers use the accounts in their order, one after the other.'}),
         h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('share', 'clear', e.currentTarget)}, 'Remove the share')) : null);
   }
+  // W-053: said plainly, never hidden: the choice is kept, but a helper start does not use it yet.
+  const SPREAD_NOTE = 'Not applied to helper starts yet. Your choice is saved; until then helpers use the accounts in their order.';
   function spread(v) {
-    const presets = h('div', {className: 'grid-3', role: 'group', 'aria-label': 'Ready-made spreads'}, v.presets.map(p => {
+    const presets = h('div', {className: 'grid-3', role: 'group', 'aria-label': 'Ready-made spreads', 'aria-describedby': 'spread-note'}, v.presets.map(p => {
       const on = v.preset === p.id;
       return h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': String(on), onclick: e => act('share', 'preset:' + p.id, e.currentTarget)},
         h('span', {className: 'live-opt-t'},
@@ -517,7 +519,7 @@
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
       onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
     return h('section', {className: 'stack', id: 'spread'},
-      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Preview: saved, but helpers do not follow it yet. Until then they use the accounts in their order.'})),
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', id: 'spread-note', text: SPREAD_NOTE})),
       h('div', {className: 'card pad stack'},
         presets,
         h('p', {className: 't-body', id: 'share-sentence', text: v.sentence}),
@@ -616,10 +618,9 @@
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
     if (m.status) parts.unshift(statusLine(m.status));
-    if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
-    if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
-    if (m.prepare) parts.push(prepareLine(m.prepare));
+    // W-053 (owner 28 Nov): the accounts with their bars come first (what is used, when it starts again); today's
+    // starts, the spread and the history follow below them.
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     // API credits: each its own account, never added together per provider (owner, ORCH-624)
     const gone = m.removed || [];
@@ -637,6 +638,9 @@
     if (toolsBack) toolSection.append(toolsBack);
     toolSection.append(addCard(m.providers || []));
     parts.push(toolSection);
+    if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
+    if (m.prepare) parts.push(prepareLine(m.prepare));
+    if (m.share) parts.push(spread(m.share));
     parts.push(history(m.history || []));
     parts.push(h('p', {className: 'meta', text: 'Logins and keys are never shown or kept here.'}));
     if (!embedded) {

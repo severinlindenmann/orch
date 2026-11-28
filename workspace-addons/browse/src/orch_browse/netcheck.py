@@ -210,6 +210,40 @@ def norm_site(site: str) -> str:
     return s
 
 
+_SPLIT = re.compile(r"[\s,;]+")
+PASTE_MAX = 20000  # entries looked at in one pasted list
+
+
+def norm_many(entries) -> dict:
+    """A pasted list as it would be stored (O-21): entries split at spaces, commas, semicolons and line ends,
+    each through norm_site, so "*.20min.ch", "https://www.20min.ch/zuerich" and "20min.ch." read as written
+    here: {"sites": the names, each once, in the order given; "changed": [{"entry", "site"}] where the stored
+    name differs from what was typed; "refused": [{"entry", "why"}]; "repeats": how many said a name again}."""
+    if isinstance(entries, str):
+        entries = _SPLIT.split(entries)
+    out: dict = {"sites": [], "changed": [], "refused": [], "repeats": 0}
+    seen: set[str] = set()
+    for raw in list(entries)[:PASTE_MAX]:
+        entry = raw.strip() if isinstance(raw, str) else ""
+        if not entry:
+            continue
+        try:
+            site = norm_site(entry)
+            if not site:
+                raise ValueError("no site name in it")
+        except ValueError as e:
+            out["refused"].append({"entry": entry[:120], "why": str(e)[:200]})
+            continue
+        if site in seen:
+            out["repeats"] += 1
+            continue
+        seen.add(site)
+        out["sites"].append(site)
+        if site != entry.lower():
+            out["changed"].append({"entry": entry[:120], "site": site})
+    return out
+
+
 def site_allowed(host: str, sites: Iterable[str]) -> bool:
     """True when host is a listed site or a part of one (www.example.com for example.com)."""
     h = (host or "").strip().lower().rstrip(".")
@@ -228,7 +262,7 @@ def check_target(host: str, port: int, sites: Iterable[str]) -> str | None:
     if literal_ip(host) is not None:
         return "the browser opens sites by name only, not by address"
     if not site_allowed(host, sites):
-        return f"{host.lower().rstrip('.')} is not on this ticket's site list"
+        return f"{host.lower().rstrip('.')} is not on the site list (this ticket's or the workspace's)"
     return None
 
 

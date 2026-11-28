@@ -30,13 +30,24 @@ function generalPanel(addons) {
     addonLabel:a => a?.name, fetch:async () => ({ok:false, status:404, json:async () => ({})}), act:async () => ({ok:true}), URL,
   });
   for (const file of ['home', 'settings']) vm.runInContext(fs.readFileSync(path.join(PAGES, file + '.js'), 'utf8'), c);
-  return all(c.settingsPage(), n => n.attrs?.id === 'settings-panel-general')[0];
+  const general = all(c.settingsPage(), n => n.attrs?.id === 'settings-panel-general')[0];
+  const row = addons.find(a => a.name === 'publish');
+  return {general, detail:row ? c.addonDetailPage(row) : null};
 }
-const shown = panel => all(panel, n => n.attrs?.['data-key'] === 'settings-look').length === 1;
+const key = (n, k) => all(n, x => x.attrs?.['data-key'] === k);
 
-test('publish off: Settings › General has no Shared pages section; publish on: it shows', () => {
-  assert.equal(shown(generalPanel([])), false, 'no add-ons');
-  assert.equal(shown(generalPanel([{name:'dashboard', active:true, shipped:true}])), false, 'only the dashboard');
-  assert.equal(shown(generalPanel([{name:'publish', active:false, shipped:true}])), false, 'publish turned off');
-  assert.equal(shown(generalPanel([{name:'publish', active:true, shipped:true}])), true, 'publish on');
+// W-059 (owner 28 Nov): the shared pages options are an add-on's own: they are edited on that add-on's Settings page,
+// and General only links there. Still only while publish is on (R1.1, ORCH-2112).
+test('publish off: no Shared pages row in General and no section on its Settings page; publish on: the row links to the section', () => {
+  for (const [addons, why] of [[[], 'no add-ons'], [[{name:'dashboard', active:true, shipped:true}], 'only the dashboard'], [[{name:'publish', active:false, shipped:true}], 'publish turned off']]) {
+    const {general, detail} = generalPanel(addons);
+    assert.equal(key(general, 'settings-look').length, 0, why);
+    assert.equal(key(general, 'settings-everyday-shared-row').length, 0, why);
+    if (detail) assert.equal(key(detail, 'settings-look').length, 0, why + ': its Settings page shows the switch only');
+  }
+  const {general, detail} = generalPanel([{name:'publish', active:true, shipped:true, dashboard:{panel:'links', label:'Publish'}}]);
+  assert.equal(key(general, 'settings-look').length, 0, 'General does not edit it');
+  const [link] = key(general, 'settings-everyday-shared');
+  assert.deepEqual([link.tag, link.attrs.href], ['a', '#settings/addons/publish']);
+  assert.equal(key(detail, 'settings-look').length, 1, 'the add-on\u2019s Settings page holds it');
 });

@@ -121,3 +121,61 @@ def test_a_second_copy_is_named_on_the_row():
     texts = [r["text"] for r in json.loads(out.stdout)["rows"]]
     assert len(texts) == 2
     assert any("also on your computer" in t for t in texts) and any("also in this workspace" in t for t in texts)
+
+
+WIDE_DOM = DOM.replace(
+    "rows: rows.map(",
+    "heads: nodes.filter(n => n.tag === 'th').map(n => n.textContent),\n"
+    "    cells: rows.map(r => r.kids.filter(k => k && k.tag === 'td').map(td => ({cls: td.className, lines: td.kids.filter(k => k && k.tag)"
+    ".map(k => ({cls: k.className, text: k.textContent, from: 'data-from' in k.attrs}))}))),\n"
+    "    rows: rows.map(",
+)
+
+
+def _list_at(width, page):
+    js = str(resources.files("orch_skills").joinpath("web", "skills.js"))
+    dom = WIDE_DOM.replace("window: {}", "window: {innerWidth: %d}" % width)
+    assert dom != WIDE_DOM
+    out = subprocess.run(
+        ["node", "-e", dom, json.dumps(page), js], check=False, capture_output=True, text=True, timeout=30
+    )
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+LONG_LINE = (
+    "Reads every open pull request of the team and writes one short plain summary for the weekly meeting "
+    "with the numbers that changed since the last run and the three things that need a decision"
+)
+
+
+@pytest.mark.parametrize("width", [617, 785, 390, 320])
+def test_beside_the_focus_panel_from_sits_under_the_name_and_state_keeps_its_width(width):
+    """O-29 (owner 28 Nov): under 900 px of page area the From column moves under the name as grey text, State is
+    never cut and the description gets two lines (at 1440 with the panel at 40 % the page has 617 or 785 px)."""
+    page = {"skills": [{**_skill("weekly-summary", LONG_LINE + "."), "from": "Your workspace"},
+                       _skill("pass-tool", "Read a password.", ["Not ready here: a program it needs is not installed"])]}  # fmt: skip
+    got = _list_at(width, page)
+    cards = width <= 720  # the kit's card form: it hides the third cell and puts State under the name
+    assert got["heads"] == (["On", "Name", "From", "State"] if cards else ["On", "Name", "State"])
+    by = dict(zip([r["name"] for r in got["rows"]], got["cells"], strict=True))
+    name, state = by["Weekly summary"][1], by["Weekly summary"][-1]
+    assert len(by["Weekly summary"]) == (4 if cards else 3)
+    assert [x["text"] for x in name["lines"]][:2] == ["Weekly summary", "Your workspace"]
+    assert name["lines"][1]["cls"] == "meta" and name["lines"][1]["from"]
+    text = name["lines"][2]
+    assert "truncate" not in text["cls"]  # it wraps onto a second line instead of one cut line
+    assert text["text"].endswith("…") and LONG_LINE.startswith(text["text"][:-1])
+    per_line = (width - (130 if cards else 300)) / 6.5
+    assert len(text["text"]) <= 2 * per_line and (len(text["text"]) > per_line or width > 720)  # at most two lines
+    assert state["cls"] == "nowrap" and state["lines"][0]["text"] == "On"
+    assert by["Pass tool"][-1]["lines"][0]["text"] == "Needs a look"
+
+
+@pytest.mark.parametrize("width", [1208, 1440, 900])
+def test_a_wide_page_keeps_the_from_column_and_one_line(width):
+    page = {"skills": [{**_skill("weekly-summary", LONG_LINE + "."), "from": "Your workspace"}]}
+    got = _list_at(width, page)
+    assert got["heads"] == ["On", "Name", "From", "State"]
+    switch, name, where, state = got["cells"][0]
+    assert where["cls"] == "nowrap" and "truncate" in name["lines"][1]["cls"]

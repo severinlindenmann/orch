@@ -86,12 +86,32 @@ test('turned off: the 15 s status look stops and reads no status (ORCH-960)', as
   assert.equal(ui.timer, null);
 });
 
-test('Settings › General: the Sync card comes right after Workspace', () => {
+// W-059, W-058d (owner 28 Nov): the choice is edited in one place, the add-on's own Settings page; General links there.
+test('Settings › General has no Backup card: one row says where the copy goes and links to Backup settings', () => {
   const {c, ui} = context({settings:{...ON, folder:'/Users/mia/close'}});
   ui.card = {...BASE};
   const general = all(c.settingsPage(), n => n.attrs?.id === 'settings-panel-general')[0];
-  const keys = general.children.map(n => n.attrs?.['data-key']).filter(Boolean);
-  assert.equal(keys[keys.indexOf('settings-workspace') + 1], 'settings-sync');
+  assert.equal(byKey(general, 'settings-sync'), undefined, 'no editor in General');
+  assert.equal(all(general, n => n.attrs?.type === 'radio').length, 0);
+  const row = byKey(general, 'settings-everyday-sync-row');
+  assert.match(text(row), /Your storage at files\.example\.org/);
+  const link = byKey(row, 'settings-everyday-sync');
+  assert.deepEqual([link.tag, link.attrs.href], ['a', '#settings/addons/sync']);
+  assert.equal(all(general, n => n.tag === 'h2' && text(n) === 'More settings').length, 0, 'named sections only');
+  assert.deepEqual(all(general, n => n.tag === 'h2').map(text).filter(t => !/^Everyday|^Workspace$/.test(t)), ['Sharing and finished work', 'Working copies', 'Report a problem']);
+});
+
+test('the add-on\u2019s Settings page holds the Backup choice: the line, the three places, the address', () => {
+  const {c, ui} = context({settings:{...ON}});
+  vm.runInContext("state.settings.addons[0].description = 'Keeps a copy.'; addons = () => [{name:'sync', active:true, dashboard:{label:'Backup'}}];", c);
+  ui.card = {...BASE};
+  const page = c.addonDetailPage({name:'sync', active:true, label:'Backup', description:'Keeps a copy.'});
+  assert.equal(text(byKey(page, 'sync-line')), 'Backed up to your storage at files.example.org, last time 10:15.');
+  assert.ok(byKey(page, 'settings-sync') && byKey(page, 'sync-where-remote') && byKey(page, 'sync-where-local') && byKey(page, 'sync-where-off'));
+  assert.equal(byKey(page, 'sync-addr').attrs.value, 'https://files.example.org/mia/month-end');
+  assert.equal(byKey(page, 'sync-settings-link'), undefined, 'no link to itself');
+  // an add-on that is off shows its switch only: turning it on comes first
+  assert.equal(byKey(c.addonDetailPage({name:'sync', active:false, label:'Backup'}), 'settings-sync'), undefined);
 });
 
 test('turned on just now: "On this computer only" is offered in the review line, nothing saved without Save', async () => {
@@ -136,7 +156,7 @@ test('the card has the draft parts: where, sync address with Check connection, S
   const {c, calls, ui} = context({answers:{check:a => ({ok:a.target.startsWith('https://files')})}});
   ui.card = {...BASE};
   const card = c.syncCard(ON);
-  assert.equal(text(all(card, n => n.tag === 'legend')[0]), 'Where to keep a copy');
+  assert.equal(text(all(byKey(card, 'sync-where-head'), n => n.tag === 'h3')[0]), 'Where to keep a copy');
   assert.deepEqual(all(card, n => n.attrs?.type === 'radio').map(n => [n.attrs.value, n.checked]), [['off', false], ['local', false], ['remote', true]]);
   assert.equal(byKey(card, 'sync-addr').attrs.value, 'https://files.example.org/mia/month-end');
   assert.deepEqual(['5', '15', '60'].map(v => [text(byKey(card, 'sync-every-' + v)), byKey(card, 'sync-every-' + v).attrs['aria-pressed']]), [['5 min', false], ['15 min', true], ['1 hour', false]]);
@@ -252,7 +272,7 @@ const ROWS = [
       {label:'View file', view:{ticket:'t_abc123', name:'payroll-access.txt'}}]},
 ];
 
-test('Home › Needs you: the three sync rows in the draft words, with "Needs your OK" and their buttons', () => {
+test('Home: the three sync rows in the draft words, with "Needs your OK" and their buttons', () => {
   const {c} = context({needs:ROWS});
   vm.runInContext('needsOpen = true', c);
   const home = c.home();
@@ -263,7 +283,7 @@ test('Home › Needs you: the three sync rows in the draft words, with "Needs yo
   assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your OK'], ['Needs your OK'], ['Needs your OK']]);
   assert.deepEqual(rows.map(r => all(r, n => n.tag === 'button').map(text)), [['Keep mine', 'Keep theirs'], ['Move', 'Not now'], ['Leave it out', 'View file']]);
   // ORCH-63: the number counts ticket questions and results only (the Review cards); sync's rows stay listed here
-  assert.match(text(home), /Needs you Sync paused/); assert.doesNotMatch(text(home), /Needs you · /);
+  assert.match(text(home), /Sync paused/); assert.doesNotMatch(text(home), /Needs you · /);
 });
 
 const KEEP_TARGET = 'sync:keep-theirs:' + 'e'.repeat(64);
@@ -273,7 +293,7 @@ const KEEP_REVIEW = {target:KEEP_TARGET, review:{title:'Keep the other computer�
 
 test('a signed need shows the add-on’s review (not the row’s) and signs the target it showed; Move uses the signed core op', async () => {
   const {c, calls, dialogs, toasts} = context({needs:ROWS, reviews:{'keep-theirs':KEEP_REVIEW}});
-  const row = c.needRow(ROWS[0], null);
+  const row = c.noteRow(ROWS[0], null);
   await click(all(row, n => n.tag === 'button')[1]);
   assert.deepEqual(calls, [['addon.act', {addon:'sync', verb:'keep-theirs', target:'tickets/t_abc123.json', review:true}]], 'only the review before Sign');
   const {d, actions, title} = dialogs.at(-1);
@@ -285,16 +305,16 @@ test('a signed need shows the add-on’s review (not the row’s) and signs the 
   await click(byKey(actions, 'confirm-ok'));
   assert.deepEqual(calls[1], ['addon.act', {addon:'sync', verb:'keep-theirs', target:'tickets/t_abc123.json', sign:true, seen:KEEP_TARGET}]);
   assert.deepEqual(toasts.at(-1), ['Confirmed. Kept the other version.', 'ok']);
-  await click(all(c.needRow(ROWS[1], null), n => n.tag === 'button')[0]);
+  await click(all(c.noteRow(ROWS[1], null), n => n.tag === 'button')[0]);
   await click(byKey(dialogs.at(-1).actions, 'confirm-ok'));
   assert.deepEqual(calls[2], ['private.move', {}]);
-  await click(all(c.needRow(ROWS[2], null), n => n.tag === 'button')[1]);
+  await click(all(c.noteRow(ROWS[2], null), n => n.tag === 'button')[1]);
   assert.deepEqual(calls[3], ['preview', 't_abc123', 'artifacts', 'payroll-access.txt']);
 });
 
 test('no review from the add-on: no sign step, nothing signed', async () => {
   const {c, calls, dialogs, toasts} = context({needs:ROWS});
-  await click(all(c.needRow(ROWS[0], null), n => n.tag === 'button')[0]);
+  await click(all(c.noteRow(ROWS[0], null), n => n.tag === 'button')[0]);
   assert.equal(dialogs.length, 0);
   assert.deepEqual(calls.map(([, a]) => [a.verb, !!a.review, !!a.sign]), [['keep-mine', true, false]]);
   assert.deepEqual(toasts.at(-1), ['This file is not waiting for a choice', 'error']);
@@ -303,7 +323,7 @@ test('no review from the add-on: no sign step, nothing signed', async () => {
 test('private.move in a row: only from the sync add-on, always with the core’s own label and wording', async () => {
   const sneaky = {...ROWS[1], id:'sync:move:x', actions:[{label:'Keep mine', op:'private.move', sign:true, review:{title:'Keep your version?', body:'Nothing changes.', done:'Kept.'}}]};
   const {c, calls, dialogs} = context({needs:[sneaky]});
-  const row = c.needRow(sneaky, null);
+  const row = c.noteRow(sneaky, null);
   const [move] = all(row, n => n.tag === 'button');
   assert.equal(text(move), 'Move', 'the row’s label is never shown for a core op');
   await click(move);
@@ -316,24 +336,24 @@ test('private.move in a row: only from the sync add-on, always with the core’s
   // from any other add-on: no button at all (also not when it names a verb next to the op)
   for (const source of ['insights', 'automation']) {
     const other = {...sneaky, source, id:source + ':move:x'};
-    assert.equal(all(c.needRow(other, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source);
+    assert.equal(all(c.noteRow(other, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source);
     const mixed = {...other, actions:[{label:'Move', op:'private.move', verb:'move', sign:true}]};
-    assert.equal(all(c.needRow(mixed, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source + ' op+verb');
+    assert.equal(all(c.noteRow(mixed, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, source + ' op+verb');
   }
   const smuggled = {...sneaky, actions:[{label:'Fix', op:'ticket.patch', verb:'fix'}]};
-  assert.equal(all(c.needRow(smuggled, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, 'an op next to a verb is not a verb');
+  assert.equal(all(c.noteRow(smuggled, null), n => String(n.attrs?.className || '').includes('need-acts')).length, 0, 'an op next to a verb is not a verb');
 });
 
 test('Not now waits a day; a row may not name any other core op; snapshots show no buttons', async () => {
   const {c, calls} = context({needs:ROWS});
-  await click(all(c.needRow(ROWS[1], null), n => n.tag === 'button')[1]);
+  await click(all(c.noteRow(ROWS[1], null), n => n.tag === 'button')[1]);
   assert.equal(calls.length, 0);
   assert.equal(all(c.home(), n => String(n.attrs?.className || '').includes('need-acts')).length, 2);
   const acts = n => all(n, x => String(x.attrs?.className || '').includes('need-acts') && !String(x.attrs?.className).includes('need-notice')).length;
   const evil = {...ROWS[1], id:'sync:x:y', actions:[{label:'Delete', op:'ticket.patch', sign:true}]};
-  assert.equal(acts(c.needRow(evil, null)), 0);
+  assert.equal(acts(c.noteRow(evil, null)), 0);
   const core = {...ROWS[0], source:'core'};
-  assert.equal(acts(c.needRow(core, null)), 0);
+  assert.equal(acts(c.noteRow(core, null)), 0);
 });
 
 // Owner feedback 14 Nov, fb14: a row with answer options but no ticket and no buttons showed as a ticket question
@@ -342,7 +362,7 @@ test('a row with options but no ticket and no buttons is a notice in plain words
   const stuck = {id:'sync:paused:zz', source:'sync', kind:'sync:paused', ticket:null, title:'.json', tone:'needs-you', since:'2026-11-11T10:12:00Z',
     text:'Sync paused: “.json” changed here and on another computer.', answer:{question:'q1', options:['Keep mine', 'Keep theirs'], recommended:null}};
   const {c, calls} = context({needs:[stuck]});
-  const row = c.needRow(stuck, null);
+  const row = c.noteRow(stuck, null);
   const labels = all(row, n => n.tag === 'button').map(text);
   assert.deepEqual(labels, ['Not now'], 'no answer buttons that can only fail');
   assert.match(text(row), /Sync paused/);
@@ -354,17 +374,52 @@ test('a row with options but no ticket and no buttons is a notice in plain words
 
 // Owner feedback 14 Nov fb9: the Sync page itself changes the settings (no redirect to Settings), and says in
 // plain words what is wrong with one button to press.
-test('fb9: #addon/sync shows the real Sync controls on the page itself, no link away to Settings', async () => {
-  const {c, ui} = context({settings:{...ON}});
-  c.route = () => ({kind:'addon', id:'sync'});
+// Owner feedback 14 Nov (fb18): the Sync page says where, what and when, the last 5 syncs, and one plain error line + one button.
+const INFO = {folder:'Demo', folder_path:'/Users/anna/Work/Demo/.orch', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
+  history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'12 tickets, 3 files'}, {at:'2026-11-11T08:45:00Z', ok:false, text:'could not reach your storage'}]};
+function syncPage(card) {
+  const {c, ui, calls} = context({settings:{...ON}});
   vm.runInContext("route = () => ({kind:'addon', id:'sync'}); addons = () => [{name:'sync', active:true, dashboard:{label:'Sync', subtitle:'Keep another copy.'}}];", c);
-  ui.card = {...BASE};
-  const page = c.addonTab('sync');
-  assert.ok(byKey(page, 'settings-sync'), 'the sync card is on the page');
-  assert.ok(byKey(page, 'sync-where-remote'), 'the three places are on the page');
-  assert.equal(all(page, n => n.tag === 'a' && /settings/.test(n.attrs?.href || '')).length, 0, 'no link to Settings');
-  assert.equal(text(byKey(page, 'sync-addr') || ''), '');
-  assert.equal(byKey(page, 'sync-addr').attrs.value, 'https://files.example.org/mia/month-end');
+  ui.card = card;
+  return {page:c.addonTab('sync'), c, calls, ui};
+}
+// W-058d (owner 28 Nov) replaces fb9's "controls on the page itself": the page says where the backup goes and when it
+// last worked in one line; the choice is edited in Backup settings, one click away.
+test('W-058d: #addon/sync opens with "Backed up to <place>, last time <when>" and one link to Backup settings', async () => {
+  const cases = [
+    [{...BASE}, 'Backed up to your storage at files.example.org, last time 10:15.'],
+    [{...BASE, mode:'local', remote:null}, 'Backed up to this computer only, last time 10:15.'],
+    [{...BASE, mode:'local', remote:null, last_ok:null, shown:'never'}, 'Backed up to this computer only, last time not yet.'],
+    [{...BASE, remote:null, unconfirmed:true}, 'Backed up to this computer (no storage address yet), last time 10:15.'],
+    [{...BASE, mode:'off', remote:null}, 'Backup is off: no copy is kept.'],
+  ];
+  for (const [card, words] of cases) {
+    const {page} = syncPage(card);
+    const line = byKey(page, 'sync-line');
+    assert.equal(text(all(line, n => n.tag === 'span')[0]), words);
+    const link = byKey(line, 'sync-settings-link');
+    assert.deepEqual([link.tag, link.attrs.href, text(link)], ['a', '#settings/addons/sync', 'Backup settings →']);
+    assert.equal(byKey(page, 'settings-sync'), undefined, 'the choice is not edited here');
+    assert.equal(all(page, n => n.attrs?.type === 'radio').length, 0);
+  }
+});
+
+test('W-058d: before the setting is read the page says so; a failed read has Try again; what needs you stays on the page', async () => {
+  const {page} = syncPage(null);
+  assert.equal(text(byKey(page, 'sync-unread')), 'Reading the backup setting…');
+  assert.equal(byKey(page, 'sync-line'), undefined);
+  const {c, ui} = context({settings:{...ON}});
+  vm.runInContext("route = () => ({kind:'addon', id:'sync'}); addons = () => [{name:'sync', active:true, dashboard:{label:'Backup'}}];", c);
+  ui.failed = true;
+  const failed = c.addonTab('sync');
+  assert.match(text(byKey(failed, 'sync-unread')), /Can’t read the backup setting right now\. Nothing was changed\./);
+  assert.ok(byKey(failed, 'sync-unread-retry'));
+  const paused = syncPage({...BASE, shown:'paused', paused_needs:1, last_error:'Not synced: tickets/t_awwgkw.json: secret', not_synced:[{name:'notes.txt', why:'it may contain a password or access key'}]}).page;
+  const needs = byKey(paused, 'sync-page-needs');
+  assert.match(text(needs), /Needs you/);
+  assert.match(text(byKey(needs, 'sync-paused-help')), /password or access key/);
+  assert.match(text(byKey(needs, 'sync-not-synced-0')), /Not synced: notes\.txt/);
+  assert.equal(byKey(syncPage({...BASE}).page, 'sync-page-needs'), undefined, 'nothing wrong: no such card');
 });
 
 test('fb9: the sync status loads while the Sync page is open', async () => {
@@ -397,15 +452,6 @@ test('Sync now is not offered while the saved sync mode is off', () => {
   assert.ok(/saved\.where === 'off'/.test(src.slice(i, i + 120)));
 });
 
-// Owner feedback 14 Nov (fb18): the Sync page says where, what and when, the last 5 syncs, and one plain error line + one button.
-const INFO = {folder:'Demo', folder_path:'/Users/anna/Work/Demo/.orch', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
-  history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'12 tickets, 3 files'}, {at:'2026-11-11T08:45:00Z', ok:false, text:'could not reach your storage'}]};
-function syncPage(card) {
-  const {c, ui, calls} = context({settings:{...ON}});
-  vm.runInContext("route = () => ({kind:'addon', id:'sync'}); addons = () => [{name:'sync', active:true, dashboard:{label:'Sync', subtitle:'Keep another copy.'}}];", c);
-  ui.card = card;
-  return {page:c.addonTab('sync'), c, calls, ui};
-}
 test('fb18: the Sync page shows Where, What and When, then the last syncs', () => {
   const {page} = syncPage({...BASE, ...INFO});
   assert.match(text(byKey(page, 'sync-where-info')), /Your storage repository.*https:\/\/files\.example\.org\/mia\/month-end.*Local history: \/Users\/anna\/Work\/Demo\/\.orch/);
@@ -417,10 +463,11 @@ test('fb18: the Sync page shows Where, What and When, then the last syncs', () =
   assert.match(text(rows[0]), /12 tickets, 3 files/);
   assert.match(text(rows[1]), /Could not reach your storage/);
 });
+const settingsCard = card => { const {c, ui} = context(); ui.card = card; return c.syncCard(ON); };
 test('fb18: the storage choice says "Another computer or your own storage" and gives an example address', () => {
-  const {page} = syncPage({...BASE, ...INFO});
-  assert.match(text(byKey(page, 'sync-where-row-remote')), /Another computer or your own storage/);
-  assert.match(text(byKey(page, 'sync-addr-example')), /github\.com\/your-name\/orch-copy/);
+  const card = settingsCard({...BASE, ...INFO});
+  assert.match(text(byKey(card, 'sync-where-row-remote')), /Another computer or your own storage/);
+  assert.match(text(byKey(card, 'sync-addr-example')), /github\.com\/your-name\/orch-copy/);
 });
 test('fb18: a failed sync is one plain sentence and one button, never a raw error', async () => {
   const {page, calls} = syncPage({...BASE, ...INFO, shown:'offline', last_error:'offline'});
@@ -458,14 +505,13 @@ test('before the sync status is read no choice is selected (not a false Off), th
   assert.equal(busy(after), 'false');
 });
 
-test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {
-  const {page} = syncPage({...BASE, ...INFO});
+test('bug hunt 17 Nov: each place to keep a copy says what it does, and the card names the choice, not the add-on again', () => {
+  const card = settingsCard({...BASE, ...INFO});
   for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing is sent to another device\./], ['remote', /private place you own/]])
-    assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
-  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Backup').length, 0);
-  const {c, ui} = context();
-  ui.card = {...BASE};
-  assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Backup').length, 1, 'Settings keeps the card heading');
+    assert.match(text(byKey(card, 'sync-where-says-' + key)), want);
+  assert.equal(all(card, n => n.tag === 'h3' && text(n) === 'Backup').length, 0);
+  assert.equal(text(all(byKey(card, 'sync-where-head'), n => n.tag === 'h3')[0]), 'Where to keep a copy');
+  assert.equal(all(card, n => n.tag === 'fieldset')[0].attrs['aria-labelledby'], 'sync-where-title');
 });
 
 test('ORCH-413: the status is read with a GET, never a click: a page without a session sends nothing that is refused', async () => {
@@ -496,16 +542,12 @@ test('ORCH-413: a status read that fails says so with Try again, and sends no cl
   assert.deepEqual(calls, []);
 });
 
-test('Sync page polish: one card heading, no "Last error: none", plurals, history lines start with a capital', () => {
+test('Sync page polish: no "Last error: none", plurals, history lines start with a capital', () => {
   const {page} = syncPage({...BASE, ...INFO, counts:{tickets:1, files:1, bytes:900}, history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'nothing new'}]});
-  assert.equal(text(byKey(page, 'sync-where-head')), 'Where to keep a copy');
-  assert.equal(byKey(page, 'sync-status'), undefined, 'synced: the When card already says when');
-  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'fieldset')[0].attrs['aria-labelledby'], 'sync-where-title');
   assert.equal(byKey(page, 'sync-details'), undefined, 'nothing went wrong: no error line at all');
   assert.match(text(byKey(page, 'sync-what-info')), /^What is backed up.*Saved locally: 1 ticket · 1 file · 1 KB/);
   assert.match(text(byKey(page, 'sync-history')), /Nothing new/);
-  const never = syncPage({...BASE, ...INFO, shown:'never'}).page;
-  assert.equal(text(byKey(never, 'sync-status')), 'Not synced yet');
+  assert.equal(text(byKey(settingsCard({...BASE, ...INFO, shown:'never'}), 'sync-status')), 'Not synced yet');
 });
 
 // ORCH-2160: saved destinations remain explicit even when a draft or a stopped run exists.
@@ -518,7 +560,7 @@ test('Backup distinguishes local history, a remote destination and an unconfirme
     assert.match(text(byKey(page, 'sync-when-info')), /Every 5 minutes/);
   }
   const {page} = syncPage({...BASE, ...INFO, remote:null, unconfirmed:true});
-  assert.match(text(byKey(page, 'sync-where-info')), /Choose a storage address below.*No backup on another device/);
+  assert.match(text(byKey(page, 'sync-where-info')), /Choose a storage address in Backup settings.*No backup on another device/);
   const remote = 'git@example.org:team/a-repository-with-a-long-name.git';
   assert.ok(text(byKey(syncPage({...BASE, ...INFO, remote}).page, 'sync-where-info')).includes(remote));
 });

@@ -52,7 +52,7 @@ test('a pick column, a header box that picks every shown row, and the bar only w
   const boxes = nodes(table).filter(n => n.tag === 'input' && n.attrs['data-pick']);
   assert.deepEqual(boxes.map(n => n.attrs['data-pick']).sort(), ['*', 'a', 'b', 'c', 'ep']);
   assert.ok(boxes.every(n => n.attrs['aria-label'].startsWith('Select ')));
-  assert.ok(nodes(table).filter(n => n.attrs?.colSpan).every(n => n.attrs.colSpan === 7), 'group rows span the extra column');
+  assert.ok(nodes(table).filter(n => n.attrs?.colSpan).every(n => n.attrs.colSpan === 8), 'group rows span the extra column');
   assert.equal(c.bulkBar(c.tickets()), null, 'nothing picked: no bar');
   c.pickTicket('a', true); c.pickTicket('b', true);
   const head = nodes(c.ticketTable(c.tickets())).find(n => n.attrs?.['data-pick'] === '*');

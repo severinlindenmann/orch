@@ -1,5 +1,9 @@
 """`orch services view`: the Services page (orch.addon-view/1), list and panel as in the mockup (layout C).
 
+A failing service nothing is known to depend on (W-054 A, owner 28 Nov) offers Restart on its row and Restart or
+Remove in its question; Stop stays in its panel. Home hears of a failing service only when work depends on it
+(`needs.py`).
+
 One `split` block with every managed service (state, the work that depends on it (said as not known while it fails
 and none is written down), starts by itself, made by, health, the last log lines masked), a second group "Found on
 this computer" when there are found items, and a footnote to Automation. A failing service's question says the
@@ -149,6 +153,11 @@ def _remove_lines(r: dict, depends: list[str]) -> list[str]:
     return lines
 
 
+def _alone(r: dict, depends: list[str]) -> bool:
+    """A failing service nothing relies on: no `depends` line and not marked important."""
+    return r.get("state") == "failing" and not depends and not r.get("important")
+
+
 def _address(r: dict) -> str | None:
     """http://127.0.0.1:<port> for a service with a port (the address its health check asks), else None."""
     port = r.get("port")
@@ -169,7 +178,12 @@ def _service_item(root: Path, r: dict) -> dict:
     hung = state == "running" and isinstance(h, dict) and h.get("ok") is False
     list_state = {"label": "Not answering", "tone": "warn"} if hung else {"label": word, "tone": tone}
     depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
-    main = _btn("Start", "start", sid) if stopped else _stop(r, name, depends)
+    # W-054 A (owner, 28 Nov): a failing service nothing is known to depend on offers Restart on its row, never Stop
+    # as the one thing to do; Stop stays in its panel, and Remove is the panel's own button. One marked important is
+    # relied on by the person: it keeps Stop with its one question (ORCH-641).
+    alone = _alone(r, depends)
+    restart = _btn("Restart", "restart", sid)
+    main = _btn("Start", "start", sid) if stopped else restart if alone else _stop(r, name, depends)
     auto, important = bool(r.get("auto")), bool(r.get("important"))
     facts: list[dict] = [
         {"label": "State", "value": f"{word} since {since}" if since else word, "tone": tone},
@@ -231,7 +245,11 @@ def _service_item(root: Path, r: dict) -> dict:
         "state": list_state,
         "action": main,
         "panel": {
-            "buttons": [main] if stopped else [main, _btn("Restart", "restart", sid)],
+            "buttons": [main]
+            if stopped
+            else [restart, _stop(r, name, depends)]
+            if alone
+            else [main, restart],
             "facts": facts,
             "log": {"lines": _log(root, r), "empty": _plain(_empty_log(root, r))},
             "danger": {
@@ -260,7 +278,19 @@ def _question(root: Path, r: dict) -> dict | None:
         return None
     sid = r["id"]
     depends = [_plain(d, 80) for d in r.get("depends") or [] if isinstance(d, str) and d.strip()][:6]
-    buttons = [_btn("Restart", "restart", sid), _stop(r, _plain(r["name"], 80), depends)]
+    name = _plain(r["name"], 80)
+    if not _alone(r, depends):
+        second = _stop(r, name, depends)
+    else:  # W-054 A: nothing is known to depend on it: Restart or Remove (Stop stays in the panel below)
+        second = {
+            **_btn("Remove", "remove", sid),
+            "confirm": {
+                "title": _plain(f"Remove {name}?", 80),
+                "lines": _remove_lines(r, depends),
+                "keep": "Keep it",
+            },
+        }
+    buttons = [_btn("Restart", "restart", sid), second]
     tid = _ticket_id(root, q["ticket"]) if isinstance(q.get("ticket"), str) else None
     if tid:
         buttons.append({"label": "Look into it", "link": tid})

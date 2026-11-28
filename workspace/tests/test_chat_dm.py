@@ -59,6 +59,7 @@ def test_contacts_only_workspaces_and_malformed(dm, monkeypatch):
             "can": {"chat": True, "tasks": False, "files": True},
             "count": 0,
             "last_at": "",
+            "unread": 0,
         }
     ]
     for bad in (None, [], {"workspaces": None}, {"workspaces": [None, {"id": WS}], "phones": None}):
@@ -171,7 +172,10 @@ def test_inbox_clean_idempotent_sorted_and_isolated(dm, all_contacts):
     if all_contacts:
         chat.dm_sync_all(root)
     msgs = chat.dm_sync(root, WS)["messages"]
-    assert [m["text"] for m in msgs] == [relay.clean_untrusted(text, 2000), "earlier"]  # arrival order
+    assert [m["text"] for m in msgs] == [
+        relay.clean_untrusted(text, chat.MAX_TEXT),
+        "earlier",
+    ]  # arrival order
     assert chat.dm_thread(root, WS)["messages"] == msgs
     with pytest.raises(Refused):
         chat.dm_thread(root, "../" + OTHER)
@@ -480,8 +484,11 @@ def test_cli_pure_and_all(dm, capsys, monkeypatch):
         return capsys.readouterr().out
 
     before = {p: p.stat().st_mtime_ns for p in root.rglob("*")}
-    assert '"messages": []' in run("thread", WS)  # read-only by default
+    # read-only by default: the text still waits in the inbox (O-26: the relay's records show it, nothing
+    # is stored)
+    assert '"note": "Not picked up yet"' in run("thread", WS)
     assert before == {p: p.stat().st_mtime_ns for p in root.rglob("*")}
+    assert chat.dm_read(root, WS)["messages"] == []
     assert "hello" in run("thread", WS, "--sync")
     run("sync")
     monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
@@ -837,3 +844,134 @@ def test_unattended_reads_with_the_dashboards_by(dm, monkeypatch, capsys):
         assert WS in capsys.readouterr().out
         with pytest.raises(Refused, match="Only a person"):
             cli_chat.dispatch(parse(["chat", *command, "--json"]), dm[0])
+
+
+def _inbound(root, n, text="hello", peer=WS):
+    net.write_json(
+        root / ".orch/inbox" / f"m_in{n}.json",
+        {
+            "id": f"m_in{n:014d}",
+            "type": "text",
+            "from": peer,
+            "body": {"text": text},
+            "created_at": "2026-11-09T10:00:00Z",
+        },
+        True,
+    )
+
+
+def test_unread_counts_only_their_messages_after_the_read_mark(dm, monkeypatch):
+    """O-18 (owner, 28 Nov): a workspace conversation's number is what the OTHER workspace wrote since the
+    person last opened it; our own messages never count; opening it (or writing) starts again from there."""
+    root, _ = dm
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: {"id": "m_relay00000000000", "sent": True})
+    assert chat.contacts(root)[0]["unread"] == 0
+    _inbound(root, 1)
+    _inbound(root, 2)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 2
+    assert chat.dm_mark_read(root, WS)["read"] == "m_in00000000000002"
+    assert chat.contacts(root)[0]["unread"] == 0
+    chat.dm_send(root, WS, "ours")  # our own message is never unread
+    assert chat.contacts(root)[0]["unread"] == 0
+    _inbound(root, 3)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 1
+    chat.dm_send(root, WS, "an answer")  # whoever writes has read what came before
+    assert chat.contacts(root)[0]["unread"] == 0
+
+
+def test_a_conversation_from_before_the_read_mark_is_not_suddenly_unread(dm):
+    root, _ = dm
+    old = [{"id": f"m_old{i:013d}", "at": "2026-11-01T10:00:00Z", "by": WS, "text": "old"} for i in range(3)]
+    net.write_json(chat._dm_path(root, WS), {"schema": "orch.chat-dm/1", "ws": WS, "messages": old}, True)
+    assert chat.contacts(root)[0]["unread"] == 0  # no mark yet: nothing counts
+    _inbound(root, 1)
+    chat.dm_sync(root, WS)
+    assert chat.contacts(root)[0]["unread"] == 1  # only the one that arrived after
+
+
+def test_marking_read_is_a_persons_and_the_cli_takes_a_workspace(dm, monkeypatch, capsys):
+    root, _ = dm
+    _inbound(root, 1)
+    chat.dm_sync(root, WS)
+    monkeypatch.chdir(root)
+    (root / ".orch").mkdir(exist_ok=True)
+    with pytest.raises(Refused):
+        chat.dm_mark_read(root, WS, "agent:claude")
+    with pytest.raises(Refused):
+        chat.dm_mark_read(root, OTHER)  # not a contact
+    assert chat.contacts(root)[0]["unread"] == 1
+    assert chat.dm_mark_read(root, WS) == {"workspace": WS, "read": "m_in00000000000001"}
+    assert chat.contacts(root)[0]["unread"] == 0
+
+
+def test_the_conversation_adds_what_the_relay_records_to_the_stored_thread(dm, monkeypatch):
+    """O-26 (owner, 28 Nov): Chat shows the whole conversation with a workspace: what the person typed and
+    what came in (the stored thread, in its own order), plus a helper's texts, files and tasks from the
+    relay's records, put in by time; a message both know is one message with its delivery state."""
+    from orch import relay_view
+
+    root, _ = dm
+    stored = [
+        {
+            "id": "m_aaaaaaaaaaaaaaaa",
+            "at": "2026-11-20T10:00:00Z",
+            "by": WS,
+            "text": "Hello",
+            "state": "delivered",
+        },
+        {
+            "id": "m_bbbbbbbbbbbbbbbb",
+            "at": "2026-11-20T10:05:00Z",
+            "by": "you",
+            "text": "Hi back",
+            "state": "delivered",
+            "relay_id": "m_rrrrrrrrrrrrrrrr",
+        },
+    ]
+    net.write_json(chat._dm_path(root, WS), {"schema": "orch.chat-dm/1", "ws": WS, "messages": stored}, True)
+    extra = [
+        {
+            "id": "m_aaaaaaaaaaaaaaaa",
+            "at": "2026-11-20T09:59:00Z",
+            "by": WS,
+            "text": "Hello",
+            "note": "Picked up · Chat",
+        },
+        {"id": "m_ffffffffffffffff", "at": "2026-11-20T10:02:00Z", "by": WS, "file": {"name": "march.csv"}},
+        {
+            "id": "m_rrrrrrrrrrrrrrrr",
+            "at": "2026-11-20T10:05:00Z",
+            "by": "person",
+            "text": "Hi back",
+            "status": {"label": "Delivered", "tone": "good"},
+        },
+        {
+            "id": "m_hhhhhhhhhhhhhhhh",
+            "at": "2026-11-20T10:30:00Z",
+            "by": "helper",
+            "text": "A long report " * 80,
+            "status": {"label": "Sent", "tone": "good"},
+        },
+    ]
+    monkeypatch.setattr(relay_view, "thread", lambda r, ws: extra if ws == WS else [])
+    msgs = chat.dm_conversation(root, WS)["messages"]
+    assert [m["id"] for m in msgs] == [
+        "m_aaaaaaaaaaaaaaaa",
+        "m_ffffffffffffffff",
+        "m_bbbbbbbbbbbbbbbb",
+        "m_hhhhhhhhhhhhhhhh",
+    ]
+    assert msgs[0]["note"] == "Picked up · Chat" and msgs[1]["file"] == {"name": "march.csv"}
+    assert msgs[2]["by"] == "you" and msgs[2]["status"] == {"label": "Delivered", "tone": "good"}
+    assert msgs[3]["by"] == "helper" and msgs[3]["text"] == "A long report " * 80
+    assert chat.dm_read(root, WS)["messages"] == stored  # a pure read: the stored thread is as it was
+    monkeypatch.setattr(relay_view, "thread", lambda r, ws: 1 / 0)
+    assert chat.dm_conversation(root, WS)["messages"] == stored  # no relay records: the thread still reads
+
+
+def test_an_inbound_text_is_kept_in_full(dm):
+    root, _ = dm
+    _inbound(root, 1, "wall " * 1500)  # 7500 characters; before O-19 only 2000 were kept
+    assert chat.dm_sync(root, WS)["messages"][0]["text"] == "wall " * 1500

@@ -70,3 +70,12 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## Relay off: no incoming footnote (ORCH-2022, 25 Nov)
 
 - automation.html: the footnote "Incoming from your phone and other workspaces · … / Manage incoming work →" is the relay-on demo. `?relay=off` shows the page of a workspace without the relay: no footnote, no link, no phone or relay words (R1.1). The product does the same (`orch automation view` and `status` read `orch addon list`).
+
+## W-051 (owner 28 Nov): repeats beside the panel
+
+- automation.html: in a page area under 900 px (beside the right panel at 40 %, or a 1024 / 768 window) each repeat and
+  each one-time start is a two-line row: the name, then the plan, the next and the last time on one quiet line ("Last
+  time" is last, so it is what "…" drops first), with Start now, Edit and the switch always in view at the right.
+- A wide page keeps the table; a phone-width window (up to 720 px) keeps the table's card form.
+- See it: narrow the window under 900 px, or open `automation.html?room=617` and `?room=785` (the page area of a 1440
+  window with the panel at 40 %, menu open and closed). The form is drawn by `narrow-rows.js` from the same rows.

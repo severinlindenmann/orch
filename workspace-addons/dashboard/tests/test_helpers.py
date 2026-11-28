@@ -407,18 +407,21 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
     assert "boardLane(t) === section)) return null" in chip  # the status word is left out where it matches
-    nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
+    nxt = src[src.index("function ticketNextText") : src.index("function ticketMenu")]
     assert "'Question: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
     assert (
         "'Start helper'" not in nxt and "'Resume'" not in nxt and "run.start" not in nxt
     )  # ORCH-69: no start on cards
-    assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "button(" not in nxt and "'btn " not in nxt  # O-15 C (owner, 28 Nov): no button on a row at all
+    assert "ticketNextText(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "ticketMark(t)" in tree  # the row ends in its one state mark
     assert "activity(t," not in tree
 
 
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = webjs.all_js()
-    assert "openCard('in-progress', 'In progress'" in src and "Getting started…" in src
+    # O-01 D (28 Nov): In progress is one of the numbers of Home's one row, no card of its own
+    assert "part('in-progress', inProgress, 'in progress'" in src and "Getting started…" in src
     assert "needsYou(needCount)" in src  # 5A: the badge says what it counts
 
 
@@ -644,11 +647,9 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert (
-        "if (!list.length) return null;" in src
-    )  # an empty In progress or Not started card is hidden (ORCH-2140)
+    assert "openCard(" not in src  # O-01 D: Home has no In progress or Not started card (the numbers are one row)
     assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
-    assert "plainWhy(question" in src  # Needs-you rows carry no command text
+    assert "plainWhy(said, 'The helper')" in src  # a quiet Home row carries no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert (
         "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]

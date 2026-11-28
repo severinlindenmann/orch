@@ -156,9 +156,9 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   // Owner draft A (ORCH-2179): Live opens first in the bar; it never adds a second start (ORCH-1466).
   assert.match(ticketBar, /liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)[^]*?window\.LiveLayer\.open\(t\.id, true\)/);
   assert.match(ticketBar, /const cells = \[first, \.\.\.main, chat, menu\]/);
-  assert.match(list, /function ticketRowFocus/);
-  assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
-  assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
+  // O-15 C (owner, 28 Nov): a ticket row has no button, so no session button either; it ends in its state mark
+  assert.doesNotMatch(list, /liveFocusButton|ticketRowFocus/);
+  assert.match(list, /function shortSide\(t\) \{ return ticketMark\(t\); \}/, 'the compact row');
   assert.match(layer, /function liveFocusButton[^]*?liveFocusOn\(\)/, 'only where Focus runs');
   assert.match(layer, /function liveStatusMenu[^]*?'data-key':'live-open-ticket'/, 'Open ticket sits in the status pill popover (ORCH-2199)');
 });

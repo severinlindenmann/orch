@@ -34,15 +34,40 @@ test('the Contacts picker says Loading… first, then fills in when the contacts
   assert.doesNotMatch(c.shown(), /Loading…|No contacts/);
   assert.match(c.shown(), /Home/);
 });
-test('No contacts only after a real empty answer; a failure shows an error line, not "No contacts"', async () => {
+test('no workspace section without a connected workspace; a failure shows an error line', async () => {
+  // O-17 (owner, 28 Nov): who with = your helper, a ticket, or a workspace only when the relay has connected one
   const empty = context(async () => ({ok:true, json:async () => []}));
   await vm.runInContext("chatDmContacts(), chatDmLoad(true)", empty);
-  assert.match(empty.shown(), /No contacts yet/);
+  assert.match(empty.shown(), /Your helper/);
+  assert.doesNotMatch(empty.shown(), /A workspace|No contacts|Loading…/);
   const failing = context(async () => ({ok:false, json:async () => ({})}));
   await vm.runInContext("chatDmContacts(), chatDmLoad(true)", failing);
-  assert.match(failing.shown(), /Could not load contacts\./);
+  assert.match(failing.shown(), /Could not load the workspaces\./);
   assert.match(failing.shown(), /Try again/);
   assert.doesNotMatch(failing.shown(), /No contacts/);
+});
+test('New chat asks who with: your helper, a ticket, a workspace; search narrows; nothing is made by picking', async () => {
+  const c = context(async () => ({ok:true, json:async () => [{ws:WS, name:'Sales', can:{chat:true}}]}));
+  const acts = [];
+  vm.runInContext(`window.orchAct = async (op, args) => { globalThis.__acts.push(op); return {ok:true}; }`, Object.assign(c, {__acts:acts}));
+  c.Date.parse = text => Date.parse(text);   // this file's small clock has only now()
+  c.tickets = () => [
+    {id:'t_aaaaaa', key:'ORCH-1', title:'Autumn newsletter', status:'active', updated_at:'2026-11-28T10:00:00Z'},
+    {id:'t_bbbbbb', key:'ORCH-2', title:'Price list', status:'todo', updated_at:'2026-11-28T11:00:00Z'},
+    {id:'t_cccccc', key:'ORCH-3', title:'Old thing', status:'done', updated_at:'2026-11-28T12:00:00Z'},
+    ...Array.from({length:8}, (_, i) => ({id:'t_more0' + i, key:'ORCH-1' + i, title:'Filler ' + i, status:'todo', updated_at:'2026-11-20T10:00:00Z'}))];
+  await vm.runInContext("chatDmContacts(), chatDmLoad(true)", c);
+  const shown = c.shown();
+  assert.match(shown, /Who do you want to talk to\?/);
+  assert.ok(shown.indexOf('Your helper') < shown.indexOf('A ticket') && shown.indexOf('A ticket') < shown.indexOf('A workspace'));
+  assert.match(shown, /Price list/); assert.match(shown, /Autumn newsletter/); assert.match(shown, /Sales/);
+  assert.doesNotMatch(shown, /Old thing/);                       // a finished ticket is not offered
+  assert.doesNotMatch(shown, /Your phone/);                      // only when something came from the phone today
+  assert.match(shown, /4 more tickets\. Search to find one\./);  // six newest shown, the rest by search
+  assert.ok(shown.indexOf('Price list') < shown.indexOf('Autumn newsletter'));  // newest first
+  assert.deepEqual(acts, []);                                    // opening and listing writes nothing
+  assert.equal(vm.runInContext("JSON.stringify(chatPickTickets('filler 7').rows.map(t => t.key))", c), '["ORCH-17"]');
+  assert.equal(vm.runInContext("chatPickTickets('zzz').rows.length", c), 0);
 });
 test('opening the picker inside the 5 s throttle still loads (force) and does not stay empty', async () => {
   let calls = 0;

@@ -17,9 +17,15 @@ module.exports = {
       await open('#review');
       await page.locator('.attn-tile').first().waitFor();
       const names = await page.locator('.attn-tile .stat-label').allInnerTexts();
-      must(JSON.stringify(names) === JSON.stringify(['Quick look', 'Short decision', 'Take your time']), `the tiles are ${JSON.stringify(names)}`);
+      // W-038: a group with nothing in it has no tile (here: no Short decision); the others keep their order
+      must(JSON.stringify(names) === JSON.stringify(['Quick look', 'Take your time']), `the tiles are ${JSON.stringify(names)}`);
       const time = page.locator('.attn-tile[data-group="time"] .stat-value');
       must(Number(await time.innerText()) >= 1, 'the card that costs money is not in Take your time');
+      // W-038: a tile with 0 is not shown; FX-06: the tiles end where the card ends
+      const tl = await page.evaluate(() => ({ zero: [...document.querySelectorAll('.attn-tile .stat-value')].filter(n => !Number(n.textContent)).length, empty: /Nothing waits here/.test(document.querySelector('.review-attn').textContent),
+        tiles: Math.round(document.querySelector('.review-attn').getBoundingClientRect().right), card: Math.round(document.querySelector('.swipe-card:not(.under):not(.under2)').getBoundingClientRect().right) }));
+      must(tl.zero === 0 && !tl.empty, 'a tile with nothing in it is shown');
+      must(Math.abs(tl.tiles - tl.card) <= 1, 'the tiles and the card end on different lines: ' + JSON.stringify(tl));
       await shot('tiles');
       const before = JSON.parse(orch('review', 'list', '--json')).cards.length;
 
@@ -29,8 +35,10 @@ module.exports = {
       await quick.click();
       await page.locator('.attn-round').waitFor();
       must((await page.locator('.attn-round-h').innerText()) === 'Quick look', 'the round does not name its group');
-      const top = await page.locator('.swipe-top span').first().innerText();
+      // W-038: the progress row shows with the first answer; its words are in the page from the start
+      const top = await page.locator('.swipe-top span').first().textContent();
       must(/^0 answered · 5 waiting/.test(top), `the round is not 5 cards: ${top}`);
+      must(!(await page.locator('.swipe-top span').first().isVisible()), 'the progress row shows before the first answer');
       await shot('round');
       must(JSON.parse(orch('review', 'list', '--json')).cards.length === before, 'starting a round answered a card');
 

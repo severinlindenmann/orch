@@ -1,4 +1,5 @@
-"""`orch relay view --json` (addon-view.schema.json): who this workspace can talk to and the recent messages.
+"""`orch relay view --json` (addon-view.schema.json): who this workspace can talk to and a short log of what
+was sent and received. The conversations themselves are in Chat (O-26): `thread` gives Chat one workspace's.
 
 Local files only, no network: workspaces.json, allows.json, inbox, outbox and the sent log."""
 
@@ -20,6 +21,9 @@ SENT_MAX = 400  # lines kept in the sent log
 # the ticket that asked. Lines to a workspace are kept 30 days on top (at most SENT_PEER_MAX of them).
 SENT_PEER_DAYS = 30
 SENT_PEER_MAX = 10000  # a size bound only: far above the messages a workspace sends to others in 30 days
+SENT_TEXT_MAX = 20000  # a text's own limit on the wire (message.schema.json): the sent log keeps all of it
+THREAD_MAX = 500  # newest relay items of one workspace's conversation in Chat (the stored thread's own cap)
+MESSAGE_ID = re.compile(r"m_[a-z0-9]{16}")
 KINDS = {
     "text": "Message",
     "file": "File",
@@ -114,6 +118,16 @@ def record_sent(root: Path, msg: dict) -> None:
         # ORCH-2348: a text or file of ours to one workspace about a ticket: an answer is looked for (and the
         # person asked when none comes). Never a group copy or a status note, and no line from before this.
         entry["watch"] = True
+    if msg["type"] == "text" and str(msg["to"]).startswith("ws_") and not {"update", "group"} & set(body):
+        # O-19 step 1 (owner, 28 Nov): the words as they were written. Chat shows a short line of a long
+        # message and opens all of it; before, only the first 120 characters of what a helper sent were kept.
+        full = clean_untrusted(str(body.get("text") or ""), SENT_TEXT_MAX)
+        if len(full) > 120 or "\n" in full.strip():
+            entry["text"] = full
+        with contextlib.suppress(
+            Exception
+        ):  # who wrote it: a helper's long text is shown short, a person's as written
+            entry["by"] = "helper" if tickets.current_actor().startswith("agent:") else "person"
     path = _sent_path(root)
     if path is None:
         return
@@ -369,17 +383,15 @@ def _question_state(root: Path, entry: dict) -> str:
     return ""
 
 
-CONV_MAX = 12  # workspaces shown with a thread
-CONV_MESSAGES = 30  # newest messages kept per thread
-
-
-def _conversations(root: Path, received: list[dict], sent: list[dict], picked: dict, handled) -> list[dict]:
-    """RP5: one conversation per workspace (the people in the relay's list), oldest first. What a message says
-    about itself comes from what this workspace already records: still in the outbox is "Not sent yet"; sent
-    is "Sent"; a task they must allow first is "Waiting for <Name>". ORCH-2348: once the other workspace's
-    orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for N days" when nothing came back;
-    "Declined" when their person declined a task (ORCH-2189)."""
-    d = relay._read_dir(root)
+def _peer_items(
+    root: Path, received: list[dict], sent: list[dict], picked: dict, handled
+) -> dict[str, list[tuple[str, dict]]]:
+    """Everything said with each workspace, as (time, item) pairs: a text, a file or a handed-over task, from
+    `you` or `them`. What a message says about itself comes from what this workspace already records: still in
+    the outbox is "Not sent yet"; sent is "Sent"; a task they must allow first is "Waiting for <Name>".
+    ORCH-2348: once the other workspace's orch said so, "Delivered" or "Passed on to <ticket>"; "No answer for
+    N days" when nothing came back; "Declined" when their person declined a task (ORCH-2189). `full` is the
+    text as it was written (O-19); `text` its one line."""
     waiting: dict[str, list[dict]] = {}
     for m in relay.outbox_list(root):
         waiting.setdefault(str(m.get("to")), []).append(m)
@@ -395,8 +407,8 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
 
     for m in received:
         line, extra = preview(m["type"], m.get("body"))
-        upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
-        if is_update(m["type"], line, upd):
+        body = m.get("body") if isinstance(m.get("body"), dict) else {}
+        if is_update(m["type"], line, body.get("update")):
             continue
         at = str(m.get("created_at") or "")
         item: dict = {"id": str(m["id"]), "who": "them", "at": _stamp(at) or "-"}
@@ -409,11 +421,14 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
             }
         else:
             item["text"] = line
+            item["full"] = clean_untrusted(str(body.get("text") or ""), SENT_TEXT_MAX)
         if m["type"] in ("text", "file"):  # where orch passed it on (#2051)
             tmp: dict = {}
             _pickup_state(root, tmp, m, picked.get(m["id"]), m["id"] in handled)
             if tmp.get("chips"):
                 item["note"] = tmp["chips"][-1]["label"]
+            if tmp.get("detail"):  # passed to which ticket, taken by which helper run
+                item["detail"] = tmp["detail"]
         add(m["from"], at, item)
     for e in sent:
         line = plain(e.get("preview") or "-")
@@ -433,6 +448,12 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
             item["task"] = task
         else:
             item["text"] = line
+            # a line from before the whole text was kept has only its first 120 characters
+            item["full"] = e["text"] if isinstance(e.get("text"), str) else line
+            if not isinstance(e.get("text"), str) and line.endswith("…"):
+                item["cut"] = True
+        if e.get("by") in ("helper", "person"):
+            item["by"] = e["by"]
         unsent = any(w.get("id") == e["id"] for w in waiting.get(pid, []))
         if unsent:
             item["state"] = {"label": "Not sent yet", "tone": "warn"}
@@ -447,44 +468,75 @@ def _conversations(root: Path, received: list[dict], sent: list[dict], picked: d
         else:
             item["state"] = {"label": "Sent", "tone": "good"}
         add(pid, at, item)
-    rows = []
-    for w in d.get("workspaces", []):
-        if not isinstance(w, dict) or not isinstance(w.get("id"), str):
-            continue
-        pid, name = w["id"], plain(w.get("name") or w["id"], 60)
-        msgs = sorted(by_peer.get(pid, []), key=lambda x: x[0])[-CONV_MESSAGES:]
+    return by_peer
+
+
+def thread(root: Path, ws: str) -> list[dict]:
+    """O-26 (owner, 28 Nov): what was said with one workspace over the relay, oldest first, for its
+    conversation in Chat (chat.dm_conversation): texts, files and handed-over tasks, each {id, at, by,
+    text | file | task, status?, note?, detail?}. `by` is the workspace's id for theirs; for ours "helper" or
+    "person" when the sent log says who wrote it, else "workspace". `text` is all of it, `cut: true` when only
+    its start was kept. Local files only, nothing is written."""
+    picked = {r["id"]: r for r in relay.pickups(root)}
+    pairs = _peer_items(root, _received(root), _sent(root), picked, relay.seen(root)).get(ws, [])
+    out = []
+    for at, it in sorted(pairs, key=lambda x: x[0])[-THREAD_MAX:]:
         row: dict = {
-            "id": pid,
-            "name": name,
-            "messages": [it for _, it in msgs],
-            "_at": msgs[-1][0] if msgs else "",
+            "id": it["id"],
+            "at": at,
+            "by": ws if it["who"] == "them" else it.get("by") or "workspace",
         }
-        if w.get("description"):
-            row["about"] = plain(w["description"], 80)
-        last = next(
-            (
-                it.get("text") or (it.get("file") or {}).get("name") or (it.get("task") or {}).get("title")
-                for _, it in reversed(msgs)
-                if it
-            ),
-            "",
-        )
-        if last:
-            row["last"] = plain(last, 60)
-        wait = waiting.get(pid, [])
-        if wait:
-            n = len(wait)
-            row["badge"] = {"label": f"{n} not sent", "tone": "warn"}
-            row["offline"] = (
-                f"Not sent yet: {n} message{'s' if n != 1 else ''} to {name}. "
-                "They go out by themselves when the relay can be reached."
-            )
-        rows.append(row)
-    rows.sort(key=lambda r: (r["_at"] == "", r["_at"]), reverse=True)
-    rows = rows[:CONV_MAX]
-    for r in rows:
-        del r["_at"]
+        if "full" in it:
+            row["text"] = it["full"]
+            if it.get("cut"):
+                row["cut"] = True
+        for k in ("file", "task", "note", "detail"):
+            if k in it:
+                row[k] = it[k]
+        if "state" in it:
+            row["status"] = it["state"]
+        out.append(row)
+    return out
+
+
+def _log_rows(root: Path, by_peer: dict) -> list[tuple[str, dict, tuple]]:
+    """The Relay page's log of what went to and came from other workspaces: one short row per message with
+    its delivery state. A text opens in full on a click (W-055): the row links to it in its conversation in
+    Chat, where the conversations live since O-26."""
+    rows = []
+    for pid, pairs in by_peer.items():
+        if not str(pid).startswith("ws_"):
+            continue
+        name = relay.name_of(root, pid)
+        for at, it in pairs:
+            title = f"{name} → you" if it["who"] == "them" else f"you → {name}"
+            item: dict = {"title": plain(title, 200)}
+            chips: list[dict] = []
+            if "file" in it:
+                line, kind = it["file"]["name"], "file"
+                size = it["file"].get("size")
+                item["subtitle"] = it["at"]
+                chips.append({"label": plain(f"{line} · {size}" if size else line, 40)})
+            else:
+                line = it["task"]["title"] if "task" in it else it.get("text") or "-"
+                kind = "task" if "task" in it else "text"
+                item["subtitle"] = plain(" · ".join(x for x in (it["at"], line) if x and x != "-"), 200)
+                if kind == "task":
+                    chips.append({"label": KINDS["delegate"]})
+            if "state" in it:
+                chips.append(it["state"])
+            if "note" in it:
+                tone = "good" if it["note"].startswith("Picked up") else "warn"
+                chips.append({"label": plain(it["note"], 40), "tone": tone})
+            if chips:
+                item["chips"] = chips
+            if kind == "text" and _DM_PEER.fullmatch(pid) and MESSAGE_ID.fullmatch(it["id"]):
+                item["link"] = f"app:chat/{pid}/{it['id']}"
+            rows.append((at, item, (title, it["who"], kind, line)))
     return rows
+
+
+_DM_PEER = re.compile(r"ws_[a-z0-9]{10}")
 
 
 def view(root: Path) -> dict:
@@ -592,14 +644,15 @@ def view(root: Path) -> dict:
     picked = {r["id"]: r for r in relay.pickups(root)}
     handled = relay.seen(root)
     got, gave = _received(root), _sent(root)
-    convs = _conversations(root, got, gave, picked, handled)
-    conv_ids = {c["id"] for c in convs}  # what is said with these workspaces is read in their thread
+    # O-26: the conversations with workspaces are in Chat; this page keeps the connection, who is connected
+    # and a short log of what was sent and received
+    rows += _log_rows(root, _peer_items(root, got, gave, picked, handled))
     for m in got:
         line, extra = preview(m["type"], m.get("body"))
         upd = (m.get("body") or {}).get("update") if isinstance(m.get("body"), dict) else None
         auto = is_update(m["type"], line, upd)
-        if not auto and m["from"] in conv_ids:
-            continue
+        if not auto and str(m["from"]).startswith("ws_"):
+            continue  # in the log rows above
         if _is_receipt(m["from"], upd):
             continue  # said on the message it is about (ORCH-2348), not once more as an update
         r = row(
@@ -617,7 +670,7 @@ def view(root: Path) -> dict:
     for e in gave:
         line = plain(e.get("preview") or "-")
         auto = is_update(e["type"], line, e.get("update"))
-        if not auto and e["to"] in conv_ids:
+        if not auto and str(e["to"]).startswith("ws_"):
             continue
         if _is_receipt(e["to"], e.get("update")):
             continue  # the receipt orch gave by itself: nothing a person needs to read
@@ -659,32 +712,32 @@ def view(root: Path) -> dict:
     trust = _trust_block(root)
     if trust:
         out["blocks"].append(trust)
-    if convs:
-        out["blocks"].append({"type": "conversations", "title": "Conversations", "items": convs})
-    if rows or updates or not convs:
-        out["blocks"].append(
-            {
-                "type": "list",
-                "title": "Recent messages",
-                "items": shown,
-                "more": max(0, len(rows) - 20),
-                "empty": {
-                    "title": "No messages yet",
-                    "text": (
-                        "Send one from the phone or from another workspace."
-                        if peers
-                        else "Your admin chooses who you can write to. Nothing to do until then."
-                    ),
-                    "button": {"label": "Open Relay settings", "to": "app:settings/phone"},
-                },
-            }
-        )
-        if not convs:
-            out["blocks"][-1]["span"] = "half"
+    if peers:
+        out["header"]["link"] = {"label": "Open Chat", "to": "app:chat"}  # where the conversations are
+    out["blocks"].append(
+        {
+            "type": "list",
+            "title": "Recent messages",
+            **({"meta": "Open a message to read all of it"} if any("link" in r for r in shown) else {}),
+            "span": "half",
+            "items": shown,
+            "more": max(0, len(rows) - 20),
+            "empty": {
+                "title": "No messages yet",
+                "text": (
+                    "Send one from the phone or from another workspace."
+                    if peers
+                    else "Your admin chooses who you can write to. Nothing to do until then."
+                ),
+                "button": {"label": "Open Relay settings", "to": "app:settings/phone"},
+            },
+        }
+    )
     out["blocks"].append(
         {
             "type": "list",
             "title": "Workspaces",
+            "span": "half",
             "count": len(peers),
             "items": peers[:50],
             "empty": {
@@ -694,8 +747,6 @@ def view(root: Path) -> dict:
             },
         }
     )
-    if not convs:
-        out["blocks"][-1]["span"] = "half"
     return out
 
 
@@ -734,8 +785,7 @@ def needs(root: Path, now: dt.datetime | None = None) -> list[dict]:
                 "kind": "relay:new-contact",
                 "ticket": None,
                 "title": f"New contact: {name}",
-                "text": f"New contact: {name}, connected by your admin. "
-                "Their messages are on the Relay page.",
+                "text": f"New contact: {name}, connected by your admin. Their messages are in Chat.",
                 "tone": "warn",
                 "since": since.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "actions": [{"label": "OK", "later": True}],

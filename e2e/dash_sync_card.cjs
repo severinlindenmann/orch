@@ -103,12 +103,13 @@ async function open(browser, width, start, mutate = s => s) {
   await page.clock.setFixedTime(new Date('2026-11-11T12:00:00Z'));
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
-  await page.goto(BASE + '/#settings');
+  // W-058d, W-059 (owner 28 Nov): the choice is edited on the add-on's own Settings page, nowhere else
+  await page.goto(BASE + '/#settings/addons/sync');
   return {context, page, fake, state, errors};
 }
 const noSideways = page => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 
-test('Sync card: open Settings, pick On this computer only, review, Save, status line; screenshots', {timeout: 180_000}, async () => {
+test('Sync card: open Backup settings, pick On this computer only, review, Save, status line; screenshots', {timeout: 180_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   fs.mkdirSync(OUT, {recursive: true});
   const browser = await headless.launch(chromium);
@@ -180,10 +181,12 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
     // 4. add-on off: one switch row; the switch opens the add-on review, then the card
     {
       const {context, page, fake, errors} = await open(browser, 720, {}, s => { s.settings.addons.find(a => a.name === 'sync').active = false; return s; });
-      const row = page.locator('#sync-card');
-      await row.getByText('Keep a copy of my tickets').waitFor();
+      // off: the add-on's Settings page shows its one switch row and no card; turning it on brings the card
+      const row = page.locator('[data-key="addon-detail-switch"]');
+      await row.waitFor();
+      assert.equal(await page.locator('#sync-card').count(), 0, 'no choice to edit while the add-on is off');
       await shot(page, row, 'off-720');
-      await page.locator('[data-key="settings-switch-sync-off"]').click();
+      await page.locator('[data-key="settings-switch-sync"]').click();
       const confirm = page.locator('dialog[open]');
       await confirm.getByRole('button', {name: 'Turn on'}).click();
       await page.locator('[data-key="sync-review"]').filter({hasText: 'Sync will keep a copy on this computer only.'}).waitFor();
@@ -192,18 +195,15 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       assert.deepEqual(errors, []);
       await context.close();
     }
-    // 5. Home › Needs you: the three sync rows and the sign step of Keep theirs
+    // 5. Home: the three sync rows and the sign step of Keep theirs
     for (const width of [1440, 390]) {
       const {context, page, fake, errors} = await open(browser, width, {});
       await page.goto(BASE + '/#home');
-      await page.locator('#needs-you').waitFor();
-      const showAll = page.locator('#needs-you').getByRole('button', {name: 'Show all'});   // only when Home folds the list
-      if (await showAll.count()) await showAll.click();
-      const rows = page.locator('.home-need.need-acts');
+      const rows = page.locator('main .home-need.need-acts');
       await rows.first().waitFor();
       assert.equal(await rows.count(), 3);
       assert.deepEqual((await rows.locator('.sig').allTextContents()).map(t => t.trim()), ['Needs your OK', 'Needs your OK', 'Needs your OK']);
-      await page.locator('#needs-you').screenshot({path: path.join(OUT, `needs-${width}.png`)});
+      await page.locator('main').screenshot({path: path.join(OUT, `needs-${width}.png`)});
       await rows.nth(0).getByRole('button', {name: 'Keep theirs'}).click();
       const dialog = page.locator('dialog.confirm-step');
       await dialog.waitFor();

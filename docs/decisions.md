@@ -126,3 +126,11 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
   or a repo) is refused with what to do, in every mode. Before, a note went to stderr and the command ran on the
   real `~/.orch-tool`; a folder that was asked for is used or refused, never replaced. `orch doctor` still answers
   and names it as a problem. The Mac runner's wheel smoke gets its orch folder under the runner account's home.
+- 2026-11-28 (owner's walk, O-01 D / ORCH-2433, CX-01, W-017, W-054 A): Home shows blocked work first (one line and
+  one action each), one line that opens Review instead of question and result cards, the numbers as one row and the
+  five newest finished titles; a paused automation and a full start line are calm notices, not blocked rows. A
+  Helpers row on a finished ticket is read once (Finished / still running / not known). A failing service shows on
+  Home only when work depends on it.
+- 2026-11-28 (owner's walk, O-13 / ORCH-2438, O-14 D / ORCH-2439, O-15 C, O-16 C, W-022 C): no button on a ticket row,
+  a group line or a Board card; each ends in one state mark. "Top tickets only" is a filter, off at first. Under
+  900 px of page area the list is the compact two-line rows. Board cards are two lines.

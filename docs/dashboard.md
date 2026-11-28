@@ -43,7 +43,12 @@ Anyone with the token can pick any profile: it says who did what, it is not a pa
 terminal) prints `http://<name>:<port>/go/<secret>`. Opening it logs that browser in (30 days). Keep it private like a
 password. `--new` makes a new one (the old one stops working), `--remove` removes it.
 
-- **Home:** Needs you first (questions, failed runs), then your tickets, then which agents are working.
+- **Home:** what is blocked first ("Blocked now": a sign-in or tool that stopped, a helper that could not start, a
+  merge that waits, a helper that waits for your OK; one line and one button each), then one line that says how many
+  questions and results wait and opens Review, the numbers in one row, the helpers at work and the five newest finished
+  tickets with one short result each. Questions and results are answered on Review, never on Home.
+- **Tickets:** every row ends in one state mark (an icon and one word); a click on the row opens the ticket at its
+  question. "Top tickets only" hides sub-tickets. Beside an open panel the list becomes compact two-line rows.
 - **Ticket page:** tasks with proof, questions, history, owner and due day, and a Continue or Start button for the agent.
   Your clicks count as you; an agent's changes count as the agent.
 - **Add-ons:** each add-on you turn on gets its own tab (automation, publish's Shared tab, relay messages).

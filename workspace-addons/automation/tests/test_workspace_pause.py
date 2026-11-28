@@ -139,3 +139,47 @@ def test_a_pause_does_not_hold_the_health_checks(ws):
     brake.pause(ws, "agent:system-keeper", "Disk almost full")
     Scheduler(ws).tick(T(8))
     assert any(c["args"][:2] == ["doctor", "soon"] for c in calls(ws))
+
+
+# W-043 (owner, 28 Nov): "Cards that need no person, and questions whose cause is gone".
+PAUSED_Q = (
+    "The helper could not start: Automation is paused in this workspace. Turn it back on with: orch resume."
+)
+
+
+def _failure(ws, tid, text, **kw):
+    q = {"id": "q1", "text": text, "options": ["Try again", "Leave it"], "kind": "automation:failure"}
+    return add_ticket(ws, tid, status="waiting", questions=[{**q, "answer": None}], **kw)
+
+
+def test_w043_a_start_refused_by_the_pause_asks_nothing(ws):
+    add_ticket(ws, "t_p0000001", status="ready")
+    Scheduler(ws).fail(
+        "t_p0000001", "Automation is paused in this workspace. Turn it back on with: orch resume."
+    )
+    assert [c for c in calls(ws) if c["args"][:1] == ["ask"]] == []
+    Scheduler(ws).fail("t_p0000001", "the agent stopped within 10 seconds without doing anything")
+    assert [c["args"][2] for c in calls(ws) if c["args"][:1] == ["ask"]] == [
+        "The helper could not start: the agent stopped within 10 seconds without doing anything."
+    ]
+
+
+def test_w043_a_question_whose_cause_was_the_pause_closes_when_automation_runs_again(ws):
+    _failure(ws, "t_p0000002", PAUSED_Q)
+    _failure(ws, "t_p0000003", "The helper could not start: No agent found.")
+    brake.pause(ws, "human:s")
+    assert Scheduler(ws).tick(T(8)) == []  # still paused: nothing is closed, nothing starts
+    assert [c for c in calls(ws) if "--take-back" in c["args"]] == []
+    brake.resume(ws)
+    assert Scheduler(ws).tick(T(8, 1)) == ["t_p0000002"]
+    back = [c["args"] for c in calls(ws) if "--take-back" in c["args"]]
+    assert [(a[1], a[a.index("--take-back") + 1]) for a in back] == [("t_p0000002", "q1")]
+    assert runs_started(ws) == ["t_p0000002"]  # the start the pause held back, once
+    import json as _json
+
+    read = lambda tid: _json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())
+    assert read("t_p0000002")["questions"][0]["answer"].startswith("Taken back: Automation runs again")
+    assert (
+        read("t_p0000003")["questions"][0]["answer"] is None
+    )  # another cause: it still waits for the person
+    assert Scheduler(ws).tick(T(8, 2)) == [] and runs_started(ws) == ["t_p0000002"]  # never twice

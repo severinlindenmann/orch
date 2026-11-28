@@ -362,7 +362,7 @@ def test_site_list_empty_states_and_mistakes(ws, capsys):
     code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
     assert code == 0 and "empty" in out
     code, out = run(capsys, "sites", "list", "--ticket", "t_abc123", "--json")
-    assert json.loads(out) == {"ticket": "t_abc123", "sites": []}
+    assert json.loads(out) == {"ticket": "t_abc123", "sites": [], "by_source": []}
     code, out = run(capsys, "sites", "add", "--ticket", "t_abc123")
     assert code == 2 and out.startswith("orch browse sites [list|add|remove]")
     code, out = run(capsys, "sites", "rename", "t_abc123", "example.com")
@@ -435,3 +435,93 @@ def test_a_broker_that_stops_mid_step_says_how_to_start_again(ws, capsys, monkey
     _fake_broker(monkeypatch, [None])
     code, out = run(capsys, "look", "--ticket", "t_abc123")
     assert code == 2 and "The browser stopped" in out and "orch browse open" in out
+
+
+# ---- O-21 (owner, 28 Nov): the workspace's permanent site list ----
+def test_the_workspace_list_holds_for_every_ticket(ws, capsys):
+    code, out = run(capsys, "sites", "--workspace", "add", "*.20min.ch", "https://www.sbb.ch/de")
+    assert code == 0 and "for every ticket" in out and "20min.ch" in out
+    assert paths.load_workspace_sites(ws) == ["20min.ch", "www.sbb.ch"]
+    assert paths.load_ticket_sites(ws, "t_abc123") == []
+    assert paths.load_sites(ws, "t_abc123") == ["20min.ch", "www.sbb.ch"]  # what the filter asks
+    run(capsys, "sites", "add", "t_abc123", "docs.python.org", "20min.ch")
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123", "--json")
+    doc = json.loads(out)
+    assert doc["sites"] == ["20min.ch", "docs.python.org", "www.sbb.ch"]
+    assert doc["by_source"] == [
+        {"site": "20min.ch", "source": "workspace"},  # on both lists: the workspace's
+        {"site": "docs.python.org", "source": "ticket"},
+        {"site": "www.sbb.ch", "source": "workspace"},
+    ]
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
+    assert "20min.ch  (workspace)" in out and "  docs.python.org\n" in out + "\n"
+    code, out = run(capsys, "sites", "--workspace", "list", "--json")
+    assert json.loads(out)["sites"] == ["20min.ch", "www.sbb.ch"] and "ticket" not in json.loads(out)
+    code, out = run(capsys, "sites", "--workspace", "remove", "*.20min.ch")
+    assert code == 0 and paths.load_workspace_sites(ws) == ["www.sbb.ch"]
+    assert paths.load_sites(ws, "t_abc123") == [
+        "20min.ch",
+        "docs.python.org",
+        "www.sbb.ch",
+    ]  # the ticket's own stays
+
+
+def test_only_a_person_changes_the_workspace_list_and_a_bad_entry_adds_nothing(ws, capsys, monkeypatch):
+    code, out = run(capsys, "sites", "--workspace", "add", "example.com", "10.0.0.1")
+    assert code == 2 and "Not added" in out and paths.load_workspace_sites(ws) == []
+    monkeypatch.setenv("ORCH_RUN", "r_1")
+    code, out = run(capsys, "sites", "--workspace", "add", "example.com")
+    assert code == 2 and "Only a person changes the site list" in out and "--workspace add example.com" in out
+    assert paths.load_workspace_sites(ws) == []
+
+
+def test_a_damaged_workspace_list_opens_nothing(ws):
+    import pytest as _pytest
+
+    paths.save_sites(ws, "t_abc123", ["example.com"])
+    paths.workspace_sites_file(ws).write_text("{ not json", encoding="utf-8")
+    with _pytest.raises(ValueError):
+        paths.load_sites(ws, "t_abc123")
+
+
+def test_a_list_has_a_size_bound(ws):
+    import pytest as _pytest
+
+    paths.save_workspace_sites(ws, [f"s{i}.example.org" for i in range(1000)])
+    assert len(paths.load_workspace_sites(ws)) == 1000
+    with _pytest.raises(ValueError):
+        paths.save_workspace_sites(ws, [f"s{i}.example.org" for i in range(paths.MAX_SITES + 1)])
+    assert len(paths.load_workspace_sites(ws)) == 1000
+
+
+def test_no_command_reaches_the_persons_own_browser(ws, capsys, monkeypatch):
+    """O-20: the browser a person opens on the Browser page is held by paths.OWN_RUN, which is not a ticket id and
+    which no `orch browse` command takes, by --ticket or from a helper run's ORCH_TICKET."""
+    import re
+
+    assert not re.fullmatch(r"t_[a-z0-9]{6,16}", paths.OWN_RUN)
+    for cmd in (["look"], ["open", "https://example.com"], ["sites", "add", "example.com"]):
+        code, out = run(capsys, *cmd, "--ticket", paths.OWN_RUN)
+        assert code == 2 and "person's own browser" in out
+    monkeypatch.setenv("ORCH_TICKET", paths.OWN_RUN)
+    code, out = run(capsys, "look")
+    assert code == 2 and "person's own browser" in out
+    for odd in (
+        "./t_self",
+        "t_self/",
+        "../tickets/t_abc123",
+        "T_ABC123",
+    ):  # never a path part or another case
+        code, out = run(capsys, "look", "--ticket", odd)
+        assert code == 2 and (
+            "not a ticket id" in out or "person's own browser" in out or "No ticket" in out
+        ), out
+    for spelled in (" T_SELF ", "t_Self"):  # however it is written
+        code, out = run(capsys, "look", "--ticket", spelled)
+        assert code == 2 and "person's own browser" in out
+    core = types.ModuleType("orch")  # and whatever a reference resolves to in the core
+    core.tickets = types.SimpleNamespace(resolve=lambda root, ref: paths.OWN_RUN, agent_tool=lambda: None)
+    monkeypatch.setitem(sys.modules, "orch", core)
+    monkeypatch.delenv("ORCH_TICKET")
+    code, out = run(capsys, "look", "--ticket", "ORCH-1")
+    assert code == 2 and "person's own browser" in out

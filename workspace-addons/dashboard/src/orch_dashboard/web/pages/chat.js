@@ -51,10 +51,65 @@ function chatPreview(text) {
   const lines = String(text ?? '').split(/\r?\n/).map(line => line.replace(/^\s*(?:[-*•·–]|\d+[.)])\s+/, '').trim()).filter(Boolean);
   return (lines.find(line => !/:$/.test(line)) || lines[0] || '').replace(/\s*:$/, '');
 }
+// O-19 (owner, 28 Nov): a helper's long message is one short entry: who and when (the line's head), then the helper's
+// own short line when it gave one (orch chat reply --summary), else the start of the text under the word "Excerpt",
+// and "Open message" for all of it, drawn from its Markdown. No program and no model shortens a message, and the
+// original is never changed; a message a person wrote stays as written.
+const CHAT_LONG = 280, CHAT_LONG_LINES = 4, CHAT_EXCERPT = 160;
+const chatIsLong = text => { const s = String(text ?? ''); return s.length > CHAT_LONG || s.split(/\r?\n/).filter(l => l.trim()).length > CHAT_LONG_LINES; };
+function chatExcerpt(text) {
+  const one = String(text ?? '').replace(/^\s*#{1,6}\s+/gm, '').replace(/\s+/g, ' ').trim();
+  if (one.length <= CHAT_EXCERPT) return one;
+  const cut = one.slice(0, CHAT_EXCERPT), at = cut.lastIndexOf(' ');
+  return (at > CHAT_EXCERPT / 2 ? cut.slice(0, at) : cut).replace(/[\s,;:.]+$/, '') + '…';
+}
+const chatShort = new Map();   // message key -> what its "Open message" shows
+if (typeof document === 'object') document.addEventListener?.('click', event => {
+  const b = event.target?.closest?.('[data-chat-open]');
+  const m = b ? chatShort.get(b.dataset.chatOpen) : null;
+  if (m) chatOpenMessage(m);
+});
+// o: {helper, summary, who, when, key, cut, status, note, detail}. helper false (a person wrote it): as written.
+function chatBody(text, o = {}) {
+  const full = String(text ?? '');
+  if (!o.helper || !chatIsLong(full)) return chatText('div', 'thread-line-text chat-message-text', full);
+  const short = clean(o.summary || '').trim(), key = o.key || 'message';
+  // The page is repainted in place (app.js reconcile keeps the button it already drew), so the button only names its
+  // message; the click is handled once for the whole document and reads the newest text from chatShort.
+  if (chatShort.size > 400) chatShort.clear();
+  chatShort.set(key, {...o, text:full});
+  const open = h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-open', 'data-chat-open':key, 'aria-haspopup':'dialog'}, 'Open message');
+  return h('div', {className:'stack-sm', 'data-key':key + '-short', 'data-chat-short':short ? 'summary' : 'excerpt'},
+    short ? chatText('div', 'thread-line-text chat-message-text', short)
+      : h('div', {className:'thread-line-text chat-message-text'}, h('span', {className:'eyebrow'}, 'Excerpt'), ' ', chatExcerpt(full)),
+    h('div', {className:'row'}, open));
+}
+// The whole message, as it was written: the master's Markdown view in a dialog that scrolls inside. Close or Esc
+// goes back to where you were (the conversation, or the Relay page's list).
+function chatOpenMessage(m) {
+  if (typeof dialog !== 'function') return false;
+  const who = clean(m.who || CHAT_HELPER);
+  const {d, actions} = dialog('Message from ' + (who === CHAT_HELPER ? 'your helper' : who), 'dialog dialog-fit');
+  d.setAttribute?.('data-key', 'chat-message-dialog');
+  if (actions.firstChild) actions.firstChild.textContent = 'Close';
+  const text = String(m.text ?? '').replace(/!\[([^\]]*)\]\([^)\s]+\)/g, '$1');  // a picture link is its words: nothing is fetched
+  const md = window.FileViewer?.renderMd;
+  const body = h('div', {className:'dialog-body', tabindex:'0', role:'document', 'aria-label':'The whole message', 'data-key':'chat-message-body'},
+    md ? md(text, {name:'message.md', tid:'', kind:''}) : chatText('pre', 'preserve-lines', text));
+  const facts = [m.when, m.status?.label, m.note].map(x => clean(x || '')).filter(Boolean).join(' · ');
+  const parts = [facts ? chatText('p', 'meta', facts) : null,
+    m.cut ? chatText('p', 'meta', 'Only the start of this message was kept. Newer messages are kept in full.') : null, body,
+    chatObjects(m.detail).length ? chatText('p', 'meta', chatObjects(m.detail).map(x => clean(x.label) + ': ' + clean(x.value)).join(' · ')) : null, actions];
+  d.append(...parts.filter(Boolean));
+  window.orch.open(d);
+  return true;
+}
 const chatLink = id => '#ticket/' + encodeURIComponent(String(id || ''));
 function chatHttp(value) { try { const url = new URL(value); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; } }
+// O-18 (owner, 28 Nov): the number is what OTHER workspaces wrote and you have not opened yet. Nothing that started
+// in this workspace counts (your own lines, your helper's, a question: that one waits in Review).
 function chatBadge() {
-  const count = chatGroups().reduce((sum, g) => sum + chatCount(g.unread), 0);
+  const count = chatGroups().reduce((sum, g) => sum + chatCount(g.unread), 0) + (typeof chatDmUnreadAll === 'function' ? chatDmUnreadAll() : 0);
   return count ? h('span', {className:'count', 'aria-label':count + ' unread'}, count) : null;
 }
 function chatButton(text, action, attrs = {}) {
@@ -100,11 +155,12 @@ function chatListRow(g) {
 }
 // With other workspaces or groups: one list grouped as the draft — This workspace (your helper), Other workspaces (direct chats), Groups.
 function chatDmRow(c) {
-  const last = chatDmMessages(c.ws).at(-1);
+  const last = chatDmMessages(c.ws).at(-1), unread = chatDmUnread(c);
+  const said = chatPreview(last?.text) || clean(last?.file?.name || last?.task?.title || '');
   return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
     'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
-    h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', 'chat-row-preview', (last?.by === 'you' ? 'You: ' : '') + chatPreview(last?.text))),
-    h('span', {className:'chat-row-time'}, chatWhen(last?.shown_at || last?.at || c.last_at)));
+    h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', 'chat-row-preview', (last?.by === 'you' ? 'You: ' : '') + said)),
+    h('span', {className:'chat-row-time'}, chatWhen(last?.shown_at || last?.at || c.last_at), unread ? h('span', {className:'count', 'aria-label':unread + ' unread'}, unread) : null));
 }
 const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
 // Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
@@ -123,7 +179,7 @@ function chatList() {
   // Newest group first, so an old group never sits above a fresh one.
   const byTime = (a, b) => chatGroupTime(b) - chatGroupTime(a), query = chatUi.search.toLowerCase();
   const groups = chatGroups().filter(g => !chatFinished(g)).sort(byTime), finished = chatGroups().filter(chatFinished).sort(byTime);
-  const dms = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
+  const dms = chatDm.contacts.filter(c => c.count > 0 || chatCount(c.unread) || chatDmMessages(c.ws).length || chatUi.open === c.ws)
     .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
   const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), doneRows = finished.map(chatListRow);
   const rows = [helperRow, ...dmRows, ...groupRows, ...doneRows];
@@ -342,7 +398,7 @@ function chatMessage(m, previous, g, index, readOnly, lastMine, after = null) {
       grouped ? null : h('div', {className:'thread-line-head'}, sender, g && member.ws && !mine ? chatText('span', 'chat-ws-label', member.name + ' workspace') : null,
         chatText('span', 'meta' + (m.via === 'phone' ? ' chat-from-phone' : ''), [chatWhen(m.at, true), m.via === 'phone' ? 'from your phone' : '', m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · '))),
       m.question_to ? chatText('small', 'chat-question', 'Question to ' + clean(m.question_to)) : null,
-      m.text ? chatText('div', 'thread-line-text chat-message-text', m.text) : null, chatRefs(m.refs, key, m.id, readOnly),
+      m.text ? chatBody(m.text, {helper:!mine, summary:m.summary, who:sender, when:chatWhen(m.at, true), key}) : null, chatRefs(m.refs, key, m.id, readOnly),
       chatFileCards(m.files, key),
       g && m.task ? chatTask(m.task, g, readOnly) : null,
       g && m.added_to ? h('a', {className:'chat-card', href:chatLink(g.ticket)}, 'Added to ', clean(m.added_to.key), ' › ', clean(m.added_to.label)) : null,
@@ -351,7 +407,7 @@ function chatMessage(m, previous, g, index, readOnly, lastMine, after = null) {
 }
 const CHAT_PROMPTS = [['Plan something', 'Help me plan my week'], ['Compare options', 'Help me compare two options'], ['Check a result', 'What is still open this week?']];
 // Empty chat in the new frame: the three starters, drawn as a first message from your helper.
-function chatWelcome() {
+function chatWelcome(earlier = null) {
   // ORCH-2149 (2): with no helper tool set up nobody answers here; the way on is to set one up (the words of the
   // ticket page's Two ways card), never three starters for a helper that is not there
   if (typeof ticketNoHelperTool === 'function' && ticketNoHelperTool()) return h('article', {className:'thread-line chat-welcome', 'data-key':'welcome-no-helper'}, chatAvatar('Helper', true),
@@ -362,7 +418,9 @@ function chatWelcome() {
     h('div', {className:'thread-line-body'}, h('div', {className:'thread-line-head'}, 'Talk it through with your helper'),
       chatText('p', 'chat-muted', 'Nothing written today. Start with one of these or write your own.'),
       h('div', {className:'chat-prompts'}, CHAT_PROMPTS.map(([kind, text]) => h('button', {type:'button', className:'chat-prompt', 'data-chat-action':'prompt', 'data-prompt':text, 'data-key':'prompt-' + kind},
-        chatText('span', '', kind), clean(text))))));
+        chatText('span', '', kind), clean(text)))),
+      // W-045: in an empty chat the way to earlier days sits here, under the starters, not alone in the middle
+      earlier ? h('div', {className:'row', 'data-key':'welcome-earlier'}, earlier) : null));
 }
 const CHAT_STALL_MS = 60000;
 // A group member's helper on its way (contract words, the same on the phone): its picture and one plain line.
@@ -387,12 +445,14 @@ const chatDayLine = (word, key) => h('div', {className:'day-line', 'data-key':'d
 // Earlier days (option A): one conversation. Scrolling up (or the button at the top) brings yesterday back under its
 // own day line, read only; the Today line says once that your helper starts each day fresh.
 const chatPastDays = () => chatDays.status !== 'ready' ? [] : chatObjects(chatDays.rows).map(d => d.day).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && d !== chatToday());
-function chatPast() {
+// W-045: `inWelcome` = today is empty and no earlier day is open yet: the button is drawn inside the welcome block.
+function chatPast(inWelcome = false) {
   if (chatDays.status === 'idle' && !snapshot) setTimeout(() => { if (chatDays.status === 'idle') chatLoad(); }, 0);
   const days = chatPastDays(), shown = chatUi.past.filter(d => days.includes(d)), more = days.length > shown.length;
   const busy = shown.some(d => chatArchive.get(d)?.status === 'loading'), failed = shown.find(d => chatArchive.get(d)?.status === 'error');
   const top = failed ? h('div', {className:'chat-history-status', role:'status'}, 'Could not load earlier messages.', chatButton('Try again', 'retry-day', {'data-day':failed}))
-    : busy ? chatHistoryStatus('loading') : more ? chatButton('Show earlier messages', 'older', {className:'btn ghost sm chat-older'}) : null;
+    : busy ? chatHistoryStatus('loading') : more ? chatButton('Show earlier messages', 'older', {className:'btn ghost sm' + (inWelcome ? '' : ' chat-older')}) : null;
+  if (inWelcome) return top;
   return fragment(top, [...shown].reverse().map(day => {
     const archive = chatArchive.get(day), messages = archive?.status === 'ready' ? chatObjects(archive.data.messages) : [];
     return fragment(chatDayLine(chatDayLabel(day), day), messages.map((m, i) => chatMessage(m, messages[i - 1], null, i, true, -1)));
@@ -416,6 +476,9 @@ function chatThread(g) {
   const failed = g || readOnly ? [] : chatUi.failed;
   const pastDays = !g && !phoneOnly ? chatPastDays() : [];
   const logKey = 'log-' + (g?.id || 'chat');
+  // W-045: nothing today and no earlier day open: "Show earlier messages" belongs to the welcome block
+  const welcome = !g && !phoneOnly && !readOnly && !messages.length && !failed.length && !!state?.chat;
+  const earlierInWelcome = welcome && !chatUi.past.some(d => pastDays.includes(d));
   const rows = [];
   messages.forEach((m, i) => {
     const prev = messages[i - 1], word = g && m.at ? chatDayWord(m.at) : '';
@@ -426,11 +489,11 @@ function chatThread(g) {
   return fragment(g ? chatSharedTicket(g) : null,
     g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Finished · you can read, not reply') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'You can read here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
-      !g && !phoneOnly ? chatPast() : null,
+      !g && !phoneOnly && !earlierInWelcome ? chatPast() : null,
       g ? null : chatDayLine('Today', 'today'),
       !g && pastDays.length ? chatText('p', 'day-line-note', 'Your helper starts each day without yesterday’s conversation.') : null,
       !g && state && !state.chat ? chatHistoryStatus('loading') :
-      messages.length || failed.length ? rows : !g && !phoneOnly && !readOnly ? chatWelcome() : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'),
+      messages.length || failed.length ? rows : !g && !phoneOnly && !readOnly ? chatWelcome(earlierInWelcome ? chatPast(true) : null) : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'),
       failed.map(f => chatMessage({id:f.id, by:'you', at:f.at, text:f.text, files:f.files.map(x => ({name:x.name, size:x.size}))}, null, null, 0, true, 0,
         chatState('failed', 'Not sent. Check the connection.', f.id))),
       thinking.map(w => chatThinking(w))),
@@ -694,7 +757,8 @@ new MutationObserver(() => {
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
-const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, loaded:false, picker:null, error:false, lastFetch:-Infinity, timer:null};
+const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, loaded:false, picker:null, error:false, lastFetch:-Infinity, timer:null,
+  lastPeek:-Infinity, peeking:false, quiet:false, want:null};
 // How often an open workspace thread looks for new texts (relay delivery is ~1 s; R8.3 wants the screen within 2 s).
 const CHAT_DM_POLL = 2000;
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
@@ -723,6 +787,38 @@ function chatDmMessages(ws) {
   const saved = chatObjects(chatDm.threads.get(ws)?.messages), ids = new Set(saved.map(m => m.id));
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
+// O-18: a workspace conversation's number is what THEY wrote since you last opened it (orch chat contacts `unread`).
+// Opened here: {workspace: its newest time then}; hidden until the next read of the contacts has the mark.
+const chatDmReadNow = new Map();
+function chatDmUnread(c) {
+  if (!c || chatUi.open === c.ws) return 0;
+  const seen = chatDmReadNow.get(c.ws);
+  if (seen !== undefined && (!chatCount(c.unread) || c.last_at !== seen)) chatDmReadNow.delete(c.ws);
+  return chatDmReadNow.has(c.ws) ? 0 : chatCount(c.unread);
+}
+const chatDmUnreadAll = () => { chatDmPeek(); return chatDm.contacts.reduce((n, c) => n + chatDmUnread(c), 0); };
+async function chatDmMarkRead(ws) {
+  const c = chatDmContact(ws);
+  if (snapshot || !c || !chatCount(c.unread) || chatDmReadNow.get(ws) === c.last_at) return;  // nothing new, or sent: no write
+  chatDmReadNow.set(ws, c.last_at);
+  try { await (typeof act === 'function' ? act : window.orchAct)('chat.read', {workspace:ws}, {quiet:true}); } catch { /* the count comes back with the next contacts */ }
+}
+// The menu's Chat number away from the Chat page: one quiet look at the contacts, at most once a minute, never while
+// a look runs, the tab is hidden or nothing is connected (an empty answer ends the looks until Chat is opened).
+const CHAT_DM_PEEK = 60000;
+function chatDmPeek() {
+  if (snapshot || chatDm.peeking || chatDm.quiet || typeof fetch !== 'function' || (typeof document === 'object' && document.hidden)) return;
+  if (typeof route === 'function' && route().kind === 'chat') return;  // the Chat page reads the contacts itself
+  if (Date.now() - chatDm.lastPeek < CHAT_DM_PEEK) return;
+  chatDm.lastPeek = Date.now(); chatDm.peeking = true;
+  const before = chatDm.contacts.reduce((n, c) => n + chatDmUnread(c), 0);
+  fetch('/api/chat/contacts').then(r => r.ok ? r.json() : null).then(list => {
+    if (!Array.isArray(list)) { chatDm.quiet = true; return; }
+    chatDm.contacts = chatObjects(list).filter(c => chatDmId(c.ws)); chatDm.loaded = true;
+    if (!chatDm.contacts.length) chatDm.quiet = true;
+    if (chatDm.contacts.reduce((n, c) => n + chatDmUnread(c), 0) !== before) render();
+  }).catch(() => { chatDm.quiet = true; }).finally(() => { chatDm.peeking = false; });
+}
 async function chatDmLoad(force = false) {
   if (snapshot || route().kind !== 'chat' || document.hidden) return;  // a hidden tab does not poll
   if (chatDm.loading) return;  // a thread opened meanwhile is picked up when this load ends (see finally)
@@ -742,7 +838,7 @@ async function chatDmLoad(force = false) {
     const contacts = await response.json();
     if (!Array.isArray(contacts)) throw new Error('Contacts');
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
-    chatDm.loaded = true;
+    chatDm.loaded = true; chatDm.quiet = false;
     const ws = chatUi.open;  // read now: the person may have opened another thread while the contacts loaded
     if (chatDmId(ws) && chatDmContact(ws)) {
       const response = await fetch('/api/chat/thread/' + ws);
@@ -750,6 +846,7 @@ async function chatDmLoad(force = false) {
       const thread = await response.json();
       if (!Array.isArray(thread?.messages)) throw new Error('Thread');
       chatDm.threads.set(ws, thread); fetched = ws;
+      chatDmMarkRead(ws); chatDmWanted();
       const stored = new Set(thread.messages.map(m => m.id));
       chatDm.pending.set(ws, array(chatDm.pending.get(ws)).filter(m => !stored.has(m.id)));
     }
@@ -788,51 +885,153 @@ function chatSayOpen(e) {
   location.hash = '#chat';
 }
 window.addEventListener('message', chatSayOpen);
+// #chat/<workspace>/<message> (a row of the Relay page's log, W-055) opens that conversation and the message in full.
+const CHAT_DM_LINK = /^#chat\/(ws_[a-z0-9]{10})\/(m_[a-z0-9]{16})$/;
 function chatDmRoute() {
-  const ws = location.hash.slice(6);
+  const link = CHAT_DM_LINK.exec(String(location.hash || ''));
+  if (link && !snapshot) { chatDm.want = {ws:link[1], mid:link[2]}; history.replaceState(null, '', '#chat/' + link[1]); }
+  const ws = link ? link[1] : location.hash.slice(6);
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
-  if (route().kind === 'chat') { render(); chatDmLoad(); }
+  if (route().kind === 'chat') { render(); chatDmLoad(!!link); }
 }
+// One message of a workspace conversation as the dialog shows it (the same facts as its line in the thread).
+function chatDmOpen(ws, m) {
+  const c = chatDmContact(ws), who = chatDmWho(m, c?.name || chatDmNames.get(ws) || 'Workspace'), at = m.shown_at || m.at;
+  return chatOpenMessage({text:m.text, who:who.name, when:at ? time(at) : '', cut:m.cut, status:who.mine ? m.status : null, note:m.note, detail:m.detail});
+}
+function chatDmWanted() {
+  const want = chatDm.want;
+  if (!want || !chatDm.threads.has(want.ws)) return;
+  chatDm.want = null;
+  const m = chatObjects(chatDm.threads.get(want.ws).messages).find(x => (x.id === want.mid || x.relay_id === want.mid) && typeof x.text === 'string');
+  if (m) chatDmOpen(want.ws, m); else window.orch.toast('That message is no longer kept here. The conversation is open.', 'info');
+}
+// On the Relay page a click on a log row opens the message right there (W-055): read the conversation, show all of
+// it, Close is back at the list. Anything that fails falls back to the link itself (the conversation in Chat).
+async function chatDmPeekMessage(ws, mid) {
+  try {
+    const r = await fetch('/api/chat/thread/' + ws);
+    if (!r.ok) return false;
+    const thread = await r.json();
+    const m = chatObjects(thread?.messages).find(x => (x.id === mid || x.relay_id === mid) && typeof x.text === 'string');
+    if (!m) return false;
+    if (!chatDmContact(ws) && typeof thread.name === 'string') chatDmHint(ws, thread.name);
+    return chatDmOpen(ws, m);
+  } catch { return false; }
+}
+if (typeof document === 'object') document.addEventListener?.('click', async event => {
+  const a = event.target?.closest?.('a[href^="#chat/ws_"]');
+  const link = a ? CHAT_DM_LINK.exec(a.getAttribute('href') || '') : null;
+  if (!link || snapshot || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (typeof route === 'function' && route().kind === 'chat') return;
+  event.preventDefault();
+  if (!(await chatDmPeekMessage(link[1], link[2]))) location.hash = a.getAttribute('href');
+});
 document.addEventListener?.('visibilitychange', () => { if (!document.hidden && chatDmId(chatUi.open)) chatDmLoad(); });
 window.addEventListener('hashchange', chatDmRoute);
 window.addEventListener('orch:state', chatDmRoute);
 window.addEventListener('DOMContentLoaded', chatDmRoute);
 
+// O-17 (owner, 28 Nov): "New chat" asks one thing, who with: your helper, a ticket, or a workspace (only when the relay
+// has connected one). Picking opens that conversation with the message box ready. Nothing is made before the first
+// message: a ticket's chat is the ticket itself, a workspace conversation starts with what you send.
+const CHAT_PICK_TICKETS = 6;
+const chatFocusBox = () => setTimeout(() => { if (typeof document === 'object') document.querySelector('.chat-page .chat-composer-area textarea, .chat-page .chat-draft')?.focus(); }, 0);
+function chatPickTickets(query) {
+  if (typeof tickets !== 'function') return {rows:[], more:0};
+  const open = tickets().filter(t => t && typeof t.id === 'string' && /^t_[a-z0-9]{6,16}$/.test(t.id) && !t.hidden && !['done', 'dropped', 'superseded'].includes(t.status))
+    .filter(t => !query || (clean(t.title) + ' ' + clean(t.key)).toLowerCase().includes(query))
+    .sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
+  return {rows:open.slice(0, CHAT_PICK_TICKETS), more:Math.max(0, open.length - CHAT_PICK_TICKETS)};
+}
 function chatDmContacts() {
-  const {d, actions} = dialog('New chat', 'dialog');
+  const {d, actions} = dialog('New chat', 'dialog dialog-fit');
   d.classList.add('chat-page', 'chat-contacts');
-  const body = h('div', {className:'chat-contact-list'});
+  const search = h('input', {type:'search', className:'chat-search', 'data-key':'new-chat-search', 'aria-label':'Search tickets and workspaces', placeholder:'Search tickets and workspaces', autocomplete:'off'});
+  const body = h('div', {className:'chat-contact-list dialog-body', 'data-key':'new-chat-list'});
+  let query = '';
+  const done = async fn => { chatDm.picker = null; await window.orch.close(d); fn(); chatFocusBox(); };
+  const group = (label, key) => h('p', {className:'eyebrow', 'data-key':'new-chat-' + key}, label);
   const paint = () => {
-    const rows = [...chatNewChatRows(() => window.orch.close(d))];
-    for (const c of chatDm.loaded ? chatDm.contacts : []) {
+    const rows = [], match = text => !query || clean(text).toLowerCase().includes(query);
+    // your helper (and what came from your phone today, when something did)
+    const phone = chatObjects(state?.chat?.messages).some(m => m.via === 'phone');
+    chatNewChatRows(() => done(() => {})).forEach((row, i) => { if ((i === 0 || phone) && match(i === 0 ? 'Your helper' : 'Your phone')) rows.push(row); });
+    const found = chatPickTickets(query);
+    if (found.rows.length) {
+      rows.push(group('A ticket', 'tickets'));
+      for (const t of found.rows) {
+        const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + t.id}, chatText('strong', '', chatPlainTitle(t.title, t.key) || t.key),
+          chatText('small', 'chat-muted', [t.key, window.DashHelpers?.statusWord ? window.DashHelpers.statusWord(t.status) : ''].filter(Boolean).join(' · ')));
+        row.addEventListener('click', () => done(() => { if (typeof tcSelect === 'function') tcSelect(t.id); else location.hash = '#chat/' + encodeURIComponent(t.id); }));
+        rows.push(row);
+      }
+      if (found.more) rows.push(chatText('p', 'chat-muted', found.more + (found.more === 1 ? ' more ticket' : ' more tickets') + '. Search to find one.'));
+    }
+    const contacts = (chatDm.loaded ? chatDm.contacts : []).filter(c => match(c.name));
+    if (contacts.length) rows.push(group('A workspace', 'workspaces'));
+    for (const c of contacts) {
       const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
-      const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
+      const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + c.ws, disabled:!allowed}, chatText('strong', '', c.name),
         h('span', {className:'chat-member-chips'},
           can.chat ? chatText('small', 'chat-member-chip', can.files ? 'Can read and send messages and files' : 'Can read and send messages') : null,
           can.files && !can.chat ? chatText('small', 'chat-member-chip', 'Files') : null,
           can.tasks ? chatText('small', 'chat-member-chip', 'Give tasks') : null,
           !allowed ? chatText('small', 'chat-member-chip', 'No access') : null));
-      row.addEventListener('click', async () => { chatDm.picker = null; await window.orch.close(d); chatDmSelect(c.ws); });
+      row.addEventListener('click', () => done(() => chatDmSelect(c.ws)));
       rows.push(row);
     }
     if (!chatDm.loaded) {
       if (chatDm.error && !chatDm.loading) {
         const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
         retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
-        rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
+        rows.push(chatText('p', 'chat-muted', 'Could not load the workspaces.'), retry);
       } else rows.push(chatSkeleton());
-    } else if (!chatDm.contacts.length) rows.push(chatEmpty('No contacts yet', 'Other workspaces show up here once your admin has paired them with yours.'));
+    }
+    if (query && !rows.some(r => r.dataset ? r.dataset.key?.startsWith('pick-') : String(r.attrs?.['data-key'] || '').startsWith('pick-'))) rows.push(chatText('p', 'chat-muted', 'Nothing matches. Try another word.'));
     body.replaceChildren(...rows);
   };
+  search.addEventListener('input', () => { query = String(search.value || '').trim().toLowerCase(); paint(); });
   chatDm.picker = paint; paint();
   d.addEventListener('close', () => { if (chatDm.picker === paint) chatDm.picker = null; });
-  d.append(body, actions); window.orch.open(d);
+  d.append(chatText('p', 'chat-muted', 'Who do you want to talk to?'), search, body, actions); window.orch.open(d);
 }
 function chatDmSelect(ws) {
   if (!chatDmId(ws)) return;
   chatUi.open = ws; chatUi.listOpen = false; chatUi.sheet = null;
   location.hash = '#chat/' + ws; render(); chatDmLoad();
-  chatFocus('[data-key="chat-title"]');
+  chatFocus('[data-key="chat-title"]'); chatDmMarkRead(ws);
+}
+// Who wrote a line of a workspace conversation (O-26): you, the other workspace, this workspace's helper, or this
+// workspace when an older line of the sent log does not say who. Whether THEIR person or their helper wrote a
+// message is not on the wire, so a long one of theirs is shown short too and opens in full.
+function chatDmWho(m, title) {
+  if (m.by === 'you' || m.by === 'person') return {mine:true, name:'You', helper:false};
+  if (m.by === 'helper') return {mine:true, name:CHAT_HELPER, helper:true};
+  if (m.by === 'workspace') return {mine:true, name:chatWorkspace(), helper:true};
+  return {mine:false, name:clean(title), helper:true};
+}
+// One line of the conversation: words (a long helper text as a short entry, O-19), a file, or a handed-over task, and
+// under it what orch knows: not sent, sending, where it went, or that it waits.
+function chatDmLine(m, prev, c, title, last) {
+  const who = chatDmWho(m, title), before = prev ? chatDmWho(prev, title) : null, at = m.shown_at || m.at, key = 'message-' + m.id;
+  const grouped = before && before.name === who.name && Math.abs((Date.parse(at) || 0) - (Date.parse(prev.shown_at || prev.at) || 0)) < CHAT_GROUP_MS;
+  const typed = m.by === 'you', status = m.status && typeof m.status.label === 'string' ? m.status : null, warn = status?.tone === 'warn';
+  const state = typed && m.state === 'failed' ? h('p', {className:'msg-state failed chat-delivery'}, 'Not sent. Check the connection.', chatButton('Try again', 'retry-send', {className:'btn outline sm', 'data-id':m.id}))
+    : typed && m.state !== 'delivered' ? h('p', {className:'msg-state chat-delivery'}, 'Sending…')
+    : who.mine && status && !m.task && (warn || last || !['Sent', 'Delivered'].includes(status.label)) ? h('p', {className:'msg-state chat-delivery' + (warn ? ' saved' : '')}, clean(status.label))
+    : typed && last ? h('p', {className:'msg-state chat-delivery'}, 'Delivered') : null;
+  const note = !who.mine && m.note && (last || !/^Picked up/.test(m.note)) ? chatText('p', 'msg-state', m.note) : null;
+  const task = m.task ? h('div', {className:'banner', 'data-key':key + '-task'}, h('div', {className:'grow'}, h('div', {className:'stack-sm'},
+      chatText('span', 'eyebrow', who.mine ? 'Task you handed over' + (m.task.from ? ' · from ticket ' + clean(m.task.from) : '') : 'Task from ' + clean(title)),
+      chatText('strong', '', m.task.title), m.task.note ? chatText('p', '', m.task.note) : null)),
+    status && (warn || status.label !== 'Sent') ? chatText('span', warn ? 'badge needs' : 'badge', status.label) : null) : null;
+  return h('article', {className:'thread-line chat-message' + (who.mine ? ' chat-out' : '') + (grouped ? ' cont' : ''), 'data-key':key},
+    who.mine ? chatAvatar(who.helper ? 'Helper' : 'You', who.helper) : chatAvatar(c || title),
+    h('div', {className:'thread-line-body'}, grouped ? null : h('div', {className:'thread-line-head'}, who.name, chatText('span', 'meta', at ? time(at) : '')),
+      typeof m.text === 'string' && m.text ? chatBody(m.text, {helper:who.helper, who:who.name, when:at ? time(at) : '', key, cut:m.cut, status:who.mine ? status : null, note:m.note, detail:m.detail}) : null,
+      m.file ? chatText('span', 'chat-file-chip', clean(m.file.name) + (m.file.size ? ' · ' + clean(m.file.size) : '')) : null,
+      task, state, note));
 }
 function chatDmThread() {
   const ws = chatUi.open, c = chatDmContact(ws), title = c?.name || chatDmNames.get(ws) || 'Workspace', messages = chatDmMessages(ws);
@@ -844,17 +1043,9 @@ function chatDmThread() {
         array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, !c && !messages.length && !chatDm.error ?
-      (chatDm.loaded ? chatEmpty('This workspace is not in your contacts', 'Go back to your chats and pick one from the list.') : chatSkeleton()) : null, messages.map((m, i) => {
-        const mine = m.by === 'you', prev = messages[i - 1], at = m.shown_at || m.at;
-        const grouped = prev && prev.by === m.by && Math.abs((Date.parse(at) || 0) - (Date.parse(prev.shown_at || prev.at) || 0)) < CHAT_GROUP_MS;
-        return h('article', {className:'thread-line chat-message' + (mine ? ' chat-out' : '') + (grouped ? ' cont' : ''), 'data-key':'message-' + m.id},
-          mine ? chatAvatar('You') : chatAvatar(c || title),
-          h('div', {className:'thread-line-body'}, grouped ? null : h('div', {className:'thread-line-head'}, mine ? 'You' : clean(title), chatText('span', 'meta', at ? time(at) : '')),
-            chatText('div', 'thread-line-text chat-message-text', m.text),
-            mine && m.state === 'failed' ? h('p', {className:'msg-state failed chat-delivery'}, 'Not sent. Check the connection.', chatButton('Try again', 'retry-send', {className:'btn outline sm', 'data-id':m.id})) :
-            mine && m.state !== 'delivered' ? h('p', {className:'msg-state chat-delivery'}, 'Sending…') :
-            mine && i === messages.length - 1 ? h('p', {className:'msg-state chat-delivery'}, 'Delivered') : null));
-      })),
+      (chatDm.loaded ? chatEmpty('This workspace is not in your contacts', 'Go back to your chats and pick one from the list.') : chatSkeleton()) : null,
+      c && !messages.length && !chatDm.error && chatDm.threads.has(ws) ? chatText('p', 'chat-empty', c.can?.chat ? 'No messages yet. Write the first one below.' : 'No messages yet.') : null,
+      messages.map((m, i) => chatDmLine(m, messages[i - 1], c, title, i === messages.length - 1))),
     !snapshot && c?.can?.chat ? h('div', {className:'chat-composer-area', 'data-key':'composer-' + ws}, chatBox(ws, {label:'Message ' + title, attach:false, max:2000})) : null);
 }
 const chatPageWithoutDm = chatPage;

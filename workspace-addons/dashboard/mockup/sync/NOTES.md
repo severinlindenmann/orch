@@ -63,3 +63,11 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   "Last synced …" is already in the When card. No "Last error: none" line.
 - `?state=empty` shows the unreadable state: the choices stay visible but disabled, one plain line and Try again
   ("Can’t read the sync setting right now. Nothing was changed."), instead of a "Reading…" line that never ends.
+
+## W-058d (owner 28 Nov): where the backup goes
+
+- sync.html: the page opens with one line, "Backed up to <place>, last time <when>.", and one link, "Backup
+  settings →". The three cards (destination, what, when) and the last syncs stay; files left out are listed.
+- The choice (Off / On this computer only / Another computer or your own storage, the address, Sync now) is edited in
+  one place: the add-on's own Settings page (`../settings/addon-detail-backup.html`). Settings › General has one row
+  that says where the copy goes and links there.

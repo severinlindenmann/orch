@@ -316,3 +316,57 @@ a connection address to show.
 ## ORCH-2060: dialog close settles after the real close (ORCH-2056 draft 5)
 
 - "Workspace icon & colour": Cancel, Escape and Save fade out with the exit token (120 ms), then focus is back on Change; Tab right after goes to the next control on the page, never into the fading dialog. Save announces only after that. Same with reduced motion (no fade). Built on the master `overlay.js` lifecycle; no page delays, no new CSS.
+
+## W-059, W-011, W-058d, O-27 (owner 28 Nov): one place per option
+
+- settings.html (General): the profile and the folder, then "Everyday settings" (one row per thing edited elsewhere:
+  Helper, Phone questions, Backup, Shared pages, each with its state and a link), then named sections: "Sharing and
+  finished work", "Working copies", "Report a problem". No "More" fold and no "More settings" heading.
+- addon-detail.html (Publish settings): the on/off list, then the add-on's own options (owner shown on shared pages,
+  "Shared pages: show workspace name and icon").
+- addon-detail-backup.html (new, Backup settings): the on/off list, the line "Backed up to …", then the card "Where to
+  keep a copy" with the address, Check connection and Sync now. This is the only place the choice is edited.
+- The add-on with the phone tab (Relay) has one Settings page, that tab: its on/off and Remove rows sit at the end of
+  the tab and every link to its settings leads there.
+
+### O-27: every option, what it does, the test that proves it, where it belongs
+
+Checked on 28 Nov by reading the code: each control sends one action, the server has a handler for it, and at least
+one test covers it. No option without effect was found this way. Not done: clicking each one in a browser on demo
+data (the preview run does that). Tests are in `workspace-addons/dashboard/tests/` unless a path is given. Inside a
+tab the order is: what most people change first, rare things last.
+
+| Tab | Option (in this order) | What it does | Action | Test | Belongs |
+|---|---|---|---|---|---|
+| General | Name, description, tags, icon and colour | How this workspace shows in the menu and to connected workspaces | `look.set` | `look.test.js`, `test_look.py` | General (profile) |
+| General | Folder · Copy path | Shows the workspace folder, copies its path | none (copy) | `dashboardpages.test.js` | General |
+| General | Private files: Move to private · Allow on this computer | Shown only when something waits: moves private files out of the team repo; allows a command this workspace asks for | `private.move`, `private.allow` | `test_act.py`, `sync_card.test.js` | General (it is about the folder) |
+| General | Menu: which add-on pages show, their order | The left menu | menu order (b301, O-34) | `menu_order.test.js` | General |
+| General | Everyday settings: Helper, Phone questions, Backup, Shared pages | One row each with the state and a link to the place it is edited | links only | `sync_card.test.js`, `settings_shared_pages.test.js` | General (links) |
+| General › Sharing and finished work | Let helpers finish tickets | A helper may mark its own ticket Done | `workflow.set` | `test_act.py`, `dashboardpages.test.js` | General |
+| General › Sharing and finished work | Auto Reviewer: Check finished work · Away for the night | A helper checks finished work; at night it also answers open questions | Review page rows (`review.js`) | `review_page.test.js` | General (same rows as Review) |
+| General › Sharing and finished work | Accept small finished work for me · which kinds | Merged work with green tests is marked Done | `reviewer.set`, `reviewer.kinds` | `test_act.py`, `dashboardpages.test.js` | General |
+| General › Sharing and finished work | Put new versions live without my click | Only shown here when Pull requests is off but the switch is on, so it can be turned off | `release_merge.set` | `test_act.py` | Pull requests settings |
+| General › Sharing and finished work | Tell teammates about orch | Adds a short note to the project's guide file | `share.set` | `test_act.py` | General |
+| General › Working copies | Several helpers at once · when · most copies · clean up · get a copy ready with | Each helper works in its own copy of the folder | `copies.set`, `copies.clean`, `copies.retry`, `copies.remove_orphaned` | `test_act.py`, `test_copies_disk.py` | General |
+| General › Report a problem | Problem log · Delete all saved reports | Background notes for a problem report | `diag.set`, `diag.delete_reports` | `test_page_session.py`, `workspace/tests/test_diag_api.py` | General |
+| People | People on or off, Add a person, rights, Rename, Remove, phones | Who may use this workspace and what they may do | `people.*` | `test_act.py`, `test_people.py`, `people_list.test.js` | People |
+| People | Let me type into the plain terminal | Typing into a shell on this computer | `terminal_typing.set` (session) | `addon_names_catalogue.test.js` | People (the owner's switch) |
+| Helper | Helper tool · Test · Add your own helper | Which helper tool starts work | `config.agent`, `config.agent.test`, `config.agent.add` | `test_act.py`, `test_page_proxy.py` | Helper |
+| Helper | What helpers need | Logins and keys a helper needs, with Renew / Check again | renew ops | `test_logins_state.py`, `logins_warning.test.js` | Helper |
+| Helper | What a helper may do | Asks first · asks for risky things · never asks | `config.permissions` | `test_act.py` | Helper |
+| Helper › New tickets | Prepare tickets when I save | A helper writes title, steps and estimate on save | `prepare.set` | `test_act.py` | Helper |
+| Helper › Limits | Helpers at once | The next helper waits in line above this number | `live.set` | `test_act.py`, `dashboardpages.test.js` | Helper (rare: last) |
+| Relay (the add-on's one Settings page) | Connect this workspace · phones · phone questions · workspaces | The relay connection, paired phones, who you can write to | `relay.connect`, `people.cut`, phone mode | `test_logins_state.py`, `test_mobile_mode.py`, `test_page_session.py` | Relay tab |
+| Relay | Relay on or off · Remove | The add-on itself | `addon.set`, `addon.uninstall` | `addon_set_restart.test.js` | Relay tab, last (moved here: W-059) |
+| Add-ons › any add-on | On or off · Remove | The add-on itself | `addon.set`, `addon.uninstall` | `addon_set_restart.test.js`, `addon_names_catalogue.test.js` | That add-on's Settings page |
+| Add-ons › Backup | Where to keep a copy · address · Check connection · Sync every · Sync now | Where the backup goes | `addon.act` (sync verbs) | `sync_card.test.js`, `workspace-addons/sync/tests/test_cli.py` | Backup settings (moved from General and from the Backup page: W-058d) |
+| Add-ons › Publish | Owner shown · Shared pages: show workspace name and icon | How a shared page looks | `look.shared` | `test_look.py`, `settings_shared_pages.test.js` | Publish settings (moved from General: W-059) |
+| Add-ons › Pull requests | Put new versions live without my click | A green release goes live by itself | `release_merge.set` | `test_act.py`, `test_release_switch.py` | Pull requests settings |
+| Add-ons › an add-on with a live screen | Let me type into the helper's screen | Typing into the helper's live screen | `typing.set` | `test_settings_ui.py` | That add-on's Settings page (a plain row, no "More settings") |
+| About & updates | Update · Update by itself · tools · companion download | The installed release and its updates | `update.auto`, update start | `auto_update.test.js`, `test_auto_update.py`, `test_selfupdate.py` | About & updates |
+
+Add-ons whose Settings page still holds only On/Off and Remove (Automation, Lessons, Insights, Skills, Usage, Services,
+Notes, Files, Factory, Pull requests when it has no release switch): they have no option in the dashboard today. Their
+limits live in files or commands (a repeat's own plan, the lessons' 3 KB cap, Usage's own page). Bringing those onto
+the page is new work, not a move, and was not built here.

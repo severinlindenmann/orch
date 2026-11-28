@@ -8,7 +8,9 @@ const path = require('node:path');
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 const home = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/home.js'), 'utf8');
 const settings = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
-const homePart = home.slice(home.indexOf('// What helpers need'), home.indexOf('// Home: what needs the person first'));
+const homePart = home.slice(home.indexOf('// What helpers need'), home.indexOf('// Tickets waiting in line'));
+// the one row shape of Blocked now (O-01 D), defined above that part
+const blockedPart = home.slice(home.indexOf('function blockedRow'), home.indexOf('const ticketLink'));
 const settingsPart = settings.slice(settings.indexOf('// What helpers need'), settings.indexOf('// Share with team'));
 
 const el = (tag, attrs, ...kids) => ({tag, attrs: attrs || {}, kids: kids.flat(Infinity).filter(k => k != null && k !== false)});
@@ -28,7 +30,7 @@ function page(logins, extra = {}) {
     act: async (op, args) => { acted.push([op, args]); c.state.logins = {items: [item({state: 'works'})]}; return {ok: true}; },
     ...extra,
   });
-  vm.runInContext(homePart + settingsPart + '\nthis.api = {loginWarnings, loginBanner, loginSoonRow, loginAction, helperNeedsCard};', c);
+  vm.runInContext(blockedPart + homePart + settingsPart + '\nthis.api = {loginWarnings, blockedLogins, loginStoppedRow, loginSoonRow, loginAction, helperNeedsCard};', c);
   return {c, api: c.api, acted, toasts};
 }
 
@@ -37,7 +39,7 @@ test('nothing shows when every login works or nothing was checked yet', () => {
     const {api} = page(logins);
     const w = api.loginWarnings();
     assert.equal(w.soon.length + w.stopped.length, 0);
-    assert.equal(api.loginBanner(w.stopped), null);
+    assert.equal(api.blockedLogins(w.stopped).length, 0);
   }
   assert.equal(page(null).api.helperNeedsCard(), null);
 });
@@ -53,27 +55,27 @@ test('a login that runs out soon is a Needs you row with its end, the tickets it
   assert.equal(find(row, n => n.tag === 'button').length, 1);
 });
 
-test('one login that stopped working is the red banner: what stopped, the tickets, no new work for the main helper', () => {
+// O-01 D and W-017 (28 Nov): a login that stopped is one line with one button in Blocked now, never a red banner
+// with a terminal command.
+test('a login that stopped working is one row of Blocked now: what stopped, how many tickets, no new work for the main helper, one button', () => {
   const {api} = page({items: [item({name: 'gh', label: 'GitHub', state: 'renew', stops: [T1, T2]})]});
-  const b = api.loginBanner(api.loginWarnings().stopped);
-  assert.equal(b.attrs.className, 'banner error');
-  assert.equal(b.attrs.role, 'alert');
-  assert.match(text(b), /^The GitHub login stopped working/);
-  assert.match(text(b), /Helpers stopped on 2 tickets and start no new work: ORCH-12 Fix login page · ORCH-14 Update the price list/);
-  const other = page({items: [item({state: 'renew', chosen: false, stops: [T1]})]});
-  assert.match(text(other.api.loginBanner(other.api.loginWarnings().stopped)), /Helpers stopped on 1 ticket: ORCH-12/);
+  const [row] = api.blockedLogins(api.loginWarnings().stopped).map(api.loginStoppedRow);
+  assert.equal(row.attrs['data-blocked'], 'login');
+  assert.equal(text(row), 'The GitHub login stopped working.Helpers stopped on 2 tickets and start no new work.Sign in');
+  assert.equal(find(row, n => n.tag === 'button' || n.tag === 'a').length, 1);
+  const other = page({items: [item({name: 'wiki', label: 'Company wiki', kind: 'connection', helper: null, state: 'unreachable', chosen: false, stops: [T1]})]});
+  assert.equal(text(other.api.loginStoppedRow(other.api.loginWarnings().stopped[0])), 'The Company wiki connection cannot be reached.Helpers stopped on 1 ticket.Try again');
 });
 
-test('several things that stopped are one banner with a count, their names and See what to fix', () => {
+test('several things that stopped are one row each; the sign-in of a helper tool that is not the chosen one is left out', () => {
   const {api} = page({items: [item({name: 'gh', label: 'GitHub', state: 'renew', stops: [T1]}),
+    item({name: 'codex', label: 'Codex', state: 'renew', helper: 'codex', chosen: false}),
     item({name: 'wiki', label: 'Company wiki', kind: 'connection', state: 'unreachable', helper: null, chosen: false, stops: [T1, T2]}),
     item({name: 'pay', label: 'Payments key', kind: 'key', state: 'renew', helper: null, chosen: false})]});
-  const b = api.loginBanner(api.loginWarnings().stopped);
-  assert.match(text(b), /^3 things stopped working/);
-  assert.match(text(b), /Helpers stopped on 2 tickets and start no new work\. GitHub login · Company wiki connection · Payments key\./);
-  const go = find(b, n => n.tag === 'a')[0];
-  assert.equal(go.attrs.href, '#settings/agent');
-  assert.equal(text(go), 'See what to fix');
+  const rows = api.blockedLogins(api.loginWarnings().stopped);
+  assert.deepEqual(rows.map(i => i.name), ['gh', 'wiki', 'pay']);
+  assert.deepEqual(rows.map(i => find(api.loginStoppedRow(i), n => n.tag === 'button' || n.tag === 'a').map(text)), [['Sign in'], ['Try again'], ['Sign in']]);
+  assert.equal(find(api.loginStoppedRow(rows[0]), n => n.tag === 'a')[0].attrs.href, '#settings/agent');
 });
 
 test('without the renew step the button checks again; a connection that cannot be reached says Try again', async () => {
@@ -95,7 +97,7 @@ test('the renew step\'s own button takes the place, and a shared copy has none',
   assert.equal(api.loginAction(item({state: 'soon'}), 'k'), own);
   assert.deepEqual(seen, [['claude', false]]);
   const shared = page({items: [item({state: 'renew'})]}, {snapshot: true});
-  assert.equal(shared.api.loginBanner(shared.api.loginWarnings().stopped), null);  // a snapshot carries no logins
+  assert.equal(shared.api.loginWarnings().stopped.length, 0);  // a snapshot carries no logins
   assert.equal(shared.api.loginAction(item({state: 'renew'}), 'k'), null);
 });
 
@@ -134,17 +136,18 @@ test('the page files share one global scope: no name of this part is taken by an
   }
 });
 
-// ORCH-218 (owner, 17 Nov): a tool orch cannot sign in itself shows the exact terminal command with one Copy button.
-test('a tool orch cannot renew shows its sign-in command with a Copy button on Home and in Settings', () => {
+// ORCH-218 (owner, 17 Nov): a tool orch cannot sign in itself shows the exact command with one Copy button, in Settings.
+// W-017 (28 Nov): Home's line never names a terminal or the command; its one button, Sign in, opens that place.
+test('a tool orch cannot renew: Home says one line with Sign in, Settings shows its sign-in command with a Copy button', () => {
   const copies = [];
   const UI = {commandCopy: (cmd, o) => { copies.push([cmd, o]); return {tag: 'div', attrs: {className: 'cmd-copy', 'data-key': o.dataKey}, kids: [o.lead || '', cmd, 'Copy']}; }};
   const az = item({name: 'azure', label: 'Azure CLI', helper: null, chosen: false, state: 'renew', sign_in: 'az login'});
   const {api, c} = page({items: [az]});
   c.window.UI = UI;
-  const b = api.loginBanner(api.loginWarnings().stopped);
-  assert.match(text(b), /The Azure CLI login stopped working/);
-  assert.match(text(b), /Open a terminal on this computer and run:az loginCopy/);
-  assert.deepEqual(JSON.parse(JSON.stringify(copies[0])), ['az login', {lead: 'Open a terminal on this computer and run:', dataKey: 'login-how-azure'}]);
+  const row = api.loginStoppedRow(api.loginWarnings().stopped[0]);
+  assert.equal(text(row), 'The Azure CLI login stopped working.Sign in');
+  assert.doesNotMatch(text(row), /terminal|az login|this computer/);
+  assert.equal(copies.length, 0);
   const card = api.helperNeedsCard();
   assert.match(text(card), /az loginCopy/);
   // a Renew button or Replace key takes the place: no command then, and none while it works
@@ -153,9 +156,6 @@ test('a tool orch cannot renew shows its sign-in command with a Copy button on H
   assert.equal(helpers.needSignIn({...az, state: 'works'}), '');
   assert.equal(helpers.needSignIn({...az, sign_in: 'az login; rm -rf ~'}), '');
   assert.equal(helpers.needHow({...az, how: 'Ask IT to reset it.'}), 'Ask IT to reset it.');
-  // without the kit widget the words still carry the command
-  const plain = page({items: [az]});
-  assert.match(text(plain.api.loginBanner(plain.api.loginWarnings().stopped)), /run: az login/);
 });
 
 test('a command a helper writes in backticks in its question is offered to copy; names and step ids are not', () => {
@@ -163,7 +163,6 @@ test('a command a helper writes in backticks in its question is offered to copy;
   assert.deepEqual(helpers.questionCommands(q), ['az login', 'gcloud auth login --update-adc']);
   assert.deepEqual(helpers.questionCommands('no command here'), []);
   assert.deepEqual(helpers.questionCommands('`a b` `c d` `e f`'), ['a b', 'c d']);  // at most two
-  assert.match(home, /questionCommandRows\(needQuestion\(row\), key\)/);
   assert.equal(helpers.questionWords(q), 'The Azure login ran out. Sign in again with az login, then gcloud auth login --update-adc; see `c1`, `Wiki` and `rm`.');
 });
 
@@ -175,7 +174,8 @@ test('a check file that waits for the person says so on Home and in Settings, wi
   assert.equal(helpers.needKindWord({kind: 'tool'}), 'Tool');
   assert.deepEqual(helpers.needState({...check, approve: 'broken', runs: undefined, hash: undefined}), {word: 'Cannot be read', tone: 'error'});
   const {api} = page({items: [check]});
-  const b = api.loginBanner(api.loginWarnings().stopped);
-  assert.match(text(b), /^The Databricks dev login waits for you to approve it/);
+  const own = {tag: 'button', attrs: {}, kids: ['Approve']};
+  const b = page({items: [check]}, {renewButton: () => own}).api.loginStoppedRow(api.loginWarnings().stopped[0]);
+  assert.match(text(b), /^The Databricks dev login waits for you to approve it\.Approve$/);
   assert.doesNotMatch(text(b), /orch checks approve/);
 });

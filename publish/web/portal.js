@@ -139,13 +139,16 @@
     });
   }
 
+  // PCX-01 (owner 28 Nov): the right `public` only lets this workspace put an app on the internet that opens without
+  // its access link. Where an app can be reached (internet or private network) is the app's own choice, a separate
+  // thing; "public" and "private" are words for reach, so this choice never uses them.
   function fields(workspace = {}, isNew = false) {
     const rights = workspace.rights || { permanent: false, files: true, apps: true, public: false };
     return `<div class="field"><label for="name">Workspace name</label><input id="name" name="name" value="${esc(workspace.name)}" maxlength="60" autocomplete="off" aria-describedby="name-error"><p class="field-error" id="name-error" role="alert" hidden></p></div>
       <div class="field"><label for="description">Description <span class="muted">(optional)</span></label><textarea id="description" name="description" maxlength="280" aria-describedby="description-error">${esc(workspace.description)}</textarea><p class="field-error" id="description-error" role="alert" hidden></p></div>
       <div class="field"><label for="tag-entry">Tags</label><input id="tags" name="tags" value="${esc((workspace.tags || []).join(', '))}" aria-describedby="tags-error"><p class="field-error" id="tags-error" role="alert" hidden></p></div>
       <fieldset><legend>What it can publish</legend>${[['permanent','Permanent files','kept until you remove them'],['files','Temporary files','removed after 7 days by default'],['apps','Apps','small web pages and tools']].map(([key,label,help]) => `<label class="check"><input name="${key}" type="checkbox" ${rights[key] ? 'checked' : ''}><span>${label}<small class="muted"> · ${help}</small></span></label>`).join('')}</fieldset>
-      <div class="field"><label for="sharing">Sharing</label><select id="sharing" name="public"><option value="false" ${!rights.public ? 'selected' : ''}>Private only</option><option value="true" ${rights.public ? 'selected' : ''}>Public links allowed</option></select><small class="muted">Private apps open only with their access link. Public apps can be opened by anyone.</small></div><p class="field-error form-error" role="alert" hidden></p>`;
+      <div class="field"><label for="sharing">Internet apps without an access link</label><select id="sharing" name="public" aria-describedby="sharing-help"><option value="false" ${!rights.public ? 'selected' : ''}>Not allowed</option><option value="true" ${rights.public ? 'selected' : ''}>Allowed</option></select><small class="muted" id="sharing-help">An app's network reach is chosen separately.</small></div><p class="field-error form-error" role="alert" hidden></p>`;
   }
 
   function bindTags(form) {
@@ -284,7 +287,7 @@
       (pending.length ? `<section class="card"><div class="card-h"><h2>Waiting for your approval<span class="muted"> · ${pending.length}</span></h2></div>${items.map((w,i) => w.pending ? reviewCard(w,i) : '').join('')}</section>` : '') +
       (items.length ? `<section class="card"><div class="card-h"><h2>Workspaces<span class="muted"> · ${items.length}</span></h2></div>${items.map((w,i) => {
         const r = w.rights || {};
-        const labels = [w.description || 'No description yet.', plural(Number(w.files)||0,'file','files'), plural(Number(w.apps)||0,'app','apps'), r.permanent && 'Permanent files', r.files && 'Temporary files', r.apps && 'Apps', r.public ? 'Public links allowed' : 'Private only'].filter(Boolean);
+        const labels = [w.description || 'No description yet.', plural(Number(w.files)||0,'file','files'), plural(Number(w.apps)||0,'app','apps'), r.permanent && 'Permanent files', r.files && 'Temporary files', r.apps && 'Apps', r.public ? 'Internet apps may open without an access link' : 'Internet apps require an access link'].filter(Boolean);
         return `<div class="workspace-entry"><div class="card-row" data-row>${icon('workspace')}<div class="grow"><h3>${esc(w.name)} ${w.pending ? '<span class="chip outline">Waiting for your approval</span>' : ''}</h3><p class="meta">${esc(labels.join(' · '))}</p><div class="row">${(w.tags || []).map(t => `<span class="chip outline">${esc(t)}</span>`).join('')}</div>${!w.pending && flash[w.id] ? `<p class="review-done" role="status" tabindex="-1">${esc(flash[w.id])}</p>` : ''}</div><button class="small" data-edit="${i}" data-edit-id="${esc(w.id)}" aria-expanded="false" aria-label="Edit ${esc(w.name)}">Edit</button></div></div>`;
       }).join('')}</section>` : '<section class="card empty"><h2>No workspaces yet</h2><div class="actions space-top"><a class="button primary" href="#add">Add your first workspace</a></div></section>');
     view.querySelectorAll('[data-review]').forEach(box => bindReview(box, items[Number(box.dataset.review)]));

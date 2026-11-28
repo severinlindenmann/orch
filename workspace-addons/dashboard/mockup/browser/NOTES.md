@@ -45,3 +45,15 @@ Design note: `contracts/addons/browse/signin-design.md`.
 - `browser.html`: card "Signed-in sites · N" under Live now: a line per site with "Signed in" (or "Sign-in ended" on the needs
   colour, with one sentence under the list) and "Forget sign-in" (one click, the line goes, no typed confirm).
   `?signin=none`: the empty state "No sign-in kept"; it shows too after the last Forget.
+
+## 28 Nov 2026 (owner walk: O-20 A and O-21 D)
+
+- "Your browser" (O-20): one field ("Which site?", the allowed sites as suggestions) and "Open a browser", the page's
+  one filled button. Only an allowed site opens; with no site on the list the button is off and says "No site is
+  allowed yet. Add one under Allowed sites first.". While it runs the section shows the live view with "Close".
+- "Allowed sites" (O-21): the effective list with where each site comes from ("Workspace" or "Ticket: <title>"),
+  the count ("1,004 sites"), a search field once the list is longer than a glance, at most twenty rows ("And 999
+  more sites. Search to find one."). "Add sites" takes one or a pasted list; before saving the page says what is
+  stored under another name ("*.nzz.ch → nzz.ch") and what cannot be a site, then "Add 2 sites". Remove has Undo.
+- Not yet in the mockup's `?state=empty` view: the product keeps "Your browser" and "Allowed sites" on the page
+  when no helper uses a browser (one quiet line says so); the mockup's empty view still hides the whole list.

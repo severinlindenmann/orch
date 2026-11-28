@@ -208,8 +208,8 @@ async function focusIsNew(page, dash) {
 
 async function noPreviewSwitch(page) {
   await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-  // the Typing switch sits under the add-on's "More settings", shown plainly (ORCH-1693: no fold)
-  await page.waitForSelector('[data-key="settings-more-addon-focus"]', { timeout: 20000 });
+  // the Typing switch is a plain row of the add-on's settings list (W-059: no "More settings")
+  await page.waitForSelector('[data-key="addon-detail-typing-row"]', { timeout: 20000 });
   await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
   if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
   if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');
@@ -1088,7 +1088,7 @@ async function staysOpen(page, dash, width) {
     const line = /(\d+) things? (?:needs?|waits?)/.exec(  // ORCH-2316 (R2 A): "N things need you."
       document.querySelector('main [data-key="heading"]')?.innerText || '');
     const extra = document.querySelectorAll('[data-key="review-extra"] .card-row').length;
-    const cards = document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length;
+    const cards = Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0);  // O-05: every waiting card, not only the five rows shown
     return { badge: Number(badge?.textContent || 0), line: line ? Number(line[1]) : 0, listed: extra + cards };
   });
   if (!(nums.badge === nums.line && nums.line === nums.listed)) throw new Error(`Review badge ${nums.badge}, heading ${nums.line}, listed ${nums.listed}: they must agree`);

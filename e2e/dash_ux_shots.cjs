@@ -135,19 +135,23 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       await shot('chat-day');
       report[`chat-day-${w}`].banner = await page.textContent('.chat-archive-banner');
       await page.goto(BASE + '/#settings');
-      // The technical switches sit under "More settings", shown plainly (ORCH-1693: no fold).
-      await page.waitForSelector('[data-key="settings-more-general"]');
+      // The remaining switches sit under named sections, shown plainly (W-059: no "More settings").
+      await page.waitForSelector('[data-key="settings-section-sharing"]');
       await page.waitForSelector('[data-key="settings-copies"]');
       await shot('settings', true, true);
       report[`text-settings-${w}`] = await page.evaluate(() => [...document.querySelectorAll('[data-key=settings-copies],[data-key=settings-workspace],[data-key=settings-workflow],[data-key=settings-mobile-mode],.settings-nav')]
         .map(n => n.innerText.replace(/\s+/g, ' ').trim()));
-      // Shared pages: the words and the switch on one row, switch right
+      // Shared pages: the words and the switch on one row, switch right. W-059: on the sharing add-on's own Settings page.
+      await page.goto(BASE + '/#settings/addons/publish');
+      await page.waitForSelector('[data-key="lk-shared-row"]');
       Object.assign(report[`settings-${w}`], await page.evaluate(() => {
         const row = document.querySelector('[data-key="lk-shared-row"]').getBoundingClientRect();
         const words = document.querySelector('[data-key="lk-shared-row"] > .grow').getBoundingClientRect();
         const sw = document.querySelector('[data-key="lk-shared"]').getBoundingClientRect();
         return {sharedOneRow: sw.top < words.bottom && words.top < sw.bottom && sw.left >= words.right, sharedSwitchGap: Math.round(row.right - sw.right)};
       }));
+      await page.goto(BASE + '/#settings');
+      await page.waitForSelector('[data-key="settings-copies"]');
       await page.locator('[data-key="settings-copies-details"]').scrollIntoViewIfNeeded();
       await shot('settings-copies-details');
       // "When": stacked = each choice full width
