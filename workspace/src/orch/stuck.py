@@ -35,6 +35,9 @@ MAX_PULLS = 10  # pull requests per look
 FINISHED = ("review", "done", "dropped")
 GONE = ("merged", "closed", "not found")
 UNMERGED = "The pull request passed its checks but was not merged, and no helper is working on it."
+# FX-04 (owner, 28 Nov): a pull request that only just passed its checks is still on its way in (the helper or
+# the queue merges it within this time on a normal day): no row and no card until it is older than this.
+UNMERGED_WAIT = 30 * 60  # seconds since its checks passed (a default, not a setting)
 
 
 def _cache_path(root: Path) -> Path:
@@ -168,11 +171,40 @@ def _ready(seen) -> bool:
     return isinstance(seen, dict) and seen.get("green") is True and seen.get("state") == "OPEN"
 
 
-def unmerged_ids(root: Path, tickets_: list[dict], queue: mergequeue.Queue | None = None) -> set[str]:
-    """ORCH-1741: the tickets that have the "passed its checks but was not merged" row, from the last look
-    only (GitHub is not asked). Their Check card gives way to that row: one card per ticket."""
+def _young(seen, now: float) -> bool:
+    """Its checks passed less than UNMERGED_WAIT ago (the time is known): it still waits to be merged."""
+    since = seen.get("green_since") if isinstance(seen, dict) else None
+    return isinstance(since, (int, float)) and not isinstance(since, bool) and 0 <= now - since < UNMERGED_WAIT
+
+
+def merging_ids(
+    root: Path, tickets_: list[dict], queue: mergequeue.Queue | None = None, now: float | None = None
+) -> set[str]:
+    """FX-04: the tickets whose open pull request passed its checks less than UNMERGED_WAIT ago, with no
+    older one left open: they wait to be merged and need nobody yet. From the last look only."""
+    now = time.time() if now is None else now
     pulls = _read(root).get("pulls") or {}
-    return {t["id"] for t, _, url in _left_open(root, tickets_, queue) if _ready(pulls.get(url))}
+    young, old = set(), set()
+    for t, _, url in _left_open(root, tickets_, queue):
+        seen = pulls.get(url)
+        if _ready(seen):
+            (young if _young(seen, now) else old).add(t["id"])
+    return young - old
+
+
+def unmerged_ids(
+    root: Path, tickets_: list[dict], queue: mergequeue.Queue | None = None, now: float | None = None
+) -> set[str]:
+    """ORCH-1741: the tickets that have the "passed its checks but was not merged" row, from the last look
+    only (GitHub is not asked). Their Check card gives way to that row: one card per ticket. FX-04: not one
+    whose checks only just passed (merging_ids)."""
+    now = time.time() if now is None else now
+    pulls = _read(root).get("pulls") or {}
+    return {
+        t["id"]
+        for t, _, url in _left_open(root, tickets_, queue)
+        if _ready(pulls.get(url)) and not _young(pulls.get(url), now)
+    }
 
 
 def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
@@ -186,8 +218,8 @@ def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
         seen = pulls.get(url) if isinstance(pulls.get(url), dict) else None
         if seen is None or now - float(seen.get("at") or 0) >= CHECK_EVERY:
             due = True
-        if not _ready(seen):
-            continue
+        if not _ready(seen) or _young(seen, now):
+            continue  # FX-04: checks that only just passed still wait to be merged: no row yet
         tid = t["id"]
         if any(r["ticket"] == tid for r in rows):
             continue  # one row per ticket: its first pull request that is ready

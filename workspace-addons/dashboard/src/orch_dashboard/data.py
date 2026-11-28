@@ -1865,6 +1865,21 @@ def _answered_newest(root: Path, orch_bin: str | None):
     return run_orch(orch_bin, ["review", "list", "--answered", "--json"], root)
 
 
+def load_paused(root: Path) -> dict | None:
+    """W-043: {"reason": str} while automation is paused in this workspace (`orch pause`, core's brake), else
+    None. The Review page says it in one line on top with Turn on. A plain file read, never an error."""
+    try:
+        from orch import brake
+
+        rec = brake.paused(root)
+    except Exception:  # noqa: BLE001 - an older core, or a file that cannot be read: nothing to say
+        return None
+    if rec is None:
+        return None
+    why = brake.clean_reason(rec.get("reason") if isinstance(rec.get("reason"), str) else None)
+    return {"reason": why or ""}
+
+
 def load_review(root: Path, orch_bin: str | None) -> dict:
     """The Review page's data: what waits (`orch review list --json`) and what was decided
     (`orch review list --answered --json`). Empty lists when orch cannot say."""
@@ -2169,6 +2184,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
         "ticket_chats": ticket_chats,
         "needs": needs if isinstance(needs, list) else [],
         "parked": f_parked.result() if f_parked else [],  # ORCH-2431: live page only
+        "paused": load_paused(root) if with_settings else None,  # W-043: live page only
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
