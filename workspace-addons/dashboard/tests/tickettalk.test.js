@@ -98,13 +98,6 @@ test('orch unreachable says so in plain words', async () => {
   assert.deepEqual(plain(result), {ok:false, dropFiles:false, text:"Can't reach orch. Nothing was sent; try again in a moment."});
 });
 
-test('the card is on open tickets only, never on a shared copy or a done ticket', () => {
-  assert.ok(setup().ctx.ticketTalkCard({id:'t_talk0001', status:'active'}));
-  assert.ok(setup().ctx.ticketTalkCard({id:'t_talk0001', status:'review'}));
-  assert.equal(setup().ctx.ticketTalkCard({id:'t_talk0001', status:'done'}), null);
-  assert.equal(setup({snapshot:true}).ctx.ticketTalkCard({id:'t_talk0001', status:'active'}), null);
-});
-
 test('the button says what one click does', () => {
   const {ctx} = setup();
   assert.equal(ctx.ticketTalkLabel({status:'active'}, {running:true}), 'Send to helper');

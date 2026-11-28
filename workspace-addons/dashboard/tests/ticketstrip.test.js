@@ -66,9 +66,9 @@ test('ORCH-2140 W4: one Result card, result first, Looks good + Send back under 
   const result = cards[0], inside = nodes(result);
   assert.match(text(result), /Result/);
   assert.match(text(result), /In short/);
-  assert.match(text(result), /What was done.*1 of 1 task/);
+  assert.match(text(result), /1 of 1 task done.*Open tasks/, 'O-12: one tasks line, the list is on the Tasks tab');
   const order = key => inside.findIndex(n => key(n));
-  const short = order(n => typeof n.children?.[0] === 'string' && /In short/.test(n.children.join(''))), did = order(n => n.attrs?.['data-key'] === 'review-what-done');
+  const short = order(n => typeof n.children?.[0] === 'string' && /In short/.test(n.children.join(''))), did = order(n => n.attrs?.['data-key'] === 'overview-tasks-t_one');
   const buttons = inside.filter(n => n.tag === 'button' && /^(Looks good|Send back)$/.test(text(n)));
   assert.deepEqual(buttons.map(text), ['Looks good', 'Send back']);
   assert.ok(short >= 0 && short < did && did < inside.indexOf(buttons[0]), 'result first, buttons last');
@@ -82,16 +82,15 @@ test('Start, Answer, Stop and Reopen are the main actions of their states', () =
   assert.ok(label({status:'done'}).includes('Reopen'));
   assert.ok(c.detail);
 });
-test('Done: "What the helper did" lists the finished tasks; Properties are compact', () => {
+test('Done: the tasks are one line on the Overview; Properties are compact', () => {
   const c = ctx();
   const done = STATES[4][1];
   const tree = c.detail({...base, ...done, done_when:'The website shows the new hours.'});
-  const did = nodes(tree).find(n => /helper-did/.test(n.attrs.className || ''));
-  assert.ok(did, 'a "What the helper did" card');
-  assert.match(text(did), /What the helper did/);
-  assert.match(text(did), /Read the page/);
-  assert.match(text(did), /Changed 3 lines/);
-  assert.doesNotMatch(text(did), /Skipped bit/);
+  // O-07 / O-12 (owner, 28 Nov): no "What the helper did" card; the tasks are one line, the list is on the Tasks tab
+  assert.ok(!nodes(tree).some(n => /helper-did/.test(n.attrs.className || '')));
+  const did = nodes(tree).find(n => n.attrs?.['data-key'] === 'overview-tasks-t_one');
+  assert.match(text(did), /^2 of 2 tasks done1 won't doOpen tasks$/);
+  assert.doesNotMatch(text(nodes(tree).find(n => n.attrs?.id === 'ticket-panel-overview')), /Read the page|Skipped bit/);
   const props = nodes(tree).find(n => n.tag === 'aside' && /properties/.test(n.attrs.className || ''));
   assert.doesNotMatch(text(props), /What happens next|Updated/);
   // ORCH-581: created and finished are one quiet line at the foot of the rail
@@ -298,6 +297,7 @@ test('What I found: folded line with counts, sources with web links only, Could 
   const found = {sources:[{name:'MKT-214 Spring newsletter', link:'https://acme.example/browse/MKT-214', opened:true, lines:'One mail with the garden range.'},
     {name:'Old notes', link:'javascript:alert(1)', opened:true, lines:'Same list.'},
     {name:'Email from Anna', opened:false, why:'No mail connection is set up.'}], facts:['For 1,400 shop customers'], at:'2026-11-19T09:41:00Z'};
+  c.tcHash = id => '#chat/' + id;
   const tree = c.detail({...base, status:'open', description:'Spring newsletter', found});
   const fold = nodes(tree).find(n => n.attrs['data-key'] === 'found');
   assert.equal(fold.tag, 'details');
@@ -308,6 +308,7 @@ test('What I found: folded line with counts, sources with web links only, Could 
   assert.deepEqual(links, ['https://acme.example/browse/MKT-214']);
   const closed = nodes(tree).find(n => n.attrs['data-key'] === 'found-closed');
   assert.match(text(closed), /Email from Anna.*Attach it.*No mail connection/);
+  assert.equal(nodes(closed).find(n => text(n) === 'Attach it' && n.tag === 'a').attrs.href, '#chat/t_one', 'O-07: files are added in the ticket chat, the Overview has no write box');
   assert.ok(!nodes(fold).some(n => n.attrs['data-key'] === 'found-closed'), 'Could not open is outside the fold');
   assert.equal(nodes(c.detail({...base, status:'open', found:{sources:[], facts:[]}})).find(n => n.attrs['data-key'] === 'found'), undefined);
 });
@@ -390,13 +391,13 @@ test('ORCH-1850: active task and no run: the bar names the last marked step and 
   assert.match(text(keyed(all, 'handover-source')), /^Marked by Anna · .+ · No helper run on record$/);
   assert.doesNotMatch(text(keyed(all, 'agent-bar')), /Claude/, 'the chosen helper is not named as if it ran');
   assert.ok(keyed(all, 'handover-activity'), 'the supporting event is one click away');
-  const progress = keyed(all, 'progress');
-  assert.equal(text(keyed(nodes(progress), 'progress-c3')).endsWith('In progress'), true);
-  assert.doesNotMatch(text(progress), /Working/);
-  assert.match(text(keyed(nodes(progress), 'progress-c2')), /Three places with a table on Friday/, 'the evidence of the task done last');
-  assert.doesNotMatch(text(keyed(nodes(progress), 'progress-c1')), /Twelve people/, 'one evidence line, not one per task');
-  const [bar, prog, res] = order(all, 'agent-bar', 'progress', 'results-widgets');
-  assert.ok(bar < prog && prog < res, 'bar, then Progress, then Results');
+  // O-07 / O-12 (owner, 28 Nov): the tasks are one line that names the task in progress; the list is on the Tasks tab
+  const progress = keyed(all, 'overview-tasks-t_one');
+  assert.equal(text(keyed(nodes(progress), 'overview-task-now')), 'In progress: Book the table');
+  assert.doesNotMatch(text(progress), /Working|helper is on/);
+  assert.ok(!keyed(all, 'progress') && !keyed(all, 'results-widgets'));
+  const [bar, prog] = order(all, 'agent-bar', 'overview-tasks-t_one');
+  assert.ok(bar < prog, 'bar, then the tasks line');
 });
 
 test('ORCH-1850: a live run is the only "Working"; the step it is on says the helper works on it', () => {
@@ -404,18 +405,18 @@ test('ORCH-1850: a live run is the only "Working"; the step it is on says the he
   const all = nodes(c.detail({...lunch, sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
   assert.ok(!keyed(all, 'agent-bar') && !keyed(all, 'handover-step'), 'the header holds a running helper');
   assert.match(text(keyed(all, 'ticket-kicker')), /Working/);
-  assert.match(text(keyed(all, 'progress-c3')), /Your helper is working on this task/);
+  assert.equal(text(keyed(all, 'overview-task-now')), 'The helper is on: Book the table');
 });
 
 test('ORCH-1850: a paused or ended run says what the record says, by the helper that really ran', () => {
   const dead = nodes(handoverCtx({runs:{t_one:{running:false, state:'dead', claim:{agent:'codex'}}}}).detail(lunch));
   assert.match(text(keyed(dead, 'handover-source')), /Codex: the last run ended without finishing$/);
-  assert.doesNotMatch(text(keyed(dead, 'progress')), /Working/);
+  assert.doesNotMatch(text(keyed(dead, 'overview-tasks-t_one')), /Working|helper is on/);
   const earlier = nodes(handoverCtx({}).detail({...lunch, sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
   assert.match(text(keyed(earlier, 'handover-source')), /Codex last worked .+ ago$/);
   const paused = nodes(handoverCtx({}).detail({...lunch, status:'ready', sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
   assert.match(text(keyed(paused, 'ticket-sentence')), /^Paused/);
-  assert.doesNotMatch(text(keyed(paused, 'progress')), /Working/);
+  assert.doesNotMatch(text(keyed(paused, 'overview-tasks-t_one')), /Working|helper is on/);
   assert.equal(text(keyed(paused, 'handover-step')), 'Last marked step · Book the table');
   assert.match(text(keyed(paused, 'handover-source')), /Codex last worked/);
   // a mark under the computer's login reads as the person its earlier lines were stamped with, as Activity says
@@ -433,9 +434,9 @@ test('ORCH-1850: a paused or ended run says what the record says, by the helper 
 test('ORCH-1850: Done with a real result keeps Results on top and no handover bar', () => {
   const done = {...lunch, status:'done', done_at:'2026-11-14T11:05:00Z', checklist:lunch.checklist.map(c => ({...c, state:undefined, done:true}))};
   const all = nodes(handoverCtx({}).detail(done));
-  assert.ok(keyed(all, 'results-widgets') && !keyed(all, 'progress') && !keyed(all, 'agent-bar'));
+  assert.ok(!keyed(all, 'progress') && !keyed(all, 'agent-bar'));
   assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
-  assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
+  assert.match(text(keyed(all, 'overview-tasks-t_one')), /3 of 3 tasks done/);
 });
 
 test('Results: a completion note counts as a result, so no "Nothing yet" under it', () => {
@@ -443,10 +444,11 @@ test('Results: a completion note counts as a result, so no "Nothing yet" under i
   const c = ctx({resultsHost:(id, o) => { seen.push(o.empty); return h('div', {}); }, ticketHostsOpenGroup:() => false});
   c.window.UI.result = () => null;
   const done = c.detail({...STATES[4][1], ...base, status:'done', done_at:'2026-11-14T11:05:00Z', checklist:[{id:'c1', text:'Collect', done:true, at:'2026-11-14T11:00:00Z', evidence:[{type:'note', ref:'Sales up 8%.'}]}]});
-  const card = nodes(done).find(n => n.attrs?.['data-key'] === 'results-widgets');
+  const card = nodes(done).find(n => n.attrs?.['data-key'] === 'results');
   assert.ok(nodes(card).some(n => n.attrs?.['data-key'] === 'completion-note'));
-  assert.equal(seen.pop(), '', 'no empty line under the note');
-  assert.match(text(card), /Results1 note/);
+  assert.equal(seen.length, 0, 'O-07: the Overview lists result files as rows, not as widgets');
+  assert.match(text(card), /Result1 note/);
+  assert.doesNotMatch(text(card), /Nothing yet/);
 });
 
 test('ORCH-2140 W2: a saved ticket with no helper tool set up shows Two ways to start instead of a Start that cannot work', () => {

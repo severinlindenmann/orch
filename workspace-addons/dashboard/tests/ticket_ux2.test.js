@@ -314,7 +314,7 @@ test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an emp
   assert.match(ticketSrc, /taskAct\('check\.move', \{ticket:t\.id, check:task\.id, after:after\.id\}\)/);
   assert.match(ticketSrc, /taskAct\('check\.remove', \{ticket:t\.id, check:task\.id\}\)/);
   assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
-  assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
+  assert.match(ticketSrc, /\['activity', 'Activity', activityRows\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
 });
 test('ORCH-1716: the Needs you button counts tickets like its group, even when one ticket holds two questions', () => {
   const c = listCtx();

@@ -25,7 +25,7 @@ test('ORCH-902: the ticket page 44px minimum height leaves .switch at its 24px h
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.css'), 'utf8');
   const rule = ticket.match(/\.ticket-page :is\(([^)]*\)?[^)]*)\)\{min-height:44px\}/);
   assert.ok(rule, 'the 44px rule exists');
-  assert.match(rule[1], /button:not\(\.switch\)/);
+  assert.match(rule[1], /button:not\(\.switch[,)]/);  // O-12 added the compact task row's small controls to the same list
   assert.match(kit, /\.switch\{[^}]*height:24px/);
 });
 

@@ -299,7 +299,7 @@ function roleDetail(t, run, parent, menu) {
         panel('schedule', 'Schedule', roleSchedulePanel(t, data)),
         panel('chat', 'Chat', roleChatPanel(t, data, openQs), 'role-chat'),
         panel('files', 'Files', artifactsPanel(t)),
-        panel('tasks', 'All tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.')])),
+        panel('tasks', 'All tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskList(t) : emptyRow('No tasks yet.')])),
         panel('activity', 'Everything that happened', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side' + (snapshot ? '' : ' rail-sheet'), id:'ticket-rail-' + t.id, 'data-open':String(railOpen.id === t.id), 'aria-label':'About this role', 'data-key':'ticket-rail-' + t.id,
         role:railOpen.id === t.id ? 'dialog' : null, 'aria-modal':railOpen.id === t.id ? 'true' : null},

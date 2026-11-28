@@ -135,7 +135,8 @@ test('loaded after the kit renderer and before the pages that use it; the page r
   const app = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
   assert.match(app, /dataset\.resultsHost !== undefined/);
   assert.match(app, /resultsFillAll\(document\)/);
-  for (const page of ['ticket.js', 'livechat.js', 'livewall.js']) assert.match(fs.readFileSync(path.join(WEB, 'pages', page), 'utf8'), /resultsHost\(/, page + ' uses the one shared host');
+  // O-07 (owner, 28 Nov): the ticket Overview lists its result files as rows; the widgets stay in the chat and on the wall
+  for (const page of ['livechat.js', 'livewall.js']) assert.match(fs.readFileSync(path.join(WEB, 'pages', page), 'utf8'), /resultsHost\(/, page + ' uses the one shared host');
 });
 
 test('no page-local widget: the pages draw results only through UI.result (R4.3)', () => {

@@ -369,7 +369,7 @@ test('an open task menu and its typed reason survive render() until submit, Esca
   const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
-  const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
+  const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['data-key'] === 'task-more-c1'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
   let ui = draw();
   assert.equal(ui.form.hidden, true);
   ui.more.onclick();
@@ -414,7 +414,8 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
-  assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
+  assert.ok(all.some(n => n.attrs.className === 'task-title task-wont' && n.children.includes('Skip this')));
+  assert.ok(all.some(n => n.tag === 'li' && n.attrs.className === 'task-row skipped'), 'O-12: the compact row');
   assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes("Won't do")), "ORCH-476: one word, the button's");
   assert.ok(all.some(n => JSON.stringify(n.children).includes("Won't do: No longer needed")), 'the reason shows plainly, no disclosure');
   assert.ok(!all.some(n => n.tag === 'details'));
@@ -431,7 +432,7 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   all = c.taskRows(t).flatMap(nodes);
   const form = all.find(n => n.tag === 'form'), input = all.find(n => n.tag === 'input');
   assert.equal(form.hidden, true);
-  all.find(n => n.attrs['aria-label'] === 'More').onclick();
+  all.find(n => n.attrs['data-key'] === 'task-more-c1').onclick();
   assert.equal(form.hidden, false);
   assert.equal(input.attrs.maxlength, 200);
   input.value = 'Changed plans';
@@ -649,11 +650,11 @@ test('Results of a Done ticket shows the completion note, newest first, and noth
   const notes = c.completionNotes(t);
   assert.equal(notes[0].head, 'The typo is fixed.');
   assert.equal(notes[0].body, 'Page now says 9:00 - 13:00');
-  const json = JSON.stringify(c.ticketResultsCard(t));
+  const json = JSON.stringify(c.overviewResult(t));
   assert.match(json, /Completion note · 12:26/);
   assert.match(json, /2 notes/);
   assert.equal(c.completionNotes({...t, status:'review'}).length, 0);
-  assert.equal(c.ticketResultsCard({id:'t_x', status:'done', checklist:[]}), null);
+  assert.equal(c.overviewResult({id:'t_x', status:'done', checklist:[]}), null);
 });
 test('the Changes to add card offers Review changes and Keep as is; a kept copy collapses to one quiet line', () => {
   const c = context({render:() => {}, clean:v => String(v ?? '')});
