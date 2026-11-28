@@ -177,21 +177,22 @@ test('same numbers: every page shows the same count, date and state for the same
 
     // ---- Review
     await visit('#review');
-    await page.waitForSelector('[data-review-queue] .review-row', {timeout: 10_000}).catch(() => null);
+    await page.waitForSelector('[data-review-queue][data-review-total]', {timeout: 10_000}).catch(() => null);
     const review = await page.evaluate(() => {
       const main = document.querySelector('main');
       // ORCH-2316 (R2 A): the line reads "N things need you."; older builds said "N things wait on you"
       return {line: (/(\d+) things? (?:needs?|waits?) (?:on )?you/.exec(main.innerText) || [])[0] || '', chrome: null,
         waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
-        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length,
-        // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed above
+        // O-05 (28 Nov): the list shows five rows at a time and folds one cause into a row; its count is every waiting card
+        queue: Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0),
+        // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed after the card
         extra: document.querySelectorAll('[data-key="review-extra"] [data-what]').length};
     });
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
     note('needs you', 'Review Waiting tab (cards + rows listed above them, ORCH-2339)', int(review.waiting));
-    note('needs you', 'Review "All cards" rows waiting + rows listed above the cards', review.queue + review.extra);
+    note('needs you', 'Review list count + rows listed after the card', review.queue + review.extra);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
     noise('top bar (on Review)', reviewChrome.topBar);
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));

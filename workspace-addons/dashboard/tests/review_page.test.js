@@ -78,26 +78,128 @@ test('refusals become the codes the page understands', async () => {
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
 });
-// ORCH-477 round 2 (owner sent back): the list is the kit's (deck.drawList: rows, groups, Compare mode); the page only
-// hands it the queue and keeps it on the left. The kit's swipe-deck tests cover the rows and Compare mode.
-test('the All cards list is drawn by the kit into the queue, on the left of the deck (ORCH-477)', () => {
-  const c = ctx({});
-  const drawn = [], queue = h('div'), deck = {drawList:q => drawn.push(q)};
+// Owner's walk of 28 Nov (O-05 D, O-06 D, W-036): the page draws the waiting list itself: five compact rows and the
+// count, Next five / All, cards with one cause folded into a row with Open, no Compare and no ticks; under it the
+// merge line and the Reviewer's line.
+const listDeck = (n, extra = {}) => { const jumps = []; return {jumps, items:Array.from({length:n}, (_, i) => ({id:'c' + i, title:'Card ' + i, ticket:'DT-' + i, raw:{}})), answers:{}, index:0, jump:i => jumps.push(i), drawList() { throw new Error('the kit list is not used'); }, ...extra}; };
+const buttons = n => nodes(n).filter(x => x.tag === 'button');
+test('O-05: the list shows five compact rows and the count; Next five shows the next five, All every one, First five the start again', () => {
+  const c = ctx({}), deck = listDeck(13), queue = h('div');
   c.reviewDrawSide(queue, deck);
-  assert.deepEqual(drawn, [queue]);
-  assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
-  assert.doesNotThrow(() => c.reviewDrawSide(queue, {}), 'an old deck without the list draws nothing');
-  const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
-  assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
-  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
-  assert.equal(side.attrs['aria-label'], 'Needs you');
-  assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
+  const rows = () => nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']);
+  const steps = () => buttons(queue).filter(b => b.attrs['data-review-more']).map(text);
+  const where = () => text(nodes(queue).find(n => n.attrs?.['data-review-where'] !== undefined));
+  assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4']);
+  assert.match(text(queue), /^Needs you13 waiting/);
+  const first = nodes(queue).find(n => n.attrs?.['data-review-row'] === 'c0');
+  assert.equal(first.attrs['aria-current'], 'true'); assert.match(first.attrs.className, /review-queue-row is-now/);
+  assert.deepEqual(steps(), ['Next five', 'All 13']); assert.equal(where(), 'Rows 1 to 5 of 13');
+  nodes(queue).find(n => n.attrs?.['data-review-row'] === 'c3').onclick(); assert.deepEqual(deck.jumps, [3], 'a row opens its card');
+  const more = key => buttons(queue).find(b => b.attrs['data-review-more'] === key);
+  // the buttons redraw the list in its place on the page; here the place is handed in again
+  c.document.querySelector = () => queue;
+  more('next').onclick(); assert.deepEqual(rows(), ['c5', 'c6', 'c7', 'c8', 'c9'], 'the next five, never a longer list');
+  assert.deepEqual(steps(), ['Next five', 'First five', 'All 13']); assert.equal(where(), 'Rows 6 to 10 of 13');
+  more('next').onclick(); assert.deepEqual(rows(), ['c10', 'c11', 'c12']); assert.deepEqual(steps(), ['First five', 'All 13']);
+  more('all').onclick(); assert.equal(rows().length, 13); assert.deepEqual(steps(), ['First five']);
+  more('five').onclick(); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4']);
+  // the list follows the card on screen: a card further down (opened from a ticket, or the next after an answer) shows its five
+  deck.index = 7; c.reviewDrawSide(queue, deck);
+  assert.deepEqual(rows(), ['c5', 'c6', 'c7', 'c8', 'c9']);
+  more('five').onclick(); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4'], 'First five stays where the person put it');
+  c.reviewDrawSide(queue, deck); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4'], 'the same card: no jump back');
+  deck.answers.c0 = {verdict:'ok'}; c.reviewDrawSide(queue, deck);
+  assert.match(text(queue), /^Needs you12 waiting/, 'an answered card leaves the list and the count at once');
+  assert.deepEqual(rows(), ['c1', 'c2', 'c3', 'c4', 'c5']);
+  // five or fewer: no steps at all
+  const few = h('div'); ctx({}).reviewDrawSide(few, listDeck(4));
+  assert.deepEqual(buttons(few).filter(b => b.attrs['data-review-more']).length, 0);
+});
+test('O-05: cards that wait for one cause are one row with Open (their cards under it), never a button that answers them all', () => {
+  const c = ctx({}), queue = h('div');
+  const items = [{id:'s1', title:'Export', ticket:'DT-1', raw:{cause:'helper:unmerged'}}, {id:'q', title:'Which colour?', ticket:'DT-2', raw:{}},
+    {id:'s2', title:'Import', ticket:'DT-3', raw:{cause:'helper:unmerged'}}, {id:'r1', kind:'check', title:'Recorded as passed for release 53', raw:{}}, {id:'r2', kind:'check', title:'Recorded as passed for release 53', raw:{}},
+    {id:'n1', kind:'draft', title:'Review', raw:{}}, {id:'n2', kind:'draft', title:'Review', raw:{}}, {id:'d1', kind:'draft', title:'Recorded as passed for release 53', raw:{}}];
+  const deck = listDeck(0, {items, index:2});
+  c.document.querySelector = () => queue;
+  c.reviewDrawSide(queue, deck);
+  const group = key => buttons(queue).find(b => b.attrs['data-review-group'] === key);
+  assert.equal(text(group('cause:helper:unmerged')), '2 · Pull request not mergedOpen');
+  assert.equal(text(group('title:check:recorded as passed for release 53')), '2 · Recorded as passed for release 53Open');
+  assert.match(group('cause:helper:unmerged').attrs.className, /is-now/, 'the card on screen is in this group');
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['q', 'n1', 'n2'], 'a lone cause stays its own row (rows 1 to 5: two groups, then three single rows)');
+  assert.equal(c.reviewListModel(deck).all, 6, 'two groups and four single rows for eight cards');
+  vm.runInContext('reviewListAll = true', c); c.reviewDrawSide(queue, deck);
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']), ['q', 'n1', 'n2', 'd1'], 'cards without words of their own, or of another kind, are never folded');
+  vm.runInContext('reviewListAll = false', c); c.reviewDrawSide(queue, deck);
+  group('cause:helper:unmerged').onclick();
+  assert.deepEqual(nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']).slice(0, 3), ['s1', 's2', 'q']);
+  assert.equal(text(group('cause:helper:unmerged')), '2 · Pull request not mergedClose'); assert.equal(group('cause:helper:unmerged').attrs['aria-expanded'], 'true');
+  assert.deepEqual(buttons(queue).map(text).filter(t => /merge all|answer all/i.test(t)), [], 'every decision stays its own');
+});
+test('O-06: no Compare button and no ticks in the list, and the kit is told to leave them out of its own lists', () => {
+  const calls = [];
+  const c = ctx({}, {window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const queue = h('div');
+  c.reviewDrawSide(queue, listDeck(8));
+  assert.doesNotMatch(text(queue), /Compare|Tick two/);
+  assert.equal(nodes(queue).filter(n => n.tag === 'input').length, 0);
+  const host = h('div');
+  c.mountReview({querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => null});
+  assert.equal(calls[0].compare, false);
+  assert.doesNotMatch(read('pages/review.js'), /deck\.drawList\(|setPicking|showPair/, 'the page starts no Compare mode');
+});
+test('W-036: the same order in every layout: the card, the list, then the Reviewer\'s one line that opens Answered', () => {
+  const acc = (ticket, extra = {}) => ({ticket, key:'DT-1', title:'Fix', why:'merged.', sent_back:false, ...extra});
+  const c = ctx({review:{cards:[], accepted:[acc('t_aaaa11'), acc('t_bbbb22'), acc('t_cccc33', {back:true}), acc('t_dddd44', {answer:true, question:'q1'}), acc('t_eeee55', {earlier:true})]}}, {iconEl:n => n});
+  const queue = h('div');
+  c.reviewDrawSide(queue, listDeck(1));
+  const line = nodes(queue).find(n => n.attrs?.['data-review-reviewer'] !== undefined);
+  assert.equal(text(line), 'The Reviewer accepted 2, sent back 1, answered 1 for you today.Look');
+  assert.equal(nodes(queue).filter(n => n.attrs?.['data-review-row']).length, 0, 'one card alone has no rows; the line still shows');
+  // wide: the list beside the card; the Reviewer's history is not on the Waiting page at all
+  const page = nodes(c.reviewPage()), keys = page.map(n => n.attrs?.['data-key']).filter(Boolean);
+  assert.ok(!keys.includes('review-accepted'), 'no log on Waiting');
+  const main = page.find(n => n.attrs?.['data-key'] === 'review-main');
+  assert.deepEqual(main.children.map(n => n.attrs['data-key']), ['review-nav', 'review-host'], 'the switch, then the card: nothing above the decision');
+  const wide = page.find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.deepEqual(wide.children.map(x => x.attrs['data-key']), ['review-main', 'review-rail'], 'wide too: the card before the list in the page, so Tab reaches the decision first');
+  assert.equal(wide.attrs['data-narrow'], null, 'wide: no narrow mark, so the master stands the list on the left');
+  assert.match(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8'), /\.review-layout:not\(\[data-narrow\]\)>\.review-rail\{order:-1\}/, 'the master rule that keeps the list on the left');
+  // narrow (a phone, or beside the Focus panel): one column, the card first, the list after it in the same scroll
+  const n = ctx({review:{cards:[], accepted:[]}}, {document:{addEventListener(){}, getElementById:() => null, body:{dataset:{liveNarrow:''}}}});
+  const layout = nodes(n.reviewPage()).find(x => x.attrs?.['data-key'] === 'review-layout');
+  assert.deepEqual(layout.children.map(x => x.attrs['data-key']), ['review-main', 'review-rail']);
+  assert.deepEqual(layout.children[0].children.map(x => x.attrs['data-key']), ['review-nav', 'review-host', 'review-next']);
+  assert.equal(nodes(layout).filter(x => x.attrs?.['data-review-queue'] !== undefined).length, 1, 'one list, never two');
+  assert.ok(!nodes(layout).some(x => x.attrs?.className === 'card review-side'), 'the aside the narrow styles hide is not used');
+  // Answered: the Reviewer's block first, each entry with its reason and Undo
+  const a = ctx({review:{cards:[], accepted:[acc('t_aaaa11', {undo:'accept'})]}, tickets:[{id:'t_x', key:'DT-9', title:'Lunch', questions:[{id:'q1', text:'The helper could not start: Automation is paused.', taken_back:{at:'2026-11-15T10:00:00Z', by:'agent:automation', reason:'Automation runs again, so this needs no answer.'}}, {id:'q2', text:'old', taken_back:{at:'2026-11-01T10:00:00Z', reason:'x'}}]}]},
+    {iconEl:x => x, document:{addEventListener(){}, getElementById:id => id === 'answered' ? {hidden:false} : null}});
+  const am = nodes(a.reviewPage()).find(x => x.attrs?.['data-key'] === 'review-main');
+  assert.deepEqual(am.children.map(x => x.attrs['data-key']), ['review-nav', 'review-accepted', 'review-closed', 'review-host']);
+  assert.match(text(am.children[1]), /What the Reviewer did.*merged\./); assert.deepEqual(buttons(am.children[1]).map(text), ['Send back', 'Undo']);
+  // W-043: what closed by itself today says so in one line; an older one is history
+  assert.match(text(am.children[2]), /^Closed without youDT-9 · Lunch.*Closed by itself · Automation runs again, so this needs no answer\.$/);
+  assert.doesNotMatch(text(am.children[2]), /old/);
+});
+test('W-043: a paused automation is one line on top with Turn on (one click, orch resume); running, there is no line', async () => {
+  const c = ctx({paused:{reason:'Disk almost full: 8 GB free'}, tickets:[{id:'t_a', status:'ready'}, {id:'t_b', status:'ready'}, {id:'t_c', status:'active'}], review:{cards:[]}});
+  const page = c.reviewPage(), line = nodes(page).find(n => n.attrs?.['data-key'] === 'review-paused');
+  assert.equal(text(line), 'Automation is paused: Disk almost full: 8 GB free. Nothing starts by itself. 2 tickets wait for a helper.Turn on');
+  assert.equal(page.children[1], line, 'right under the heading, above every card');
+  assert.doesNotMatch(text(line), /orch resume/, 'no command to type');
+  await buttons(line)[0].onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['automation.resume', {}]]);
+  assert.equal(nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-paused'), undefined, 'gone at once');
+  assert.equal(ctx({review:{cards:[]}}).reviewPausedLine(), null);
+  assert.equal(ctx({paused:{reason:''}, review:{cards:[]}}, {snapshot:true}).reviewPausedLine(), null, 'never in a shared copy');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
   const calls = [];
   const c = ctx({}, {window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() { calls.push('destroy'); }, tick() {}}; }}}});
   const host = h('div'), side = h('aside'), queue = h('div');
-  const main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : sel === '[data-review-side]' ? [side] : [], querySelector: () => queue};
+  const main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : sel === '[data-review-side],[data-review-nav]' ? [side] : [], querySelector: () => queue};
   c.mountReview(main); c.mountReview(main);
   assert.equal(calls.length, 1, 'mounted once'); assert.equal(calls[0].poll, 3000); assert.equal(typeof calls[0].onChange, 'function');
   assert.ok(c.mounts.has(host) && c.mounts.has(side));
@@ -173,7 +275,7 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
 
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
-  assert.match(c.reviewSubtitle(), /^1 thing needs you\./);
+  assert.equal(c.reviewSubtitle(), 'Nothing new needs you. 1 card you put off is still here.', 'W-003: never another number than the badge; the part is named');
 });
 
 test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
@@ -198,10 +300,8 @@ test('"What the Reviewer did": hidden when empty, a link and the why line per ro
   assert.equal(buttons.length, 1, 'only the row that is not sent back has the button');
   assert.equal(text(buttons[0]), 'Send back');
   assert.match(text(card), /Sent back/);
-  // the page keeps the card beside the "All cards" aside, not inside it (the aside hides on a phone)
-  const page = nodes(c.reviewPage());
-  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined), rail = page.find(n => n.attrs?.['data-key'] === 'review-rail');
-  assert.ok(rail && !nodes(side).some(n => n.attrs?.['data-key'] === 'review-accepted') && nodes(rail).some(n => n.attrs?.['data-key'] === 'review-accepted'));
+  // W-036: the block is on Answered, not in the rail under the list
+  assert.ok(!nodes(c.reviewPage()).some(n => n.attrs?.['data-key'] === 'review-accepted'));
   // the send: ticket.changes with the note, then the row reads "Sent back"
   assert.equal(await c.reviewSendBack(row('t_aaaa11'), '   '), false, 'an empty note sends nothing');
   assert.equal(c.acts.length, 0);
@@ -484,7 +584,7 @@ test('ORCH-1804: "Open ticket" shows the card\'s ticket beside the deck (#review
   assert.equal(closed.reviewTicketHref('t_abcdef'), '#review?card=x&ticket=t_abcdef', 'the card the page opened on stays');
   const layout0 = nodes(closed.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
   assert.equal(layout0.attrs.className, 'review-layout');
-  assert.equal(layout0.children[0].attrs['data-key'], 'review-rail', 'closed: All cards on the left as before');
+  assert.deepEqual(layout0.children.map(n => n.attrs['data-key']), ['review-main', 'review-rail'], 'closed: the card before the list in the page (W-036); the master stands the list on the left');
   const c = ctx({}, at('#review?ticket=t_abcdef'));
   assert.equal(c.reviewTicketId(), 't_abcdef');
   assert.equal(c.reviewTicketHref(''), '#review', 'Close drops only the ticket');
@@ -608,4 +708,136 @@ test('ORCH-2339: every item the core counts is a card or a listed row (stopped w
   assert.equal(n.count, items.length);
   assert.equal(cards + c.reviewExtraRows().length, n.count, 'the heading adds up to the badge');
   assert.equal(c.reviewExtraRows().map(r => r.what).join(), 'stopped,stopped');
+});
+
+// ---- Owner's walk of 28 Nov: evidence and cost on the card, the one number, the ticket beside the card ----
+test('W-040: a pull request card shows one evidence line (which one, check and merge state, how fresh) with Open, and says what Start helper costs', async () => {
+  const c = stuckHome();
+  c.needsList().find(r => r.kind === 'helper:unmerged').pull.checked_at = '2026-11-15T11:55:00Z';
+  const card = (await c.reviewApi().stack()).find(x => x.ticket === 't_aaaa01' && x.card.kind === 'stuck');
+  assert.equal(card.card.why, 'Pull request #12 · checks passed, not merged · passed ' + kit.UI.stamp('2026-11-15T10:00:00Z') + ' · looked at ' + kit.UI.stamp('2026-11-15T11:55:00Z'));
+  assert.equal(JSON.stringify(card.links), JSON.stringify([{label:'Open pull request #12', url:'https://github.com/acme/app/pull/12'}]));
+  assert.equal(card.card.hint, 'Merge puts the pull request in. Start helper starts paid helper work (cost not known) that asks it to merge or say why it stays open.');
+  assert.equal(card.cause, 'helper:unmerged', 'the list folds cards with one cause');
+  // a real estimate when the helper gave one, never an invented one
+  c.tickets().find(t => t.id === 't_aaaa02').estimate = {minutes:20, cost:1.2};
+  const idle = (await c.reviewApi().stack()).find(x => x.ticket === 't_aaaa02');
+  assert.match(idle.card.hint, /starts a new helper on this ticket \(this ticket's estimate: about 20 min · \$1\.20\)\.$/);
+  assert.doesNotMatch(read('pages/review.js'), /\$1\b|10 min/, 'no fixed estimate in the page');
+  // the card reads: what happened, the evidence, what the buttons do and cost (W-042); other stuck cards keep their step line
+  assert.equal(idle.card.why, 'Stopped at: Write the guide · 1 of 2 steps done.');
+});
+test('W-040 / CX-02: a result to review links its pull request with its state, and says that Send back is paid helper work', async () => {
+  const check = {...CARD, id:'core:review:t_abcdef', key:'review', card:{kind:'check', title:'Result'}, links:[{label:'Preview', url:'https://example.com/p'}]};
+  const t = {id:'t_abcdef', refs:[{url:'https://github.com/acme/app/pull/7', kind:'github-pr', status:'ready to merge'}, {url:'https://example.com/doc'}]};
+  const c = ctx({review:{cards:[check, CARD]}}, {ticketOf:id => id === t.id ? t : null});
+  const [got, other] = await c.reviewApi().stack();
+  assert.equal(JSON.stringify(got.links), JSON.stringify([{label:'Preview', url:'https://example.com/p'}, {label:'Pull request #7 · ready to merge', url:'https://github.com/acme/app/pull/7'}]));
+  assert.equal(got.card.hint, 'Send back: sends your changes for a helper to work on · cost not known.');
+  assert.equal(other, CARD, 'a question is left as it is');
+  t.estimate = {minutes:45, cost:2};
+  assert.equal((await c.reviewApi().stack())[0].card.hint, "Send back: sends your changes for a helper to work on · this ticket's estimate: about 45 min · $2.00.");
+  assert.equal(check.card.hint, undefined, 'the state itself is not changed');
+  // the Reviewer's own row: the Send back box says it above its button
+  const row = {ticket:'t_abcdef', key:'DT-41', title:'Fix', why:'merged.', sent_back:false};
+  const a = ctx({review:{cards:[], accepted:[row]}}, {ticketOf:() => t, FEEDBACK_BOX:{}, window:{DashHelpers:helpers, UI:{...kit.UI, composer:() => ({field:{focus() {}}, destroy() {}})}, orch:{toast() {}}}});
+  const node = a.reviewAcceptedRow(row);
+  node.replaceChildren = (...kids) => { node.children = kids; };
+  nodes(node).find(n => n.tag === 'button' && text(n) === 'Send back').onclick();
+  const kids = node.children.map(text);
+  assert.equal(kids[1], "Sends your changes for a helper to work on · this ticket's estimate: about 45 min · $2.00.");
+  assert.ok(kids.indexOf(kids[1]) < node.children.findIndex(n => String(n.attrs?.id || '').endsWith('-box')), 'above the box with its button');
+});
+test('W-003: the subtitle reads the menu badge\'s number, whatever the deck holds at that moment', () => {
+  let total = 31;
+  const c = ctx({review:{cards:[CARD, {...CARD, id:'core:review:t_abcdef', key:'review'}]}}, {needsYouTotal:() => total});
+  assert.match(c.reviewSubtitle(), /^31 things need you\./);
+  const sub = {textContent:''}, main = {querySelector:() => sub};
+  c.reviewSetWaiting(main, {items:[{id:'a'}, {id:'b'}], answers:{a:{}}});  // the deck says 1 waiting: the heading keeps THE number
+  assert.match(sub.textContent, /^31 things need you\./);
+  total = 30; c.reviewSetWaiting(main, {items:[{id:'a'}, {id:'b'}], answers:{a:{}}});
+  assert.match(sub.textContent, /^30 things need you\./, 'it changes when the badge does');
+  total = 0; c.reviewSetWaiting(main, null);
+  assert.equal(c.reviewSubtitle(), 'Nothing new needs you. 2 cards you put off are still here.');
+  assert.doesNotMatch(read('pages/review.js').slice(read('pages/review.js').indexOf('function reviewSubtitle'), read('pages/review.js').indexOf('// The words the "All cards" list')), /reviewWaiting \+/, 'never the deck count as the heading number');
+});
+test('W-039: with a ticket open beside the card nothing is pushed in above the decision; what has no card is listed after it', () => {
+  const c = ctx({review:{cards:[CARD]}, tickets:[]}, {reviewExtraCard:undefined});
+  vm.runInContext("reviewExtraCard = () => h('section', {'data-key':'review-extra'}, 'Also waiting for you')", c);
+  const main = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-main');
+  assert.deepEqual(main.children.map(n => n.attrs['data-key']), ['review-nav', 'review-host', 'review-extra']);
+  const src = read('pages/review.js');
+  assert.match(src, /e\.key !== 'Escape'[^\n]*reviewTicketId\(\)/, 'Esc closes the ticket beside the card');
+  assert.match(src, /reviewKeepY = .*scrollY/, 'the page stays where it was');
+});
+test('FX-04: the quiet line under the list says how many wait to be merged', () => {
+  const one = ctx({counts:{needs_you:{queue:['t_a']}}, review:{cards:[]}}), two = ctx({counts:{needs_you:{queue:['t_a', 't_b']}}, review:{cards:[]}});
+  assert.equal(text(one.reviewQueueLine()), '1 waits to be merged, nothing to do');
+  assert.equal(text(two.reviewQueueLine()), '2 wait to be merged, nothing to do');
+  assert.equal(ctx({review:{cards:[]}}).reviewQueueLine(), null);
+});
+test('W-003: a card answered on Review leaves the one count at once (badge, heading, Home), and Undo brings it back', async () => {
+  const c = stuckHome();
+  let refreshed = 0;
+  vm.runInContext('var wantFull = false;', c); c.refresh = () => { refreshed++; };
+  c.state.counts = {needs_you:{count:3, questions:1, results:2, failed:0, stopped:0, tickets:[], queue:[],
+    items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}, {ticket:'t_aaaa05', question:null}, {ticket:'t_aaaa02', question:null, stopped:'helper:idle', row:'core:idle:t_aaaa02'}]}};
+  const before = c.needsYouTotal(), api = c.reviewApi();
+  assert.match(c.reviewSubtitle(), new RegExp('^' + before + ' things need you'));
+  api.hold({id:'core:q:t_abcdef:q3'}, 'ok');
+  assert.equal(c.needsYouTotal(), before - 1, 'the question is out of the number while its answer waits for Undo');
+  assert.match(c.reviewSubtitle(), new RegExp('^' + (before - 1) + ' things need you'));
+  api.hold({id:'core:review:t_aaaa01'}, 'no');
+  assert.equal(c.needsYouTotal(), before - 2, 'a result sent back too');
+  api.hold({id:'stuck:core:idle:t_aaaa02'}, 'ok');
+  assert.equal(c.needsYouTotal(), before - 2, 'work that stopped is not answered by a button: it stays counted');
+  // a new state from the server while the answers wait: still left out
+  const next = c.acceptOverlay({...c.state, counts:{needs_you:{...c.state.counts.needs_you, items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}, {ticket:'t_aaaa05', question:null}]}}});
+  assert.deepEqual(next.counts.needs_you.items.map(i => i.ticket), ['t_aaaa05']);
+  // Undo: the whole state is read again, so every place shows the card again
+  api.release({id:'core:q:t_abcdef:q3'});
+  assert.ok(refreshed >= 1); assert.equal(c.state.rev, '');
+  assert.deepEqual(c.acceptOverlay({counts:{needs_you:{items:[{ticket:'t_abcdef', question:'q3'}, {ticket:'t_aaaa01', question:null}]}}}).counts.needs_you.items.map(i => i.ticket), ['t_abcdef']);
+  // saved: nothing more to hide
+  await api.answer({id:'core:review:t_aaaa01', digest:ID, verdict:'no'});
+  assert.equal(c.acceptOverlay({counts:{needs_you:{items:[{ticket:'t_aaaa01', question:null}]}}}).counts.needs_you.items.length, 1);
+});
+test('O-04: the layout watcher draws the page again only when the layout really changed (the shell writes its marks at every paint)', () => {
+  let renders = 0;
+  const body = {dataset:{}};
+  const c = ctx({review:{cards:[]}}, {document:{addEventListener(){}, getElementById:() => null, body}, route:() => ({kind:'review'}), render:() => { renders++; c.reviewPage(); }});
+  assert.equal(c.reviewLayoutChanged(), false, 'before the first paint there is nothing to redo');
+  c.reviewPage();
+  assert.equal(c.reviewLayoutChanged(), false); assert.equal(renders, 0, 'the same layout: no paint');
+  body.dataset.liveNarrow = '';
+  assert.equal(c.reviewLayoutChanged(), true); assert.equal(renders, 1, 'the Focus panel took the room: one paint');
+  for (let i = 0; i < 5; i++) c.reviewLayoutChanged();  // the shell writes the same mark again at every paint
+  assert.equal(renders, 1, 'a mark written again starts no paint');
+  delete body.dataset.liveNarrow; body.dataset.liveStack = '';
+  assert.equal(c.reviewLayoutChanged(), false, 'still one column');
+  delete body.dataset.liveStack;
+  assert.equal(c.reviewLayoutChanged(), true); assert.equal(renders, 2);
+  const other = ctx({review:{cards:[]}}, {document:{addEventListener(){}, getElementById:() => null, body:{dataset:{liveNarrow:''}}}, route:() => ({kind:'home'}), render:() => { renders++; }});
+  other.reviewPage(); delete other.document.body.dataset.liveNarrow;
+  assert.equal(other.reviewLayoutChanged(), false, 'another page is on screen');
+});
+test('W-039: the keyboard moves only when the ticket panel opens or closes, and a scroll kept for a click is used once and soon', () => {
+  const focused = [], timers = [];
+  const at = hash => ({location:{hash, origin:'', pathname:'/'}});
+  const c = ctx({review:{cards:[]}}, {...at('#review'), setTimeout:fn => timers.push(fn), window:{DashHelpers:helpers, UI:kit.UI, orch:{toast(){}}, scrollTo:(x, y) => focused.push('scroll:' + y), scrollY:0}});
+  const main = {querySelector:sel => ({focus:() => focused.push(sel)})};
+  const run = () => { while (timers.length) timers.shift()(); };
+  c.reviewKeepPlace(main); run();
+  assert.deepEqual(focused, [], 'the page just opened: nothing moves');
+  c.location.hash = '#review?ticket=t_abcdef'; c.reviewKeepPlace(main); run();
+  assert.deepEqual(focused, ['[data-key="review-ticket-close"]'], 'opened: to the panel');
+  c.location.hash = '#review?ticket=t_aaaa01'; c.reviewKeepPlace(main); run();
+  assert.equal(focused.length, 1, 'the panel followed the next card: the keyboard stays on the deck');
+  c.location.hash = '#review'; c.reviewKeepPlace(main); run();
+  assert.equal(focused[1], '[data-review-host] .swipe-more summary', 'closed: back to the card');
+  vm.runInContext('reviewKeepY = {y:240, at:Date.now()}', c); c.reviewKeepPlace(main); run();
+  assert.equal(focused[2], 'scroll:240');
+  c.reviewKeepPlace(main); run(); assert.equal(focused.length, 3, 'used once');
+  vm.runInContext('reviewKeepY = {y:99, at:Date.now() - 5000}', c); c.reviewKeepPlace(main); run();
+  assert.equal(focused.length, 3, 'an old one is dropped');
 });

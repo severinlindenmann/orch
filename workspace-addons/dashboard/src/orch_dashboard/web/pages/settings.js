@@ -961,6 +961,7 @@ function settingsPage() {
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
       // Shared pages are files shared with a link: only once sharing is on (R1.1, ORCH-2112).
       snapshot || !sharingOn() ? null : window.OrchLook?.settingsSection(),
+      typeof menuSettingsCard === 'function' ? menuSettingsCard() : null,  // O-34: which add-on pages the menu shows, and their order (app.js)
       syncCard(settings),
       everydayCard(settings, phoneAddon),
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),

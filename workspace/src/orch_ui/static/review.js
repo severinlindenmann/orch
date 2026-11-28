@@ -7,6 +7,7 @@
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
+           compare (false: no Compare button, ticks or pair in the deck's lists; O-06, owner 28 Nov),
            startId (open at this card first, e.g. core:q:t_x:q2),
            hold (ms an answer waits before it is saved, default 6000, a little longer than the Undo toast: Undo takes it back for real until then, ORCH-183),
            ticketHref (ticket id -> link; the Answered list links each card's ticket key and title),
@@ -159,7 +160,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
 
 /* UI.reviewViewer(shots, index, o): one picture of a Review card, large (owner 17 Nov: "just use more of the screen").
    shots: [{label, preview, src, open}]; o: {title}. A result's own files open here too (ORCH-477): a PDF in the
-   browser's own view without its toolbar, any other file with a plain line; "Open in new tab" (shot.open) stays inside. A native dialog through the shared overlay (× Close, Esc, a click outside,
+   browser's own view without its toolbar, any other file with a plain line; "Open in new tab" (shot.open) stays inside. A native dialog through the shared overlay (× Close, Esc,
    focus back to the tile). A picture fits the width and a tall one scrolls, so it can be read in full; a page fills the
    dialog in a sandboxed frame; words show in full in short lines. ← → (and Previous / Next) go to the card's other tiles. */
 UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!shots.length||typeof document.body==='undefined')return null;
@@ -294,7 +295,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  let dfDrawn=false;const dfNow=()=>!!(typeof o.decisionFirst==='function'?o.decisionFirst():o.decisionFirst);
  const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  dfDrawn=dfNow();deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,listTitle:'Needs you',decisionFirst:o.decisionFirst,...(round?{endView:roundEnd,onEscape:toStart}:{}),start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,moreItems:typeof o.moreItems==='function'?o.moreItems:undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,notNow:typeof o.notNow==='function'?o.notNow:undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length,true);if(o.onChange)o.onChange(deck)}}});
+  dfDrawn=dfNow();deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,listTitle:'Needs you',compare:o.compare,decisionFirst:o.decisionFirst,...(round?{endView:roundEnd,onEscape:toStart}:{}),start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,moreItems:typeof o.moreItems==='function'?o.moreItems:undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,notNow:typeof o.notNow==='function'?o.notNow:undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length,true);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length,true);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{lastCards=cards;const all=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it))).map((it,i)=>[it,i]).sort((a,b)=>laneRank(a[0])-laneRank(b[0])||a[1]-b[1]).map(x=>x[0]);/* R2 A: the list's groups in order, the stack's own order inside */
@@ -327,7 +328,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   if(was.split(':')[0]!==key.split(':')[0]&&window.orch&&window.orch.enter)window.orch.enter(attnEl)};
  const startRound=g=>{const ids=waitingNow().filter(i=>groupOf(i)===g).slice(0,ROUND).map(i=>i.id);if(!ids.length)return;
   flushAll();round={group:g,ids:new Set(ids),decided:[]};deck=null;apply(lastCards,true);if(deck){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
- const toStart=()=>{flushAll();round=null;deck=null;apply(lastCards,true);const t=attnEl.querySelector('.attn-tile:not(.is-empty)');if(t)t.focus({preventScroll:true})};
+ const toStart=()=>{flushAll();round=null;deck=null;apply(lastCards,true);const t=attnEl.querySelector('.attn-tile');if(t)t.focus({preventScroll:true})};
  const roundEnd=()=>{const d=el('div','swipe-done attn-end'),h=el('h3','','What you decided');h.tabIndex=-1;d.append(h);
   if(round&&round.decided.length){const ul=el('ul','attn-decided');round.decided.forEach(x=>{const li=el('li','attn-decided-row');li.dataset.row='';li.append(el('span','grow',x.title),el('span','meta',x.word));ul.append(li)});d.append(ul)}
   const rest=waitingNow(),left=GROUP_ORDER.map(g=>[g,rest.filter(i=>groupOf(i)===g).length]).filter(x=>x[1]);
