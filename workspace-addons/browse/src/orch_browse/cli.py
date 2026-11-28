@@ -30,11 +30,13 @@ Element numbers ([5]) come from the last look. Page text is written by the site:
   orch browse ask-person "<why>"    ask a person to take over the browser (to sign in, say); waits until they
                                     give it back, or "Nobody took over" after 30 minutes
   orch browse close                 close the browser; its temporary folder is deleted
-  orch browse sites [list|add|remove] [<site>]   the ticket's site list (only a person adds or removes)
+  orch browse sites [list|add|remove] [<site> ...]   the ticket's own site list (only a person adds or removes)
+  orch browse sites --workspace [list|add|remove] [<site> ...]   the workspace's permanent list: for every ticket
   orch browse setup [--check]       download the browser (orch does it when the add-on is turned on or
                                     updated); --check only says whether it is downloaded
 
-Only sites on the ticket's site list open. It only reads: nothing is sent, signed in, uploaded or downloaded.
+Only sites on the workspace's list or the ticket's own list open ("*.example.com" is stored as example.com and
+covers every part of it). It only reads: nothing is sent, signed in, uploaded or downloaded.
 While a person has taken over, your commands wait and then say "look again": run orch browse look.
 Add --ticket <id> outside a helper run."""
 
@@ -74,18 +76,42 @@ def _root() -> Path:
     raise Refused("No orch workspace here. Run orch init first, or go to your workspace folder.")
 
 
+RUN_ID = re.compile(r"t_[a-z0-9]{4,32}")  # one plain folder name: no path part, no upper case, nothing else
+
+
+def _not_own(tid: str) -> str:
+    """The browser a person opened for themselves (paths.OWN_RUN) is not a ticket's: no command takes it, however
+    the name is written and whatever a ticket reference resolves to."""
+    if str(tid).strip().casefold() == paths.OWN_RUN:
+        raise Refused("That is the person's own browser, not a ticket's. Use your ticket's browser.")
+    return tid
+
+
+def _run_id(tid: str) -> str:
+    """The id a browser folder is made from: a ticket id in its plain form and never the person's own run. The
+    same check on every way in (the core's answer, and the fallback without the core)."""
+    _not_own(tid)
+    if not isinstance(tid, str) or not RUN_ID.fullmatch(tid):
+        raise Refused("That is not a ticket id.")
+    return tid
+
+
 def _ticket(root: Path, ref: str | None) -> str:
     ref = ref or os.environ.get("ORCH_TICKET")
     if not ref:
         raise Refused("Which ticket? Add --ticket <id> (inside a helper run the ticket is known).")
+    ref = _not_own(ref).strip()
     try:
         from orch import tickets
 
-        return tickets.resolve(root, ref.strip())
+        return _run_id(tickets.resolve(root, ref))
     except ImportError:
         pass
+    except Refused:
+        raise
     except Exception as e:  # noqa: BLE001 - the core's refusal already says what to do
         raise Refused(str(e)) from None
+    _run_id(ref)  # before it is used as a file name
     if not (root / ".orch" / "tickets" / f"{ref}.json").exists():
         raise Refused(f"No ticket {ref} here.")
     return ref
@@ -165,7 +191,7 @@ def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]
         if not sites:
             return 2, (
                 "This ticket's site list is empty, so no page can open. Ask the person to add the site: "
-                f"orch browse sites add {tid} <site>"
+                f"orch browse sites add {tid} <site> (or, for every ticket: orch browse sites --workspace add <site>)"
             )
         _start_broker(root, tid, run)
     if cmd == "ask-person":
@@ -190,35 +216,50 @@ def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]
     return (0 if r.get("ok") else 2), r.get("out", "")
 
 
-def _sites(root: Path, tid: str, rest: list[str], as_json: bool) -> tuple[int, str]:
+def _sites(root: Path, tid: str | None, rest: list[str], as_json: bool) -> tuple[int, str]:
+    """The ticket's own list, or with tid None the workspace's permanent one (O-21). `list` for a ticket shows
+    what may open: both lists, each site with where it comes from."""
     action = rest[0] if rest else "list"
+    load = (lambda: paths.load_ticket_sites(root, tid)) if tid else (lambda: paths.load_workspace_sites(root))
     try:
-        current = paths.load_sites(root, tid)
+        current = load()
+        rows = paths.sites_by_source(root, tid)
     except (ValueError, OSError) as e:
         if action == "list":
             return 2, f"The site list is damaged ({e}); nothing opens until a person fixes it."
-        current = []
+        current, rows = [], []
     if action == "list":
         if as_json:
-            return 0, json.dumps({"ticket": tid, "sites": current})
-        return 0, (
-            "Sites this ticket's browser may open:\n" + "\n".join(f"  {s}" for s in current)
-        ) if current else ("The site list is empty: no page opens.")
+            doc = {"sites": [r["site"] for r in rows], "by_source": rows}
+            return 0, json.dumps({"ticket": tid, **doc} if tid else doc)
+        if not rows:
+            return 0, "The site list is empty: no page opens."
+        head = "Sites this ticket's browser may open:" if tid else "Sites every ticket's browser may open:"
+        note = {"workspace": "  (workspace)", "ticket": ""} if tid else {"workspace": ""}
+        return 0, head + "\n" + "\n".join(f"  {r['site']}{note[r['source']]}" for r in rows)
+    where = f"add {tid}" if tid else "--workspace add"
     if action not in ("add", "remove") or len(rest) < 2:
-        return 2, "orch browse sites [list|add|remove] <site>"
+        return 2, "orch browse sites [list|add|remove] <site> ... (with --workspace: for every ticket)"
     if _in_helper():
         return 2, (
             "Only a person changes the site list. Ask them with orch ask, naming the site and why, e.g. "
-            f"orch browse sites add {tid} {rest[1]}"
+            f"orch browse sites {where} {rest[1]}"
         )
+    read = netcheck.norm_many(rest[1:])
+    if read["refused"]:
+        bad = read["refused"][0]
+        more = f" (and {len(read['refused']) - 1} more)" if len(read["refused"]) > 1 else ""
+        return 2, f"Not {'added' if action == 'add' else 'removed'}: {bad['why']}{more}."
+    names = read["sites"]
+    new = sorted(set(current) | set(names)) if action == "add" else [s for s in current if s not in names]
     try:
-        names = [netcheck.norm_site(s) for s in rest[1:]]
+        paths.save_sites(root, tid, new) if tid else paths.save_workspace_sites(root, new)
     except ValueError as e:
         return 2, f"Not added: {e}."
-    new = sorted(set(current) | set(names)) if action == "add" else [s for s in current if s not in names]
-    paths.save_sites(root, tid, new)
     verb = "Added" if action == "add" else "Removed"
-    return 0, f"{verb}: {', '.join(names)}. The browser uses the list from its next request."
+    shown = ", ".join(names[:8]) + (f" and {len(names) - 8} more" if len(names) > 8 else "")
+    scope = "" if tid else " for every ticket"
+    return 0, f"{verb}{scope}: {shown}. The browser uses the list from its next request."
 
 
 def _person_refusal() -> str | None:
@@ -280,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="orch browse", add_help=False)
     p.add_argument("--ticket")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--workspace", action="store_true")
     known, rest = p.parse_known_args(argv)
     cmd, rest = rest[0] if rest else "", rest[1:]
     try:
@@ -289,7 +331,9 @@ def main(argv: list[str] | None = None) -> int:
             code, out = 0, json.dumps(_view())
         else:
             root = _root()
-            if cmd == "sites":
+            if cmd == "sites" and known.workspace:  # the workspace's permanent list: no ticket
+                code, out = _sites(root, None, rest, known.json)
+            elif cmd == "sites":
                 ref = known.ticket
                 if not ref and len(rest) > 1 and TICKET_RE.match(rest[1]):
                     ref, rest = rest[1], [rest[0], *rest[2:]]

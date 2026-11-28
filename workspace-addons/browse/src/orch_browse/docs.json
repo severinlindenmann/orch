@@ -14,8 +14,8 @@
     },
     {
      "who": "you",
-     "text": "You add the sites a ticket may open to its site list",
-     "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing."
+     "text": "You add the sites that may open: for every ticket, or for one",
+     "detail": "The workspace's list holds for every ticket; a ticket can have extra sites of its own. Add, paste, search and remove on the Browser page under Allowed sites. Only a person changes a list: a helper asks on the ticket when a site is missing."
     },
     {
      "who": "helper",
@@ -85,7 +85,7 @@
      ],
      [
       "orch browse sites add <ticket> <site>",
-      "allow a site for one ticket (a person only)"
+      "allow a site for one ticket; with --workspace in place of the ticket: for every ticket"
      ],
      [
       "orch browse setup",
@@ -95,7 +95,7 @@
     "files": [
      [
       ".orch/addons/browse/sites/",
-      "the site list of each ticket"
+      "the workspace's site list (_workspace.json) and the list of each ticket"
      ],
      [
       ".orch/addons/browse/run/<ticket>/net.jsonl",

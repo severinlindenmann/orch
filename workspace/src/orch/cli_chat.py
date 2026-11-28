@@ -33,13 +33,18 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--ticket", help="the Chat ticket, or a ticket whose chat you answer")
     x.add_argument("--reply-to")
     x.add_argument("--ref", action="append", default=[], metavar="KIND:VALUE")
+    x.add_argument(
+        "--summary",
+        metavar="LINE",
+        help="with a long answer: one short line that says it (shown first; the answer opens in full)",
+    )
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
     x = s.add_parser("list", parents=[common], help="ticket chats: chat lines or an open question")
     x.add_argument("--reader", help="whose unread count (default: you)")
     x = s.add_parser("read", parents=[common], help="mark a ticket chat as read up to now")
-    x.add_argument("id")
+    x.add_argument("id", help="a ticket, or a workspace (ws_...) for the conversation with it")
     x.add_argument("--reader", help="who read it (default: you)")
     _add_dm_parsers(s, common)
 
@@ -71,6 +76,10 @@ def dispatch(args, root: Path) -> bool:
         d = ticketchats.chats(root, args.reader)
         _out(args, d, "\n".join(_chat_row(r) for r in d) or "No ticket chats yet.")
     elif args.sub == "read":
+        if chat._DM_WS.fullmatch(args.id or ""):  # the conversation with a workspace (a person's own mark)
+            d = chat.dm_mark_read(root, args.id, getattr(args, "by", None))
+            _out(args, d, f"{_ws_name(root, args.id)}: read.")
+            return True
         tid = tickets.resolve_cli(root, args.id, json_output=args.json)
         d = ticketchats.mark_read(root, tid, args.reader)
         _out(args, d, f"{d['key']}: read.")
@@ -91,10 +100,10 @@ def dispatch(args, root: Path) -> bool:
         if args.ticket and tickets.resolve(root, args.ticket) != gid:
             if args.reply_to or refs:
                 raise Refused("A ticket chat answer is plain text: no --reply-to or --ref.")
-            r = chat.reply_ticket(root, args.ticket, args.text)
+            r = chat.reply_ticket(root, args.ticket, args.text, args.summary)
             _out(args, r, f"Saved in the chat of {r['key']}.")
             return True
-        r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs)
+        r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs, args.summary)
         _out(args, r, "Sent." if r["sent"] else "Saved in the chat.")
     elif args.sub == "say":
         who = tickets.acting_by(args)
@@ -143,6 +152,12 @@ def _add_dm_parsers(sub, common):
     p.add_argument("--retry", help="replace a failed message")
 
 
+def _dm_line(m: dict) -> str:
+    """One message of a workspace conversation as a line: its words, or the file or task it carried."""
+    said = m.get("text") or (m.get("file") or {}).get("name") or (m.get("task") or {}).get("title") or ""
+    return f"{m['by']}: {said}"
+
+
 def _ws_name(root, ws):
     """The workspace's name for a sentence (never its raw id when a name is known)."""
     from orch import relay
@@ -163,8 +178,8 @@ def _dispatch_dm(args, root):
     elif args.sub == "thread":
         if args.sync:
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))
-        data = chat.dm_read(root, args.workspace, getattr(args, "by", None))
-        text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
+        data = chat.dm_conversation(root, args.workspace, getattr(args, "by", None))
+        text = "\n".join(_dm_line(m) for m in data["messages"]) or "No messages."
     elif args.sub == "sync":
         data = (
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))

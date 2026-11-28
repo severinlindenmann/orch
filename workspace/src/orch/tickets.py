@@ -1290,6 +1290,22 @@ def clean_by_name(name: str | None) -> str | None:
     return name
 
 
+SUMMARY_MAX = 200
+
+
+def clean_summary(text: str | None) -> str | None:
+    """The short line a helper gives with a long chat message (`--summary`): one line, 1 to 200 characters,
+    or None. Shown in place of the long text, which opens in full; orch never writes one itself."""
+    if text is None:
+        return None
+    line = " ".join(clean_untrusted(str(text)).split())
+    if not line:
+        return None
+    if len(line) > SUMMARY_MAX:
+        raise Refused(f"A short line has 1 to {SUMMARY_MAX} characters.")
+    return line
+
+
 def add_history(
     ticket: dict,
     by: str,
@@ -1300,6 +1316,7 @@ def add_history(
     at: str | None = None,
     mid: str | None = None,
     by_name: str | None = None,
+    summary: str | None = None,
 ) -> None:
     """THE one point where core appends a history line (contracts/history.md). chat=True marks a real Chat or
     group message (`chat_message: true`): the only lines the Chat shows. A chat line also gets a stable `id`
@@ -1314,8 +1331,13 @@ def add_history(
         name = clean_by_name(by_name)
         if name:
             entry["by_name"] = name
-    elif mid is not None or by_name is not None:
-        raise Refused("Only a chat line carries an id and a typed name.")
+        short = clean_summary(summary)
+        if short:
+            entry["summary"] = (
+                short  # the writer's own short line of a long message (O-19); never made by orch
+            )
+    elif mid is not None or by_name is not None or summary is not None:
+        raise Refused("Only a chat line carries an id, a typed name and a short line.")
     addon = _env_addon(by)
     if addon:
         entry["addon"] = addon

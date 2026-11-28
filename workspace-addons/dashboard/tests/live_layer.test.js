@@ -694,3 +694,49 @@ test('ORCH-2314: a helper that waits for an OK says so in the pane pill; an empt
   assert.match(css, /\.live-shelf:not\(:has\(\.result-grid>\*,\.result-links>\*,>\.live-ask:not\(\[hidden\]\)\)\)\{display:none\}/);
   for (const m of ['full', 'bottom']) assert.match(css, new RegExp('\\.live-panel\\[data-mode=' + m + '\\] \\.live-shelf\\{display:flex;'), 'the column beside the chat stays in ' + m);
 });
+
+// W-001 (owner, 28 Nov): beside the Focus panel a page lays out for the room it really has. The shell marks the body
+// (under 900 px: data-live-narrow, under 1100 px: data-live-stack); the narrow layouts are written for the mark too,
+// the wide layouts stand down without added weight, and code can ask (UI.pageRoom) and listen (orch:page-room).
+// The same in a browser, on every dashboard-drawn page at the 60/40 split: clickthrough/features/a-split-layout.cjs.
+test('W-001: the page area, not the window, picks the narrow layouts beside the panel', () => {
+  const kitDir = path.join(__dirname, '../../../workspace/src/orch_ui/static');
+  const kit = f => fs.readFileSync(path.join(kitDir, f), 'utf8');
+  const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web', f), 'utf8');
+  const layer = web('pages/live-layer.js');
+  assert.match(layer, /if \(pageRoom < 900\) document\.body\.dataset\.liveNarrow = ''; else delete document\.body\.dataset\.liveNarrow;/);
+  assert.match(layer, /if \(liveRoomMarks\(\) !== marksWas\) window\.dispatchEvent\(new CustomEvent\('orch:page-room', \{detail:\{narrow:pageRoom < 900, stack:pageRoom < 1100\}\}\)\);/);
+  // shared pieces of the master
+  const base = kit('components.css');
+  for (const rule of ['body[data-live-narrow] .columns{grid-template-columns:minmax(0,1fr)}', 'body[data-live-narrow] .grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}',
+    '.btn,.chip,.badge,.pill{overflow-wrap:normal;word-break:normal;hyphens:manual}', ':root[data-window=wide]{--page-gutter:24px}']) assert.ok(base.includes(rule), rule);
+  // W-004: one top bar row; "Updated" goes first, then the page name ends with an ellipsis; the buttons keep their size
+  const widgets = kit('widgets.css');
+  for (const rule of ['body[data-live-narrow] .topbar{flex-wrap:nowrap}', 'body[data-live-narrow] .topbar>*{flex-shrink:0}', 'body[data-live-narrow] .topbar #updated{display:none}',
+    'body[data-live-narrow] .topbar>.breadcrumb{flex:0 1 auto;min-width:0;flex-wrap:nowrap;height:auto}']) assert.ok(widgets.includes(rule), rule);
+  assert.match(widgets, /body\[data-live-narrow\] \.topbar \.breadcrumb>#crumb\{[^}]*text-overflow:ellipsis;white-space:nowrap\}/);
+  assert.doesNotMatch(widgets, /body\[data-live-narrow\] \.topbar\{flex-wrap:wrap\}/);
+  // New ticket: the narrow rules under the mark, the two-column layout stands down there (no added weight)
+  const nt = web('pages/newticket.css');
+  assert.ok(nt.includes('body[data-live-narrow] .new-ticket-form .new-ticket-helper-list { display: flex; flex-wrap: wrap; border: 0; gap: 8px; }'));
+  const wide = nt.slice(nt.indexOf('@media (min-width: 1000px) {'));
+  assert.ok(wide.includes(':where(body:not([data-live-narrow])) .new-ticket-form {'));
+  assert.equal((wide.match(/\n  \.new-ticket/g) || []).length, 0, 'every wide rule stands down beside the panel');
+  // Chat, Tickets, Home, Documentation
+  assert.ok(widgets.includes('body[data-live-narrow] .chat-page,body[data-live-narrow] .chat-page.chat-with-side{grid-template-columns:minmax(0,1fr)}'));
+  assert.ok(widgets.includes('body[data-live-narrow] .chat-page .chat-prompts{grid-template-columns:1fr}'));
+  assert.ok(web('pages/tickets.css').includes('body[data-live-narrow] .ticket-table{min-width:520px}'));
+  assert.ok(web('pages/home.css').includes('body[data-live-narrow] .home-columns{grid-template-columns:minmax(0,1fr)}'));
+  const docs = kit('docs.css');
+  assert.equal((docs.match(/@media\(min-width:1100px\)\{\s*\.ui-docs/g) || []).length, 0, 'every wide Documentation rule stands down when the page area is under 1100 px');
+  assert.ok(docs.includes(':where(body:not([data-live-stack])) .ui-docs .dl-band{grid-template-columns:190px minmax(0,1fr);gap:var(--s4)}'));
+  assert.match(kit('docs.js'), /const narrow = \(\) => window\.matchMedia\('\(max-width: 1099px\)'\)\.matches \|\| roomNarrow\(\);/);
+  // code can ask: the page area's width, and whether the window or the page area is under a width
+  const ui = {};
+  const ctx = {window:{UI:ui, innerWidth:1440}, document:{querySelector:() => ({clientWidth:617})}};
+  const src = kit('widgets.js');
+  new Function('UI', 'window', 'document', src.slice(src.indexOf('UI.pageRoom=()=>'), src.indexOf('UI.chevron=()=>')))(ui, ctx.window, ctx.document);
+  assert.equal(ui.pageRoom(), 617);
+  assert.equal(ui.pageRoom.under(900), true, 'a wide window, a narrow page area');
+  assert.equal(ui.pageRoom.under(600), false);
+});

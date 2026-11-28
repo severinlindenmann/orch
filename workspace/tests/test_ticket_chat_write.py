@@ -59,7 +59,41 @@ def test_the_helper_answers_in_the_ticket_chat(proj, run, new_ticket, monkeypatc
         and line["id"].startswith("m_")
     )
     [row] = [x for x in ticketchats.chats(proj, "dashboard") if x["id"] == tid]
-    assert row["unread"] == 1  # a helper's line is new for the reader
+    assert row["unread"] == 0  # O-18: this workspace's own helper wrote it, so it is not a Chat number
+
+
+def test_a_long_answer_carries_the_helpers_own_short_line(proj, run, new_ticket, monkeypatch):
+    """O-19 (owner, 28 Nov): the helper gives the short line itself (--summary); the chat shows it and opens the
+    whole text. orch never shortens a message by a program or a model, and the original is kept as written."""
+    tid = new_ticket("Launch plan")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    long = "## Plan\n\n" + "\n".join(f"- step {i}: do the thing with care" for i in range(30))
+    code, out, err = run(
+        "chat", "reply", long, "--ticket", tid, "--summary", "  Poster first,\n then the mail.  ", "--json"
+    )
+    assert code == 0, (out, err)
+    [line] = _chat_lines(proj, tid)
+    assert line["text"] == long and line["summary"] == "Poster first, then the mail."
+    code, out, err = run("chat", "reply", "Short.", "--ticket", tid, "--summary", "x" * 201)
+    assert code == 2 and "1 to 200 characters" in out + err
+    assert len(_chat_lines(proj, tid)) == 1
+    code, out, err = run("chat", "reply", "No short line.", "--ticket", tid)
+    assert code == 0 and "summary" not in _chat_lines(proj, tid)[-1]
+
+
+def test_a_short_line_is_only_for_a_chat_line(proj, new_ticket):
+    import pytest
+
+    from orch.errors import Refused
+
+    tid = new_ticket("Launch plan")
+    with pytest.raises(Refused):
+        tickets.apply_op(
+            proj,
+            tid,
+            lambda t: tickets.add_history(t, "agent:claude", "note", summary="short"),
+            by="agent:claude",
+        )
 
 
 def test_only_a_person_says_and_only_a_helper_replies(proj, run, new_ticket, monkeypatch):

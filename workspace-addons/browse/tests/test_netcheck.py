@@ -180,3 +180,64 @@ def test_nat64_every_reading_counts():
     # A discovered /64 prefix with 127.0.0.1 in the /96 position is refused as well.
     pref = [ipaddress.ip_network("2001:db8:1:2::/64")]
     assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:5d:b8:7f00:1"), (), pref)
+
+
+# ---- O-21 (owner, 28 Nov): a pasted list, wildcards, a permanent workspace list ----
+def test_a_pasted_list_is_read_as_it_would_be_stored():
+    text = "*.20min.ch, https://www.SBB.ch/de/fahrplan\n20min.ch.\n  docs.python.org;10.0.0.1 localhost\nexample.com"
+    read = nc.norm_many(text)
+    assert read["sites"] == ["20min.ch", "www.sbb.ch", "docs.python.org", "example.com"]
+    assert read["repeats"] == 1  # "20min.ch." says 20min.ch again
+    assert {"entry": "*.20min.ch", "site": "20min.ch"} in read["changed"]
+    assert {"entry": "https://www.SBB.ch/de/fahrplan", "site": "www.sbb.ch"} in read["changed"]
+    assert not any(c["entry"] in ("docs.python.org", "example.com") for c in read["changed"])
+    assert [r["entry"] for r in read["refused"]] == ["10.0.0.1", "localhost"]
+    assert all(r["why"] for r in read["refused"])
+    assert nc.norm_many(["  ", "", None]) == {"sites": [], "changed": [], "refused": [], "repeats": 0}
+
+
+def test_a_wildcard_means_the_site_and_every_part_of_it():
+    (site,) = nc.norm_many("*.20min.ch")["sites"]
+    assert nc.site_allowed("20min.ch", [site]) and nc.site_allowed("www.20min.ch", [site])
+    assert nc.site_allowed("a.b.20min.ch", [site]) and not nc.site_allowed("evil20min.ch", [site])
+    assert not nc.site_allowed("20min.ch.evil.com", [site])
+
+
+def test_a_thousand_sites_match_fast_and_exactly():
+    import time
+
+    sites = nc.norm_many("\n".join(f"*.site{i}.example.org" for i in range(1000)))["sites"]
+    assert len(sites) == 1000
+    start = time.perf_counter()
+    for _ in range(200):
+        assert nc.check_target("www.site999.example.org", 443, sites) is None
+        assert "site list" in nc.check_target("www.site1000.example.org", 443, sites)
+    assert (
+        time.perf_counter() - start < 2.0
+    )  # 400 checks against 1000 sites: under 5 ms each, far below a page's own time
+
+
+def test_the_filter_reads_a_thousand_sites_once_and_sees_every_change(tmp_path):
+    """What the network filter does on every connection: read both lists, check the host. Under 5 ms with 1,000
+    sites (ORCH-2443), because an unchanged file is not read again; a changed or damaged file is seen at once."""
+    import time
+
+    from orch_browse import paths
+
+    paths.save_workspace_sites(tmp_path, [f"site{i}.example.org" for i in range(1000)])
+    paths.save_sites(tmp_path, "t_abc123", ["docs.python.org"])
+    assert len(paths.load_sites(tmp_path, "t_abc123")) == 1001
+    start = time.perf_counter()
+    for _ in range(100):
+        assert nc.check_target("www.site999.example.org", 443, paths.load_sites(tmp_path, "t_abc123")) is None
+    assert (time.perf_counter() - start) / 100 < 0.005
+    paths.save_workspace_sites(
+        tmp_path, ["only.example.org"]
+    )  # a person changed the list: the next request sees it
+    assert paths.load_sites(tmp_path, "t_abc123") == ["docs.python.org", "only.example.org"]
+    got = paths.load_sites(tmp_path, "t_abc123")
+    got.append("evil.example")  # what a caller does with its list never reaches the next reader
+    assert paths.load_sites(tmp_path, "t_abc123") == ["docs.python.org", "only.example.org"]
+    paths.workspace_sites_file(tmp_path).write_text("{ not json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        paths.load_sites(tmp_path, "t_abc123")

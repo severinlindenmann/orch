@@ -25,6 +25,11 @@ function liveChatCut(text) {
   const s = String(text ?? '').replace(/\s+\n/g, '\n').trim();
   return s.length > LIVE_CHAT_TEXT ? s.slice(0, LIVE_CHAT_TEXT - 1).trimEnd() + '…' : s;
 }
+// The same measure as the Chat page (pages/chat.js CHAT_LONG): over 280 characters or more than four lines.
+function liveChatLong(text) {
+  const s = String(text ?? '');
+  return s.length > 280 || s.split(/\r?\n/).filter(l => l.trim()).length > 4;
+}
 function liveChatWho(by) {
   const m = /^(?:human|agent):(.+)$/.exec(String(by || ''));
   return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : '';
@@ -132,7 +137,11 @@ function liveChatModel(t, me = '', sent = [], talk = null) {
     if (!e || typeof e !== 'object' || !Number.isFinite(liveChatTime(e.at))) continue;
     const by = String(e.by || '');
     if (e.chat_message === true && clean0(e.text)) {
-      rows.push(/^human:/.test(by) ? {w:'y', text:liveChatCut(e.text), at:e.at, who:mine(by) ? '' : liveChatWho(by)} : {w:'h', text:liveChatCut(e.text), at:e.at});
+      // O-19 (owner, 28 Nov): a helper's long chat line keeps its whole text (and its own short line when it gave
+      // one), so the pane shows a short entry with Open message (pages/chat.js chatBody) instead of a silent cut
+      const long = !/^human:/.test(by) && liveChatLong(e.text);
+      rows.push(/^human:/.test(by) ? {w:'y', text:liveChatCut(e.text), at:e.at, who:mine(by) ? '' : liveChatWho(by)}
+        : {w:'h', text:liveChatCut(e.text), at:e.at, ...(long ? {full:String(e.text), ...(clean0(e.summary) ? {summary:clean0(e.summary)} : {})} : {})});
       continue;
     }
     const line = liveChatEvent(e);
@@ -265,7 +274,8 @@ function liveChatRow(r, tid = '') {
   const links = widgets ? [] : (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
-    ...(r.w === 'h' && r.text ? liveChatParts(r.text) : r.text ? [{t:'text', text:r.text}] : []).map(p => p.t === 'cmd' ? liveCmdBlock(p.text, tid) : h('p', {}, p.text)),
+    ...(r.w === 'h' && r.full && typeof chatBody === 'function' ? [chatBody(r.full, {helper:true, summary:r.summary, who:'Your helper', when:stamp, key:'live-' + tid + '-' + r.at})]
+      : (r.w === 'h' && r.text ? liveChatParts(r.text) : r.text ? [{t:'text', text:r.text}] : []).map(p => p.t === 'cmd' ? liveCmdBlock(p.text, tid) : h('p', {}, p.text))),
     liveChatFiles(tid, r.files),
     links.length ? h('div', {className:'live-links'}, links) : null,
     widgets ? resultsHost(tid, {key:'chat-results-' + tid + '-' + r.step, step:r.step, cls:'live-results', label:'Results of this step'}) : null);

@@ -44,13 +44,12 @@ def _history(proj, tid) -> list[str]:
 
 
 def _states(proj) -> dict[str, str]:
-    """Our own messages on the Relay page: {text: state label}."""
+    """Our own messages in the conversations (in Chat since O-26, relay_view.thread): {text: state label}."""
     out = {}
-    for b in relay_view.view(proj)["blocks"]:
-        for c in b["items"] if b["type"] == "conversations" else []:
-            for it in c["messages"]:
-                if it["who"] == "you":
-                    out[it.get("text") or ""] = it["state"]["label"]
+    for peer in {e["to"] for e in relay_view._sent(proj)}:
+        for it in relay_view.thread(proj, peer):
+            if it["by"] != peer:
+                out[it.get("text") or ""] = it["status"]["label"]
     return out
 
 

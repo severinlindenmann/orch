@@ -1421,6 +1421,21 @@ def test_helper_reply_without_a_relay_is_kept_in_the_chat(proj, run, monkeypatch
     assert last["text"] == "Four." and last["via"] == "helper" and last["by"] != "you"
 
 
+def test_helper_reply_keeps_its_own_short_line_with_the_whole_text(proj, run, monkeypatch):
+    """O-19: `orch chat reply --summary` in the workspace Chat: the day's message keeps the text as written and
+    the helper's own short line beside it."""
+    gid = _helper(proj, monkeypatch)
+    long = "First the numbers.\n\n" + "A longer paragraph about what was found. " * 20
+    code, out, err = run(
+        "chat", "reply", long, "--ticket", gid, "--summary", "The numbers are in; two are off."
+    )
+    assert code == 0, (out, err)
+    last = chat.read_day(proj, chat.day_key(proj))["messages"][-1]
+    assert last["text"] == long.strip() and last["summary"] == "The numbers are in; two are off."
+    line = [e for e in tickets.load(proj, gid)["history"] if e.get("chat_message") is True][-1]
+    assert line["summary"] == "The numbers are in; two are off."
+
+
 def test_status_running_is_false_while_a_live_helper_is_idle(proj, monkeypatch):
     gid = "t_general"
     monkeypatch.setattr(tickets, "general_id", lambda root: gid)

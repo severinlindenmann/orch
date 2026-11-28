@@ -258,3 +258,99 @@ test('the helper rows show an initial in a circle, no stray glyph', () => {
   assert.doesNotMatch(row, /✧|chat-helper-mark/);
   assert.match(row, /avatar chat-avatar/);
 });
+
+// ---- 28 Nov owner decisions: O-18 (unread), O-19 (long helper messages), O-26 (workspace conversations in Chat) ----
+const LONG = '## Weekly numbers\n\n' + Array.from({length:12}, (_, i) => '- line ' + i + ' with enough words to be a real sentence').join('\n');
+test('O-18: a workspace row and the menu number count only what they wrote; the open conversation counts nothing', () => {
+  const c = context();
+  vm.runInContext("chatUi.open = 'chat'; route = () => ({kind:'chat'}); Object.assign(chatDm.contacts[0], {count:5, unread:2, last_at:'2026-11-28T10:00:00Z'})", c);
+  assert.match(JSON.stringify(c.chatList()), /"aria-label":"2 unread"/);
+  assert.equal(c.chatBadge().children[0], 2);
+  vm.runInContext(`chatUi.open = '${WS}'`, c);
+  assert.equal(c.chatBadge(), null);
+  // your own helper's and your own lines are not a number: groups hosted here carry unread 0 and add nothing
+  vm.runInContext("chatUi.open = 'chat'; chatDm.contacts[0].unread = 0", c);
+  assert.equal(c.chatBadge(), null);
+});
+test('O-18: opening a workspace conversation marks it read once, by the person\'s own op', async () => {
+  const c = context(), sent = [];
+  c.window.orchAct = async (op, args) => { sent.push([op, args]); return {ok:true}; };
+  vm.runInContext("Object.assign(chatDm.contacts[0], {unread:3, last_at:'2026-11-28T10:00:00Z'})", c);
+  await vm.runInContext(`chatDmMarkRead('${WS}')`, c);
+  await vm.runInContext(`chatDmMarkRead('${WS}')`, c);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['chat.read', {workspace:WS}]]);
+  vm.runInContext("chatUi.open = 'chat'", c);
+  assert.equal(vm.runInContext('chatDmUnread(chatDm.contacts[0])', c), 0);   // hidden until the contacts say so
+  vm.runInContext("Object.assign(chatDm.contacts[0], {unread:1, last_at:'2026-11-28T11:00:00Z'})", c);
+  assert.equal(vm.runInContext('chatDmUnread(chatDm.contacts[0])', c), 1);   // a newer message counts again
+});
+test('O-19: a long helper message is a short entry (its own short line, else a labelled excerpt) with Open message', () => {
+  const c = context();
+  const own = JSON.stringify(vm.runInContext(`chatBody(${JSON.stringify(LONG)}, {helper:true, summary:'Numbers are in; two are off.', key:'message-1'})`, c));
+  assert.match(own, /Numbers are in; two are off\./); assert.match(own, /Open message/); assert.match(own, /"data-chat-short":"summary"/);
+  assert.doesNotMatch(own, /Excerpt|line 11/);
+  const cut = JSON.stringify(vm.runInContext(`chatBody(${JSON.stringify(LONG)}, {helper:true, key:'message-2'})`, c));
+  assert.match(cut, /"eyebrow"[^\]]*Excerpt/); assert.match(cut, /Weekly numbers - line 0/); assert.match(cut, /…/); assert.match(cut, /Open message/);
+  assert.doesNotMatch(cut, /line 11/);
+  // a person's message stays as written, however long; a short helper message too (a short line never replaces it)
+  const person = JSON.stringify(vm.runInContext(`chatBody(${JSON.stringify(LONG)}, {helper:false})`, c));
+  assert.match(person, /line 11/); assert.doesNotMatch(person, /Open message|Excerpt/);
+  const brief = JSON.stringify(vm.runInContext("chatBody('Done.', {helper:true, summary:'ignored'})", c));
+  assert.match(brief, /Done\./); assert.doesNotMatch(brief, /Open message|ignored/);
+  assert.equal(vm.runInContext("chatExcerpt('word '.repeat(100)).length <= 161", c), true);
+});
+test('O-19: Open message shows the original text, when, and its delivery; a picture link is only its words', () => {
+  const c = context();
+  let made = null;
+  c.dialog = title => (made = {title, d:{children:[], append(...n) { this.children.push(...n); }, setAttribute() {}}, actions:{firstChild:{textContent:'Cancel'}}});
+  c.window.FileViewer = {renderMd:(src, f) => ({md:src, f})};
+  assert.equal(vm.runInContext(`chatOpenMessage({text:${JSON.stringify(LONG + '\n![chart](http://x/y.png)')}, who:'Sales', when:'today 10:02', status:{label:'Delivered'}, cut:true})`, c), true);
+  const shown = JSON.stringify(made.d.children);
+  assert.equal(made.title, 'Message from Sales'); assert.equal(made.actions.firstChild.textContent, 'Close');
+  assert.match(shown, /line 11 with enough words/); assert.match(shown, /today 10:02 · Delivered/);
+  assert.match(shown, /Only the start of this message was kept/); assert.doesNotMatch(shown, /y\.png/); assert.match(shown, /chart/);
+  assert.match(shown, /"dialog-body"/);
+});
+test('O-26: the workspace conversation shows helper texts short, files, tasks and their delivery state', () => {
+  const c = context();
+  vm.runInContext(`chatDm.threads.set('${WS}', {messages:[
+    {id:'m1', at:'2026-11-28T09:00:00Z', by:'${WS}', text:${JSON.stringify(LONG)}, note:'Picked up · ORCH-12'},
+    {id:'m2', at:'2026-11-28T09:10:00Z', by:'helper', text:${JSON.stringify(LONG)}, state:'delivered', status:{label:'Passed on to ORCH-7', tone:'good'}},
+    {id:'m3', at:'2026-11-28T09:20:00Z', by:'${WS}', file:{name:'march.csv', size:'2.0 KB'}},
+    {id:'m4', at:'2026-11-28T09:30:00Z', by:'workspace', task:{title:'Check the numbers', from:'ORCH-7'}, state:'delivered', status:{label:'Waiting for Home', tone:'warn'}},
+    {id:'m5', at:'2026-11-28T09:40:00Z', by:'you', text:${JSON.stringify(LONG)}, state:'delivered', status:{label:'No answer for 3 days', tone:'warn'}},
+    {id:'m6', at:'2026-11-28T09:50:00Z', by:'${WS}', text:'Thanks', note:'Not picked up yet'}]});`, c);
+  const view = JSON.stringify(c.chatDmThread());
+  const shorts = (n, out = []) => { if (n && n.attrs && n.attrs['data-chat-short']) out.push(n); (n && n.children || []).forEach(k => shorts(k, out)); return out; };
+  assert.equal(shorts(c.chatDmThread()).length, 2);              // their long text and our helper's: short entries
+  assert.match(view, /Your helper/); assert.match(view, /Passed on to ORCH-7/);
+  assert.match(view, /march\.csv · 2\.0 KB/);
+  assert.match(view, /Task you handed over · from ticket ORCH-7/); assert.match(view, /Waiting for Home/);
+  assert.match(view, /line 11 with enough words/);                // what the person typed stays as written
+  assert.match(view, /No answer for 3 days/); assert.match(view, /Not picked up yet/);
+  assert.doesNotMatch(view, /Picked up · ORCH-12/);               // an old "picked up" is in the opened message, not on every line
+  assert.match(JSON.stringify(c.chatList()), /Thanks/);
+});
+test('W-055: a Relay log link opens the message in place; an unknown one falls back to the conversation', async () => {
+  const c = context();
+  let made = null;
+  c.dialog = title => (made = {title, d:{children:[], append(...n) { this.children.push(...n); }, setAttribute() {}}, actions:{firstChild:{textContent:'Cancel'}}});
+  c.fetch = async url => ({ok:true, json:async () => ({ws:WS, name:'Home', messages:[{id:'m_aaaaaaaaaaaaaaaa', at:'2026-11-28T09:00:00Z', by:'you', relay_id:'m_rrrrrrrrrrrrrrrr', text:LONG}]})});
+  assert.equal(await vm.runInContext(`chatDmPeekMessage('${WS}', 'm_rrrrrrrrrrrrrrrr')`, c), true);   // by its relay id too
+  assert.equal(made.title, 'Message from You'); assert.match(JSON.stringify(made.d.children), /line 11 with enough words/);
+  assert.equal(await vm.runInContext(`chatDmPeekMessage('${WS}', 'm_zzzzzzzzzzzzzzzz')`, c), false);
+  assert.equal(vm.runInContext("CHAT_DM_LINK.test('#chat/ws_abcdefghij/m_aaaaaaaaaaaaaaaa') && !CHAT_DM_LINK.test('#chat/ws_abcdefghij')", c), true);
+});
+test('W-045: in an empty chat "Show earlier messages" sits in the welcome block, not above the day line', () => {
+  const c = context();
+  vm.runInContext("chatUi.open = 'chat'; state = {chat:{messages:[], day:'2026-11-28'}}; chatDays = {status:'ready', rows:[{day:'2026-11-27'}]};", c);
+  const log = c.chatThread(null).children.find(n => n.attrs && n.attrs.className === 'chat-log');
+  const kinds = log.children.map(n => n.attrs?.['data-key'] || n.attrs?.className);
+  assert.deepEqual(kinds.slice(0, 2), ['day-today', 'day-line-note']);          // nothing floats above "Today"
+  const welcome = JSON.stringify(log.children.find(n => n.attrs?.['data-key'] === 'welcome'));
+  assert.match(welcome, /"data-key":"welcome-earlier"/); assert.match(welcome, /Show earlier messages/);
+  // with messages today it stays the first line of the conversation, as before
+  vm.runInContext("state.chat.messages = [{id:'1', by:'you', at:'2026-11-28T09:00:00Z', text:'hello'}]", c);
+  const full = c.chatThread(null).children.find(n => n.attrs && n.attrs.className === 'chat-log');
+  assert.match(JSON.stringify(full.children[0]), /Show earlier messages/);
+});
