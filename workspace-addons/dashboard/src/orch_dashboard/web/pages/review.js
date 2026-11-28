@@ -417,7 +417,9 @@ function reviewApi() {
 // O-04 D / W-036: the page draws the list (not the kit's deck.drawList): beside the card on a wide screen, after the
 // card in the same page scroll on a narrow one, and under it one line that leads to what the Reviewer did.
 const REVIEW_PAGE = 5;
-let reviewListShown = REVIEW_PAGE;   // rows the list shows now
+let reviewListFrom = 0;              // the first row the list shows (a multiple of five): "Next five" moves on, never grows the list
+let reviewListAll = false;           // "All": every row
+let reviewListCur = '';              // the card that was on screen at the last draw (the list follows a new one)
 const reviewListOpen = new Set();    // the causes whose cards are listed
 let reviewDeck = null;               // the deck on screen (the list is drawn from it)
 const STUCK_CAUSE = {'helper:unmerged':'Pull request not merged', 'helper:idle':'Helper stopped working', 'helper:failing':'Checks keep failing',
@@ -429,8 +431,9 @@ function reviewCauseOf(it) {
   const title = clean(it?.title || '').replace(/\s+/g, ' ').trim();
   return title ? {key:'title:' + title.toLowerCase(), label:title} : null;
 }
-// {total, rows, more}: the waiting cards in the deck's order; two or more with one cause are one group row
-function reviewListModel(deck, shown = reviewListShown, open = reviewListOpen) {
+// {total, rows, all, from, more, back}: the waiting cards in the deck's order, five rows at a time; two or more cards
+// with one cause are one group row. The five shown are the ones that hold the card on screen when it changes.
+function reviewListModel(deck, follow = false) {
   const items = array(deck?.items), answers = deck?.answers || {}, cur = deck?.index;
   const waiting = items.map((it, i) => ({it, i, now:i === cur, cause:reviewCauseOf(it)})).filter(x => x.it && !answers[x.it.id]);
   const count = new Map();
@@ -439,15 +442,24 @@ function reviewListModel(deck, shown = reviewListShown, open = reviewListOpen) {
   for (const x of waiting) {
     if (!x.cause || count.get(x.cause.key) < 2) { rows.push(x); continue; }
     let g = groups.get(x.cause.key);
-    if (!g) { g = {group:x.cause.key, label:x.cause.label, rows:[], now:false, open:open.has(x.cause.key)}; groups.set(x.cause.key, g); rows.push(g); }
+    if (!g) { g = {group:x.cause.key, label:x.cause.label, rows:[], now:false, open:reviewListOpen.has(x.cause.key)}; groups.set(x.cause.key, g); rows.push(g); }
     g.rows.push(x); g.now = g.now || x.now;
   }
-  const page = rows.slice(0, Math.max(REVIEW_PAGE, shown));
-  return {total:waiting.length, rows:page, more:rows.length - page.length, all:rows.length};
+  const at = rows.findIndex(r => r.now), id = at >= 0 ? String((rows[at].group ? rows[at].rows.find(x => x.now) : rows[at]).it.id) : '';
+  if (follow) {  // a new card on screen: the five rows that hold it
+    if (id && id !== reviewListCur && !reviewListAll) reviewListFrom = Math.floor(at / REVIEW_PAGE) * REVIEW_PAGE;
+    reviewListCur = id;
+  }
+  if (reviewListFrom >= rows.length) reviewListFrom = Math.max(0, Math.floor((rows.length - 1) / REVIEW_PAGE) * REVIEW_PAGE);
+  if (rows.length <= REVIEW_PAGE) reviewListAll = false;
+  const from = reviewListAll ? 0 : reviewListFrom, page = reviewListAll ? rows : rows.slice(from, from + REVIEW_PAGE);
+  return {total:waiting.length, rows:page, all:rows.length, from, more:!reviewListAll && from + REVIEW_PAGE < rows.length, back:reviewListAll ? rows.length > REVIEW_PAGE : from > 0};
 }
 function reviewListJump(id) {
   const i = array(reviewDeck?.items).findIndex(it => it.id === id);
-  if (i >= 0 && typeof reviewDeck.jump === 'function') reviewDeck.jump(i);
+  if (i < 0 || typeof reviewDeck.jump !== 'function') return;
+  if (reviewViewNow() === 'answered') reviewShow('deck');  // a row always shows its card, also from Answered
+  reviewDeck.jump(i);
 }
 function reviewListRow(x, sub) {
   const b = h('button', {type:'button', className:'btn ghost review-queue-row' + (x.now ? ' is-now' : ''), title:clean(x.it.title), 'aria-current':x.now ? 'true' : null, 'data-review-row':x.it.id},
@@ -472,24 +484,26 @@ function reviewReviewerLine() {
   look.onclick = () => reviewShow('answered');
   return h('div', {className:'card-row', 'data-review-reviewer':''}, h('p', {className:'meta grow'}, 'The Reviewer ' + parts.join(', ') + ' for you today.'), look);
 }
-function reviewListNodes(deck) {
-  const m = reviewListModel(deck), queue = reviewQueueLine(), reviewer = reviewReviewerLine();
+function reviewListNodes(deck, follow = false) {
+  const m = reviewListModel(deck, follow), queue = reviewQueueLine(), reviewer = reviewReviewerLine();
   // one card alone needs no list; the lines under it still show
   if (m.total < 2 && !queue && !reviewer) return [];
-  const step = (word, n, key) => { const b = h('button', {type:'button', className:'btn ' + (key === 'next' ? 'outline' : 'ghost') + ' sm', 'data-review-more':key}, word); b.onclick = () => { reviewListShown = n; reviewDrawList(); }; return b; };
+  const step = (word, key, go) => { const b = h('button', {type:'button', className:'btn ' + (key === 'next' ? 'outline' : 'ghost') + ' sm', 'data-review-more':key}, word); b.onclick = () => { go(); reviewDrawList(); }; return b; };
   // under the rows, as plain card rows: the steps through the list, the merge line, the Reviewer's line
-  const foot = m.more > 0 ? h('div', {className:'card-row'}, step('Next five', reviewListShown + REVIEW_PAGE, 'next'), step('All ' + m.total, 1e6, 'all'))
-    : m.all > REVIEW_PAGE ? h('div', {className:'card-row'}, step('First five', REVIEW_PAGE, 'five')) : null;
+  const steps = [m.more ? step('Next five', 'next', () => { reviewListFrom = m.from + REVIEW_PAGE; }) : null,
+    m.back ? step('First five', 'five', () => { reviewListFrom = 0; reviewListAll = false; }) : null,
+    !reviewListAll && m.all > REVIEW_PAGE ? step('All ' + m.total, 'all', () => { reviewListAll = true; }) : null].filter(Boolean);
+  const where = !reviewListAll && m.all > REVIEW_PAGE ? h('span', {className:'meta', 'data-review-where':''}, 'Rows ' + (m.from + 1) + ' to ' + (m.from + m.rows.length) + ' of ' + m.all) : null;
   return [
     h('div', {className:'review-list-head'}, h('h2', {className:'review-list-title'}, 'Needs you'), m.total ? h('span', {className:'review-group-count'}, m.total + ' waiting') : null),
     m.total > 1 ? h('div', {className:'review-list-groups'}, h('div', {className:'review-group', role:'list', 'aria-label':'Waiting'}, m.rows.flatMap(r => r.group ? reviewListGroup(r) : [reviewListRow(r)]))) : null,
-    foot, queue ? h('div', {className:'card-row'}, queue) : null, reviewer].filter(Boolean);
+    steps.length ? h('div', {className:'card-row'}, steps, where) : null, queue ? h('div', {className:'card-row'}, queue) : null, reviewer].filter(Boolean);
 }
 // draws the list into its place on the page (the aside beside the card, or the card after it); an empty list hides it
-function reviewDrawSide(queue, deck) {
+function reviewDrawSide(queue, deck, follow = true) {
   if (!queue) return;
   reviewDeck = deck || null;
-  const kids = reviewListNodes(reviewDeck), ae = typeof document === 'object' ? document.activeElement : null;
+  const kids = reviewListNodes(reviewDeck, follow), ae = typeof document === 'object' ? document.activeElement : null;
   if (queue.dataset) queue.dataset.reviewTotal = String(reviewListModel(reviewDeck).total);  // every waiting card, also those behind Next five or in a group
   const held = ae && queue.contains?.(ae) ? ae.dataset?.reviewRow || ae.dataset?.reviewGroup || ae.dataset?.reviewMore || '' : '';
   if (typeof queue.replaceChildren === 'function') queue.replaceChildren(...kids); else queue.children = kids;
@@ -500,7 +514,7 @@ function reviewDrawSide(queue, deck) {
 }
 function reviewDrawList() {
   const queue = typeof document === 'object' && document.querySelector ? document.querySelector('[data-review-queue]') : null;
-  reviewDrawSide(queue, reviewDeck);
+  reviewDrawSide(queue, reviewDeck, false);  // a click in the list itself: the rows stay where the person put them
 }
 // O-04 D: under 721 px, or beside the Focus panel when the page area is tight, the list comes after the card in the
 // page's own scroll (the shell marks those with data-live-narrow / data-live-stack); wider, it stands beside the card.
@@ -899,8 +913,9 @@ function reviewTicketFollow(deck) {
   setTimeout(render, 0);
   return true;
 }
+let reviewDrawnNarrow = null;  // how the page was last drawn (the layout watcher below draws again only on a change)
 function reviewPage() {
-  const open = snapshot ? '' : reviewTicketId(), narrow = reviewNarrow(), answered = (reviewView = reviewViewNow()) === 'answered';
+  const open = snapshot ? '' : reviewTicketId(), narrow = reviewDrawnNarrow = reviewNarrow(), answered = (reviewView = reviewViewNow()) === 'answered';
   // the page's own list: an aside beside the card (wide), or a card after it in the same scroll (narrow). The kit's
   // deck.drawList with its Compare button is not used any more (O-06).
   const queue = () => h('div', {className:'review-queue', 'data-review-queue':''});
@@ -931,7 +946,6 @@ function reviewQueueLine() {
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
-  if (reviewListShown > REVIEW_PAGE && reviewWaiting != null && reviewWaiting <= REVIEW_PAGE) reviewListShown = REVIEW_PAGE;
   const sub = main.querySelector('[data-key="heading"] p.muted');
   if (sub && sub.textContent !== reviewSubtitle()) sub.textContent = reviewSubtitle();
 }
@@ -957,13 +971,13 @@ function mountReview(main) {
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
     // nav: the switch stands above the Reviewer's blocks of Answered; compare:false: no Compare in the kit's own lists (O-06)
     const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, nav, compare:false, empty, extra:() => reviewExtraRows().length, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue(), deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id), notNow:snapshot ? undefined : reviewNotNow, decisionFirst:() => state?.settings?.decision_first_on === true, moreItems:snapshot ? undefined : reviewMoreItems});
-    mounts.set(host, {destroy() { reviewWaiting = null; reviewDeck = null; reviewListShown = REVIEW_PAGE; reviewListOpen.clear(); page.destroy(); }, page});
+    mounts.set(host, {destroy() { reviewWaiting = null; reviewDeck = null; reviewListFrom = 0; reviewListAll = false; reviewListCur = ''; reviewListOpen.clear(); reviewPanelWas = null; page.destroy(); }, page});
   });
   mountReviewPanel(main);
 }
 // W-039: opening or closing the ticket beside the card keeps the page where it is (the shell scrolls a changed address
 // to the top), the keyboard goes to the panel's Close and back to the card, and Esc closes the panel.
-let reviewKeepY = null, reviewPanelWas = '';
+let reviewKeepY = null, reviewPanelWas = null;  // null: the page was just opened (a link straight to a ticket moves no keyboard place)
 function reviewKeepPlace(main) {
   const open = snapshot ? '' : reviewTicketId();
   if (reviewKeepY != null && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
@@ -971,7 +985,7 @@ function reviewKeepPlace(main) {
     setTimeout(() => window.scrollTo(0, y), 0);  // after the shell's own scroll at the end of this paint
   }
   if (open !== reviewPanelWas) {
-    const to = open ? '[data-key="review-ticket-close"]' : reviewPanelWas ? '[data-review-host] .swipe-more summary' : '';
+    const to = reviewPanelWas == null ? '' : open ? '[data-key="review-ticket-close"]' : reviewPanelWas ? '[data-review-host] .swipe-more summary' : '';
     reviewPanelWas = open;
     if (to) setTimeout(() => (main.querySelector(to) || main.querySelector('#deck'))?.focus?.({preventScroll:true}), 0);
   }
@@ -996,11 +1010,18 @@ if (typeof document !== 'undefined' && document.addEventListener) {
     if (reviewCloseTicket()) e.preventDefault();
   });
 }
-// the list changes its place when the page area crosses a width or the Focus panel opens beside it
+// The list changes its place when the page area crosses a width or the Focus panel opens beside it. The shell writes
+// its marks again at every paint (pages/live-layer.js liveLayerPad), and a watcher sees every write: the page is drawn
+// again only when the layout really differs from the one on screen, so a paint can never start the next paint.
+function reviewLayoutChanged() {
+  if (typeof route !== 'function' || typeof render !== 'function' || route().kind !== 'review' || reviewDrawnNarrow == null) return false;
+  if (reviewNarrow() === reviewDrawnNarrow) return false;
+  render();
+  return true;
+}
 if (typeof window !== 'undefined' && typeof document !== 'undefined' && document.body) {
-  const again = () => { if (typeof route === 'function' && typeof render === 'function' && route().kind === 'review') render(); };
-  if (typeof matchMedia === 'function') matchMedia('(max-width:720px)').addEventListener?.('change', again);
-  if (typeof MutationObserver === 'function') new MutationObserver(again).observe(document.body, {attributes:true, attributeFilter:['data-live-narrow', 'data-live-stack']});
+  if (typeof matchMedia === 'function') matchMedia('(max-width:720px)').addEventListener?.('change', reviewLayoutChanged);
+  if (typeof MutationObserver === 'function') new MutationObserver(reviewLayoutChanged).observe(document.body, {attributes:true, attributeFilter:['data-live-narrow', 'data-live-stack']});
 }
 // Answer on a helper that asks on its screen: its session opens in the live layer over the Review page
 if (typeof document !== 'undefined' && document.addEventListener) {

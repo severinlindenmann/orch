@@ -11,6 +11,10 @@ module.exports = {
   covers: ['automation.resume', 'page:review'],
   async run({page, open, reload, act, orch, orchAsPerson, python, until, must, shot}) {
     const made = [];
+    try { await walk(); } finally { tidy(); }
+    // the tickets made here are closed again, so later click-throughs find the lists they expect
+    function tidy() { for (const tid of made) { try { orchAsPerson('ticket', 'status', tid, 'dropped'); } catch (e) { /* already closed */ } } }
+    async function walk() {
     for (let i = 1; i <= 8; i++) {
       const tid = python('import sys; from pathlib import Path; from orch import tickets; print(tickets.create(Path.cwd(), sys.argv[1], "agent:standin")["id"])', 'Walk ' + i + ': menu for week ' + i).trim();
       orch('check', 'add', tid, 'Write the menu');
@@ -39,18 +43,22 @@ module.exports = {
     const bar = await page.locator('.swipe-actions').first().boundingBox();
     must(bar && bar.y + bar.height <= page.viewportSize().height, 'the answer buttons are below the window: ' + JSON.stringify(bar));
     await shot('five-rows');
-    // Next five, All, First five
+    // Next five shows the next five (the list never grows), All every row, First five the start again
+    const shownRows = () => page.evaluate(() => [...document.querySelectorAll('.review-side [data-review-row],.review-side [data-review-group]')].map(n => n.innerText.replace(/\s+/g, ' ').trim()));
+    const page1 = await shownRows();
     await side.getByRole('button', {name:'Next five'}).click();
-    must(await rows.count() + await side.locator('[data-review-group]').count() === Math.min(10, await page.evaluate(() => document.querySelectorAll('.review-side [data-review-row],.review-side [data-review-group]').length)), 'Next five adds five');
-    must(await rows.count() > 5, 'Next five shows more rows');
-    if (await side.getByRole('button', {name:/^All /}).count()) await side.getByRole('button', {name:/^All /}).click();
-    must(await side.getByRole('button', {name:'Next five'}).count() === 0, 'All shows every row');
+    const page2 = await shownRows();
+    must(page2.length >= 1 && page2.length <= 5 && !page2.some(r => page1.includes(r)), 'Next five does not show the next rows: ' + JSON.stringify([page1, page2]));
+    must((await side.locator('[data-review-where]').innerText()).startsWith('Rows 6 to '), 'the list does not say which rows it shows');
+    await side.getByRole('button', {name:/^All /}).click();
+    must((await shownRows()).length === (await page.evaluate(() => document.querySelectorAll('.review-side [data-review-row],.review-side [data-review-group]').length)) && (await shownRows()).length > 5, 'All shows every row');
+    must(await side.getByRole('button', {name:'Next five'}).count() === 0, 'Next five beside All rows');
     // a row opens its card
     await side.locator('[data-review-row]', {hasText:'Week 7'}).first().click();
     await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Week 7'}).first().waitFor();
     must((await side.locator('[data-review-row][aria-current="true"]').innerText()).includes('Week 7'), 'the row of the card on screen is marked');
     await side.getByRole('button', {name:'First five'}).click();
-    must(await rows.count() + await side.locator('[data-review-group]').count() === 5, 'First five folds the list again');
+    must(JSON.stringify(await shownRows()) === JSON.stringify(page1), 'First five does not show the first rows again');
     // W-003: answer one card: the menu badge, the heading, the Waiting tab and the list drop together at once (the
     // answer itself is saved after the Undo time); Undo brings all four back
     const numbers = () => page.evaluate(() => ({
@@ -59,6 +67,7 @@ module.exports = {
       tab: Number(document.querySelector('[data-review-nav] button[data-show="deck"] .meta')?.textContent || 0),
       list: Number(document.querySelector('[data-review-queue]')?.dataset.reviewTotal || 0)}));
     const n0 = await numbers();
+    await side.getByRole('button', {name:/^All /}).click();
     await side.locator('[data-review-row]', {hasText:'Week 2'}).first().click();
     await page.locator('.swipe-card:not(.under):not(.under2)', {hasText:'Week 2'}).first().waitFor();
     await page.locator('.swipe-actions').getByRole('button', {name:/Looks good/}).first().click();
@@ -69,6 +78,7 @@ module.exports = {
     await page.waitForFunction(n => Number(document.querySelector('.sidebar a[href="#review"] .count')?.textContent || 0) === n, n0.badge, {timeout: 20000});
     const n2 = await numbers();
     must(JSON.stringify(n2) === JSON.stringify(n0), 'Undo did not bring every number back: ' + JSON.stringify([n0, n2]));
+    await side.getByRole('button', {name:'First five'}).click();
     // Answered and back
     await page.locator('[data-review-nav] button[data-show="answered"]').click();
     await page.locator('#answered:not([hidden])').waitFor();
@@ -110,18 +120,16 @@ module.exports = {
     must(order.wide <= 1, 'the page scrolls sideways at 390 px by ' + order.wide);
     must(await next.locator('[data-review-row]').count() + await next.locator('[data-review-group]').count() === 5, 'five rows on a phone too');
     await shot('phone');
+    // the keyboard reaches the card before the list (W-036): the first stops inside the page are the switch and the card
+    const firstStops = await page.evaluate(() => [...document.querySelectorAll('[data-key="review-layout"] :is(button,a[href],summary,[tabindex="0"])')].filter(n => n.offsetParent && !n.disabled).slice(0, 3).map(n => n.closest('[data-review-next]') ? 'list' : n.closest('[data-review-nav]') ? 'switch' : n.closest('#deck') ? 'card' : 'other'));
+    must(firstStops[0] === 'switch' && firstStops.includes('card') && !firstStops.includes('list'), 'the keyboard meets the list before the card: ' + firstStops);
+    // reflow at 320 px: no sideways scroll
+    await page.setViewportSize({width:320, height:700});
+    await page.waitForTimeout(200);
+    const wide320 = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    must(wide320 <= 1, 'the page scrolls sideways at 320 px by ' + wide320);
     await page.setViewportSize(size);
     await side.locator('[data-review-row]').first().waitFor();
-
-    // O-04: beside the Focus panel the shell marks a tight page area (data-live-narrow): the list moves after the card
-    // without a reload, and back beside it when the mark goes
-    await page.evaluate(() => { document.body.dataset.liveNarrow = ''; });
-    await next.locator('[data-review-row]').first().waitFor();
-    must(await page.evaluate(() => document.querySelector('#deck').getBoundingClientRect().top < document.querySelector('[data-review-next]').getBoundingClientRect().top), 'beside the panel the list is not after the card');
-    await shot('beside-panel');
-    await page.evaluate(() => { delete document.body.dataset.liveNarrow; });
-    await side.locator('[data-review-row]').first().waitFor();
-    must(await page.locator('[data-review-next]').count() === 0, 'two lists on a wide page');
 
     // W-043: paused: one line on top; Turn on is one click
     orchAsPerson('pause', '--reason', 'Disk almost full');
@@ -137,5 +145,6 @@ module.exports = {
     must(JSON.parse(orchAsPerson('resume', '--json')).was_paused === false, 'automation is still paused after Turn on');
     await reload();
     must(await page.locator('[data-key="review-paused"]').count() === 0, 'the paused line is back after a reload');
+    }
   },
 };

@@ -53,20 +53,27 @@
 const items=new URLSearchParams(location.search).has('one')?[window.SWIPE_ONE]:window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
 /* The waiting list as the product page draws it (pages/review.js reviewListNodes, 28 Nov): five compact rows and the count,
    Next five / All, cards that wait for one cause as one row with Open, no Compare; then the merge line and the Reviewer's line. */
-let listShown=5;const listOpen=new Set(),CAUSE={'helper:unmerged':'Pull request not merged'};
+let listFrom=0,listAll=false,listCur='';const listOpen=new Set(),CAUSE={'helper:unmerged':'Pull request not merged'};
 const mk=(tag,cls,txt)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(txt!=null)n.textContent=txt;return n};
 const causeOf=it=>it.cause&&CAUSE[it.cause]?{key:'cause:'+it.cause,label:CAUSE[it.cause]}:{key:'title:'+String(it.title).toLowerCase(),label:it.title};
-function drawSide(){if(!deck)return;const wait=deck.items.map((it,i)=>({it,i,now:i===deck.index,c:causeOf(it)})).filter(x=>!deck.answers[x.it.id]),n=new Map(),rows=[],gs=new Map();
+function drawSide(follow){if(!deck)return;const wait=deck.items.map((it,i)=>({it,i,now:i===deck.index,c:causeOf(it)})).filter(x=>!deck.answers[x.it.id]),n=new Map(),rows=[],gs=new Map();
  wait.forEach(x=>n.set(x.c.key,(n.get(x.c.key)||0)+1));
  wait.forEach(x=>{if(n.get(x.c.key)<2){rows.push(x);return}let g=gs.get(x.c.key);if(!g){g={group:x.c.key,label:x.c.label,rows:[],now:false};gs.set(x.c.key,g);rows.push(g)}g.rows.push(x);g.now=g.now||x.now});
  const row=(x,sub)=>{const w=mk('div','review-queue-item'+(sub?' sub':'')),b=mk('button','btn ghost review-queue-row'+(x.now?' is-now':''));w.setAttribute('role','listitem');b.type='button';b.title=x.it.title;if(x.now)b.setAttribute('aria-current','true');
   b.append(mk('span','review-queue-title',x.it.title));if(x.it.ticket)b.append(mk('span','meta',x.it.ticket));b.onclick=()=>deck.jump(x.i);w.append(b);return w};
  const list=mk('div','review-group');list.setAttribute('role','list');list.setAttribute('aria-label','Waiting');
- rows.slice(0,listShown).forEach(r=>{if(!r.group){list.append(row(r));return}const open=listOpen.has(r.group),w=mk('div','review-queue-item'),b=mk('button','btn ghost review-queue-row'+(r.now&&!open?' is-now':''));w.setAttribute('role','listitem');b.type='button';b.title=r.label;b.setAttribute('aria-expanded',String(open));
-  b.append(mk('span','review-queue-title',r.rows.length+' · '+r.label),mk('span','meta',open?'Close':'Open'));b.onclick=()=>{open?listOpen.delete(r.group):listOpen.add(r.group);drawSide()};w.append(b);list.append(w);if(open)r.rows.forEach(x=>list.append(row(x,true)))});
+ /* five rows at a time; the five shown are the ones that hold the card on screen when it changes */
+ const at=rows.findIndex(r=>r.now),cur=at>=0?String((rows[at].group?rows[at].rows.find(x=>x.now):rows[at]).it.id):'';
+ if(follow!==false){if(cur&&cur!==listCur&&!listAll)listFrom=Math.floor(at/5)*5;listCur=cur}
+ if(listFrom>=rows.length)listFrom=Math.max(0,Math.floor((rows.length-1)/5)*5);if(rows.length<=5)listAll=false;
+ const from=listAll?0:listFrom,shownRows=listAll?rows:rows.slice(from,from+5);
+ shownRows.forEach(r=>{if(!r.group){list.append(row(r));return}const open=listOpen.has(r.group),w=mk('div','review-queue-item'),b=mk('button','btn ghost review-queue-row'+(r.now&&!open?' is-now':''));w.setAttribute('role','listitem');b.type='button';b.title=r.label;b.setAttribute('aria-expanded',String(open));
+  b.append(mk('span','review-queue-title',r.rows.length+' · '+r.label),mk('span','meta',open?'Close':'Open'));b.onclick=()=>{open?listOpen.delete(r.group):listOpen.add(r.group);drawSide(false)};w.append(b);list.append(w);if(open)r.rows.forEach(x=>list.append(row(x,true)))});
  const head=mk('div','review-list-head');head.append(mk('h2','review-list-title','Needs you'),mk('span','review-group-count',wait.length+' waiting'));
- const body=mk('div','review-list-groups'),step=(word,to,cls)=>{const b=mk('button','btn '+cls+' sm',word);b.type='button';b.onclick=()=>{listShown=to;drawSide()};return b},foot=mk('div','card-row');
- if(rows.length>listShown)foot.append(step('Next five',listShown+5,'outline'),step('All '+wait.length,1e6,'ghost'));else if(rows.length>5)foot.append(step('First five',5,'ghost'));
+ const body=mk('div','review-list-groups'),step=(word,go,cls)=>{const b=mk('button','btn '+cls+' sm',word);b.type='button';b.onclick=()=>{go();drawSide(false)};return b},foot=mk('div','card-row');
+ if(!listAll&&from+5<rows.length)foot.append(step('Next five',()=>{listFrom=from+5},'outline'));
+ if(listAll?rows.length>5:from>0)foot.append(step('First five',()=>{listFrom=0;listAll=false},'ghost'));
+ if(!listAll&&rows.length>5){foot.append(step('All '+wait.length,()=>{listAll=true},'ghost'),mk('span','meta','Rows '+(from+1)+' to '+(from+shownRows.length)+' of '+rows.length))}
  /* FX-04: in the queue or only just passed its checks: no card, one quiet line */
  const look=mk('button','btn ghost sm','Look');look.type='button';look.onclick=()=>document.querySelector('[data-show="answered"]').click();
  const merge=mk('div','card-row'),rev=mk('div','card-row');merge.append(mk('p','meta grow','2 wait to be merged, nothing to do'));rev.append(mk('p','meta grow','The Reviewer accepted 3, sent back 1, answered 1 for you today.'),look);
@@ -79,7 +86,7 @@ function drawSide(){if(!deck)return;const wait=deck.items.map((it,i)=>({it,i,now
  if(held)[...(narrow?next:q).querySelectorAll('button')].find(b=>b.textContent===held)?.focus({preventScroll:true})}
 if(new URLSearchParams(location.search).has('paused'))document.getElementById('review-paused').hidden=false;
 if(new URLSearchParams(location.search).has('narrow'))document.body.dataset.liveNarrow='';/* the shell's mark for a page area under 900 px beside the Focus panel */
-addEventListener('resize',()=>drawSide());
+addEventListener('resize',()=>drawSide(false));
 /* ?empty=1 (ORCH-2024) and ?one=1 (ORCH-2113): as the product, the rail holds only the empty All cards list, so the page is
    one column, the Waiting / Answered switch lines up with the heading and the empty state or the one card sits in the
    card's column under it (no empty left column) */

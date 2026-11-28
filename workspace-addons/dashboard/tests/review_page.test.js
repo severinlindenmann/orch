@@ -83,26 +83,37 @@ test('refusals become the codes the page understands', async () => {
 // merge line and the Reviewer's line.
 const listDeck = (n, extra = {}) => { const jumps = []; return {jumps, items:Array.from({length:n}, (_, i) => ({id:'c' + i, title:'Card ' + i, ticket:'DT-' + i, raw:{}})), answers:{}, index:0, jump:i => jumps.push(i), drawList() { throw new Error('the kit list is not used'); }, ...extra}; };
 const buttons = n => nodes(n).filter(x => x.tag === 'button');
-test('O-05: the list shows five compact rows and the count; Next five adds five, All shows every one, First five folds it again', () => {
+test('O-05: the list shows five compact rows and the count; Next five shows the next five, All every one, First five the start again', () => {
   const c = ctx({}), deck = listDeck(13), queue = h('div');
   c.reviewDrawSide(queue, deck);
-  const rows = () => nodes(queue).filter(n => n.attrs?.['data-review-row']);
-  assert.equal(rows().length, 5);
+  const rows = () => nodes(queue).filter(n => n.attrs?.['data-review-row']).map(n => n.attrs['data-review-row']);
+  const steps = () => buttons(queue).filter(b => b.attrs['data-review-more']).map(text);
+  const where = () => text(nodes(queue).find(n => n.attrs?.['data-review-where'] !== undefined));
+  assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4']);
   assert.match(text(queue), /^Needs you13 waiting/);
-  assert.equal(rows()[0].attrs['aria-current'], 'true'); assert.match(rows()[0].attrs.className, /review-queue-row is-now/);
-  assert.equal(rows()[1].attrs['aria-current'], null);
-  assert.deepEqual(buttons(queue).filter(b => b.attrs['data-review-more']).map(text), ['Next five', 'All 13']);
-  rows()[3].onclick(); assert.deepEqual(deck.jumps, [3], 'a row opens its card');
+  const first = nodes(queue).find(n => n.attrs?.['data-review-row'] === 'c0');
+  assert.equal(first.attrs['aria-current'], 'true'); assert.match(first.attrs.className, /review-queue-row is-now/);
+  assert.deepEqual(steps(), ['Next five', 'All 13']); assert.equal(where(), 'Rows 1 to 5 of 13');
+  nodes(queue).find(n => n.attrs?.['data-review-row'] === 'c3').onclick(); assert.deepEqual(deck.jumps, [3], 'a row opens its card');
   const more = key => buttons(queue).find(b => b.attrs['data-review-more'] === key);
   // the buttons redraw the list in its place on the page; here the place is handed in again
   c.document.querySelector = () => queue;
-  more('next').onclick(); assert.equal(rows().length, 10);
-  more('all').onclick(); assert.equal(rows().length, 13);
-  assert.deepEqual(buttons(queue).filter(b => b.attrs['data-review-more']).map(text), ['First five']);
-  more('five').onclick(); assert.equal(rows().length, 5);
+  more('next').onclick(); assert.deepEqual(rows(), ['c5', 'c6', 'c7', 'c8', 'c9'], 'the next five, never a longer list');
+  assert.deepEqual(steps(), ['Next five', 'First five', 'All 13']); assert.equal(where(), 'Rows 6 to 10 of 13');
+  more('next').onclick(); assert.deepEqual(rows(), ['c10', 'c11', 'c12']); assert.deepEqual(steps(), ['First five', 'All 13']);
+  more('all').onclick(); assert.equal(rows().length, 13); assert.deepEqual(steps(), ['First five']);
+  more('five').onclick(); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4']);
+  // the list follows the card on screen: a card further down (opened from a ticket, or the next after an answer) shows its five
+  deck.index = 7; c.reviewDrawSide(queue, deck);
+  assert.deepEqual(rows(), ['c5', 'c6', 'c7', 'c8', 'c9']);
+  more('five').onclick(); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4'], 'First five stays where the person put it');
+  c.reviewDrawSide(queue, deck); assert.deepEqual(rows(), ['c0', 'c1', 'c2', 'c3', 'c4'], 'the same card: no jump back');
   deck.answers.c0 = {verdict:'ok'}; c.reviewDrawSide(queue, deck);
   assert.match(text(queue), /^Needs you12 waiting/, 'an answered card leaves the list and the count at once');
-  assert.equal(rows()[0].attrs['data-review-row'], 'c1');
+  assert.deepEqual(rows(), ['c1', 'c2', 'c3', 'c4', 'c5']);
+  // five or fewer: no steps at all
+  const few = h('div'); ctx({}).reviewDrawSide(few, listDeck(4));
+  assert.deepEqual(buttons(few).filter(b => b.attrs['data-review-more']).length, 0);
 });
 test('O-05: cards that wait for one cause are one row with Open (their cards under it), never a button that answers them all', () => {
   const c = ctx({}), queue = h('div');
@@ -782,4 +793,23 @@ test('W-003: a card answered on Review leaves the one count at once (badge, head
   // saved: nothing more to hide
   await api.answer({id:'core:review:t_aaaa01', digest:ID, verdict:'no'});
   assert.equal(c.acceptOverlay({counts:{needs_you:{items:[{ticket:'t_aaaa01', question:null}]}}}).counts.needs_you.items.length, 1);
+});
+test('O-04: the layout watcher draws the page again only when the layout really changed (the shell writes its marks at every paint)', () => {
+  let renders = 0;
+  const body = {dataset:{}};
+  const c = ctx({review:{cards:[]}}, {document:{addEventListener(){}, getElementById:() => null, body}, route:() => ({kind:'review'}), render:() => { renders++; c.reviewPage(); }});
+  assert.equal(c.reviewLayoutChanged(), false, 'before the first paint there is nothing to redo');
+  c.reviewPage();
+  assert.equal(c.reviewLayoutChanged(), false); assert.equal(renders, 0, 'the same layout: no paint');
+  body.dataset.liveNarrow = '';
+  assert.equal(c.reviewLayoutChanged(), true); assert.equal(renders, 1, 'the Focus panel took the room: one paint');
+  for (let i = 0; i < 5; i++) c.reviewLayoutChanged();  // the shell writes the same mark again at every paint
+  assert.equal(renders, 1, 'a mark written again starts no paint');
+  delete body.dataset.liveNarrow; body.dataset.liveStack = '';
+  assert.equal(c.reviewLayoutChanged(), false, 'still one column');
+  delete body.dataset.liveStack;
+  assert.equal(c.reviewLayoutChanged(), true); assert.equal(renders, 2);
+  const other = ctx({review:{cards:[]}}, {document:{addEventListener(){}, getElementById:() => null, body:{dataset:{liveNarrow:''}}}, route:() => ({kind:'home'}), render:() => { renders++; }});
+  other.reviewPage(); delete other.document.body.dataset.liveNarrow;
+  assert.equal(other.reviewLayoutChanged(), false, 'another page is on screen');
 });
