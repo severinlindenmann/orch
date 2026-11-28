@@ -68,6 +68,7 @@ def test_the_runner_and_the_release_keeper_know_the_quarantine():
     # the Merge click and tend-releases tell the quarantine checks by the workflow file (ORCH-2399)
     merge = (ROOT / "workspace" / "src" / "orch" / "ghmerge.py").read_text()
     assert 'QUARANTINE_FILE = "quarantine.yml"' in merge and (WORKFLOWS / "quarantine.yml").is_file()
+    assert 'QUARANTINE_NAME = "quarantine"' in merge  # the name in quarantine.yml: when to ask, never the proof
 
 
 def test_the_docs_say_where_the_quarantined_checks_run():

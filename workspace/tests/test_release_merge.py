@@ -432,6 +432,16 @@ def test_green_checks_ask_github_nothing_more(gh):  # noqa: F811
     assert not _asked_for_quarantine(gh)
 
 
+def test_a_red_check_of_another_workflow_asks_github_nothing_more(gh):  # noqa: F811
+    """An ordinary pull request with a red or running check costs no extra read (orch needs asks often)."""
+    gh.rollup = [_check("relay / test", "FAILURE", CI_RUN), _check("lint", "", CI_RUN, status="IN_PROGRESS")]
+    gh.quarantine_runs = [Q_RUN]
+    assert ghmerge.checks(PR)["green"] is False and not _asked_for_quarantine(gh)
+    with pytest.raises(ghmerge.Refused):
+        ghmerge.merge(PR, HEAD)
+    assert not _asked_for_quarantine(gh)
+
+
 def test_named_exceptions_and_quarantine_together(tk, run, gh):  # noqa: F811
     root, tid = tk
     _ask(run, tid, "--release")

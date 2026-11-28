@@ -220,14 +220,16 @@ def failed_names(rollup) -> list[tuple[str, str]] | None:
 # over them). Told by the workflow FILE of the run, which GitHub sets, never by the display name, which any
 # workflow can carry.
 QUARANTINE_FILE = "quarantine.yml"
+QUARANTINE_NAME = "quarantine"  # its display name: only the reason to ask GitHub, never the proof
 RUN_OF = re.compile(r"/actions/runs/([0-9]{1,20})(?:/|$)")
 
 
 def without_quarantine(rollup, repo: str, head: str, read):
     """`rollup` without the checks of the quarantine workflow's runs on the commit `head`. `read(args,
-    timeout)` runs gh. GitHub is asked only while a check that belongs to an Actions run is not green (one
-    read); on any doubt (no answer, an odd answer) the rollup comes back whole: nothing is excused by
-    mistake."""
+    timeout)` runs gh. GitHub is asked (one read) only while a check that is not green carries the
+    quarantine workflow's name and belongs to an Actions run, so an ordinary pull request costs nothing
+    more; the answer, the runs of the workflow FILE, decides. On any doubt (no answer, an odd answer) the
+    rollup comes back whole: nothing is excused by mistake."""
     if not isinstance(rollup, list) or not all(isinstance(c, dict) for c in rollup) or passed(rollup):
         return rollup
     if not SHA.fullmatch(str(head or "")):
@@ -236,7 +238,10 @@ def without_quarantine(rollup, repo: str, head: str, read):
         i: (m[1] if (m := RUN_OF.search(str(c.get("detailsUrl") or ""))) else "")
         for i, c in enumerate(rollup)
     }
-    if not any(run and not passed([c]) for run, c in zip(runs.values(), rollup, strict=True)):
+    if not any(
+        run and c.get("workflowName") == QUARANTINE_NAME and not passed([c])
+        for run, c in zip(runs.values(), rollup, strict=True)
+    ):
         return rollup
     got = read(
         ["api", f"repos/{repo}/actions/workflows/{QUARANTINE_FILE}/runs?head_sha={head}&per_page=100",
