@@ -213,9 +213,9 @@ def test_a_miss_is_measured_again_and_the_better_number_counts():
 
 def test_a_page_time_is_the_middle_of_three_fresh_loads(tmp_path, monkeypatch):
     """ORCH-2370: First load was one sample, 1.02 s in one run and 3.12 s in the next on a slow CI runner.
-    Every page is measured three times on a freshly started dashboard and the middle time counts: one slow
-    load does not turn the check red, a page that is slow every time still does. The idle minute is waited
-    for once."""
+    Every page is measured three times on a new browser (the dashboard keeps running) and the middle time
+    counts: one slow load does not turn the check red, a page that is slow every time still does. The idle
+    minute is waited for once."""
     mod = _limits_module()
 
     def run(first, home, review, focus, idle=None):
@@ -244,14 +244,19 @@ def test_a_page_time_is_the_middle_of_three_fresh_loads(tmp_path, monkeypatch):
 
     idles: list[int] = []
 
-    def fake_dash(ws, orch, idle, out):
+    stops: list[list[str]] = []
+
+    def fake_dash(ws, orch, idle, out, stop=True):
+        assert stop is False  # a restart reads every ticket again: not the page's time (run 46080088904)
         idles.append(idle)
         return runs[len(idles) - 1]
 
     monkeypatch.setattr(mod.baseline, "dash", fake_dash)
+    monkeypatch.setattr(mod.baseline, "sh", lambda cmd, *a, **k: stops.append(cmd))
     out = tmp_path / "dash.json"
     assert mod.dash_pages(tmp_path, "orch", 60, out) == got
     assert idles == [60, 0, 0] and json.loads(out.read_text()) == got
+    assert stops == [["orch", "stop"]]  # stopped once, after the last measurement
 
 
 def test_against_develop_fails_only_on_more_than_30_percent_slower():

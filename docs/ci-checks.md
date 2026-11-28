@@ -144,9 +144,8 @@ late or did not come (ORCH-454).
 ## Quarantine (ORCH-2363)
 
 Owner, 27 Nov: the merge queue was red 756 of 840 minutes because of flaky checks, so they left every required set
-until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and five click-throughs
-(`a-board-families`, `f-sync-page`, `q-automation-repeats`, and since the 27 Nov train `p-looks-good-cases` and
-`s-role-page`, which time out when their lane is slow late in a run, ORCH-2372: `QUARANTINED` in
+until they are fixed: the suites at a fake clock (`clock.yml`, all `clock / *` jobs) and three click-throughs
+(`a-board-families`, `f-sync-page`, `q-automation-repeats`: `QUARANTINED` in
 `workspace-addons/dashboard/clickthrough/run.cjs`, each with the ticket that fixes it). `ci.yml` no longer calls
 `clock.yml`, and a default click-through run (pull request, queue group, develop, release) leaves the quarantined
 ones out; `--only <name>` still runs one (the light job does so for a click-through a pull request changes).
@@ -156,6 +155,10 @@ and by hand (`--quarantined` runs only the quarantined click-throughs). It has n
 group or pull request sees these checks, and the release keeper leaves the workflow's checks out when it judges a
 release pull request. A red nightly run opens one Backlog ticket "Quarantined CI checks are red (later)" (release
 keeper, not started, no rerun, no revert); while it is open, each further red run adds a note to it.
+
+`p-looks-good-cases` and `s-role-page` were quarantined with the 27 Nov train and are back in the default run
+(ORCH-2372): they timed out late in a run because every Home read left a chain of `orch needs` processes behind
+that never ended (the built-in relay add-on's needs asked `orch needs` again); that is fixed in `orch/needs.py`.
 
 **Back out of quarantine:** fix the check, see it green in the `quarantine` workflow, then in one pull request
 remove its `QUARANTINED` entry (or call `clock.yml` from `ci.yml` again), update this section and the table, and

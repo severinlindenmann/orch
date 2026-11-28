@@ -9,8 +9,9 @@ ORCH_HOME_STRICT=1, PW_DIR the folder holding node_modules/playwright. <base> mu
 (limits.json):
 - `orch ticket list` and `orch needs`: median of 3 runs after one warm-up run (the warm-up builds the ticket index,
   as the first command of a day does once);
-- every dashboard page (first load included): time until usable, the middle of 3 measurements, each on a freshly
-  started dashboard and a fresh browser (ORCH-2370: one slow load on a busy runner is not the page's time);
+- every dashboard page (first load included): time until usable, the middle of 3 measurements, each on a new
+  browser with a new sign-in link, the dashboard left running between them (ORCH-2370: one slow load on a busy
+  runner is not the page's time);
 - an idle minute on Home: bytes over the wire.
 Prints a table, adds it to the GitHub job summary when there is one, writes <base>/out/limits.json and exits 1 when
 a limit is passed (each one named with its number and limit). A miss is measured once more and the better number
@@ -149,9 +150,15 @@ def middle(runs: list[dict]) -> dict:
 
 
 def dash_pages(ws: Path, orch: str, idle: int, out: Path) -> dict:
-    """The dashboard measured DASH_SAMPLES times, each on a fresh start; the idle minute only the first time."""
-    runs = [baseline.dash(ws, orch, idle if i == 0 else 0, out.with_name(f"{out.stem}-sample{i + 1}.json"))
-            for i in range(DASH_SAMPLES)]  # fmt: skip
+    """The dashboard measured DASH_SAMPLES times, each on a new browser with a new sign-in link; the idle minute
+    only the first time. The dashboard keeps running between them and is stopped once at the end: started again
+    for each one, it first read all 10,000 tickets again and First load took 6.8 s instead of 1.8 s (run
+    46080088904), which is the time of a restart, not of the page."""
+    try:
+        runs = [baseline.dash(ws, orch, idle if i == 0 else 0, out.with_name(f"{out.stem}-sample{i + 1}.json"), stop=False)
+                for i in range(DASH_SAMPLES)]  # fmt: skip
+    finally:
+        baseline.sh([orch, "stop"], ws, check=False, timeout=120)
     got = middle(runs)
     out.write_text(json.dumps(got, indent=1))
     return got
