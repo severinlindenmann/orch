@@ -147,7 +147,7 @@ function cmd {
 $ok = DoneWithin 't_abc123' 2
 if ("$ok" -ne $env:WANT_OK) { throw "DoneWithin gave $ok, want $($env:WANT_OK)" }
 if ("$($script:answers)" -ne $env:WANT_ANSWERS) { throw "answered $($script:answers) times, want $($env:WANT_ANSWERS)" }
-$said = Get-Content $log -Raw
+$said = if (Test-Path $log) { Get-Content $log -Raw } else { '' }  # nothing is logged when it is done at once
 if ($env:WANT_ANSWERS -eq '1' -and $said -notmatch 'one retry') { throw 'the retry is not in the log' }
 if ($env:CASE -eq 'refused' -and $said -notmatch 'no retry') { throw 'the refused answer is not in the log' }
 '''
