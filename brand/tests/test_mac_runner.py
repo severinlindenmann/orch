@@ -63,6 +63,10 @@ def test_a_busy_runner_sends_a_develop_push_to_github_but_the_nightly_and_releas
     busy = [_runner(busy=True)]
     assert mr.pick(busy, "push", "")[0] is False
     assert mr.pick(busy, "push", "wait")[0] is True
+    # ORCH-2323: a manual proof run does not sit queued behind the one runner's job either
+    assert mr.pick(busy, "workflow_dispatch", "")[0] is False
+    assert mr.pick(busy, "workflow_dispatch", "wait")[0] is True
+    assert mr.pick([_runner()], "workflow_dispatch", "")[0] is True
     assert mr.pick(busy, "schedule", "")[0] is True
     assert mr.pick(busy, "pull_request", "")[0] is True
     assert mr.pick([_runner()], "push", "")[0] is True
