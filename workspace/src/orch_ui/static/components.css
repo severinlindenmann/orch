@@ -88,22 +88,37 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .nav-group>summary:after{content:'';display:block;width:16px;height:16px;margin-left:auto;background:var(--text-faint);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat;transition:transform var(--dur-base) var(--ease-move)}.nav-group[open]>summary:after{transform:rotate(180deg)}
 .nav-group nav{margin-top:4px}
 /* Menu head and add-ons (ORCH-1184): the orch name with the button that closes the menu to its icons (1280 px and wider);
-   add-ons the person pinned, then Show more (n) that unfolds the rest in place. Each row has a pin button, faint until
-   the row is pointed at or focused, filled while pinned. */
+   add-ons the person keeps in the menu, then More (n) that unfolds the rest in place. */
 .side-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .side-head>.side-toggle{display:none}
 .nav-addons{display:grid;gap:4px}
 .nav-row{position:relative;display:grid}
-/* The menu's add-ons (D2 A, ORCH-2283): plain rows; 'Change this list' shows one small switch per row (In the list or
-   under More), Done hides them again. More (n) / Fewer unfolds the rest in place. */
-.nav-row-edit>.nav-item{padding-right:52px}
-.nav-row>.nav-pin{position:absolute;right:8px;top:0;bottom:0;margin-block:auto;display:grid;place-items:center;width:36px;height:28px;padding:0;border:0;border-radius:6px;background:none;cursor:pointer}
-.nav-pin:focus-visible{outline:none;box-shadow:var(--focus-ring)}
-.nav-pin-sw{position:relative;width:28px;height:16px;border-radius:99px;background:var(--surface-3);transition:background var(--dur-fast) var(--ease-move)}
-.nav-pin-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform var(--dur-fast) var(--ease-move)}
-.nav-pin[aria-checked=true] .nav-pin-sw{background:var(--brand)}
-.nav-pin[aria-checked=true] .nav-pin-sw:after{transform:translateX(12px);background:var(--on-brand)}
-:is(.nav-more,.nav-change){width:100%;font:inherit;font-size:14px;cursor:pointer}
+/* The menu's add-ons (D2 A, ORCH-2283; O-34): plain rows in the person's order, More (n) / Fewer unfolds the rest in
+   place. No row edits the list. Way A: .nav-edit, a quiet '…' beside 'Add-ons' that shows when the menu is pointed at or
+   holds the keyboard, opens Settings › Menu (.menu-order: one row per page with a grip, two arrows and the switch).
+   Way B: every row is dragged in place and has its own '…' (.nav-row-menu). A dragged row fades; a line marks the place. */
+.nav-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
+.nav-head>.nav-edit{margin-right:4px}
+.nav-row-own>.nav-item{padding-right:40px}
+.nav-row>.nav-row-menu{position:absolute;right:4px;top:0;bottom:0;margin-block:auto;height:28px}
+.nav-row-more{cursor:pointer}
+@media(hover:hover){
+.nav-edit,.nav-row-menu:not([open])>.nav-row-more{opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
+.nav-addons:is(:hover,:focus-within) .nav-edit,.nav-row:is(:hover,:focus-within) .nav-row-more{opacity:1}
+}
+[data-menu-row][draggable=true]{cursor:grab}
+[data-menu-row].dragging{opacity:.35}
+[data-menu-row].drop-before{box-shadow:0 -2px 0 var(--brand)}
+[data-menu-row].drop-after{box-shadow:0 2px 0 var(--brand)}
+.menu-order>.menu-order-row{display:flex;align-items:center;flex-wrap:nowrap;gap:8px}
+.menu-order>.menu-order-row>.grow{flex:1 1 0;min-width:0}
+.card.menu-order>.card-row.menu-order-row>.btn{margin-left:0}
+@media(max-width:360px){.menu-order-row>.switch-text{display:none}}
+.menu-order-row h3{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu-grip{display:grid;place-items:center;flex:none;width:18px;color:var(--text-faint)}
+.menu-order-row.off h3{color:var(--text-muted)}
+@media(hover:none){.menu-grip{display:none}}
+.nav-more{width:100%;font:inherit;font-size:14px;cursor:pointer}
 @media(min-width:1280px){.side-head>.side-toggle{display:inline-flex}}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
@@ -199,6 +214,10 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .page-heading:has(>.actions,>.topbar-actions,>.btn,>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
 .page-heading>div:first-child{display:grid;gap:4px;min-width:0}
 .page-heading h1{margin:0}
+/* W-006: a page's tag ("Preview") sits after its name, on the title's middle, the same on every page: whether the page
+   top comes from UI.pageTop({tag}) or from a page's own markup (a .badge inside the h1) */
+.page-heading h1:has(>.badge){display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}
+.page-heading h1>.badge{flex:none;letter-spacing:0;font-weight:500}
 .page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
 .page-heading-actions>.btn.ghost:last-child{padding-right:0}
 /* A slot an add-on fills later (its header link) takes no gap while empty: the right edge stays the same (D1, ORCH-2315). */
@@ -256,6 +275,13 @@ input[type=checkbox],input[type=radio]{width:16px;height:16px;accent-color:var(-
 .segmented .btn,.view-toggle .btn,.view-toggle .seg,.segmented label{border:0;min-height:32px;padding:4px 12px;border-radius:4px;color:var(--text-muted);background:transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:14px}
 .segmented [aria-pressed=true],.segmented [aria-current=true],.segmented label:has(input:checked),.view-toggle .active,.view-toggle [aria-pressed=true]{background:var(--surface-3);color:var(--text)}
 .segmented label:focus-within{outline:2px solid var(--brand);outline-offset:2px}
+/* W-007: a selected choice (a button that is one of a radio group) uses the normal selected look, never the filled button:
+   the page keeps one filled button, its main action. Unselected choices are outlined. */
+.btn[role=radio]{border-color:var(--border-strong);color:var(--text);background:transparent}
+.btn[role=radio]:hover:not(:disabled){background:var(--surface-2);border-color:var(--text-muted)}
+.btn[role=radio][aria-checked=true],.btn[role=radio][aria-checked=true]:hover:not(:disabled){background:var(--surface-3);border-color:var(--text-muted);color:var(--text);font-weight:600;cursor:default}
+.choice-card{border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.choice-card.sel,.choice-card:has(input:checked){border-color:var(--text-muted);background:var(--surface-2)}
 .tabs{display:flex;align-items:stretch;gap:16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .tabs a,.tabs button{min-height:40px;padding:8px 4px;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-muted);text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
 .tabs [aria-selected=true],.tabs [aria-current=page]{border-bottom-color:var(--brand);color:var(--text)}
@@ -459,6 +485,15 @@ dialog.dialog{width:min(480px,calc(100% - 32px));border-radius:12px}
 dialog::backdrop{background:var(--scrim)}
 dialog h2{margin-bottom:8px}
 dialog .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:24px}
+/* A dialog that can outgrow the window (W-060): class dialog-fit on the dialog, dialog-body on its middle. The title and
+   the buttons stay in view and only the middle scrolls, so the main button is never cut off below the window edge. */
+dialog.dialog.dialog-fit[open]{display:flex;flex-direction:column;overflow:hidden}
+dialog.dialog.dialog-fit>*{flex:none}
+dialog.dialog.dialog-fit>.dialog-body{flex:1 1 auto;min-height:0;overflow:hidden auto;margin:0 -24px;padding:4px 24px}
+dialog.dialog.dialog-fit>.actions{margin-top:16px}
+/* Tick boxes that belong together (W-060): one short block, the rows close to each other, one small line of help below. */
+.check-block{display:grid;gap:0;margin:0;padding:4px 12px;border:1px solid var(--border);border-radius:8px;min-width:0}
+.check-block>.meta{padding:4px 0 8px}
 dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% - 32px));height:100dvh;max-height:100dvh;border-width:0 0 0 1px;border-radius:0}
 /* Results */
 .file-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);text-decoration:none;min-height:40px}
@@ -471,7 +506,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:has(.nav-label){--sidebar-width:64px}
 .sidebar:has(.nav-label){padding:16px 8px}
 .sidebar:has(.nav-label) .brand{padding:0 12px}
-.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.sidebar:has(.nav-label) :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-edit,.nav-row-menu){display:none}
 .sidebar:has(.nav-label) .side-head{flex-direction:column;gap:12px}
 .sidebar:has(.nav-label) .ws-switch{padding:8px;justify-content:center}
 .sidebar:has(.nav-label) .nav-item{justify-content:center;padding:8px}
@@ -508,7 +543,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:is([data-side=rail],[data-live-rail]){--sidebar-width:64px}
 .shell:is([data-side=rail],[data-live-rail]) .sidebar{padding:16px 8px}
 .shell:is([data-side=rail],[data-live-rail]) .brand{padding:0 12px}
-.shell:is([data-side=rail],[data-live-rail]) .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-pin){display:none}
+.shell:is([data-side=rail],[data-live-rail]) .sidebar :is(.brand-word,.ws-text,.ws-chev,.nav-label,.phone-toggle>span,.saved-views,.eyebrow,.nav-edit,.nav-row-menu){display:none}
 .shell:is([data-side=rail],[data-live-rail]) .side-head{flex-direction:column;gap:12px}
 .shell:is([data-side=rail],[data-live-rail]) .ws-switch{padding:8px;justify-content:center}
 .shell:is([data-side=rail],[data-live-rail]) .sidebar .nav-item{justify-content:center;padding:8px}
@@ -531,6 +566,22 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell:is([data-side=rail],[data-live-rail]) .nav-item:focus-visible:after,.shell:is([data-side=rail],[data-live-rail]) .nav-item:hover:after{content:attr(aria-label);position:absolute;left:52px;top:0;padding:8px 12px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:8px;white-space:nowrap;z-index:80;font-size:12px;color:var(--text)}
 }
 @media(max-width:899px){:root{--page-gutter:16px}.columns{grid-template-columns:minmax(0,1fr)}.grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}.topbar{gap:8px}.topbar-actions{flex-wrap:wrap}.page{padding-top:24px}.table-wrap table{min-width:560px}}
+/* The room a page really has (W-001, owner 28 Nov). A page lays out for its page area, not for the window: beside the
+   Focus panel a 1440 px window leaves the page 617 px. The shell marks the body while the page area is narrow:
+   body[data-live-narrow] under 900 px, body[data-live-stack] under 1100 px (dashboard pages/live-layer.js). Every
+   narrow layout is written twice, on the same line where possible: once in its width query for a small window, once
+   under the mark for the page area. Layout only: sizes for fingers (44 px) follow the window and the pointer, never
+   the room (see the touch block below). The shared pieces: */
+body[data-live-narrow] .columns{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .grid-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-live-narrow] .table-wrap table{min-width:560px}
+body[data-live-narrow] .page-heading-actions{flex-wrap:wrap}
+/* A framed add-on page in a wide window keeps the wide window's page gutter (24 px), so its left edge is the same as on
+   a dashboard-drawn page whether or not the frame is narrow (W-006: left edges of 248 and 256 px). */
+:root[data-window=wide]{--page-gutter:24px}
+/* A button's word never breaks inside itself (W-001: "Save ticket" and "Send" wrapped letter by letter in a 210 px
+   box). A row of buttons wraps as whole buttons instead; a long label still wraps between its words. */
+.btn,.chip,.badge,.pill{overflow-wrap:normal;word-break:normal;hyphens:manual}
 @media(max-width:720px){.shell{display:block}
 .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--border);padding:8px 16px;gap:8px}
 .sidebar-top{display:flex;align-items:center;justify-content:space-between}
@@ -548,10 +599,14 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar .side-foot{margin:0}
 .sidebar[data-open=true] .side-foot.person-row{display:flex}
 .sidebar .side-foot.person-row .phone-toggle{width:44px;min-height:44px}
-.btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
-.btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}
-.nav-row>.nav-pin{width:44px;height:44px;right:4px}
-.page-back{min-height:44px;margin:-10px 0 -6px}
+/* Touch sizes (44 px) follow the window, never the frame (W-001, W-006; owner 28 Nov: bigger touch buttons follow finger
+   or mouse, never the width). A framed add-on page beside the Focus panel is narrower than 720 px in a wide window: it
+   takes its narrow layout, but keeps the desktop control sizes. The dashboard tells the frame (kit/frame.js sets
+   html[data-window=wide]); :where() adds no weight, so every rule here cascades exactly as before. */
+:where(html:not([data-window=wide])) .btn,:where(html:not([data-window=wide])) .btn.sm,:where(html:not([data-window=wide])) .btn.xs,:where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs,:where(html:not([data-window=wide])) .tabs button,:where(html:not([data-window=wide])) .tabs a,:where(html:not([data-window=wide])) .nav-item,:where(html:not([data-window=wide])) summary,:where(html:not([data-window=wide])) .menu-item{min-height:44px}
+:where(html:not([data-window=wide])) .btn.icon,:where(html:not([data-window=wide])) .btn.icon.sm,:where(html:not([data-window=wide])) .btn.icon.xs{width:44px}
+.nav-row>.nav-row-menu{height:44px}.nav-row-own>.nav-item{padding-right:52px}
+:where(html:not([data-window=wide])) .page-back{min-height:44px;margin:-10px 0 -6px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
 /* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
@@ -563,8 +618,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .file-row>.file-actions{flex:1 0 100%}
 .card-row>.chip{margin-left:24px}
 .toasts{left:16px;right:16px;width:auto}
-.input{font-size:16px;min-height:44px}
-.switch:before{content:"";position:absolute;inset:-12px -4px}
+:where(html:not([data-window=wide])) .input{font-size:16px;min-height:44px}
+:where(html:not([data-window=wide])) .switch:before{content:"";position:absolute;inset:-12px -4px}
 dialog.sheet{width:100%}
 }
 @media(max-width:599px){.grid-2,.grid-3{grid-template-columns:minmax(0,1fr)}.topbar{position:relative}.topbar-actions{margin-left:0}.page-header .actions{width:100%}.page-heading-actions{margin-left:0;width:100%;flex-wrap:wrap}.breadcrumb{max-width:100%}.stepper{gap:8px}.stepper li+li:before{width:8px}.toasts{bottom:16px}}
@@ -656,11 +711,12 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 .preview-metrics b{display:block;font-size:var(--fs-4);margin-top:var(--s1)}
 @media(max-width:900px){.demo-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){
-  .btn,.icon-btn,.input{height:var(--touch)}
-  .check-label{min-height:var(--touch)}
-  .icon-btn{width:var(--touch)}
+  /* touch sizes follow the window, never the frame (W-006): see the touch block above */
+  :where(html:not([data-window=wide])) .btn,:where(html:not([data-window=wide])) .icon-btn,:where(html:not([data-window=wide])) .input{height:var(--touch)}
+  :where(html:not([data-window=wide])) .check-label{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .icon-btn{width:var(--touch)}
   .qoption{height:auto;min-height:var(--touch)}
-  .ev-technical summary{min-height:var(--touch)}
+  :where(html:not([data-window=wide])) .ev-technical summary{min-height:var(--touch)}
   .demo{padding:var(--s5) var(--s4)}
   .demo-head{align-items:flex-start;flex-direction:column}
   .section-head{flex-wrap:wrap}

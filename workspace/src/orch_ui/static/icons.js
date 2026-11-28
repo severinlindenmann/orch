@@ -51,6 +51,9 @@
     minus: '<path d="M5 12h14"/>',
     cards: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    'chevron-up': '<path d="m6 15 6-6 6 6"/>',
+    // a row that can be dragged to another place (O-34)
+    grip: '<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>',
     'chevron-right': '<path d="m9 6 6 6-6 6"/>',
     'chevron-left': '<path d="m15 6-6 6 6 6"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4"/>',  // the Tickets calendar (ORCH-1081)
@@ -75,6 +78,8 @@
     'split-down': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18"/>',
     keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
     terminal: '<path d="m5 8 4 4-4 4M12 16h7"/>',
+    // Settings (O-35): a gear with six clear teeth, the same line as its neighbours (drawing from Lucide, ISC licence)
+    settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   };
   window.iconNames = () => Object.keys(P);
   window.icon = (name, size = 16, cls = '') =>

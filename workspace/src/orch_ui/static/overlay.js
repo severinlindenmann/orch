@@ -10,17 +10,18 @@ const focusables=d=>[...d.querySelectorAll('button,a[href],input,textarea,select
 /* where focus goes back to: the opener, or, when it was an item of a menu that has closed since, that menu's button */
 const back=t=>{if(!t?.isConnected||t.closest('[inert]'))return null;if(t.getClientRects().length)return t;const s=t.closest('details')?.querySelector(':scope>summary');return s?.getClientRects().length?s:null};
 function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='true';d.setAttribute('aria-modal','true');if(!d.hasAttribute('aria-label')&&!d.hasAttribute('aria-labelledby'))d.setAttribute('aria-label',d.querySelector('h1,h2,h3')?.textContent||'Preview');
- /* class ui-bottom-close: the dialog has its own Cancel/Close row at the bottom, so no top × Close (Esc and a click outside still close it) */
+ /* class ui-bottom-close: the dialog has its own Cancel/Close row at the bottom, so no top × Close (Esc still closes it) */
  const x=document.createElement('button');x.type='button';x.className='btn outline sm ui-overlay-close';x.textContent=d.classList.contains('ui-fullscreen')?'× Exit full screen':'× Close';x.setAttribute('aria-label',x.textContent.slice(2));x.onclick=()=>d.close();if(!d.classList.contains('ui-bottom-close'))d.prepend(x);
  /* one close button: a dialog's own plain "Close" button repeats the × Close above, so it goes (and its empty row with it) */
  d.querySelectorAll?.('button').forEach(b=>{if(b!==x&&!b.classList.contains('ui-overlay-close')&&b.textContent.trim()==='Close'){const row=b.parentElement;b.remove();if(row&&row!==d&&!row.children.length&&!row.textContent.trim())row.remove()}});
  d.addEventListener('cancel',e=>{e.preventDefault();e.stopImmediatePropagation();d.close()},true);
- d.addEventListener('click',e=>{if(e.target!==d)return;const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){e.stopImmediatePropagation();d.close()}},true);
+ /* O-02 (owner, 28 Nov): a click beside a dialog does nothing, so what was typed is never lost to a slip of the mouse. Only
+    Esc, × Close and the dialog's own buttons close it. This holds for every dialog, sheet and viewer: there is no opt-out. */
  d.addEventListener('submit',e=>{if((e.submitter?.formMethod||e.target.method)==='dialog'){e.preventDefault();d.close(e.submitter?.value||'')}},true);
  d.addEventListener('close',()=>{if(!d.open)finish(d)});
 }
 HTMLDialogElement.prototype.showModal=function(){prepare(this);if(this.open){if(pending.has(this))stopClose(this);return}const from=document.activeElement;this._uiOpener=from;this._uiNear=neighbours(from);this._uiFinished=false;release();if(!locked){previousOverflow=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';locked=true}stack.push(this);nativeShow.call(this);this.classList.remove('ui-closing');UI.placePreview?.();};
-/* The one close lifecycle (ORCH-2060). Cancel, Escape, × Close, a click outside, form method=dialog, orch.close and
+/* The one close lifecycle (ORCH-2060). Cancel, Escape, × Close, form method=dialog, orch.close and
    dialog.close() all come here. The dialog fades for the exit token (--dur-exit; none with reduced motion), then it is
    closed for real, leaves the stack and focus goes back, and only then the promise settles: whoever awaits it finds
    dialog.open false, the page no longer inert and focus on the opener. A second close while it fades gets the same

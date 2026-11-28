@@ -6,6 +6,9 @@ button,a,input,textarea,summary{touch-action:manipulation}
 button,.btn,summary{transition:background-color 100ms,color 100ms,border-color 100ms,box-shadow 100ms}
 button:not(:disabled):active,.btn:active{filter:brightness(.96)}
 :where(button,a,input,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--brand,#61d5b8);outline-offset:3px}
+/* W-009: a page title (or the page itself) that only takes the keyboard position after a page change shows no box: it is
+   not a control, and a wide ring around a heading reads as a text field. Screen readers still land on it. */
+:is(h1,h2,main)[tabindex="-1"]:focus,:is(h1,h2,main)[tabindex="-1"]:focus-visible{outline:none}
 /* a date or time field's own picker button sits inside the field (the field is then only :focus-within), so it shows the mark too */
 :where(input[type=date],input[type=time],input[type=datetime-local],input[type=month],input[type=week]):focus-within{outline:2px solid var(--brand,#61d5b8);outline-offset:3px}
 button:disabled{opacity:.45;cursor:not-allowed}

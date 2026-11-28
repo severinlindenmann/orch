@@ -14,17 +14,21 @@ const run = state => ({running:true, helper:{state}, claim:{agent:'agent:claude'
 const t = (id, key, extra = {}) => ({id, key, title:'Title of ' + key, status:'active', questions:[], ...extra});
 const sess = (id, key, status, extra = {}) => ({id, key, title:'Title of ' + key, status, word:status === 'working' ? 'Working' : '', ...extra});
 
-test('sessions by state from the live sessions API; the Helpers menu groups them as Needs you, Working, Quiet (ORCH-2198)', () => {
+test('sessions by state from the live sessions API; the Helpers menu has two labelled groups, Working helpers and Needs you (ORCH-2198, W-049)', () => {
   const list = [sess('t_a', 'ORCH-1', 'needs-you'), sess('t_b', 'ORCH-2', 'working'), sess('t_c', 'ORCH-3', 'in-line'),
     sess('t_d', 'ORCH-4', 'idle'), sess('t_e', 'ORCH-5', 'working'), sess('t_f', 'ORCH-6', 'closed')];
   const all = bar.liveBarModel(list, ['t_e', 't_a']);
   assert.deepEqual(all.map(o => [o.key, o.s, o.pin]), [['ORCH-1', 'wait', true], ['ORCH-5', 'run', true], ['ORCH-2', 'run', false],
     ['ORCH-3', 'queue', false], ['ORCH-4', 'idle', false]], 'a closed session (ORCH-6) is not in the bar');
   const groups = bar.liveBarGroups(all, 0);
-  assert.deepEqual(groups.map(x => [x.head, x.n, x.rows.map(o => o.key)]), [['Needs you', 1, ['ORCH-1']], ['Working', 2, ['ORCH-5', 'ORCH-2']],
-    ['Quiet', 2, ['ORCH-3', 'ORCH-4']]], 'needs you wins over pinned; a pinned one comes first in its group; in line and idle are Quiet');
-  assert.deepEqual(bar.LIVEBAR_GROUPS.map(g => g[1]), ['Needs you', 'Working', 'Quiet'], 'the owner\'s words (option J b)');
-  assert.deepEqual(bar.liveBarGroups(all.filter(o => o.s !== 'run'), 0).map(x => x.g), ['wait', 'quiet'], 'a group with nothing is not shown');
+  assert.deepEqual(groups.map(x => [x.head, x.n, x.rows.map(o => o.key)]), [['Working helpers', 4, ['ORCH-5', 'ORCH-2', 'ORCH-3', 'ORCH-4']],
+    ['Needs you', 1, ['ORCH-1']]], 'the helpers first (working, then in line and idle, a pinned one first in its state); needs you wins over pinned');
+  assert.deepEqual(bar.LIVEBAR_GROUPS.map(g => g[1]), ['Working helpers', 'Needs you'], 'the owner\'s words (W-049, option A)');
+  assert.deepEqual(bar.liveBarGroups(all.filter(o => o.s === 'wait'), 0).map(x => [x.g, x.n]), [['helpers', 0], ['wait', 1]], 'no helper at work: the group still shows, with 0');
+  assert.deepEqual(bar.liveBarGroups(all.filter(o => o.s !== 'wait'), 0).map(x => x.g), ['helpers'], 'nothing needs you: that group is not shown');
+  const src049 = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src049, /'data-key':'lbar-helpers-none'\}, 'No helper is working\. New starts one\.'/, 'the empty group says so in one line');
+  assert.match(src049, /g === 'helpers' && o\.word && !o\.group \? h\('span', \{className:'meta'\}, ' · ' \+ o\.word\)/, 'every helper row says its state');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
   assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');
@@ -114,7 +118,7 @@ test('sessions without a ticket (ORCH-364): open ones join the bar by their titl
     ['Plain terminal', 'idle', true, 'terminal'], ['Manager', 'idle', true, 'manager']]);
   assert.equal(all.find(o => o.kind === 'terminal').word, 'Open');
   assert.deepEqual(all.filter(o => o.pin).map(o => o.title), ['Empty helper', 'Plain terminal', 'Manager'], 'a new one is pinned');
-  assert.deepEqual(bar.liveBarGroups(all, 0).find(x => x.g === 'quiet').rows.map(o => o.title), ['Plain terminal', 'Manager'], 'the Manager is a Quiet row of the Helpers menu: it opens its pane');
+  assert.deepEqual(bar.liveBarGroups(all, 0).find(x => x.g === 'helpers').rows.map(o => o.title).slice(-2), ['Plain terminal', 'Manager'], 'the Manager is a row of the Helpers menu: it opens its pane');
   assert.equal(bar.liveBarNewOpen(sessions, 'manager').id, 't_man');
   assert.equal(bar.liveBarNewOpen(sessions, 'chat'), null, 'a closed one starts again');
   assert.equal(bar.liveBarNewOpen(null, 'empty'), null);
@@ -204,8 +208,31 @@ test('ORCH-1643: the Needs you count is the Review badge number (never a second 
   assert.equal(bar.liveBarNeedCount(4, 3), 4, 'the badge says 4: the menu says 4, not the 3 sessions');
   assert.equal(bar.liveBarNeedCount(0, 2), 2, 'never fewer than the sessions that wait');
   const all = bar.liveBarModel([sess('t_a', 'ORCH-1', 'needs-you')], []);
-  assert.deepEqual(bar.liveBarGroups(all, 4).map(x => [x.g, x.n, x.rows.length]), [['wait', 4, 1]]);
-  assert.deepEqual(bar.liveBarGroups([], 2).map(x => [x.g, x.n, x.rows.length]), [['wait', 2, 0]], 'waiting things that are no session here still show');
+  assert.deepEqual(bar.liveBarGroups(all, 4).map(x => [x.g, x.n, x.rows.length]), [['helpers', 0, 0], ['wait', 4, 1]]);
+  assert.deepEqual(bar.liveBarGroups([], 2).map(x => [x.g, x.n, x.rows.length]), [['helpers', 0, 0], ['wait', 2, 0]], 'waiting things that are no session here still show');
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
   assert.match(src, /'data-key':'lbar-wait-rest'/, 'the rest links to the Review page');
+});
+
+// W-047 (owner, 28 Nov): New > Plain terminal greyed the menu for seconds with no word, then closed; the session
+// existed but no pane opened. The row says "Starting…", the pane opens with the session, an error stays under the row
+// with "Try again", and a second click starts nothing.
+test('W-047: a start says Starting…, opens its pane, keeps an error with Try again, and never starts twice', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  const start = src.slice(src.indexOf('async function startNew(kind)'), src.indexOf('// the wall shows the same Runs on row'));
+  assert.match(start, /if \(!a \|\| bar\.busy\) return;/, 'a second click while one starts does nothing');
+  assert.match(start, /bar\.busy = kind; bar\.fail = null; paint\(true\)/, 'the menu is drawn again at once, with the row busy');
+  assert.match(src, /const what = starting \? 'Starting…' :/);
+  assert.match(src, /'aria-busy':starting \? 'true' : null, disabled:!!bar\.busy\}/, 'every row is off while one starts');
+  // found late: a fixed number of looks, then a plain line; never a loop that runs on
+  assert.match(start, /for \(let i = 0; i < LIVEBAR_FIND_TRIES && !made; i\+\+\)/);
+  assert.match(src, /const LIVEBAR_FIND_TRIES = 6, LIVEBAR_FIND_WAIT = 500;/);
+  assert.match(start, /if \(!r\.ok\) bar\.fail = \{kind, again:true, text:/);
+  assert.match(start, /bar\.menu = !made;/, 'the menu stays open until the pane can open');
+  assert.match(start, /if \(made\) openSession\(a, made\.id\);/);
+  assert.doesNotMatch(start, /\.toast\?*\.?\(|liveFail\)?\(/, 'the error is in the menu, not a toast that goes away');
+  assert.match(src, /'data-lbar-kind':n\.kind, 'data-key':'lbar-new-again-' \+ n\.kind\}, 'Try again'\)/);
+  // while it starts, a click beside the menu, on New or Escape does not close it
+  assert.match(src, /if \(bar\.menu && !bar\.busy && !bar\.el\?\.querySelector\('\[data-key="lbar-new-wrap"\]'\)/);
+  assert.match(src, /if \(bar\.busy\) return;  \/\/ a start is running/);
 });
