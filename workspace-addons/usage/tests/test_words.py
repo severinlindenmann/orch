@@ -88,3 +88,22 @@ def test_today_says_the_same_word_as_the_account():
     js = (Path(__file__).resolve().parents[1] / "src/orch_usage/web/usage.js").read_text(encoding="utf-8")
     assert "STATE[model.accounts.find(a => a.id === s.id)?.state]" in js
     assert "h('span', {className: 'pill', text: 'Skipped'})" not in js
+
+
+def test_accounts_come_first_and_the_spread_says_it_is_not_applied_yet():
+    """W-053 (owner 28 Nov): the page opens with the accounts and their bars; 'How work is spread' sits below them
+    and says plainly that a helper start does not use it yet (it is never hidden)."""
+    js = (Path(__file__).resolve().parents[1] / "src/orch_usage/web/usage.js").read_text(encoding="utf-8")
+    draw = js[js.index("  function draw(m) {") :]
+    order = [
+        draw.index("parts.push(section('Subscriptions'"),
+        draw.index("section('API credits'"),
+        draw.index("parts.push(toolSection)"),
+        draw.index("parts.push(today(m.spread))"),
+        draw.index("parts.push(spread(m.share))"),
+        draw.index("parts.push(history("),
+    ]
+    assert order == sorted(order)
+    assert "if (m.share) parts.push(spread(m.share));" in draw  # still drawn whenever the page has it
+    assert "'Not applied to helper starts yet. Your choice is saved; until then helpers use the accounts in their order.'" in js
+    assert "helpers do not follow it yet" not in js
