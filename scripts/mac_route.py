@@ -17,8 +17,10 @@ self-hosted runner (label `orch-mac`) only when ALL of these hold, else on GitHu
 3. The runner is online. The repository secret MAC_RUNNER_STATUS_TOKEN (read-only "Administration" for this
    repository; it lives in GitHub, never on the Mac) reads the runner list. No secret, an error, or no online
    runner with the label: GitHub's machines, so an offline Mac never leaves a job waiting.
-4. For a push to develop: the runner is not busy, unless MAC_RUNNER_WHEN_BUSY is `wait`. The nightly run, manual
-   runs and release pull requests always wait for the Mac.
+4. For a push to develop and a manual run: the runner is not busy, unless MAC_RUNNER_WHEN_BUSY is `wait`. There is
+   one runner with the label, and it takes one job at a time: a manual run (a proof run of a branch) sat queued
+   behind the run before it (ORCH-2323), so it goes to GitHub's Mac instead. The nightly run and release pull
+   requests always wait for the Mac.
 
 Usage (ci.yml, job `route`): python3 scripts/mac_route.py   reads the env below, writes GITHUB_OUTPUT:
   mac=<runs-on JSON for jobs that need macOS>  linux=<runs-on JSON for the Linux jobs that move with them>
@@ -71,7 +73,7 @@ def pick(runners: list[dict], event: str, when_busy: str) -> tuple[bool, str]:
     online = [r for r in mine if r.get("status") == "online"]
     if not online:
         return False, "this Mac's runner is offline" if mine else "no runner with the label orch-mac"
-    if all(r.get("busy") for r in online) and event == "push" and when_busy != "wait":
+    if all(r.get("busy") for r in online) and event in ("push", "workflow_dispatch") and when_busy != "wait":
         return False, "this Mac's runner is busy with an earlier run"
     return True, "this Mac's runner is online" + (" (busy: the job waits for it)" if all(r.get("busy") for r in online) else "")
 

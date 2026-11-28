@@ -74,7 +74,9 @@ def sync(ws: Path, orch: str) -> dict:
     return out
 
 
-def dash(ws: Path, orch: str, idle: int, out: Path) -> dict:
+def dash(ws: Path, orch: str, idle: int, out: Path, stop: bool = True) -> dict:
+    """The page times on a new browser (nothing cached, a new sign-in link). stop=False leaves the dashboard
+    running for the next measurement."""
     r = sh([orch, "start", "--print-launch-url", "--no-open", "--json"], ws, timeout=300)
     launch = next(x["url"] for x in json.loads(r.stdout)["launch"] if x.get("addon") == "dashboard")
     live = sorted((ws / ".orch" / "run" / "tickets").glob("t_*.json"))
@@ -83,7 +85,8 @@ def dash(ws: Path, orch: str, idle: int, out: Path) -> dict:
         sh(["node", str(HERE / "measure_dash.cjs"), launch, tid, "--idle-seconds", str(idle),
             "--timeout-ms", "120000", "--out", str(out)], ws, timeout=3600)  # fmt: skip
     finally:
-        sh([orch, "stop"], ws, check=False, timeout=120)
+        if stop:
+            sh([orch, "stop"], ws, check=False, timeout=120)
     return json.loads(out.read_text())
 
 

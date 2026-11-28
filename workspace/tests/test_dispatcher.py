@@ -316,7 +316,6 @@ def test_config_keys(proj, run):
 # ---------------------------------------------------------------- e2e with the scripted fake agent (R3.4)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
 def _close(proj, tid, timeout=10):
     """A person closes the ticket: out of the dispatcher's lanes. The run's claim ends before the wrapper's
     last write to the ticket, so a save can meet that write: read it again and retry, as a person would."""
@@ -333,6 +332,7 @@ def _close(proj, tid, timeout=10):
             time.sleep(0.05)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
 def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, monkeypatch):
     """ORCH-813: one helper at a time, real starts of the fake agent: high first, then normal, low last."""
     monkeypatch.setattr(runs_live, "available", lambda adapter: False)  # one step at a time, no tmux

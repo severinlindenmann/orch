@@ -303,6 +303,28 @@ def test_refresh_is_started_once_while_one_runs(proj, monkeypatch):
     assert len(started) == 1 and started[0][-2:] == ["--refresh-addon", "hello"]
 
 
+def test_a_built_in_addon_is_asked_by_its_own_name(proj, run, monkeypatch, subprocess_home, child_trust):
+    """ORCH-2372: an add-on built into orch (run = "orch") was asked with plain `orch needs --json`: that
+    asked it again, and so on without end, each child in its own process group, so nothing stopped the
+    chain. On CI it left dozens of `orch needs` running and slowed every later click-through. It is asked
+    as `orch <name> needs --json`, and an `orch needs` under an add-on's needs command asks no add-on."""
+    from conftest import turn_on
+
+    assert needs_mod._argv({"name": "relay", "run": "orch"})[-4:] == ["orch", "relay", "needs", "--json"]
+    assert needs_mod._argv({"name": "hello", "run": "orch_hello"})[-3:] == ["orch_hello", "needs", "--json"]
+    assert run("init")[0] == 0
+    turn_on(proj, "relay")
+    m = addons.active_manifests(proj)["relay"]
+    assert m["needs"] and m["run"] == "orch"
+    monkeypatch.setattr(needs_mod, "PULL_TIMEOUT", 60)  # a busy machine: the answer counts, not its speed
+    # turned on, not connected yet: its own command answers "nothing", so no "did not answer" row either
+    assert needs_mod.addon_rows(proj, "relay", m) == []
+    started = []
+    monkeypatch.setattr(needs_mod._Pull, "start", lambda self: started.append(self.name_))
+    monkeypatch.setenv(needs_mod.INSIDE, "1")
+    assert needs_mod.needs(proj) == [] and started == []
+
+
 def test_broken_addon_without_cache_is_one_warn_row(na, proj, run):
     (proj / "mode.txt").write_text("broken")
     rows = _rows(run)

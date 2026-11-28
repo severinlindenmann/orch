@@ -288,8 +288,11 @@ jobs:
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
-      # No `checks` here: the Linux shards stay on GitHub's machines. On orch edge each proof run had another
-      # timing test go red (runwatch, broken ticket, bgwork, dispatcher; ORCH-1932), later ticket ORCH-2329.
+      # The Linux shards go where the checks go (orch edge for queue groups and develop pushes while a runner is
+      # online, else GitHub's machines; a run whose runners stay offline starts again on GitHub, #3375).
+      # They were held on GitHub while four timing tests went red on edge (runwatch, broken ticket, bgwork,
+      # dispatcher; ORCH-1932); all four are steady since ORCH-2329.
+      checks: ${{ needs.route.outputs.checks || '"ubuntu-latest"' }}
       # PRs into develop and merge queue groups: Linux only (+ the CLI smoke on Windows/macOS below). macOS and
       # Windows run on develop itself: every push (never cancelled, see concurrency), the nightly run and the
       # release check (the keeper's manual run with windows=true); a red one opens the release keeper's
