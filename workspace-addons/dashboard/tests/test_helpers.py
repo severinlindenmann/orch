@@ -306,6 +306,20 @@ def test_agent_line_run_states_starting_background_stopped():
 
 
 @node
+def test_a_background_helper_says_why_it_has_no_screen_and_what_to_do():
+    """ORCH-2391: without tmux the ticket page said only that the screen is not shown. One sentence says why
+    and what to do (R8.4), in words that fit from any computer (R4.1a)."""
+    why = call("backgroundWhy", {"agent": "claude", "mode": "oneshot", "no_live": "no-tmux"})
+    assert "tmux is not installed" in why and "install it" in why and "start the helper again" in why
+    assert why.count(".") == 1 and why.endswith(".") and len(why.split()) <= 28
+    assert "this computer" not in why.lower() and "this machine" not in why.lower()
+    plain = call("backgroundWhy", {"agent": "claude", "mode": "oneshot"})  # asked for, or an API key start
+    assert plain == "The helper works in the background; its screen is not shown here."
+    page = (WEB / "pages" / "ticket.js").read_text(encoding="utf-8")
+    assert "DashHelpers.backgroundWhy(run.claim)" in page
+
+
+@node
 def test_agent_line_with_the_status_shapes_core_really_returns():
     now = 1793923200000
     t = {**T, "sessions": [{"agent": "claude", "last_used": "2026-11-06T00:00:00Z"}]}

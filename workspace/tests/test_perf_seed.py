@@ -259,6 +259,33 @@ def test_a_page_time_is_the_middle_of_three_fresh_loads(tmp_path, monkeypatch):
     assert stops == [["orch", "stop"]]  # stopped once, after the last measurement
 
 
+def test_a_slow_page_names_the_requests_it_waited_for():
+    """ORCH-2391: First load sat at its 2 s limit with no per-request times, so nothing said what it waited
+    for. The row carries them (files included) and a miss names the requests that ended last."""
+    mod = _limits_module()
+    lim = json.loads((SEED.parent / "limits.json").read_text(encoding="utf-8"))
+    row = {
+        "page": "First load",
+        "ms": 2300,
+        "reads": [
+            ["/", 0, 40],
+            ["/static/app.js", 60, 400],
+            ["/api/state", 450, 2100],
+            ["/api/tickets", 460, 900],
+            ["event state s3", 2000, 2000],  # what the page was told: not a request
+            ["/api/needs", 2350, 2600],  # ended after the page was usable: it did not wait for this one
+        ],
+    }
+    assert mod.check(lim, {"ticket list": 0.4, "needs": 0.5}, {"rows": [row]})[1] == [
+        "First load was usable after 2.3 s (limit 2.0 s); waited for /api/state 0.45-2.10 s,"
+        " /api/tickets 0.46-0.90 s, /static/app.js 0.06-0.40 s"
+    ]
+    assert mod.slowest({"page": "Home", "ms": 2300}) == ""
+    src = (SEED.parent / "measure_dash.cjs").read_text(encoding="utf-8")
+    first = src[src.index("page: 'First load'") :].splitlines()[0]
+    assert "reads: firstReads" in first  # the measuring script records them for the first load too
+
+
 def test_against_develop_fails_only_on_more_than_30_percent_slower():
     """The merge queue's verdict (ORCH-1609, R8.3): never the absolute limit, only >30% (and above the noise
     floor) worse than develop; a page that fails on develop too never fails the group."""

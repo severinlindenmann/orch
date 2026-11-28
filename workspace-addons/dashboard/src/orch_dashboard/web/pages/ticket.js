@@ -1545,7 +1545,7 @@ function ticketTalk(host, tid) {
     if (!t || busy || document.hidden) return;
     // Any run on the ticket (also one that is starting or could not start) may have a screen worth seeing; no run, no ask.
     if (!run?.claim && !window.DashHelpers.helperAlive(t, run)) { show(false, idle(t)); return; }
-    if (run?.claim?.mode === 'oneshot') { show(false, 'The helper works in the background; its screen is not shown here.'); return; }
+    if (run?.claim?.mode === 'oneshot') { show(false, window.DashHelpers.backgroundWhy(run.claim)); return; }
     busy = true;
     try {
       const res = await fetch('/api/term?ticket=' + encodeURIComponent(tid), {cache:'no-store'});

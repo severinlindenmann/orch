@@ -154,6 +154,8 @@ def runs_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             "model": rec.get("model"),
             "agent_version": rec.get("agent_version"),
             "mode": rec.get("mode"),
+            "no_live": rec.get("no_live"),  # why a run that could be live has no screen (ORCH-2391)
+            "start_note": rec.get("start_note"),  # what the start said about how the run works
             "host": rec.get("host"),
             "folder": rec.get("folder"),
             "session": rec.get("session"),
