@@ -42,7 +42,33 @@ def test_view_shows_at_most_50_and_counts_all(cli, ws):
     block = v["blocks"][0]
     assert block["count"] == 55 and len(block["items"]) == 50
     assert block["items"][0]["title"] == "Short 54."
-    assert "5 older are hidden" in v["notice"]
+    assert "This page shows 50 at a time; 5 older are on the next page." in v["notice"]
+    # W-052 (owner 28 Nov): the warning's button leads to the older lessons, never away from the page
+    assert v["header"]["link"] == {"label": "Show older lessons", "to": "app:addon/lessons"}
+    older = v["blocks"][1]
+    assert older["title"] == block["title"] and [i["title"] for i in older["items"]][-1] == "Short 0."
+    assert all([a["action"]["args"]["verb"] for a in i["actions"]] == ["edit", "rm"] for i in older["items"])
+    assert "empty" not in older and "empty" in block
+
+
+def test_view_reaches_a_thousand_lessons_in_pages_and_says_what_is_left(cli, ws):
+    """W-052: 796 older lessons were hidden behind a button that left the page. Every page holds 50, a view holds 20
+    pages; beyond that the notice says how many show once newer ones are deleted. No delete-many."""
+    for i in range(1003):
+        _write(ws, f"l_{i:06d}.md", _lesson(at=f"2026-11-{1 + i // 3600:02d}T{i // 60 % 24:02d}:{i % 60:02d}:00Z", text=f"L {i}."))
+    _, v = jrun(cli, "view")
+    assert len(v["blocks"]) == 20 and all(len(b["items"]) == 50 and b["title"] == "Saved lessons" for b in v["blocks"])
+    assert v["blocks"][0]["count"] == 1003
+    assert "953 older are on the next pages." in v["notice"] and "The oldest 3 show once newer ones are deleted." in v["notice"]
+    verbs = {a["action"]["args"]["verb"] for b in v["blocks"] for i in b["items"] for a in i["actions"]}
+    assert verbs == {"edit", "rm"}
+
+
+def test_view_with_few_lessons_keeps_one_list_and_the_way_back(cli, ws):
+    _write(ws, "l_aaaaaa.md", _lesson(by="human:severin"))
+    _, v = jrun(cli, "view")
+    assert len(v["blocks"]) == 1 and v["header"]["link"] == {"label": "← Add-ons", "to": "app:settings/addons"}
+    assert "notice" not in v
 
 
 def test_view_item_without_a_ticket_has_no_link(cli, ws):

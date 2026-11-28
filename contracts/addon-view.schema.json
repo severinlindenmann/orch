@@ -67,6 +67,7 @@
     },
     "list": {
       "type": "object", "required": ["type", "title", "items"], "additionalProperties": false,
+      "description": "A list of rows. Pages (W-052): `list` blocks that follow each other with the same `title` are the pages of ONE list, in order (first page first). The dashboard shows one page at a time with Previous page / Next page under it; `count` and `meta` of the first page are the list's. A heading link (`header.link`) to the add-on's own page (`app:addon/<name>`) on a view with such a list is drawn as the button to the next page. A consumer that knows nothing of pages draws the lists one under the other.",
       "properties": {
         "type": { "const": "list" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },

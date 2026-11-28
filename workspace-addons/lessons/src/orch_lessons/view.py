@@ -11,6 +11,8 @@ from . import store
 PROMPT = "Edit lesson"
 _ANGLE = re.compile(r"[<>]")  # the dashboard shows plain text only (addon-view.schema.json)
 MAX_ROWS = 50  # maxItems of a list block in the view schema
+MAX_PAGES = 20  # maxItems of a view's blocks: 1000 lessons can be reached page by page
+TITLE = "Saved lessons"
 
 
 def _day(iso: str) -> str:
@@ -44,60 +46,87 @@ def _ticket(root, tid: str) -> dict:
     return out
 
 
-def build(root) -> dict:
-    data = store.load(root)
-    items = []
-    for r in data["lessons"][:MAX_ROWS]:
-        sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
-        src = _ticket(root, r["ticket"]) if r.get("ticket") else None
-        if src:
-            sub += f" · from {src.get('key') or src['id']}"
-        item = {
-            "title": r["text"],
-            "subtitle": sub,
-            "actions": [
-                {
-                    "label": "Edit",
-                    "action": {
-                        "op": "addon.prompt",
-                        "args": {"verb": "edit", "target": r["id"], "value": r["text"], "label": PROMPT},
-                    },
+def _item(root, r: dict) -> dict:
+    sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
+    src = _ticket(root, r["ticket"]) if r.get("ticket") else None
+    if src:
+        sub += f" · from {src.get('key') or src['id']}"
+    item = {
+        "title": r["text"],
+        "subtitle": sub,
+        "actions": [
+            {
+                "label": "Edit",
+                "action": {
+                    "op": "addon.prompt",
+                    "args": {"verb": "edit", "target": r["id"], "value": r["text"], "label": PROMPT},
                 },
-                {
-                    "label": "Delete",
-                    "tone": "bad",
-                    "action": {"op": "addon.act", "args": {"verb": "rm", "target": r["id"]}},
-                },
-            ],
-        }
-        if src:
-            item["link"] = src["id"]
-            # the row opens like an accordion: the source ticket is a real link inside it
-            if src["title"] != src["id"]:
-                item["tickets"] = [src]
-        items.append(item)
-    block = {
-        "type": "list",
-        "title": "Saved lessons",
-        "count": len(data["lessons"]),
-        "items": items,
-        "empty": {
-            "title": "No lessons yet",
-            "text": "Your helper adds a lesson when it learns something the next helper should know. Nothing to do for you.",
-        },
+            },
+            {
+                "label": "Delete",
+                "tone": "bad",
+                "action": {"op": "addon.act", "args": {"verb": "rm", "target": r["id"]}},
+            },
+        ],
     }
+    if src:
+        item["link"] = src["id"]
+        # the row opens like an accordion: the source ticket is a real link inside it
+        if src["title"] != src["id"]:
+            item["tickets"] = [src]
+    return item
+
+
+def build(root) -> dict:
+    """W-052 (owner 28 Nov): every lesson can be reached. The lessons go out as pages of one list (blocks with the
+    same title, 50 rows each, newest first); the dashboard shows one page at a time and each row keeps Edit and
+    Delete. There is no delete-many."""
+    data = store.load(root)
+    total = len(data["lessons"])
+    listed = data["lessons"][: MAX_ROWS * MAX_PAGES]
+    pages = [listed[i : i + MAX_ROWS] for i in range(0, len(listed), MAX_ROWS)] or [[]]
+    blocks = [
+        {
+            "type": "list",
+            "title": TITLE,
+            "count": total,
+            "items": [_item(root, r) for r in page],
+            **(
+                {
+                    "empty": {
+                        "title": "No lessons yet",
+                        "text": "Your helper adds a lesson when it learns something the next helper should know. Nothing to do for you.",
+                    }
+                }
+                if n == 0
+                else {}
+            ),
+        }
+        for n, page in enumerate(pages)
+    ]
+    older = total - MAX_ROWS
     view = {
         "schema": "orch.addon-view/1",
         "generated_at": store.now(),
-        "header": {"link": {"label": "← Add-ons", "to": "app:settings/addons"}},
-        "blocks": [block],
+        # with older lessons the heading's link leads to them (it is the warning's one button); else back to Add-ons
+        "header": {
+            "link": {"label": "Show older lessons", "to": "app:addon/lessons"}
+            if older > 0
+            else {"label": "← Add-ons", "to": "app:settings/addons"}
+        },
+        "blocks": blocks,
     }
     notes = []
-    if data["shown"] < len(data["lessons"]):
+    if data["shown"] < total:
         notes.append("The list is too long: helpers see only the newest lessons. Shorten or delete old ones.")
-    hidden = len(data["lessons"]) - MAX_ROWS
-    if hidden > 0:
-        notes.append(f"This page lists the newest {MAX_ROWS}; {hidden} older are hidden.")
+    if older > 0:
+        notes.append(
+            f"This page shows {MAX_ROWS} at a time; {older} older "
+            f"{'is' if older == 1 else 'are'} on the next page{'' if len(pages) == 2 else 's'}."
+        )
+    unlisted = total - len(listed)
+    if unlisted > 0:
+        notes.append(f"The oldest {unlisted} show once newer ones are deleted.")
     n = data["unreadable"]
     if n:
         what = (

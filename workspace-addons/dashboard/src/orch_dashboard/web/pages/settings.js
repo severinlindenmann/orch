@@ -1563,8 +1563,25 @@ function addonBody(a, res) {
 // The first sentence says what happened (bold), the rest what still works.
 const noticeParts = text => { const t = clean(text), m = /^(.+?[.!?])\s+(.+)$/.exec(t); return m ? {what:m[1], still:m[2]} : {what:t}; };
 const noticeTakesLink = view => !!view?.notice && !view.button && ['warn', 'needs-you', 'bad'].includes(view.notice_tone) && !!OrchBlocks.appHash(view.header?.link?.to);
+// W-052 (owner 28 Nov): a heading link that leads to the add-on's own page, on a view whose list comes in pages, is the
+// way to the next page ("Show older lessons"): a button here, never a link that leaves the page. On the last page
+// there is nothing older to show, so the notice stands without a button.
+const noticeOlder = view => noticeTakesLink(view) && OrchBlocks.appHash(view.header.link.to) === '#addon/' + shownAddon();
+function addonPageTurn(id) {
+  paintAddon(id);
+  const list = document.querySelector('#addon-blocks section[data-list-page]');
+  if (!list) return;
+  list.setAttribute('tabindex', '-1');
+  list.focus({preventScroll:true});
+  list.scrollIntoView({block:'start'});
+}
 function addonNotice(view) {
   if (!view.notice) return null;
+  if (noticeOlder(view) && !snapshot) {
+    const tone = view.notice_tone === 'bad' ? 'error' : 'attn';
+    if (!OrchBlocks.listHasOlder(view.blocks)) return pageNotice({tone, ...noticeParts(view.notice)});
+    return pageNotice({tone, ...noticeParts(view.notice), action:h('button', {type:'button', className:'btn primary sm', 'data-key':'notice-older', 'data-list-older':''}, clean(view.header.link.label))});
+  }
   if (noticeTakesLink(view) && !snapshot) return pageNotice({tone:view.notice_tone === 'bad' ? 'error' : 'attn', ...noticeParts(view.notice), action:h('a', {className:'btn primary sm', href:OrchBlocks.appHash(view.header.link.to), 'data-key':'notice-link'}, clean(view.header.link.label))});
   if (view.header?.status && view.notice_tone === 'good') return null;   // the heading's status pill already says it
   const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
@@ -1628,7 +1645,7 @@ function paintAddon(id) {
   window.scrollTo(...scroll);
 }
 // W-051, O-25 (owner 28 Nov): an add-on's rows have a two-line form for a page area under 900 px (blocks.js). When the
-// room crosses that line (the Focus panel opens, closes or the window changes) the page on screen is drawn again from
+// room crosses that line (the right panel opens, closes or the window changes) the page on screen is drawn again from
 // the view it already has: no request, at most one paint per crossing.
 let addonRoomWas = null;
 function addonRoomChanged() {
@@ -2153,5 +2170,8 @@ function bindAddonControls(host) {
     if (control.dataset.native === 'link-text') { control.oninput = () => { linkUi.text = control.value; }; return; }
     control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : control.dataset.native === 'link-connect' ? linkConnect(shownAddon()) : sharedLinkAction(control);
   });
+  // W-052: a list in pages: its two pager buttons and the notice's "Show older …" turn the page of the view on screen
+  host.querySelectorAll('button[data-list-page]').forEach(b => { b.onclick = () => { if (OrchBlocks.listGo(b.dataset.listPage, Number(b.dataset.to))) addonPageTurn(shownAddon()); }; });
+  host.querySelectorAll('button[data-list-older]').forEach(b => { b.onclick = () => { const id = shownAddon(); if (id && OrchBlocks.listOlder(addonViews[id]?.view?.blocks)) addonPageTurn(id); }; });
 }
 

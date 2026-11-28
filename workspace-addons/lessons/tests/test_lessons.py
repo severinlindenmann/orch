@@ -231,4 +231,7 @@ def test_view_notices_unreadable_and_hidden(cli, ws):
     _, view = jrun(cli, "view")
     validator(VIEW).validate(view)
     assert len(view["blocks"][0]["items"]) == 50
-    assert "2 older are hidden" in view["notice"] and "1 lesson file could not be read" in view["notice"]
+    assert "2 older are on the next page." in view["notice"] and "1 lesson file could not be read" in view["notice"]
+    # W-052: the older ones are the next page of the same list, each with Edit and Delete as on the first page
+    assert [(b["title"], len(b["items"])) for b in view["blocks"]] == [("Saved lessons", 50), ("Saved lessons", 2)]
+    assert [a["label"] for a in view["blocks"][1]["items"][0]["actions"]] == ["Edit", "Delete"]

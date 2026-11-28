@@ -253,7 +253,7 @@ const OrchBlocks = (() => {
     return finish();
   }
 
-  // The room the page has (W-001): under 900 px of page area (beside the Focus panel, or a small window) a row with
+  // The room the page has (W-001): under 900 px of page area (beside the right panel, or a small window) a row with
   // buttons is drawn as the master's short row (kit .short-row): the name, one quiet line, and the buttons and the
   // switch always in view (W-051, O-25, owner 28 Nov). A phone-width window (up to 720 px) keeps its own card form.
   const ROOM_NARROW = 900, PHONE = 720;
@@ -606,7 +606,7 @@ const OrchBlocks = (() => {
       arr(b.items).forEach((it, n) => {
         if (b.compact) { ul.append(compactItem(it)); return; }
         if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
-          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + n)); return;
+          ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + (n + (b.at || 0)))); return;
         }
         const body = el('span', 'li-main'); body.append(el('span', 'li-title', it.title));
         if (it.subtitle) body.append(el('small', 'li-sub', it.subtitle));
@@ -954,6 +954,46 @@ const OrchBlocks = (() => {
     return s;
   }
 
+  // ---- A list in pages (W-052). `listAt`: the page shown per list title, kept while the dashboard is open.
+  const listAt = new Map();
+  const pagesOf = blocks => {   // [{title, pages}] for every paged list of a view
+    const out = [], all = arr(blocks);
+    for (let i = 0; i < all.length; i++) {
+      const b = all[i]; if (!b || b.type !== 'list' || typeof b.title !== 'string') continue;
+      let n = 1; while (all[i + 1] && all[i + 1].type === 'list' && all[i + 1].title === b.title) { n++; i++; }
+      if (n > 1) out.push({title: b.title, pages: n});
+    }
+    return out;
+  };
+  const pageAt = (title, n) => Math.max(0, Math.min(n - 1, listAt.get(title) || 0));
+  // The next page of the view's first paged list that has one: true when it moved (the page then draws again).
+  function listOlder(blocks) {
+    const l = pagesOf(blocks).find(x => pageAt(x.title, x.pages) < x.pages - 1);
+    if (!l) return false;
+    listAt.set(l.title, pageAt(l.title, l.pages) + 1);
+    return true;
+  }
+  const listHasOlder = blocks => pagesOf(blocks).some(x => pageAt(x.title, x.pages) < x.pages - 1);
+  function pagedList(pages) {
+    const first = pages[0], at = pageAt(first.title, pages.length), size = arr(first.items).length;
+    const from = pages.slice(0, at).reduce((n, p) => n + arr(p.items).length, 0), shown = arr(pages[at].items).length;
+    const listed = pages.reduce((n, p) => n + arr(p.items).length, 0), total = Number.isInteger(first.count) && first.count >= listed ? first.count : listed;
+    const s = draw.list({...pages[at], count: first.count, meta: first.meta, at: from});
+    s.dataset.listPage = String(at + 1);
+    const nav = el('nav', 'row blk-pager'); nav.setAttribute('aria-label', first.title + ': pages');
+    const go = (label, to) => {
+      const b = el('button', 'btn outline sm', label); b.type = 'button'; b.dataset.listPage = first.title; b.dataset.to = String(to);
+      if (to < 0 || to >= pages.length) { b.disabled = true; b.setAttribute('aria-disabled', 'true'); }
+      return b;
+    };
+    const where = el('span', 'meta', `${from + 1}\u2013${from + shown} of ${total} \u00b7 page ${at + 1} of ${pages.length}`); where.setAttribute('role', 'status');
+    nav.append(go('Previous page', at - 1), go('Next page', at + 1), where);
+    s.append(nav);
+    return s;
+  }
+  // A pager button was pressed (the page binds the click): remember the page; the page then draws the view again.
+  function listGo(title, to) { if (typeof title !== 'string' || !Number.isInteger(to) || to < 0) return false; listAt.set(title, to); return true; }
+
   // Stats sit together in one row; everything else follows in order. Unknown types are skipped.
   function render(blocks, options) {
     opts = options || {};
@@ -962,9 +1002,18 @@ const OrchBlocks = (() => {
     // A view that is one empty list is an empty page: the empty page alone, never a box in a box naming the page twice (D4).
     const only = arr(blocks).filter(b => b && Object.prototype.hasOwnProperty.call(draw, b.type));
     if (only.length === 1 && only[0].type === 'list' && !arr(only[0].items).length && only[0].empty && !only[0].above) { root.append(emptyState(only[0].empty)); return root; }
-    for (const b of arr(blocks)) {
+    const all = arr(blocks);
+    for (let i = 0; i < all.length; i++) {
+      let b = all[i];
       const f = b && Object.prototype.hasOwnProperty.call(draw, b.type) ? draw[b.type] : null;
       if (!f) continue;
+      // W-052 (owner 28 Nov): list blocks one after the other with the same title are the pages of ONE list. One page
+      // shows at a time, with "Previous page" / "Next page" under it; the page stays over refreshes (listAt, by title).
+      if (b.type === 'list' && typeof b.title === 'string') {
+        const pages = [b];
+        while (all[i + 1] && all[i + 1].type === 'list' && all[i + 1].title === b.title) pages.push(all[++i]);
+        if (pages.length > 1) { root.append(pagedList(pages)); stats = null; pair = null; settings = null; continue; }
+      }
       if (b.type === 'stat') { if (!stats) { stats = el('div', 'stats'); root.append(stats); } stats.append(f(b)); continue; }
       stats = null;
       const node = f(b);
@@ -980,6 +1029,6 @@ const OrchBlocks = (() => {
     return root;
   }
   const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
-  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent, roomNarrow};
+  return {render, duration, appHash, splitPick, splitLogShow, convDraft, convSent, roomNarrow, listOlder, listHasOlder, listGo};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;
