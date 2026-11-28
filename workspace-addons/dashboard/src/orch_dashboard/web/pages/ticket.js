@@ -1931,7 +1931,7 @@ function ticketStripModel(t, run, fresh) {
   const prep = ticketPrepare(t);
   if (prep) {
     const said = {waiting:'In line to be prepared. Start still works.', preparing:'Preparing: reading the links and filling in the ticket.',
-      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '. Press ' + ticketStartWord(t) + ' to begin.', not_prepared:'Not prepared yet. Start still works.'}[prep.state];
+      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '.' + (ticketNoHelperTool() ? '' : ' Press ' + ticketStartWord(t) + ' to begin.'), not_prepared:'Not prepared yet. Start still works.'}[prep.state];
     return {...m(said), prepare:prep.state};
   }
   if (run?.running || run?.state === 'maybe-stale') {
@@ -1939,11 +1939,13 @@ function ticketStripModel(t, run, fresh) {
     if (s.helper) return m(((window.UI?.helperWhy ? window.UI.helperWhy(s.helper.detail) : s.helper.detail) || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
-  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press ' + ticketStartWord(t) + ' to begin now.');
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts' + (ticketNoHelperTool() ? '.' : '; press ' + ticketStartWord(t) + ' to begin now.'));
   // ORCH-2149 (4): a just-saved ticket says 'Not started' (Home's word for it, docs/wording.md), not the lane's
   // name 'Backlog', which read as jargon; the line under the title then does not say it a second time
-  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m('Your helper begins when you press ' + ticketStartWord(t) + '.'), word:'Not started'};
-  if (fresh) return m('Not started. Your helper begins when you press ' + ticketStartWord(t) + '.');
+  // ORCH-2388: with no helper tool there is no Start to press; the line says what is true
+  const begins = ticketNoHelperTool() ? 'No helper is set up yet.' : 'Your helper begins when you press ' + ticketStartWord(t) + '.';
+  if (fresh && t.status === 'open' && s.word === 'Backlog') return {...m(begins), word:'Not started'};
+  if (fresh) return m('Not started. ' + begins);
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
   // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
   if (t.status === 'active' && run?.state !== 'maybe-stale') return m('No helper is working on it right now.');
@@ -2307,9 +2309,15 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // While Prepare runs (ORCH-742) Start still shows: the prepare run is not the work.
     // ORCH-2140 W2: with no helper tool set up, the Two ways card below replaces a Start that cannot work; a result to
     // review goes on with Send back (W4), not with a second start
-    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review' && !(fresh && ticketNoHelperTool())) {
-      const plain = main.length > 0, start = ticketStartPick(t);
-      if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+    // ORCH-2388: with no helper tool no Start is drawn in any state (it was a greyed, squeezed button with its reason
+    // beside it); where the Two ways card does not show (a question is open, the ticket is not new) the bar offers
+    // the way out instead: Set up a helper
+    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale' && t.status !== 'review') {
+      if (ticketNoHelperTool()) { if (!ticketTwoWaysShown(t, fresh)) main.push(h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'ticket-setup-helper'}, 'Set up a helper')); }
+      else {
+        const plain = main.length > 0, start = ticketStartPick(t);
+        if (start) { main.push(start); if (!plain) cost = ticketStartCost(t); }
+      }
     }
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -2336,6 +2344,8 @@ function stripKicker(t, pill, extra, dataKey) {
 // computer and on the phone (the phone had no way back). Not in a shared copy, which has no Tickets page of its own.
 const ticketBack = () => !snapshot && window.UI?.pageBack ? window.UI.pageBack({label:'Tickets', href:'#tickets'}) : null;
 // ORCH-2140 W2: no helper tool is set up (the dashboard knows the list of tools). Unknown while settings load: false.
+// The Two ways card shows on a ticket nobody started that has no open question (the question card comes first).
+const ticketTwoWaysShown = (t, fresh) => !snapshot && !!fresh && !questions(t).length && ticketNoHelperTool();
 const ticketNoHelperTool = () => Array.isArray(state?.settings?.agents) && !!window.StartChoiceState?.tools && !window.StartChoiceState.tools(state.settings.agents).tools.length;
 // ORCH-2140 W2 (owner accepted B): a saved ticket no helper can start yet is no dead end. Two ways: set a helper up
 // here once, or paste one line into the AI tool the person already uses.
@@ -2891,12 +2901,6 @@ function mountQuestion(host, q, context = {}) {
       return {status:200, who, via:'dashboard'};
     }
   });
-  if (host.closest('.ticket-page')) {
-    const labelAnswer = () => { const other = host.querySelector('.qoptions .quiet'); if (other && other.textContent !== 'Write your own answer') other.textContent = 'Write your own answer'; };
-    labelAnswer();
-    const observer = new MutationObserver(labelAnswer); observer.observe(host, {childList:true, subtree:true});
-    const destroy = mounted.destroy.bind(mounted); mounted.destroy = () => { observer.disconnect(); destroy(); };
-  }
   // The shared component uses the real key for persistence; only its visible label changes.
   const label = host.querySelector('.qmeta .muted');
   if (label) label.textContent = clean(ticketOf(q.ticket)?.title) || 'Ticket';
