@@ -17,6 +17,8 @@ nothing is stored.
   #2385: plus one per row of work that stopped (stuck.rows: a pull request left open, an idle helper, a stuck
   ticket, a ticket the Reviewer was not sure about), as Home lists them; a "Reviewer not sure" row stands in
   for that ticket's Check card, so the ticket is counted once.
+  ORCH-2431: a parked ticket (parked.py: in Backlog, or waiting on a time, a ticket or something outside) is
+  never counted; it is In progress or Not started until it comes back.
 - progress / step: every task counts, a won't-do task too (it is finished, never "skipped"); the step is the
   task being done, else the first open one, "Step n of total".
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
@@ -140,20 +142,24 @@ def needs_you_items(
     (the Review page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in
     ticket order. hidden: `quiet` (the Check cards not shown)."""
     skip = set((hidden or {}).get("queue") or ()) | set((hidden or {}).get("folded") or ())
+    from orch import parked
+
+    awake = {t["id"] for t in parked.without([t for t in tickets if isinstance(t, dict) and _counts(t)])}
     by_ticket: dict[str, list[dict]] = {}
     for r in stopped_rows(stopped):
         by_ticket.setdefault(r["ticket"], []).append(r)
     out = []
     for t in tickets:
-        if not isinstance(t, dict) or not _counts(t):
-            continue
+        if not isinstance(t, dict) or not _counts(t) or t["id"] not in awake:
+            continue  # ORCH-2431: a parked ticket asks nothing now; its questions come back with it
         asked = 0
         if t.get("status") not in OPEN_DONE:
             for q in t.get("questions") or []:
                 if isinstance(q, dict) and q.get("answer") is None and isinstance(q.get("id"), str):
                     out.append({"ticket": t["id"], "question": q["id"]})
                     asked += 1
-        rows = by_ticket.get(t["id"], []) if t.get("status") not in OPEN_DONE else []
+        # ORCH-2431, one row per ticket: its own question is the row; else its first row of work that stopped
+        rows = by_ticket.get(t["id"], [])[:1] if t.get("status") not in OPEN_DONE and not asked else []
         for r in rows:
             out.append({"ticket": t["id"], "question": None, "stopped": r["kind"], "row": r["id"]})
         unsure = any(r["kind"] == "reviewer:unsure" for r in rows)  # that row is its Check card

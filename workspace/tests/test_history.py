@@ -229,6 +229,7 @@ def test_phone_view_needs_and_resume_read_the_shown_ticket(synced, monkeypatch):
     keep = types.SimpleNamespace(hide_text=lambda text: text, hide_json=lambda value: value)
     monkeypatch.setattr(phone_view.phone_results, "value_hider", lambda r: keep)
     phone_view.light_view(root, _raw(root, tid))
+    _plant(root, tid, lambda t: t.update(status="ready"))  # in Backlog it would give no row (ORCH-2431)
     monkeypatch.setattr(needs, "_asked_at", lambda r, t, qid: seen.setdefault("needs", t) and PEER["at"])
     assert [r["id"] for r in needs.core_rows(root) if r["ticket"] == tid] == [f"core:q:{tid}:q9"]
     monkeypatch.setattr(runs_live, "_asker", lambda r, t, qid: seen.setdefault("resume", t) and None)

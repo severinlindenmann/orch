@@ -112,6 +112,12 @@ function needRow(row, newest, questionCount = 1, same = []) {
     }));
     // a written answer goes through the full question card (checked answer, Undo)
     other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id, 'data-write':'own'}, 'Write your own…');
+    // ORCH-2431: "Not now" parks the ticket (until a day, or until the person brings it back): off Home and Review
+    if (t && typeof askNotNow === 'function') {
+      const later = h('button', {type:'button', className:'btn quiet sm', 'data-key':key + '-not-now', title:'Take this ticket off Home and Review until a day you pick'}, 'Not now');
+      later.onclick = () => askNotNow(ticketOf(row.ticket));
+      other = h('div', {className:'row wrap'}, other, later);
+    }
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
@@ -605,6 +611,24 @@ function notesLine(notices) {
   return h('div', {className:'card-row', 'data-key':'needs-notes'}, h('span', {className:'meta'}, label),
     button(notesOpen ? 'Hide' : 'Show', 'ghost xs', () => { notesOpen = !notesOpen; render(); }));
 }
+// ORCH-2431: what is parked (state.parked, the core's list): one quiet line; Show lists each with its reason and Bring back.
+let parkedOpen = false;
+function parkedList() { return array(state?.parked).filter(r => r && ticketOf(r.ticket)); }
+function parkedIds() { return new Set(array(state?.parked).map(r => r && r.ticket)); }
+// a parked ticket gives no row on Home (the core leaves it out of needs and the number; this covers Home's own rows)
+function isParked(t, ids = parkedIds()) { return !!t && (t.status === 'open' || ids.has(t.id)); }
+function parkedLine(list) {
+  const label = list.length + ' parked, ' + (list.length === 1 ? 'it asks' : 'they ask') + ' nothing until ' + (list.length === 1 ? 'it comes' : 'they come') + ' back';
+  return h('div', {className:'card-row', 'data-key':'needs-parked'}, h('span', {className:'meta'}, label),
+    button(parkedOpen ? 'Hide' : 'Show', 'ghost xs', () => { parkedOpen = !parkedOpen; render(); }));
+}
+function parkedRow(r) {
+  const t = ticketOf(r.ticket), n = Number(r.questions) || 0;
+  const meta = [clean(r.reason), n ? n + (n === 1 ? ' question' : ' questions') + ' kept' : ''].filter(Boolean).join(' · ');
+  const back = snapshot || typeof bringBack !== 'function' ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':'parked-back-' + t.id}, 'Bring back');
+  if (back) back.onclick = () => bringBack(ticketOf(r.ticket));
+  return listRow('parked-' + t.id, [window.DashHelpers.keyTag(t, h), h('a', {href:href(t.id)}, clean(t.title))], meta, back, {'data-counts':'0'});
+}
 // What needs the person today (Home, the Home badge and the Menu count all use this): the parts of the Home subtitle, summed.
 function needsToday() {
   const hidden = needsList().filter(r => laterToday(r) || pendingAnswers.has(r.id));
@@ -618,7 +642,8 @@ function needsToday() {
   const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question && !i.stopped && !i.start).map(i => i.ticket)) : null;
   const review = all.filter(t => t.status === 'review' && (!checks || checks.has(t.id)));  // each result to check is one row and one count, like the Review page cards
   const queued = array(state.counts?.needs_you?.queue);
-  const changes = all.filter(t => t.bring_back?.state === 'waiting');
+  const resting = parkedIds();
+  const changes = all.filter(t => t.bring_back?.state === 'waiting' && !isParked(t, resting));
   const asked = groups.length + failed.length, results = review;
   const drafts = groups.filter(g => isFactoryDraftRow(g.row)).length;  // a ready Factory draft waits like a question (ORCH-479)
   // what helpers need: a login that runs out soon is a row of Home's list; the stopped ones are the banner
@@ -642,7 +667,7 @@ function needsToday() {
   // (never a finished ticket, nor one already in the needs list or the core's count: a Home row, or one snoozed for
   // later or just answered)
   const counted = new Set([...needsList().map(r => r.ticket), ...review.map(t => t.id), ...(core ? core.items.map(i => i.ticket) : [])]);
-  const screenRows = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)), screen = screenRows.length;
+  const screenRows = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id) && !isParked(r.ticket, resting)), screen = screenRows.length;
   // the open questions the number counts, by ticket (the Review page lists those that have no card of their own)
   const askedItems = core ? core.items : needs.map(r => ({ticket:r.ticket, question:r.answer?.question || r.id}));
   return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, queued, fromCore:!!core,
@@ -897,7 +922,9 @@ function home() {
     // ORCH-1698: the top bar (and its New ticket) is hidden under the phone tabs, so Home offers it itself on a phone
     actions:fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
       all.length ? h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')) : null)});
-  const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
+  const parked = parkedList();
+  const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued),
+    ...(parked.length ? [parkedLine(parked), ...(parkedOpen ? parked.map(parkedRow) : [])] : [])].filter(Boolean);
   if (!anyNeeds && !helpers.length && !inProgress.length && !notStarted.length) {
     // D4 (26 Nov): the master's one empty page: what is missing, one sentence, the first step right there
     const step = typeof newButton === 'function' ? newButton() : null;
@@ -922,7 +949,9 @@ function home() {
   // a read-only copy has no run data: its open tickets show in In progress, so no second Working now card
   const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : null;
   // ORCH-1643: the left half is never empty: with nothing that needs the person and no open ticket, Helpers take it
-  const left = [anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null,
+  // ORCH-2431: with nothing else that needs the person, the parked line still has its place (nothing is lost)
+  const left = [anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()])
+    : parked.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
     openCard('in-progress', 'In progress', inProgress, inProgressRow), openCard('not-started', 'Not started', notStarted, notStartedRow)].filter(Boolean);
   const helpersLeft = !left.length;
   return fragment(head, banner, tiles,

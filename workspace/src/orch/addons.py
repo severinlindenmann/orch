@@ -562,10 +562,12 @@ def home_override() -> Path | None:
 
 
 def home(root: Path | None = None) -> Path:
-    """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
-    ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME
-    unset or empty, untrusted, or aimed at the real folder. Every other fallback leaves one line in the temp
-    trace file when ORCH_TRACE_FALLBACKS is set (see _trace_fallback; nothing under the real home is used)."""
+    """The user's orch folder: ORCH_HOME when set, else ~/.orch-tool. An ORCH_HOME that is not trusted (see
+    _untrusted_rule) is refused, always: a folder that was asked for is used or refused, never replaced by
+    the real one (ORCH-2410). ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) also refuses
+    ORCH_HOME unset or empty, or aimed at the real folder. The one fallback left (ORCH_HOME unset) leaves a
+    line in the temp trace file when ORCH_TRACE_FALLBACKS is set (see _trace_fallback; nothing under the real
+    home is used)."""
     real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
     strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
@@ -590,12 +592,14 @@ def home(root: Path | None = None) -> Path:
             f"folder and any .git/.orch/.agents folder), and ORCH_HOME_STRICT forbids falling back to "
             f"{real}. Nothing was written."
         )
-    print(
-        f"Note: ORCH_HOME ({env}) is ignored (not a plain folder under your home); using {real}.",
-        file=sys.stderr,
+    # ORCH-2410: never the real folder in place of the one that was asked for. Before, a note went to stderr
+    # and the command ran on (and wrote to) the real folder: a try-out with a throwaway ORCH_HOME in the temp
+    # folder changed the person's own orch.
+    raise Refused(
+        f"ORCH_HOME ({env}) is not a trusted folder (it must be under your home, outside the current "
+        f"folder and any .git/.orch/.agents folder), and orch does not use {real} in its place. Put "
+        f"ORCH_HOME in a folder under your home, or unset it. Nothing was written."
     )
-    _trace_fallback(real, f"untrusted:{rule}")
-    return real
 
 
 def copies_base(h: Path) -> Path:
