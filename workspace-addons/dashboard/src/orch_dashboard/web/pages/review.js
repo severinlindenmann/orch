@@ -440,20 +440,20 @@ function reviewReviewerLine() {
   const parts = [acc ? 'accepted ' + acc : '', back ? 'sent back ' + back : '', ans ? 'answered ' + ans : ''].filter(Boolean);
   const look = h('button', {type:'button', className:'btn ghost sm', 'data-review-look':''}, 'Look');
   look.onclick = () => reviewShow('answered');
-  return h('p', {className:'meta', 'data-review-reviewer':''}, 'The Reviewer ' + parts.join(', ') + ' for you today · ', look);
+  return h('div', {className:'card-row', 'data-review-reviewer':''}, h('p', {className:'meta grow'}, 'The Reviewer ' + parts.join(', ') + ' for you today.'), look);
 }
 function reviewListNodes(deck) {
   const m = reviewListModel(deck), queue = reviewQueueLine(), reviewer = reviewReviewerLine();
   // one card alone needs no list; the lines under it still show
   if (m.total < 2 && !queue && !reviewer) return [];
   const step = (word, n, key) => { const b = h('button', {type:'button', className:'btn ' + (key === 'next' ? 'outline' : 'ghost') + ' sm', 'data-review-more':key}, word); b.onclick = () => { reviewListShown = n; reviewDrawList(); }; return b; };
-  const foot = m.more > 0 ? h('div', {className:'row'}, step('Next five', reviewListShown + REVIEW_PAGE, 'next'), step('All ' + m.total, 1e6, 'all'))
-    : m.all > REVIEW_PAGE ? h('div', {className:'row'}, step('First five', REVIEW_PAGE, 'five')) : null;
+  // under the rows, as plain card rows: the steps through the list, the merge line, the Reviewer's line
+  const foot = m.more > 0 ? h('div', {className:'card-row'}, step('Next five', reviewListShown + REVIEW_PAGE, 'next'), step('All ' + m.total, 1e6, 'all'))
+    : m.all > REVIEW_PAGE ? h('div', {className:'card-row'}, step('First five', REVIEW_PAGE, 'five')) : null;
   return [
     h('div', {className:'review-list-head'}, h('h2', {className:'review-list-title'}, 'Needs you'), m.total ? h('span', {className:'review-group-count'}, m.total + ' waiting') : null),
-    h('div', {className:'review-list-groups'},
-      m.total > 1 ? h('div', {className:'review-group', role:'list', 'aria-label':'Waiting'}, m.rows.flatMap(r => r.group ? reviewListGroup(r) : [reviewListRow(r)])) : null,
-      foot, queue, reviewer)];
+    m.total > 1 ? h('div', {className:'review-list-groups'}, h('div', {className:'review-group', role:'list', 'aria-label':'Waiting'}, m.rows.flatMap(r => r.group ? reviewListGroup(r) : [reviewListRow(r)]))) : null,
+    foot, queue ? h('div', {className:'card-row'}, queue) : null, reviewer].filter(Boolean);
 }
 // draws the list into its place on the page (the aside beside the card, or the card after it); an empty list hides it
 function reviewDrawSide(queue, deck) {
@@ -897,7 +897,7 @@ function reviewPage() {
 // here: one quiet line under the list.
 function reviewQueueLine() {
   const n = array(state?.counts?.needs_you?.queue).length;
-  return n ? h('p', {className:'meta', 'data-key':'review-queue-line'}, n + (n === 1 ? ' waits' : ' wait') + ' to be merged, nothing to do') : null;
+  return n ? h('p', {className:'meta grow', 'data-key':'review-queue-line'}, n + (n === 1 ? ' waits' : ' wait') + ' to be merged, nothing to do') : null;
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;

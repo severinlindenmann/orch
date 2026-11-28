@@ -140,7 +140,7 @@ test('W-036: the same order in every layout: the card, the list, then the Review
   const queue = h('div');
   c.reviewDrawSide(queue, listDeck(1));
   const line = nodes(queue).find(n => n.attrs?.['data-review-reviewer'] !== undefined);
-  assert.equal(text(line), 'The Reviewer accepted 2, sent back 1, answered 1 for you today · Look');
+  assert.equal(text(line), 'The Reviewer accepted 2, sent back 1, answered 1 for you today.Look');
   assert.equal(nodes(queue).filter(n => n.attrs?.['data-review-row']).length, 0, 'one card alone has no rows; the line still shows');
   // wide: the list beside the card; the Reviewer's history is not on the Waiting page at all
   const page = nodes(c.reviewPage()), keys = page.map(n => n.attrs?.['data-key']).filter(Boolean);

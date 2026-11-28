@@ -7,8 +7,20 @@ window.SWIPE_ITEMS=[
     (the ticket, same tab). No Looks good / Don't do: there is nothing to approve. A row with no button (a helper waiting
     for an OK on its screen) shows Open alone. */
  {id:'s1',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Booking form',when:'today 11:12',title:'Booking form',text:'The checks of the step "Send the booking mail" failed 3 times in a row.',
-  about:'Guests book a table on the website and get a confirmation mail.',why:'Stopped at: Send the booking mail · 3 of 6 steps done.',hint:'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.',
+  about:'Guests book a table on the website and get a confirmation mail.',why:'Stopped at: Send the booking mail · 3 of 6 steps done.',hint:'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket (this ticket\'s estimate: about 20 min · $1.20).',
   href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Nudge',picked:'nudge'},{label:'Start fresh',picked:'fresh'}]},
+/* W-040 / FX-04 (28 Nov): a pull request nothing will move is a card with one evidence line (which one, check and merge
+    state, how fresh), Open, and what Start helper costs (the estimate, or 'cost not known'). Three of them: the list
+    folds them into one row (O-05). One that is in the queue or only just passed makes no card (the line under the list). */
+ {id:'u1',kind:'stuck',cause:'helper:unmerged',kindLabel:'Stuck',icon:'pause',ticket:'DT-71',ticketId:'DT-71',ticketTitle:'Invoice export',when:'today 09:51',title:'Invoice export',text:'The pull request passed its checks but was not merged, and no helper is working on it.',
+  about:'Export all invoices of a month as one file.',why:'Pull request #31 · checks passed, not merged · passed today 09:11 · looked at today 11:51',hint:'Merge puts the pull request in. Start helper starts paid helper work (cost not known) that asks it to merge or say why it stays open.',
+  links:[{label:'Open pull request #31',url:'https://github.com/acme/app/pull/31'}],href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Merge',picked:'merge'},{label:'Start helper',picked:'nudge'}]},
+ {id:'u2',kind:'stuck',cause:'helper:unmerged',kindLabel:'Stuck',icon:'pause',ticket:'DT-72',ticketId:'DT-72',ticketTitle:'Gift vouchers',when:'today 09:52',title:'Gift vouchers',text:'The pull request passed its checks but was not merged, and no helper is working on it.',
+  about:'Sell gift vouchers on the website.',why:'Pull request #34 · checks passed, not merged · passed today 09:12 · looked at today 11:52',hint:'Merge puts the pull request in. Start helper starts paid helper work (this ticket\'s estimate: about 15 min · $0.80) that asks it to merge or say why it stays open.',
+  links:[{label:'Open pull request #34',url:'https://github.com/acme/app/pull/34'}],href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Merge',picked:'merge'},{label:'Start helper',picked:'nudge'}]},
+ {id:'u3',kind:'stuck',cause:'helper:unmerged',kindLabel:'Stuck',icon:'pause',ticket:'DT-73',ticketId:'DT-73',ticketTitle:'Allergen list',when:'today 09:53',title:'Allergen list',text:'The pull request passed its checks but was not merged, and no helper is working on it.',
+  about:'Show the allergens under every dish.',why:'Pull request #36 · checks passed, not merged · passed today 09:13 · looked at today 11:53',hint:'Merge puts the pull request in. Start helper starts paid helper work (cost not known) that asks it to merge or say why it stays open.',
+  links:[{label:'Open pull request #36',url:'https://github.com/acme/app/pull/36'}],href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Merge',picked:'merge'},{label:'Start helper',picked:'nudge'}]},
  {id:'s2',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-54',ticketId:'DT-54',ticketTitle:'Menu page',when:'today 10:55',title:'Menu page',text:'The helper has waited 6 min for your OK on its screen.',
   about:'Put this week\'s menu on the website as a page with prices.',why:'Stopped at: Upload the menu photos · 2 of 4 steps done.',hint:'Open the ticket to see what the helper asks and answer it there.',
   href:'../ticket/ticket.html',preview:{type:'doc'}},
