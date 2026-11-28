@@ -23,7 +23,8 @@
    UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
    UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
-                                 /api/answer, /api/file (f = fetch, for tests)
+                                 /api/answer, /api/file (f = fetch, for tests); api.decisionFirst follows /api/stack's
+                                 decision_first (ORCH-2187), for o.decisionFirst
    UI.review                     pure helpers (mapCard, verdictWord, fmtTime) for tests
 
    api (what the page needs; the dashboard passes its own):
@@ -227,8 +228,8 @@ UI.appliesNow=(entries,o)=>{o=o||{};const live=(entries||[]).filter(e=>e.decisio
 UI.reviewFetchApi=(base,f)=>{base=base||'';f=f||((...a)=>window.fetch(...a));
  const fail=(r,msg)=>{const e=new Error(msg||'request failed');e.status=r.status;e.code=r.status===401||r.status===403?'needs_person':'error';return e};
  const get=async p=>{const r=await f(base+p,{headers:{accept:'application/json'},cache:'no-store'});if(!r.ok)throw fail(r);return r.json()};
- const api={workspace:'',
-  stack:async()=>{const j=await get('/api/stack');if(j&&!Array.isArray(j)){api.workspace=j.workspace||api.workspace;return j.cards||[]}return j},
+ const api={workspace:'',decisionFirst:false,/* the workspace's workflow.decision_first, as /api/stack says it (ORCH-2187) */
+  stack:async()=>{const j=await get('/api/stack');if(j&&!Array.isArray(j)){api.workspace=j.workspace||api.workspace;api.decisionFirst=j.decision_first===true;return j.cards||[]}return j},
   answered:async()=>{const j=await get('/api/answered');return Array.isArray(j)?j:(j&&j.entries)||[]},
   answer:async body=>{try{const r=await f(base+'/api/answer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     let j=null;try{j=await r.json()}catch{}

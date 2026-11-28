@@ -344,6 +344,13 @@ test('reviewFetchApi: urls for files, 401 means sign in, answer errors are data'
   assert.equal(calls.at(-1)[1].method, 'POST');
   const f2 = async () => ({ok: true, status: 200, json: async () => ({workspace: 'Demo', cards: [1]})});
   const api2 = UI.reviewFetchApi('', f2); assert.deepEqual(await api2.stack(), [1]); assert.equal(api2.workspace, 'Demo');
+  // ORCH-2187 (Focused review F): the page served by orch follows the workspace's switch, read with every list
+  assert.equal(api2.decisionFirst, false, 'no key: the card as before');
+  let on = true;
+  const api3 = UI.reviewFetchApi('', async () => ({ok: true, status: 200, json: async () => ({workspace: 'Demo', cards: [], ...(on ? {decision_first: true} : {})})}));
+  assert.equal(api3.decisionFirst, false); await api3.stack(); assert.equal(api3.decisionFirst, true);
+  on = false; await api3.stack(); assert.equal(api3.decisionFirst, false, 'turned off: back at the next list');
+  assert.match(read('review-boot.js'), /decisionFirst:\(\)=>api\.decisionFirst===true/, 'orch review passes it to the page');
 });
 
 test('review.html has no inline script, inline handler or external url', () => {

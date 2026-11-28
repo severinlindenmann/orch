@@ -333,6 +333,13 @@ preview) and, for permission questions (options `Once` / `Always` / `No`), optio
 most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
 ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
 older phone ignores both.
+With `[workflow] decision_first` on in the sending workspace (ORCH-2187, Focused review F) a question to the phones
+also carries `decision_first: true` and, when the helper gave them (`orch ask --if-wait --fact`), `if_wait` (one line,
+at most 200 characters) and `facts` (1 to 4 lines of at most 200 characters). The phone then draws the card as the
+dashboard does: "You decide: <the question>" first, then "If you wait: <line>" and one "What matters" box. `if_wait`
+and `facts` without `decision_first` are ignored. The lines are data like the title: hidden and cut by the workspace,
+one line each. The review question of a Test results card never carries them. Switch off: none of the three is sent
+and the message is byte for byte as before; an older phone ignores all three (vectors/question-decision-first-v1.json).
 
 **A refused phone answer** (the workspace could not take it, e.g. it needs a person's proof the answer did not
 carry): the relay already stored the first answer, so the workspace sends the question to the phones again as a new

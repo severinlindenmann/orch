@@ -14,8 +14,10 @@ struct ReviewCardView: View {
     var onRun: () -> Void = {}
 
     private var kindName: String {
-        switch item.kind { case .draft: "Draft"; case .check: "Result"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan"; case .run: "Command" }
+        switch item.kind { case .draft: "Draft"; case .check: "Test results"; case .link: "Link"; case .choice, .plainQuestion: "Choice"; case .plan: "Plan"; case .run: "Command" }
     }
+
+    private var lead: DecisionFirst? { ReviewStackRules.decisionFirst(item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -31,7 +33,9 @@ struct ReviewCardView: View {
             if let about = ReviewStackRules.aboutLine(item) {
                 Text(about).themeFont(13, .semibold).foregroundStyle(Theme.muted).lineLimit(1).accessibilityIdentifier("review-about")
             }
-            Text(item.card.title).themeFont(21, .semibold).lineLimit(3).accessibilityAddTraits(.isHeader).accessibilityIdentifier("review-title")
+            // ORCH-2187 (Focused review F): the decision first when the workspace's switch is on, else the title as before.
+            if let lead { DecisionLeadView(lead: lead) }
+            else { Text(item.card.title).themeFont(21, .semibold).lineLimit(3).accessibilityAddTraits(.isHeader).accessibilityIdentifier("review-title") }
             if let why = item.card.why, !why.isEmpty { Text(why).themeFont(14).foregroundStyle(Theme.muted).lineLimit(3) }
             if let run = item.card.run {
                 RunCommandView(run: run, onRun: onRun)
@@ -40,7 +44,7 @@ struct ReviewCardView: View {
             } else {
                 Spacer(minLength: 0)
             }
-            if !item.card.then.isEmpty {
+            if !item.card.then.isEmpty, lead?.decide != item.card.then {   // a plain question's "then" is the question: said once, in the lead
                 Text(item.kind == .run ? "After it runs: \(item.card.then)" : "If it looks good: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
             }
             HStack(spacing: 8) {
@@ -50,6 +54,40 @@ struct ReviewCardView: View {
         .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.border))
+    }
+}
+
+/// The lead of a decision-first card (ORCH-2187, Focused review F): "You decide: <the question>", the card's title as one quiet
+/// line when it says more, "If you wait: <line>" and one "What matters" box. Same words and order as the dashboard's card.
+struct DecisionLeadView: View {
+    let lead: DecisionFirst
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            (Text(DecisionFirst.decideWord + " ").foregroundStyle(Theme.muted) + Text(lead.decide))
+                .themeFont(21, .semibold).lineLimit(4).accessibilityAddTraits(.isHeader).accessibilityIdentifier("review-decide")
+            if let title = lead.title {
+                Text(title).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1).accessibilityIdentifier("review-title")
+            }
+            if let wait = lead.ifWait {
+                (Text(DecisionFirst.waitWord + " ").fontWeight(.semibold) + Text(wait))
+                    .themeFont(14).lineLimit(3).accessibilityIdentifier("review-if-wait")
+            }
+            if !lead.facts.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(DecisionFirst.factsTitle).themeFont(12, .semibold).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+                    ForEach(Array(lead.facts.enumerated()), id: \.offset) { _, fact in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("•").foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            Text(fact).lineLimit(2)
+                        }.themeFont(14)
+                    }
+                }
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                .accessibilityElement(children: .combine).accessibilityIdentifier("review-facts")
+            }
+        }
     }
 }
 
