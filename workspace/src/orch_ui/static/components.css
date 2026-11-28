@@ -199,6 +199,10 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .page-heading:has(>.actions,>.topbar-actions,>.btn,>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
 .page-heading>div:first-child{display:grid;gap:4px;min-width:0}
 .page-heading h1{margin:0}
+/* W-006: a page's tag ("Preview") sits after its name, on the title's middle, the same on every page: whether the page
+   top comes from UI.pageTop({tag}) or from a page's own markup (a .badge inside the h1) */
+.page-heading h1:has(>.badge){display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}
+.page-heading h1>.badge{flex:none;letter-spacing:0;font-weight:500}
 .page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
 .page-heading-actions>.btn.ghost:last-child{padding-right:0}
 /* A slot an add-on fills later (its header link) takes no gap while empty: the right edge stays the same (D1, ORCH-2315). */

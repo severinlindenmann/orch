@@ -41,6 +41,21 @@ test('name, one sentence, Settings first and the filled button last', () => {
   assert.equal(top.cls('page-back').length, 0, 'a page of its own has no back link');
 });
 
+// W-006 (owner, 28 Nov): the "Preview" pill sat on the title's middle on Files and below its baseline on Personal and
+// Skills. One place for it: after the name, inside the h1, the same on every page.
+test('W-006: a page tag sits after the name inside the title; no tag, no pill', () => {
+  const UI = load();
+  const top = UI.pageTop({title: 'Files', tag: 'Preview', text: 'Browse every file in this workspace.'});
+  const h1 = top.all(n => n.tag === 'h1')[0];
+  assert.equal(h1.children.at(-1).className, 'badge page-tag');
+  assert.equal(h1.children.at(-1).textContent, 'Preview');
+  assert.match(h1.textContent, /^Files Preview$/);
+  assert.equal(UI.pageTop({title: 'Files'}).cls('page-tag').length, 0);
+  const css = read('components.css');
+  assert.ok(css.includes('.page-heading h1:has(>.badge){display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}'));
+  assert.ok(css.includes('.page-heading>div:first-child{display:grid;gap:4px;min-width:0}'), 'the name and its sentence are 4 px apart');
+});
+
 test('a page inside another page: ← parent above the name, no empty actions', () => {
   const UI = load();
   const top = UI.pageTop({title: 'New repeat', back: {label: 'Automation', href: '#addon/automation'}});

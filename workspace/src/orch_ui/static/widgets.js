@@ -190,14 +190,18 @@ UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');r
 /* One top for every page (owner D1, 26 Nov, ORCH-2282): the name and one sentence on the left; on the right Settings first,
    then the page's own buttons with its one filled button last. A page inside another page has '← <parent>' above its name,
    the same on the computer and the phone (the phone has no other way back). Text only (textContent); the two drawings are fixed.
-   UI.pageTop({title, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
+   W-006 (owner, 28 Nov, the walk's measurements as the checklist): one place for a page's tag ("Preview"): `tag` puts
+   it after the name, on the title's middle, the same on every page; the name and the sentence are 4 px apart; the
+   Settings button is 32 px on every page (touch sizes follow the window, never the frame).
+   UI.pageTop({title, tag, text, back:{label, href}, settings:href | {href, label, onClick}, actions:[nodes], key}) -> <header> */
 const TOP_ICON={back:'<path d="M19 12H5m6-6-6 6 6 6"/>'};
 const topIcon=name=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('class','ic');s.setAttribute('viewBox','0 0 24 24');s.setAttribute('aria-hidden','true');s.innerHTML=TOP_ICON[name];return s};
 /* '← <parent>' alone, for a page whose name sits in its own frame (a ticket): UI.pageBack({label, href}) -> <a class="page-back"> */
 UI.pageBack=o=>{o=o||{};const a=el('a','page-back');a.href=o.href||'#home';a.dataset.key='page-back';a.append(topIcon('back'),el('span','',o.label||'Back'));return a};
 UI.pageTop=o=>{o=o||{};const head=el('header','page-heading page-top');if(o.key)head.dataset.key=o.key;const left=el('div','page-top-text');
  if(o.back&&o.back.href)left.append(UI.pageBack(o.back));
- const h1=el('h1','',o.title||'');left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
+ const h1=el('h1','',o.title||'');if(o.tag){const t=el('span','badge page-tag',String(o.tag));h1.append(' ',t)}
+ left.append(h1);if(o.text)left.append(el('p','muted',o.text));head.append(left);
  const acts=[];const st=typeof o.settings==='string'?{href:o.settings}:o.settings;
  if(st&&(st.href||st.onClick))acts.push(UI.settingsButton(st));
  (o.actions||[]).forEach(n=>{if(n)acts.push(n)});
