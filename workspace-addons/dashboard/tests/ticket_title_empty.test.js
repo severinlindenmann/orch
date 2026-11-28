@@ -11,7 +11,7 @@ function run(typed) {
   const input = {value:'', setAttribute() {}, focus() {}, addEventListener:(k, fn) => { listeners[k] = fn; }};
   const host = {dataset:{key:'title-host'}, replaceChildren() {}};
   const control = {dataset:{ticket:'t_one', field:'title'}, parentElement:host};
-  const c = vm.createContext({MULTILINE:['note'], locks:new Set(), render() {}, capitalise:x => x, name:x => x,
+  const c = vm.createContext({MULTILINE:['note'], FIELD_NAME:{title:'Title'}, propsAdding:new Map(), locks:new Set(), render() {}, capitalise:x => x, name:x => x,
     ticketOf:() => ({id:'t_one', title:'Old title'}), el:tag => tag === 'span' ? {} : input,
     saveField:async (t, f, v) => { saved.push([f, v]); }, window:{orch:{toast:(...x) => toasts.push(x)}}});
   vm.runInContext(block, c);

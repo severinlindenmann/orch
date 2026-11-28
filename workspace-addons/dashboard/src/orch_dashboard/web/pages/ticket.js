@@ -255,6 +255,8 @@ async function startLinkAdd(control) {
   });
   addBtn.disabled = true; actions.append(addBtn);
   d.append(tabs, body, err, actions); window.orch.open(d); draw('Ticket');
+  // O-08: closed without adding one, the empty References block picked from + Add goes away again
+  d.addEventListener?.('close', () => { if (!referenceRows(ticketOf(t.id) || t).length) propDrop(t.id, 'links'); }, {once:true});
 }
 async function removeLink(control) {
   control.disabled = true;
@@ -2023,6 +2025,65 @@ const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', a
 // Properties button (railOpen), so there is one copy of every control.
 const propsAdding = new Map();  // ticket id -> keys a person picked from + Add (their rows show while still empty)
 const adding = (t, key) => !snapshot && !!propsAdding.get(t.id)?.has(key);
+// O-08 (owner, 28 Nov: "adding a property is buggy"; the click-through a-ticket-property-kinds found the causes).
+// A row picked from + Add and then left empty (Cancel, Esc, a click elsewhere, a save that failed) goes away again and
+// + Add offers it again: before, the empty row stayed until the page was loaded again and + Add no longer listed it.
+function propDrop(tid, key) {
+  if (!propsAdding.get(tid)?.delete(key)) return;
+  const inRail = typeof document === 'object' && !!document.activeElement?.closest?.('#ticket-rail-' + tid);
+  render();
+  // the row the keyboard was on is gone: it goes back to + Add
+  if (inRail && !document.activeElement?.closest?.('#ticket-rail-' + tid)) document.querySelector('[data-key="props-add-' + tid + '"] > summary')?.focus();
+}
+// A choice in Properties (Part of, Priority, Helper strength, Kind). The page keeps the select it drew first, with its
+// first handler, so the handler must not carry the value of that first draw: the value that is saved now rides on
+// the select itself (data-value, set again by every redraw). A save that fails puts the select back to it and tells
+// the master select to show it; before, the row went on showing the choice that was not saved.
+function propChoice(select, now, save, key = '', tid = '') {
+  select.setAttribute?.('data-value', now);
+  select.value = now;
+  select.onchange = async () => {
+    const result = await save(select.value);
+    if (result.ok) return;
+    window.orch.toast(changeError(result), 'error');
+    const saved = select.getAttribute?.('data-value') ?? now;
+    select.value = saved;
+    window.UI?.select?.sync?.();
+    if (key && saved === PROP_UNSET[key]) propDrop(tid, key);  // nothing is saved: the row picked from + Add goes away again
+  };
+  return select;
+}
+// A redraw that says another saved value (data-value) on a kept select: the select takes it. Without this a kept
+// select showed the option at its old position when its list changed (Kind lost "Not set yet" and read "Small bug"
+// for Bug) or when the value changed somewhere else.
+if (typeof MutationObserver === 'function' && typeof document === 'object' && document.documentElement?.nodeType === 1) {
+  new MutationObserver(list => {
+    let changed = false;
+    for (const m of list) {
+      const n = m.target;
+      if (n.tagName !== 'SELECT' || !n.closest('.ticket-side') || n.value === n.dataset.value) continue;
+      n.value = n.dataset.value; changed = true;
+    }
+    if (changed) window.UI?.select?.sync?.();
+  }).observe(document.documentElement, {attributes:true, attributeFilter:['data-value'], subtree:true});
+}
+// What each choice reads when nothing is set.
+const PROP_UNSET = {partOf:'', priority:'normal', model:'auto', kind:''};
+// + Add picked a choice: its list opens at once, as Owner opens its box (before, the row only showed "Normal" or
+// "Auto" and read as already set). Closed without a choice, the row goes away again.
+function propChoiceOpen(t, key, select, tries = 10) {
+  // the master select (kit/select.js) wraps a select a moment after it is drawn
+  const trigger = select.closest?.('.ui-select')?.querySelector('.ui-select-trigger');
+  if (!trigger) { if (tries > 0) setTimeout(() => propChoiceOpen(t, key, select, tries - 1), 30); else select.focus(); return; }
+  trigger.click();
+  if (typeof MutationObserver !== 'function') return;
+  const watch = new MutationObserver(() => {
+    if (trigger.getAttribute('aria-expanded') !== 'false') return;
+    watch.disconnect();
+    if (select.value === PROP_UNSET[key]) propDrop(t.id, key);
+  });
+  watch.observe(trigger, {attributes:true, attributeFilter:['aria-expanded']});
+}
 const hasValue = (t, f) => t[f] != null && String(t[f]).trim() !== '';
 // An add-on is used on a ticket once one of its visible fields holds a value (false and 0 count; '' and [] do not).
 function addonUsed(t, a) {
@@ -2099,7 +2160,7 @@ async function propAdd(t, key, trigger) {
   const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
     : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'priority' ? 'select[aria-label="Priority"]' : key === 'kind' ? 'select[aria-label="Kind"]' : '[data-action="inline"][data-field="' + key + '"]';
   const target = rail.querySelector(at);
-  if (target?.tagName === 'SELECT') target.focus(); else target?.click();
+  if (target?.tagName === 'SELECT') propChoiceOpen(t, key, target); else target?.click();
 }
 // How many filled things the rail holds besides owner and due (those stay in the line under the title when narrow).
 function railCount(t, parent) {
@@ -2530,6 +2591,7 @@ function costValue(t) {
 }
 const MULTILINE = ['note', 'done_when'];
 const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what you asked', done_when:'what done looks like'};
+const FIELD_NAME = {title:'Title', owner:'Owner', due:'Due', note:'Note', done_when:'Done when'};  // the box's name (it read "Done_when", O-08)
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
@@ -2547,12 +2609,7 @@ function partOfField(t, parent) {
   const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
     h('option', {value:''}, 'Not part of another ticket'),
     window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (has parts)' : ''))));
-  select.value = was;
-  select.onchange = async () => {
-    const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
-    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
-  };
-  return select;
+  return propChoice(select, was, value => act('ticket.edit', {ticket:t.id, parent:value || null, if_revision:(ticketOf(t.id) || t).revision}), 'partOf', t.id);
 }
 // ORCH-37 (owner picked B): a release is a ticket of its own; the epics and tickets that ship together sit under it.
 // One switch marks this ticket as a release or takes the mark off; its tickets stay where they are.
@@ -2593,12 +2650,7 @@ function kindField(t) {
   const select = h('select', {'aria-label':'Kind', 'data-key':'kind-' + t.id},
     was ? null : h('option', {value:''}, 'Not set yet'),
     Object.entries(KIND_NAMES).map(([k, label]) => h('option', {value:k}, label)));
-  select.value = was;
-  select.onchange = async () => {
-    const result = await act('ticket.kind', {ticket:t.id, kind:select.value});
-    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
-  };
-  return select;
+  return propChoice(select, was, value => act('ticket.kind', {ticket:t.id, kind:value}), 'kind', t.id);
 }
 // ORCH-813: the ticket's priority. When helpers wait for a free slot, high tickets start first, low ones last.
 // No field = normal. The same native select as Helper strength.
@@ -2609,12 +2661,7 @@ function priorityField(t) {
   if (snapshot) return el('span', 'ed-ro', PRIORITY_NAMES[was]);
   const select = h('select', {'aria-label':'Priority', 'data-key':'priority-' + t.id, title:'When helpers wait for a free slot, higher priority starts first'},
     ['high', 'normal', 'low'].map(p => h('option', {value:p}, PRIORITY_NAMES[p])));
-  select.value = was;
-  select.onchange = async () => {
-    const result = await act('ticket.edit', {ticket:t.id, priority:select.value, if_revision:(ticketOf(t.id) || t).revision});
-    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
-  };
-  return select;
+  return propChoice(select, was, value => act('ticket.edit', {ticket:t.id, priority:value, if_revision:(ticketOf(t.id) || t).revision}), 'priority', t.id);
 }
 function modelField(t) {
   const m = modelChoice(t);
@@ -2626,13 +2673,9 @@ function modelField(t) {
     h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
     h('option', {value:'opus'}, 'Stronger'),
     h('option', {value:'fable'}, 'Drafts to pick from'));
-  select.value = m && !m.auto ? m.name : 'auto';
-  select.onchange = async () => {
-    const result = await act('ticket.model', {ticket:t.id, model:select.value});
-    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
-  };
+  propChoice(select, m && !m.auto ? m.name : 'auto', value => act('ticket.model', {ticket:t.id, model:value}), 'model', t.id);
   const names = h('p', {className:'meta', 'data-key':'model-names-' + t.id}, 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.');
-  return h('div', {className:'stack'}, select, names);
+  return h('div', {}, select, names);
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
@@ -2672,14 +2715,14 @@ function startInline(control) {
   const before = field === 'owner' ? window.DashHelpers.ownerName(t.owner, state) : t[field] == null ? '' : String(t[field]);
   if (field === 'due') {
     locks.add(key);
-    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); }, true);
+    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); if (propsAdding.get(t.id)?.has('due')) propDrop(t.id, 'due'); else render(); }, true);
     return;
   }
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
   if (MULTILINE.includes(field)) input.rows = 3; else input.type = 'text';
   if (field === 'title') input.maxLength = 200;
   input.value = before;
-  input.setAttribute('aria-label', capitalise(field));
+  input.setAttribute('aria-label', FIELD_NAME[field] || capitalise(field));
   locks.add(key);
   const hint = el('span', 'hint', MULTILINE.includes(field) ? 'Enter saves · Shift+Enter new line · Esc cancels' : 'Enter saves · Esc cancels');
   host.replaceChildren(input, hint);
@@ -2704,7 +2747,8 @@ function startInline(control) {
     if (save && field === 'title' && !value && before) window.orch.toast('A ticket needs a title. The old one is kept.', 'error');  // ORCH-185: never restore it silently
     else if (save && value !== before) await saveField(t, field, value);
     locks.delete(key);
-    render();
+    // O-08: a row picked from + Add is only held open while its box is; saved, it shows by its value
+    if (propsAdding.get(t.id)?.has(field)) propDrop(t.id, field); else render();
   };
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !(MULTILINE.includes(field) && event.shiftKey)) { event.preventDefault(); finish(true); }

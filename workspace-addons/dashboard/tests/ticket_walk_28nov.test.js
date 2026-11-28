@@ -203,3 +203,52 @@ test('W-033: no line without a recorded change; never a guess', () => {
     {at:'2026-11-27T08:00:00Z', by:'orch', text:'pull-requests refresh: Old name title Old name -> New name'}, refresh('2026-11-27T08:00:00Z', 'Old name', 'open', 'merged'), refresh('2026-11-28T08:00:00Z', 'Two', 'open', 'closed')]};
   assert.match(text(c.sinceThenLine(two)), /^Since then: pull request 131 merged on .+, pull request 132 closed on .+\.$/);
 });
+
+// ---- O-08: what the click-through a-ticket-property-kinds found, as unit checks
+test('O-08: a choice whose save failed goes back to what is saved now, not to the value of its first draw', async () => {
+  const toasts = [], synced = [];
+  let answer = {ok:true};
+  const c = ctx({act:async () => answer, changeError:r => r.text});
+  c.window.orch.toast = (...a) => toasts.push(a); c.window.UI.select = {sync:() => synced.push(1)};
+  const sel = c.priorityField({id:'t_one', priority:'normal'});
+  sel.getAttribute = k => sel.attrs[k];
+  assert.equal(sel.attrs['data-value'], 'normal');
+  sel.value = 'high'; await sel.onchange();
+  assert.deepEqual(toasts, []);
+  sel.setAttribute('data-value', 'high');  // the redraw after the save says the new value on the kept select
+  answer = {ok:false, text:'That could not be saved just now. Try again.'};
+  sel.value = 'low'; await sel.onchange();
+  assert.equal(sel.value, 'high', 'back to the saved value (before: back to the value of the first draw, "normal")');
+  assert.deepEqual(toasts, [['That could not be saved just now. Try again.', 'error']]);
+  assert.equal(synced.length, 1, 'the master select is told to show it');
+  for (const f of ['kindField', 'partOfField', 'modelField']) assert.match(source, new RegExp('function ' + f + '[\\s\\S]{0,1400}?propChoice\\(select, '), f + ' is the same kind of choice');
+});
+
+test('O-08: a row picked from + Add and left empty goes away again and + Add offers it again', () => {
+  const c = ctx();
+  const t = {...base, status:'open'};
+  c.ticketOf = () => t;
+  const offered = () => nodes(c.detail(t)).filter(n => /^prop-add-/.test(n.attrs?.['data-key'] || '')).map(n => n.attrs['data-key'].replace(/^prop-add-|-t_one$/g, ''));
+  assert.ok(offered().includes('priority') && offered().includes('due'));
+  vm.runInContext("propsAdding.set('t_one', new Set(['priority', 'due', 'links']))", c);
+  assert.ok(keyed(nodes(c.detail(t)), 'prop-priority-t_one') && !offered().includes('priority'), 'picked: its row shows');
+  for (const key of ['priority', 'due', 'links']) vm.runInContext("propDrop('t_one', '" + key + "')", c);
+  assert.ok(!keyed(nodes(c.detail(t)), 'prop-priority-t_one') && !keyed(nodes(c.detail(t)), 'links-card'));
+  assert.ok(offered().includes('priority') && offered().includes('due') && offered().includes('links'));
+  // typed in place: the box closes (saved, cancelled or failed) and the hold ends; a saved value shows by itself
+  assert.match(source, /if \(propsAdding\.get\(t\.id\)\?\.has\(field\)\) propDrop\(t\.id, field\); else render\(\);/);
+  assert.match(source, /if \(propsAdding\.get\(t\.id\)\?\.has\('due'\)\) propDrop\(t\.id, 'due'\); else render\(\);/);
+  assert.match(source, /d\.addEventListener\?\.\('close', \(\) => \{ if \(!referenceRows\(ticketOf\(t\.id\) \|\| t\)\.length\) propDrop\(t\.id, 'links'\); \}/);
+});
+
+test('O-08: + Add opens a choice at once; the box of Done when is named "Done when"', () => {
+  assert.match(source, /if \(target\?\.tagName === 'SELECT'\) propChoiceOpen\(t, key, target\); else target\?\.click\(\);/);
+  assert.match(source, /input\.setAttribute\('aria-label', FIELD_NAME\[field\] \|\| capitalise\(field\)\);/);
+  const c = ctx();
+  assert.equal(vm.runInContext('FIELD_NAME.done_when', c), 'Done when');
+  // opening tries a bounded number of times while the master select wraps the new select, then gives up to plain focus
+  let focused = 0, timers = 0;
+  c.setTimeout = fn => { timers++; fn(); };
+  vm.runInContext('propChoiceOpen', c)({id:'t_one'}, 'kind', {closest:() => null, focus() { focused++; }});
+  assert.equal(timers, 10); assert.equal(focused, 1);
+});
