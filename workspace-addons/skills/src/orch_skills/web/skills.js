@@ -240,16 +240,36 @@
         text: 'The whole list is under All.', action: {label: 'Show all', onClick: () => { filter = 'all'; draw(); }}});
       return emptyList(NONE[tab]);
     }
+    // O-29 (owner 28 Nov): in a page area under 900 px (beside the Focus panel) the From column moves under the name as
+    // grey text, State keeps its full width and the description gets two lines instead of ending in "…" after a few
+    // words. The page is a frame, so its own width is the page area. Up to 720 px the kit's card form hides the third
+    // cell (From) and puts State under the name: that cell stays in the row there, only its words also sit under the name.
+    const narrow = roomNarrow(), cards = narrow && roomCards(), cols = !narrow || cards;
+    drawnForm = formNow();
     return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'data-table switch-table'},
       h('caption', {className: 'sr-only', text: TABS.find(t => t[0] === tab)[1]}),
       h('thead', {}, h('tr', {}, h('th', {scope: 'col'}, h('span', {className: 'sr-only', text: 'On'})), h('th', {scope: 'col', text: 'Name'}),
-        h('th', {scope: 'col', text: 'From'}), h('th', {scope: 'col', text: 'State'}))),
+        cols ? h('th', {scope: 'col', text: 'From'}) : null, h('th', {scope: 'col', text: 'State'}))),
       h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': plain(it.name), onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
         h('td', {}, control(it)),
-        h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)}),
-          it.copy ? h('div', {className: 'meta truncate', text: it.copy}) : null),  // in the name cell: From is hidden on a phone
-        h('td', {className: 'nowrap', text: from(it)}),
-        h('td', {}, badge(it)))))));
+        narrow ? h('td', {}, h('strong', {text: plain(it.name)}),
+          from(it) ? h('div', {className: 'meta', 'data-from': '', text: from(it)}) : null,
+          h('div', {className: 'meta', title: line(it), text: twoLines(line(it))}),
+          it.copy ? h('div', {className: 'meta', text: it.copy}) : null)
+          : h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)}),
+            it.copy ? h('div', {className: 'meta truncate', text: it.copy}) : null),  // in the name cell: From is hidden on a phone
+        cols ? h('td', {className: 'nowrap', 'aria-hidden': narrow ? 'true' : null, text: from(it)}) : null,
+        h('td', {className: narrow ? 'nowrap' : null}, badge(it)))))));
+  }
+  let drawnForm = 'wide';
+  const roomNarrow = () => { const w = Number(window.innerWidth) || 0; return w > 0 && w < 900; };
+  const roomCards = () => (Number(window.innerWidth) || 0) <= 720;
+  const formNow = () => (!roomNarrow() ? 'wide' : roomCards() ? 'cards' : 'narrow');
+  // Two lines of the text column: what fits beside the switch and the State pill at this width, cut at a word.
+  function twoLines(text) {
+    const w = Number(window.innerWidth) || 800, beside = w <= 720 ? 130 : 300;  // the switch, and from 721 px the State column too
+    const t = String(text || ''), room = Math.max(40, Math.floor((w - beside) / 6.5) * 2 - 4);
+    return t.length <= room ? t : t.slice(0, room).replace(/\s+\S*$/, '') + '…';
   }
 
   function facts(list) {
@@ -460,5 +480,7 @@
     }
   }
   $('retry').addEventListener('click', () => { show('loading'); load(true); });
+  // the list is drawn again only when the room crosses into or out of the narrow form (never on every resize step)
+  addEventListener('resize', () => { if (model && tab !== 'bin' && formNow() !== drawnForm && $('list')) $('list').replaceWith(drawList()); });
   load();
 })();
