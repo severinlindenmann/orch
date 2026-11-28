@@ -29,8 +29,10 @@ module.exports = {
       await quick.click();
       await page.locator('.attn-round').waitFor();
       must((await page.locator('.attn-round-h').innerText()) === 'Quick look', 'the round does not name its group');
-      const top = await page.locator('.swipe-top span').first().innerText();
+      // W-038: the progress row shows with the first answer; its words are in the page from the start
+      const top = await page.locator('.swipe-top span').first().textContent();
       must(/^0 answered · 5 waiting/.test(top), `the round is not 5 cards: ${top}`);
+      must(!(await page.locator('.swipe-top span').first().isVisible()), 'the progress row shows before the first answer');
       await shot('round');
       must(JSON.parse(orch('review', 'list', '--json')).cards.length === before, 'starting a round answered a card');
 
