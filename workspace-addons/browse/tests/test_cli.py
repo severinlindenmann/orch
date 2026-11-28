@@ -362,7 +362,7 @@ def test_site_list_empty_states_and_mistakes(ws, capsys):
     code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
     assert code == 0 and "empty" in out
     code, out = run(capsys, "sites", "list", "--ticket", "t_abc123", "--json")
-    assert json.loads(out) == {"ticket": "t_abc123", "sites": []}
+    assert json.loads(out) == {"ticket": "t_abc123", "sites": [], "by_source": []}
     code, out = run(capsys, "sites", "add", "--ticket", "t_abc123")
     assert code == 2 and out.startswith("orch browse sites [list|add|remove]")
     code, out = run(capsys, "sites", "rename", "t_abc123", "example.com")
@@ -435,3 +435,60 @@ def test_a_broker_that_stops_mid_step_says_how_to_start_again(ws, capsys, monkey
     _fake_broker(monkeypatch, [None])
     code, out = run(capsys, "look", "--ticket", "t_abc123")
     assert code == 2 and "The browser stopped" in out and "orch browse open" in out
+
+
+# ---- O-21 (owner, 28 Nov): the workspace's permanent site list ----
+def test_the_workspace_list_holds_for_every_ticket(ws, capsys):
+    code, out = run(capsys, "sites", "--workspace", "add", "*.20min.ch", "https://www.sbb.ch/de")
+    assert code == 0 and "for every ticket" in out and "20min.ch" in out
+    assert paths.load_workspace_sites(ws) == ["20min.ch", "www.sbb.ch"]
+    assert paths.load_ticket_sites(ws, "t_abc123") == []
+    assert paths.load_sites(ws, "t_abc123") == ["20min.ch", "www.sbb.ch"]  # what the filter asks
+    run(capsys, "sites", "add", "t_abc123", "docs.python.org", "20min.ch")
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123", "--json")
+    doc = json.loads(out)
+    assert doc["sites"] == ["20min.ch", "docs.python.org", "www.sbb.ch"]
+    assert doc["by_source"] == [
+        {"site": "20min.ch", "source": "workspace"},  # on both lists: the workspace's
+        {"site": "docs.python.org", "source": "ticket"},
+        {"site": "www.sbb.ch", "source": "workspace"},
+    ]
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
+    assert "20min.ch  (workspace)" in out and "  docs.python.org\n" in out + "\n"
+    code, out = run(capsys, "sites", "--workspace", "list", "--json")
+    assert json.loads(out)["sites"] == ["20min.ch", "www.sbb.ch"] and "ticket" not in json.loads(out)
+    code, out = run(capsys, "sites", "--workspace", "remove", "*.20min.ch")
+    assert code == 0 and paths.load_workspace_sites(ws) == ["www.sbb.ch"]
+    assert paths.load_sites(ws, "t_abc123") == [
+        "20min.ch",
+        "docs.python.org",
+        "www.sbb.ch",
+    ]  # the ticket's own stays
+
+
+def test_only_a_person_changes_the_workspace_list_and_a_bad_entry_adds_nothing(ws, capsys, monkeypatch):
+    code, out = run(capsys, "sites", "--workspace", "add", "example.com", "10.0.0.1")
+    assert code == 2 and "Not added" in out and paths.load_workspace_sites(ws) == []
+    monkeypatch.setenv("ORCH_RUN", "r_1")
+    code, out = run(capsys, "sites", "--workspace", "add", "example.com")
+    assert code == 2 and "Only a person changes the site list" in out and "--workspace add example.com" in out
+    assert paths.load_workspace_sites(ws) == []
+
+
+def test_a_damaged_workspace_list_opens_nothing(ws):
+    import pytest as _pytest
+
+    paths.save_sites(ws, "t_abc123", ["example.com"])
+    paths.workspace_sites_file(ws).write_text("{ not json", encoding="utf-8")
+    with _pytest.raises(ValueError):
+        paths.load_sites(ws, "t_abc123")
+
+
+def test_a_list_has_a_size_bound(ws):
+    import pytest as _pytest
+
+    paths.save_workspace_sites(ws, [f"s{i}.example.org" for i in range(1000)])
+    assert len(paths.load_workspace_sites(ws)) == 1000
+    with _pytest.raises(ValueError):
+        paths.save_workspace_sites(ws, [f"s{i}.example.org" for i in range(paths.MAX_SITES + 1)])
+    assert len(paths.load_workspace_sites(ws)) == 1000

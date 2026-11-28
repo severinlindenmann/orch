@@ -1,6 +1,7 @@
 """Where the browser add-on keeps its files (all under .orch/addons/browse/, kept out of git).
 
-sites/<ticket>.json   the ticket's site list (changed only by a person)
+sites/<ticket>.json   the ticket's own site list (changed only by a person)
+sites/_workspace.json the workspace's permanent site list: it holds for every ticket (O-21, owner 28 Nov)
 run/<ticket>/         the broker's 0700 folder: channel, state, network log, path of the temp profile
 shots/<ticket>/       pictures taken with orch browse shot
 """
@@ -53,9 +54,16 @@ def sites_file(root: Path, tid: str) -> Path:
     return base(root) / "sites" / f"{tid}.json"
 
 
-def load_sites(root: Path, tid: str) -> list[str]:
-    """The ticket's site list. Missing = empty; damaged = an error (the filter then allows nothing)."""
-    f = sites_file(root, tid)
+WORKSPACE_LIST = "_workspace"  # never a ticket id (those start with t_)
+MAX_SITES = 5000  # one list; far above what a person keeps, and the filter reads it on every connection
+
+
+def workspace_sites_file(root: Path) -> Path:
+    return base(root) / "sites" / f"{WORKSPACE_LIST}.json"
+
+
+def _read_sites(f: Path) -> list[str]:
+    """One stored list. Missing = empty; damaged = an error (the filter then allows nothing)."""
     if not f.exists():
         return []
     doc = json.loads(f.read_text(encoding="utf-8"))
@@ -65,12 +73,47 @@ def load_sites(root: Path, tid: str) -> list[str]:
     return [netcheck.norm_site(s) for s in sites]
 
 
-def save_sites(root: Path, tid: str, sites: list[str]) -> None:
-    f = sites_file(root, tid)
+def _write_sites(f: Path, sites: list[str]) -> None:
+    if len(set(sites)) > MAX_SITES:
+        raise ValueError(f"a site list holds at most {MAX_SITES} sites")
     _private(f.parent)
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps({"sites": sorted(set(sites))}, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, f)
+
+
+def load_ticket_sites(root: Path, tid: str) -> list[str]:
+    """The ticket's own extra sites (without the workspace's list)."""
+    return _read_sites(sites_file(root, tid))
+
+
+def load_workspace_sites(root: Path) -> list[str]:
+    """The workspace's permanent list: these sites may open for every ticket."""
+    return _read_sites(workspace_sites_file(root))
+
+
+def load_sites(root: Path, tid: str) -> list[str]:
+    """The sites this ticket's browser may open: the workspace's permanent list and the ticket's own, each
+    once. This is what the network filter asks on every connection. A damaged list is an error (the filter
+    then allows nothing)."""
+    return sorted(set(load_workspace_sites(root)) | set(load_ticket_sites(root, tid)))
+
+
+def sites_by_source(root: Path, tid: str | None = None) -> list[dict]:
+    """The allowed sites with where each comes from: [{"site", "source": "workspace" | "ticket"}], by name.
+    A site on both lists is the workspace's (it holds for every ticket anyway)."""
+    ws = set(load_workspace_sites(root))
+    own = set(load_ticket_sites(root, tid)) - ws if tid else set()
+    return [{"site": s, "source": "workspace" if s in ws else "ticket"} for s in sorted(ws | own)]
+
+
+def save_sites(root: Path, tid: str, sites: list[str]) -> None:
+    """Write the ticket's own list."""
+    _write_sites(sites_file(root, tid), sites)
+
+
+def save_workspace_sites(root: Path, sites: list[str]) -> None:
+    _write_sites(workspace_sites_file(root), sites)
 
 
 def write_state(run: Path, doc: dict) -> None:

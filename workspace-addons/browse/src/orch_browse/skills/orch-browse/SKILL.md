@@ -8,7 +8,7 @@ metadata:
 # orch browse: a private, read-only browser per ticket
 
 Each ticket gets its own fresh browser, started by orch and deleted when it closes. orch's network filter sits in
-front of it: only sites on the ticket's site list open, and this computer, the local network and cloud metadata
+front of it: only sites on the workspace's site list or the ticket's own open, and this computer, the local network and cloud metadata
 addresses never do.
 
 ## When to use
@@ -28,7 +28,8 @@ addresses never do.
     orch browse shot                # save a picture of the page (prints where)
     orch browse close               # close it when you are done
 
-A site is missing from the list: ask the person, who adds it with `orch browse sites add <ticket> <site>`:
+A site is missing from the list: ask the person, who adds it with `orch browse sites add <ticket> <site>` (or on
+the dashboard's Browser page, under Allowed sites, for every ticket):
 
     orch ask <ticket> "May the browser open <site>? I need it for <why>." --option "Yes, add it" --option "No" --recommend "Yes, add it"
 
