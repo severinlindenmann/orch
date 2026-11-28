@@ -9,7 +9,7 @@ const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/page
 function load(hash, stored) {
   const from = src.indexOf('const TICKET_VIEWS'), to = src.indexOf('const changesPending');
   const ctx = {location:{hash}, history:{replaceState:(_s, _t, url) => { ctx.location.hash = url; }}, searchFolds:new Set(),
-    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketPerson:'', ticketGroup:'', ticketView:'list', calMode:'month', calDay:'', window:{DashHelpers:require('../src/orch_dashboard/web/helpers.js')}};
+    URLSearchParams, localStorage:{getItem:() => stored || null}, ticketSearch:'', ticketPerson:'', ticketGroup:'', ticketTop:false, ticketView:'list', calMode:'month', calDay:'', window:{DashHelpers:require('../src/orch_dashboard/web/helpers.js')}};
   vm.createContext(ctx);
   vm.runInContext(src.slice(from, to).replace('let ticketAddressKey', 'var ticketAddressKey') + '\nthis.api = {ticketAddress, writeTicketAddress, syncTicketAddress, savedView};', ctx);
   return ctx;

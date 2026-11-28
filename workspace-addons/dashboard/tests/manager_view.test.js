@@ -63,7 +63,7 @@ test('tickets list: Due and Time · cost columns, stuck chip and line, This week
   if (helpers.helperState(runs.e, items[3])?.state !== 'stuck') c.state.runs = {};
   const table = c.ticketTable(c.filteredTickets());
   const heads = nodes(table, n => n.tag === 'th' && n.attrs?.scope === 'col').map(text);
-  assert.deepEqual(heads.slice(1), ['Due', 'Tasks', 'Time · cost', 'Last change', 'Actions']);
+  assert.deepEqual(heads.slice(1), ['Due', 'Tasks', 'Time · cost', 'Last change', 'State', 'Actions']);
   const row = id => nodes(table, n => n.attrs?.['data-key'] === 'tree-' + id)[0];
   const due = id => nodes(row(id), n => n.attrs?.className === 'due-cell')[0].children[0];
   assert.equal(due('a').attrs.className, 'bad');

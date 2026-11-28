@@ -17,7 +17,7 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 function listCtx(extra = {}) {
   const c = {h, window:{DashHelpers:helpers, UI:{...kitWindow(), ...require('./kit_state.js')}}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
-    needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
+    needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, URLSearchParams, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
     button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
   vm.createContext(c); vm.runInContext(listSrc, c); return c;
 }
@@ -316,18 +316,17 @@ test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an emp
   assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
   assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
 });
-test('ORCH-1716: the Needs you button counts tickets like its group, even when one ticket holds two questions', () => {
+test('O-15 C: a group line has no button; answering everything at once is on Review', () => {
   const c = listCtx();
-  const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
-  assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
-  assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
-  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Review 1 result');
+  assert.equal(typeof c.groupAction, 'undefined');
+  assert.doesNotMatch(listSrc, /Answer all|'Review ' \+ group\.length/);
+  assert.match(listSrc, /h\('div', \{className:'group-head'\}, toggle\)\)\)\);/);
 });
-test('ORCH-1716: a result to check says Test results on the phone too, not the session Start', () => {
+test('O-15 C: a result to review says Result in its state mark at every width, never a button', () => {
   const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});
-  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Test results');
-  assert.equal(text(c.shortSide({id:'o', status:'open'}, {}, 'open')), 'Start', 'other rows keep the session button');
-  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Test results', 'the computer row says the same');
+  assert.equal(text(c.shortSide({id:'r', status:'review'})), 'Result');
+  assert.equal(text(c.shortSide({id:'o', status:'open'})), 'Backlog', 'no session button on a row');
+  assert.equal(c.ticketNext({id:'r', status:'review'}), null, 'no button under the title either');
 });
 test('ORCH-1716: the Person choice lists each person once; picking one keeps every spelling of them', () => {
   const rows = [{id:'a', owner:'Severin'}, {id:'b', owner:'severin'}, {id:'c', owner:'lume'}, {id:'d', owner:'owner'}, {id:'e', owner:'human:Anna'}, {id:'f', owner:'agent:claude'}];

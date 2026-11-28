@@ -73,5 +73,5 @@ test('ticket page header (both variants) and an empty board card show the kind',
 });
 
 test('phone list: the short row of an epic starts its fact line with "Epic"', () => {
-  assert.match(listSrc, /fact:\[window\.DashHelpers\.kindWord\(row\.ticket\), shortFact\(/);
+  assert.match(listSrc, /fact:\[window\.DashHelpers\.kindWord\(row\.ticket\), partsWords\(row\.ticket\), shortFact\(/);
 });

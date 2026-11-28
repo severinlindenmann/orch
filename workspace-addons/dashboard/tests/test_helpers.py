@@ -407,12 +407,14 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
     assert "boardLane(t) === section)) return null" in chip  # the status word is left out where it matches
-    nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
+    nxt = src[src.index("function ticketNextText") : src.index("function ticketMenu")]
     assert "'Question: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
     assert (
         "'Start helper'" not in nxt and "'Resume'" not in nxt and "run.start" not in nxt
     )  # ORCH-69: no start on cards
-    assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "button(" not in nxt and "'btn " not in nxt  # O-15 C (owner, 28 Nov): no button on a row at all
+    assert "ticketNextText(t)" in tree and "ticketMenu(t, 'tree')" in tree
+    assert "ticketMark(t)" in tree  # the row ends in its one state mark
     assert "activity(t," not in tree
 
 

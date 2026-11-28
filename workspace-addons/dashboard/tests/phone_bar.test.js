@@ -90,7 +90,7 @@ function listCtx(list, extra = {}) {
 }
 const text = n => !n ? '' : typeof n === 'string' || typeof n === 'number' ? String(n) : (n.children || []).map(text).join('');
 
-test('phone list: groups as short rows, Answer where the person is needed, steps as n/m, the rest a fact', () => {
+test('phone list: groups as short rows, the state mark on the right (never a button), the rest a fact', () => {
   const list = [
     {id:'q', key:'WS-1', title:'Services', status:'waiting', questions:[{id:'q1', text:'Start?'}], updated_at:new Date().toISOString()},
     {id:'a', key:'WS-2', title:'Count', status:'active', checklist:[{done:true}, {}, {}], updated_at:new Date().toISOString()},
@@ -103,10 +103,12 @@ test('phone list: groups as short rows, Answer where the person is needed, steps
   const need = groups[0].rows[0];
   assert.equal(need.key, 'WS-1');
   assert.match(need.fact, /^Question/);
-  assert.equal(text(need.side), 'Answer');
+  assert.equal(text(need.side), 'Question');
+  assert.equal(need.href, c.href('q') + '?tab=questions', 'the row opens the ticket at its question');
   assert.equal(groups[1].icon, 'working');
-  assert.equal(text(groups[1].rows[0].side), '1/3');
-  assert.equal(groups[2].rows[0].side, null, 'no steps: nothing on the right');
+  assert.equal(text(groups[1].rows[0].side), 'In progress');
+  assert.equal(text(groups[2].rows[0].side), 'Backlog');
+  assert.ok(groups.flatMap(g => g.rows).every(r => r.side && r.side.tag !== 'button' && r.side.tag !== 'a'), 'no button on a row (O-15 C)');
 });
 
 test('phone list: a long group shows 8 rows and "n more"; a folded group no rows', () => {

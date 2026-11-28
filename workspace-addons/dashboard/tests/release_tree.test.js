@@ -58,7 +58,7 @@ test('the list shows Release > Epic > Task as one tree, every row with its statu
   assert.deepEqual(rows.slice(0, 4), ['tree-ep', 'tree-la', 'tree-tr', 'tree-fx'], 'the epic, its tickets, then the next ticket of the release');
   assert.ok(rows.includes('tree-lo') && !rows.includes('tree-r26') && !rows.includes('tree-old'));
   const fix = nodes(table).find(n => n.attrs?.['data-key'] === 'tree-fx');
-  assert.match(text(fix), /open/, 'the row carries its status chip');
+  assert.match(text(fix), /Backlog/, 'the row carries its state mark');
   assert.doesNotMatch(text(fix), /Sub-ticket of/);
   assert.ok(nodes(table).some(n => n.attrs?.['data-key'] === 'release-open-r26' && text(n) === 'Open release'));
 });
@@ -72,7 +72,7 @@ test('no release: the list is grouped by status exactly as before', () => {
 test('ORCH-576: a release tile has the Release tag and its parts bar; a ticket under it says Part of: <release>', () => {
   assert.match(listSrc, /t\.release \? 'Release' : t\.epic \? 'Epic'/);
   assert.match(listSrc, /' tickets in this ' \+ boardKind\(t\)\.toLowerCase\(\)/);
-  assert.match(listSrc, /'Part of: ' \+ clean\(parent\.title\)/);
+  assert.match(listSrc, /'Part of: ' \+ boardShort\(parent\.title, 28\)/);
 });
 
 test('ticket page: a Release switch in Properties, "Tickets in this release", releases first in Part of', () => {

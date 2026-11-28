@@ -3,6 +3,9 @@
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
+// O-14 D (ORCH-2439): "Top tickets only", off until the person turns it on: the list and the Board show the tickets
+// that are part of no other ticket (epics, releases and tickets that stand alone). On the address as top=1.
+let ticketTop = false;
 // ORCH-1081: the Calendar layout shows a month or a week; calDay is a day in it ('' = today).
 let calMode = 'month', calDay = '';
 // Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|waiting|done-week.
@@ -20,11 +23,13 @@ function savedView() {
 function ticketAddress(over = {}) {
   const view = 'view' in over ? over.view : savedView(), q = 'q' in over ? over.q : String(ticketSearch).trim(), layout = 'layout' in over ? over.layout : ticketView;
   const who = 'who' in over ? over.who : ticketPerson, part = 'part' in over ? over.part : ticketGroup, mode = 'cal' in over ? over.cal : calMode, day = 'day' in over ? over.day : calDay;
+  const top = 'top' in over ? over.top : ticketTop;
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (q) p.set('q', q);
   if (who) p.set('who', who);
   if (part) p.set('part', part);
+  if (top) p.set('top', '1');
   if (layout === 'board' || layout === 'calendar') p.set('layout', layout);
   if (layout === 'calendar' && mode === 'week') p.set('cal', 'week');
   if (layout === 'calendar' && day) p.set('day', day);
@@ -40,7 +45,7 @@ function writeTicketAddress() {
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
   const layout = ['board', 'calendar', 'list'].includes(p.get('layout')) ? p.get('layout') : '';
-  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + layout + (layout === 'calendar' ? '|' + (p.get('cal') || '') + '|' + (p.get('day') || '') : '');
+  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + (p.get('top') === '1' ? 'top' : '') + '|' + layout + (layout === 'calendar' ? '|' + (p.get('cal') || '') + '|' + (p.get('day') || '') : '');
 }
 function syncTicketAddress() {
   const key = ticketAddressPart();
@@ -50,6 +55,7 @@ function syncTicketAddress() {
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
   ticketPerson = p.get('who') || '';
   ticketGroup = p.get('part') || '';
+  ticketTop = p.get('top') === '1';
   if (['board', 'calendar', 'list'].includes(p.get('layout'))) ticketView = p.get('layout');
   else if (at < 0 || !p.has('layout')) { try { ticketView = storedTicketView(); } catch (_) { ticketView = 'list'; } }
   calMode = p.get('cal') === 'week' ? 'week' : 'month';
@@ -188,6 +194,30 @@ function keyMatch(t, needle) {
   const key = String(t.key || '').toLowerCase(), digits = needle.replace(/^#/, ''), flat = v => v.replace(/[\s-]+/g, '');
   return !!key && (/^\d+$/.test(digits) ? key.split('-').pop() === String(Number(digits)) : key === needle || flat(key) === flat(needle));
 }
+// O-14 D: the tickets that are part of no other ticket. The family is read from every ticket the page holds, so a
+// sub-ticket never counts as a top ticket only because its parent is filtered away.
+function topTickets(items) { const parent = familyOf().parent; return items.filter(t => !parent.has(t.id)); }
+const topOnly = items => ticketTop ? topTickets(items) : items;
+// What is inside a top ticket, all levels: "12 sub-tickets · 3 need you" ('' with none, and while the filter is off:
+// the list then shows them indented under it).
+function partsWords(t) {
+  if (!ticketTop) return '';
+  const ids = boardFamily(t); ids.delete(t.id);
+  if (!ids.size) return '';
+  const inside = tickets().filter(x => ids.has(x.id)), need = inside.filter(x => inView(x, 'needs-you')).length;
+  const kind = t.release || t.epic ? (inside.length === 1 ? ' ticket' : ' tickets') : inside.length === 1 ? ' sub-ticket' : ' sub-tickets';
+  return inside.length + kind + (need ? ' · ' + need + (need === 1 ? ' needs you' : ' need you') : '');
+}
+const partsLine = t => { const words = partsWords(t); return words ? h('p', {className:'meta ticket-sub', 'data-key':'parts-line-' + t.id}, words) : null; };
+// The parent of a sub-ticket shown without it (the parent sits in another status group, or is filtered away).
+function partOfWords(t) {
+  const parent = familyOf().parent.get(t.id) || boardParent(tickets(), t);
+  return parent ? 'Part of ' + boardShort(parent.title, 32) : '';
+}
+function partOfTag(t) {
+  const words = partOfWords(t), parent = familyOf().parent.get(t.id) || boardParent(tickets(), t);
+  return words ? h('span', {className:'meta nowrap', title:'Part of ' + clean(parent.title), 'data-key':'part-of-' + t.id}, words) : null;
+}
 function boardChildren(all, t) {
   return window.DashHelpers.childrenOf ? window.DashHelpers.childrenOf(all, t) : all.filter(child => child.id !== t.id && child.parent && (child.parent === t.id || child.parent === t.key));
 }
@@ -244,7 +274,8 @@ const releaseFoldSeen = new Set();
 function releaseFolds(groups) {  // a finished release starts folded, once; the person's own fold or unfold then stays
   for (const g of groups) if (!releaseFoldSeen.has(g.status)) { releaseFoldSeen.add(g.status); if (g.finished) foldedGroups.add(g.status); }
 }
-const releaseOpen = g => h('a', {className:'btn ghost sm group-action', href:href(g.release.id), 'data-key':'release-open-' + g.release.id}, 'Open release');
+// a plain link, never a button (O-15 C: a group line has no button)
+const releaseOpen = g => h('a', {className:'meta group-action', href:href(g.release.id), 'data-key':'release-open-' + g.release.id}, 'Open release');
 const blockedTitle = items => items.filter(ticketWaitsOnly).every(t => t.waiting_on?.kind === 'ticket') ? 'Waiting for another ticket' : 'Waiting';
 // "Waits for ORCH-56" under a ticket that waits for another one; "Waits until 18:00" for a time.
 function waitsLine(t) {
@@ -268,9 +299,9 @@ function filteredTickets() {
   wantSearch();
   if (searchServed()) {  // the server searched every ticket for these words, person and group; the view is chosen here
     const own = new Map(tickets().map(t => [t.id, t]));
-    return filterTickets(ticketParents(hits.rows.map(t => own.get(t.id) || t)), '', false, me, '', savedView(), '');
+    return topOnly(filterTickets(ticketParents(hits.rows.map(t => own.get(t.id) || t)), '', false, me, '', savedView(), ''));
   }
-  return filterTickets(ticketParents(pageRows()), ticketSearch, ticketMine, me, ticketPerson, savedView(), ticketGroup);
+  return topOnly(filterTickets(ticketParents(pageRows()), ticketSearch, ticketMine, me, ticketPerson, savedView(), ticketGroup));
 }
 // A native select styled with the kit's input class (the kit has no custom select yet).
 function ticketSelect(label, key, choices, value, onChange) {
@@ -282,7 +313,7 @@ function ticketSelect(label, key, choices, value, onChange) {
 // Views as chips on the Tickets page: All, Needs you, Working, To do, Done this week. ORCH-236 (owner, 17 Nov): no
 // saved views of one's own.
 function viewChips() {
-  const current = savedView(), filtered = !!(ticketSearch || ticketPerson || ticketGroup);
+  const current = savedView(), filtered = !!(ticketSearch || ticketPerson || ticketGroup || ticketTop);
   const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
   return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
     TICKET_VIEWS.map(([id, text]) => chip(id ? (id === 'stuck' ? stuckLabel() : text) : 'All', id === current && !filtered, {href:ticketAddress({view:id}), 'data-key':'view-chip-' + (id || 'all')})));
@@ -311,7 +342,10 @@ function ticketFilters() {
   const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
   const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, boardShort(t.title, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
-  return [group, person, h('span', {className:'grow'}), h('label', {className:'search-field'}, input)];
+  // a link, so the choice has an address (Back, reload and a shared link keep it) and the page keeps one filled button
+  const top = heads.length || ticketTop ? h('a', {className:'chip view-chip' + (ticketTop ? ' active' : ''), role:'switch', 'aria-checked':String(ticketTop), href:ticketAddress({top:!ticketTop}),
+    title:ticketTop ? 'Show sub-tickets again' : 'Show only tickets that are part of no other ticket', 'data-key':'ticket-top'}, 'Top tickets only') : null;
+  return [group, top, person, h('span', {className:'grow'}), h('label', {className:'search-field'}, input)];
 }
 // The Person choices: one [key, name] per person (ownerKey), named as "You: ..." says when it is the person, else the
 // first spelling that starts with a capital letter.
@@ -326,7 +360,7 @@ function ticketOwners(list) {
   return [...byKey].sort((a, b) => a[1].localeCompare(b[1]));
 }
 function clearTicketFilters() {
-  ticketSearch = ''; ticketMine = false; ticketPerson = ''; ticketGroup = '';
+  ticketSearch = ''; ticketMine = false; ticketPerson = ''; ticketGroup = ''; ticketTop = false;
   if (savedView()) location.hash = ticketAddress({view:''}); else writeTicketAddress();
   const input = document.querySelector('[data-key="ticket-search"]');
   if (input) input.value = '';
@@ -334,42 +368,52 @@ function clearTicketFilters() {
 }
 const initials = value => String(name(value) || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
 const widthSpan = pct => { const node = h('span', {}); node.style.width = pct + '%'; return node; };
-function ticketNext(t) {
+// O-15 C / W-022 C (owner, 28 Nov): no buttons on a ticket row or a group line. A row ends in ONE state mark, the
+// master's pill (a coloured status icon and one word), in its own column so the marks stand in one line; a click on the
+// row opens the ticket at the right place (its question, its result). Answering everything at once is on Review.
+// The same reading gives the Board card its word and its icon (O-16 C).
+function ticketMarkState(t) {
+  const status = shown(t).status, run = state?.runs?.[t.id], st = window.DashHelpers.helperState(run, t);
+  if (status === 'done') return {pill:'done', word:'Done'};
+  if (status === 'dropped' || status === 'superseded') return {pill:'todo', word:t.superseded_by || status === 'superseded' ? 'Superseded' : "Won't do"};
+  if (questions(t).length) return {pill:'needs', word:'Question'};
+  if (window.DashHelpers.startFailure(t, run, state?.settings)) return {helper:'stuck', word:'Start failed'};
+  if (status === 'review') return {pill:'check', word:'Result'};
+  if (st?.state === 'stuck' || t.stuck) return {helper:'stuck', word:'Stuck'};
+  if (changesPending(t)) return {pill:'needs', word:'Changes'};
+  if (ticketWaitsOnly(t) || status === 'blocked') return {pill:'todo', word:'Waiting'};
+  if (st) return ['working', 'starting'].includes(st.state) ? {pill:'working', word:st.word} : st.state === 'you' ? {pill:'needs', word:'Needs you'} : {helper:st.state, word:st.state === 'limit' ? 'Usage limit' : st.word};
+  if (['open', 'ready'].includes(status) && window.DashHelpers.changesAsked(t)) return {pill:'todo', word:'Changes asked'};
+  if (['open', 'ready'].includes(status) && ticketIsPaused(t)) return {pill:'todo', word:'Paused'};
+  return {pill:'todo', word:{open:'Backlog', ready:'To do', active:'In progress', waiting:'Waiting'}[status] || 'To do'};
+}
+function ticketMark(t) {
+  const s = ticketMarkState(t);
+  const mark = !window.UI?.ticketPill ? chip(s.word, '') : s.helper ? window.UI.helperPill(s.helper, s.word) : window.UI.ticketPill({pill:s.pill, word:s.word});
+  if (mark?.dataset) mark.dataset.key = 'mark-' + t.id;
+  return mark;
+}
+// Where a click on the row or card lands: a ticket with an open question opens on its questions.
+const ticketOpenHref = t => href(t.id) + (questions(t).length && shown(t).status !== 'done' ? '?tab=questions' : '');
+// The one line under a row's title: the question asked, why the helper could not start, or that it is paused.
+function ticketNextText(t) {
   const status = shown(t).status, need = needsList().find(n => n.ticket === t.id);
-  let text = '', action = null;
+  let text = '';
   const failed = !questions(t).length && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings);
-  if (failed) {
-    // ORCH-1687: a helper that could not start is in Needs you; it says so and opens the ticket (no start button on a
-    // list row, ORCH-69), never "Answer" for a question that is not there
-    text = failed.text;
-    if (!snapshot) action = h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'ticket-failed-' + t.id}, 'Open');
-  } else if (questions(t).length || (status === 'waiting' && !ticketWaitsOnly(t))) {
+  if (failed) text = failed.text;  // ORCH-1687: a helper that could not start is in Needs you and says why
+  else if (questions(t).length || (status === 'waiting' && !ticketWaitsOnly(t))) {
     text = window.DashHelpers.questionPreview(t) || need?.title || '';
-    if (!snapshot) {
-      action = button('Answer', 'outline sm', event => {
-        const current = needsList().find(n => n.ticket === t.id);
-        if (current) openNeed(current, event.currentTarget);
-        else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
-      });
-    }
     if (text) text = 'Question: ' + text;
-  } else if (status === 'review') {
-    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
-    // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
-    // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
     // one word per state, the ticket page's (ORCH-1696): a sent-back ticket reads Changes asked, never Paused
     if (window.DashHelpers.changesAsked(t)) text = 'Changes asked';
     else if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
   }
-  return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
+  return clean(text);
 }
-// The new live page (Preview, draft D feature 3): every row gets the ticket's session button. When it says Answer it takes the
-// place of the row's own Answer, so a row never shows two.
-function ticketRowFocus(t, nextAction) {
-  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
-  if (!live) return [nextAction];
-  return live.dataset.verb === 'Answer' && nextAction?.textContent === 'Answer' ? [live] : [nextAction, live];
+function ticketNext(t) {
+  const text = ticketNextText(t);
+  return text ? h('div', {className:'row ticket-next'}, h('span', {className:'meta'}, text)) : null;
 }
 function ticketMenu(t, scope) {
   if (snapshot) return null;
@@ -413,23 +457,26 @@ function treeBranch(rows, index, section) {
   if (!treeSeen.has(t.id)) { treeSeen.add(t.id); treeExpanded.add(t.id); }
   const open = treeExpanded.has(t.id), children = [];
   for (let i = index + 1; i < rows.length && rows[i].depth > row.depth; i++) if (rows[i].depth === row.depth + 1) children.push(i);
-  const next = ticketNext(t), nextText = next?.querySelector('.meta'), nextAction = next?.querySelector('.btn');
+  const nextText = ticketNextText(t);
   const helper = helperChip(t);
   const inRelease = String(section || '').startsWith('release:');
-  const sub = changesLine(t) || waitsLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText.textContent) : null) || (helper?.line ? h('p', {className:'meta ticket-sub'}, helper.line) : null) || (row.parentMissing && !inRelease ? parentLine(t) : null);
+  // O-14 D: with Top tickets only a ticket says what is inside it; a sub-ticket whose parent sits in another group
+  // always names that parent beside its title (never only when nothing else was to say)
+  const sub = partsLine(t) || changesLine(t) || waitsLine(t) || (nextText ? h('p', {className:'meta ticket-sub'}, nextText) : null) || (helper?.line ? h('p', {className:'meta ticket-sub'}, helper.line) : null);
   const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : '') + (picked.has(t.id) ? ' is-picked' : ''), 'data-key':'tree-' + t.id},
     pickCell(t), h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), prepareWord(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
+      h('a', {href:ticketOpenHref(t)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), prepareWord(t), row.parentMissing && !inRelease ? partOfTag(t) : null), sub),
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
     h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:whenTitle(at)}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
-    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
+    h('td', {className:'ticket-mark nowrap'}, ticketMark(t)),
+    h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
-  node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,label,[role="menu"]')) location.hash = href(t.id); });
+  node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,label,[role="menu"]')) location.hash = ticketOpenHref(ticketOf(t.id) || t); });
   return fragment(node, open ? children.map(i => treeBranch(rows, i, section)) : null);
 }
 // ORCH-742 (look B): a saved ticket in Backlog says quietly where Prepare stands; Prepared means described, not checked
@@ -533,14 +580,9 @@ function boardFactsIcon(t) {
 // The one signal of a tile, most important first.
 function boardSignal(t, lane, parts) {
   const status = shown(t).status;
-  if (questions(t).length && status !== 'done') {
-    return snapshot ? h('span', {className:'tile-sig warn'}, 'Needs you') : button('Answer', 'outline xs tile-answer', event => {
-      const current = needsList().find(n => n.ticket === t.id);
-      if (current) openNeed(current, event.currentTarget);
-      else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
-    });
-  }
-  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Test results');
+  // O-15 C / O-16 C: a card has no button; its state is the word here and the icon in its top right corner
+  if (questions(t).length && status !== 'done') return h('span', {className:'tile-sig warn'}, 'Question');
+  if (status === 'review') return h('span', {className:'tile-sig'}, 'Result');
   if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
   const helper = helperChip(t);
   if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
@@ -565,24 +607,38 @@ function boardSignal(t, lane, parts) {
   if (t.due) return h('span', {className:'tile-sig'}, dueText(t));
   return null;
 }
+// O-16 C (owner, 28 Nov, with his comment): a card is two lines. Line 1: number and title on one line (cut with …; the
+// whole title is the link's tooltip and opens with the ticket) and, in the top right corner, the state as an icon plus
+// what add-ons say (each with its words for a screen reader and on hover). Line 2: tasks, the state in a word, the
+// short name of the ticket it is part of, and ⋯ to move it. No button on the card.
+function boardStateIcon(t) {
+  const s = ticketMarkState(t), look = s.helper ? {stuck:'needs', idle:'todo', waiting:'check', limit:'check'}[s.helper] || 'todo' : s.pill;
+  if (!window.UI?.statusIcon) return null;
+  return h('span', {className:'nowrap', role:'img', title:s.word, 'aria-label':s.word, 'data-state':s.helper || s.pill, 'data-key':'state-' + t.id}, window.UI.statusIcon(look));
+}
 function boardCard(t, lane = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = familyOf().kids.get(t.id) || [], parent = boardParent(tickets(), t), kind = boardKind(t);
   const open = boardPartsOpen.has(t.id) && parts.length;
   const late = t.due && overdue(t) && (questions(t).length || shown(t).status === 'review');
-  const partOf = parent && boardScope?.root !== parent.id ? h('button', {type:'button', className:'tile-part-of tile-link', 'data-action':'board-scope', 'data-ticket':parent.id, 'data-mark':t.id, title:'Part of ' + clean(parent.key || '') + ' ' + clean(parent.title) + '. Show all its parts'}, 'Part of: ' + clean(parent.title)) : null;
+  const whole = clean((t.key ? t.key + ' · ' : '') + t.title);
+  const partOf = parent && boardScope?.root !== parent.id ? h('button', {type:'button', className:'tile-part-of tile-link', 'data-action':'board-scope', 'data-ticket':parent.id, 'data-mark':t.id, title:'Part of ' + clean(parent.key || '') + ' ' + clean(parent.title) + '. Show all its parts'}, 'Part of: ' + boardShort(parent.title, 28)) : null;
   const card = h('article', {className:'ticket-tile' + (boardScope?.mark === t.id ? ' tile-mark' : ''), 'data-col':lane || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
-    h('h3', {className:'tile-title'}, kind ? h('span', {className:'kind-tag', 'data-kind':kind.toLowerCase()}, kind) : null,
-      h('a', {href:href(t.id), title:clean((t.key ? t.key + ' · ' : '') + t.title)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
+    h('div', {className:'row', 'data-key':'tile-top-' + t.id},
+      h('h3', {className:'tile-title grow'}, h('span', {className:'truncate'}, kind ? h('span', {className:'kind-tag', 'data-kind':kind.toLowerCase()}, kind) : null,
+        h('a', {href:ticketOpenHref(t), title:whole}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t))),
+      boardFactsIcon(t), boardStateIcon(t)),
     h('div', {className:'tile-foot'},
       (kind && parts.length) ? boardPartsBar(t, parts, open) : tasks.length ? h('span', {className:'tile-num', title:window.DashHelpers.stepsText(done, tasks.length)}, done + '/' + tasks.length + ' tasks') : null,
       late ? h('span', {className:'tile-late', title:dueText(t), 'aria-label':dueText(t)}, iconEl('clock')) : null,
-      boardSignal(t, lane, parts), partOf, h('span', {className:'grow'}), boardFactsIcon(t),
+      boardSignal(t, lane, parts), partOf, h('span', {className:'grow'}),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'tile-icon move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, lane)))),
     open ? h('div', {className:'tile-parts', 'data-key':'tile-parts-' + t.id}, parts.map(p => h('a', {className:'tile-part', href:href(p.id)},
       boardDot(boardLane(p)), window.DashHelpers.keyTag(p, h), h('span', {className:'grow tile-part-title'}, clean(p.title)), h('span', {className:'meta'}, boardLaneName(boardLane(p))))),
       h('button', {type:'button', className:'tile-link', 'data-action':'board-scope', 'data-ticket':t.id}, 'Show them on the board')) : null);
   card.style?.setProperty('--c', questions(t).length ? 'var(--needs-you)' : boardTone(lane));
+  // the whole card opens the ticket (at its question, when it has one); a link, ⋯ or a part keeps its own click
+  card.addEventListener?.('click', e => { if (!e.target.closest('a,button,summary,details,[role="menu"],[role="dialog"]')) location.hash = ticketOpenHref(ticketOf(t.id) || t); });
   return card;
 }
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
@@ -618,6 +674,7 @@ function board() {
   const group = boardScope ? '' : ticketGroup;
   const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, who, ticketPerson, savedView(), group);
   let visible = sorted([...filterTickets(ticketParents(pageRows()), ticketSearch, ticketMine, who, ticketPerson, savedView(), group), ...dropped]);
+  if (ticketTop && !boardScope) visible = topTickets(visible);  // O-14 D: a scoped board shows the parts the person asked for
   if (boardScope) {
     const ids = boardScope.pair ? new Set(boardScope.pair) : boardFamily(ticketOf(boardScope.root));
     visible = visible.filter(t => ids.has(t.id) && t.id !== boardScope.root);
@@ -917,21 +974,6 @@ function toggleGroup(status) {
   if (folds.has(status)) folds.delete(status); else folds.add(status);
   render();
 }
-// The group's main action for all its tickets: "Answer all 2" opens the first question, "Check 3 results" the first result.
-function groupAction(status, group, folded = foldedGroups.has(status)) {
-  if (snapshot || folded) return null;
-  const withQuestions = group.filter(t => questions(t).length);
-  if (status === 'waiting' && withQuestions.length) {
-    // ORCH-1716 (owner's words, 23 Nov): "Answer all N", N the same number as the group's (a ticket can hold two questions)
-    const n = withQuestions.length;
-    return button(n === 1 ? 'Answer 1' : 'Answer all ' + n, 'outline sm group-action', event => {
-      const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
-      if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
-    });
-  }
-  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Review ' + group.length + (group.length === 1 ? ' result' : ' results'));
-  return null;
-}
 const searchHead = n => { const q = String(ticketSearch).trim(); if (q && searchServed() && !savedView()) n = Math.max(n, hits.total); return q ? n + (n === 1 ? ' ticket matches “' : ' tickets match “') + q + '”' : 'Ticket · ' + n; };
 // The number on a group: for Done the server's count when only part of the finished tickets are here (ORCH-523).
 const groupCount = (status, n) => status === 'done' && !savedView() && !String(ticketSearch).trim() ? Math.max(n, finishedTotal() || 0) : n;
@@ -939,7 +981,7 @@ const searchMore = () => searchServed() && hits.next != null ? () => searchPage(
 function ticketTable(visible) {
   const rel = releaseGroups(visible), groups = ticketGroups(visible.filter(t => !rel.inRelease.has(t.id)));
   if (!foldSeen) { foldSeen = true; if (groupCount('done', groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
-  const body = [], cols = picking() ? 7 : 6;
+  const body = [], cols = picking() ? 8 : 7;
   releaseFolds(rel.groups);
   for (const group of rel.groups) {
     const status = group.status, rows = window.DashHelpers.treeRows(group.tickets);
@@ -961,7 +1003,7 @@ function ticketTable(visible) {
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = folds.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, h('span', {'aria-hidden':'true'}, (folded ? '› ' : '⌄ ') + icon + ' '), group.title + ' ', h('span', {className:'meta'}, String(groupCount(status, group.tickets.length))));
     toggle.addEventListener('click', () => toggleGroup(status));
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets, folded)))));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:cols}, h('div', {className:'group-head'}, toggle))));
     if (folded) continue;
     const cap = capOf('list-' + status), fetchMore = status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null;
     for (const {i} of roots.slice(0, cap)) body.push(treeBranch(rows, i, status));
@@ -972,10 +1014,10 @@ function ticketTable(visible) {
   // This week: one total line of helper time and money under the table
   if (savedView() === 'this-week') {
     const total = window.DashHelpers.spendTotal(visible);
-    body.push(h('tr', {className:'group-row', 'data-key':'week-total'}, h('th', {colSpan:cols - 3}, h('span', {className:'meta'}, 'This week')),
-      h('th', {className:'numeric'}, h('span', {className:'meta'}, window.DashHelpers.spendWords(total) || '–')), h('th', {colSpan:2})));
+    body.push(h('tr', {className:'group-row', 'data-key':'week-total'}, h('th', {colSpan:cols - 4}, h('span', {className:'meta'}, 'This week')),
+      h('th', {className:'numeric'}, h('span', {className:'meta'}, window.DashHelpers.spendWords(total) || '–')), h('th', {colSpan:3})));
   }
-  const heads = [[searchHead(visible.length), ''], ['Due', ''], ['Tasks', ''], ['Time · cost', 'numeric'], ['Last change', '']];
+  const heads = [[searchHead(visible.length), ''], ['Due', ''], ['Tasks', ''], ['Time · cost', 'numeric'], ['Last change', ''], ['State', '']];
   return h('div', {className:'table-wrap wide-only', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
     h('thead', {}, h('tr', {}, pickAll(visible), heads.map(([label, cls]) => h('th', {scope:'col', className:cls || null}, label)), h('th', {scope:'col'}, h('span', {className:'sr-only'}, 'Actions')))),
     h('tbody', {}, body)));
@@ -1106,32 +1148,14 @@ function shortFact(t, row) {
   const helper = helperChip(t);
   if (helper?.line) return helper.line;
   if (t.due && shown(t).status !== 'done') { const due = dueText(t); return /^(Due|Late)\b/.test(due) ? due : 'Due ' + due; }  // ORCH-189: the due day is the one fact when set
-  if (row.parentMissing && typeof parentLine === 'function') { const step = parentLine(t)?.textContent; if (step) return step; }
   const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
-function shortSide(t, row, status) {
-  // ORCH-1716: a result to check says Test results at every width (the computer row shows it first, the session button
-  // only on hover); the phone has room for one thing, so it is that one
-  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Test results');
-  const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
-  if (live) return live;
-  if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {
-    event.stopPropagation();
-    const need = needsList().find(x => x.ticket === t.id);
-    if (need) openNeed(need, event.currentTarget); else location.hash = href(t.id);
-  });
-  const helper = helperChip(t);
-  if (helper) return helper.chip;
-  const tasks = array(t.checklist), total = tasks.length || row.children || 0;
-  if (!total) return null;
-  const done = tasks.length ? tasks.filter(window.DashHelpers.resolved).length : row.done || 0;
-  const pill = h('span', {className:'pill ' + ({active:'working', done:'done', waiting:'needs'}[status] || ''), title:window.DashHelpers.stepsText(done, total)});
-  if (window.UI?.statusIcon) pill.append(window.UI.statusIcon(SHORT_ICON[status] || 'todo'));
-  pill.append(done + '/' + total);
-  return pill;
-}
-function phoneList(visible) {
+// The one thing on the right of a compact row: the state mark (O-15 C, W-022 C), never a button.
+function shortSide(t) { return ticketMark(t); }
+// W-022 C: `always` = the page area is under 900 px wide (the Focus panel beside it, a small window): these rows are
+// the list then, at any screen width, and the table is not drawn.
+function phoneList(visible, always = false) {
   const rel = releaseGroups(visible), groups = ticketGroups(visible.filter(t => !rel.inRelease.has(t.id))), out = [];
   releaseFolds(rel.groups);
   const order = [...rel.groups, ...GROUP_ORDER.map(status => groups.find(g => g.status === status))];
@@ -1144,8 +1168,8 @@ function phoneList(visible) {
     const fetchMore = !isRel && status === 'done' && moreFinished(group.tickets.length) ? loadFinished : null, total = isRel ? group.tickets.length : groupCount(status, group.tickets.length);
     const sec = window.UI.shortGroup({key:'short-' + status, title:isRel ? group.title + ' · ' + releaseCount(group) : group.title, icon:isRel ? (group.finished ? 'done' : 'todo') : SHORT_ICON[status], count:total, folded,
       onToggle:() => toggleGroup(status),
-      rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:href(row.ticket.id), child:row.depth > 0,
-        fact:[window.DashHelpers.kindWord(row.ticket), shortFact(row.ticket, isRel ? {...row, parentMissing:false} : row)].filter(Boolean).join(' · '), side:shortSide(row.ticket, row, isRel ? ticketColumn(row.ticket) : status), dataKey:'short-' + row.ticket.id})),
+      rows:cut.map(row => ({key:typeof row.ticket.key === 'string' ? row.ticket.key : '', title:clean(row.ticket.title), href:ticketOpenHref(row.ticket), child:row.depth > 0,
+        fact:[window.DashHelpers.kindWord(row.ticket), partsWords(row.ticket), shortFact(row.ticket, row), row.parentMissing && !isRel ? partOfWords(row.ticket) : ''].filter(Boolean).join(' · '), side:shortSide(row.ticket), dataKey:'short-' + row.ticket.id})),
       more:!all && (cut.length < shownRows.length || fetchMore) ? {label:Math.max(shownRows.length - cut.length, total - cut.length) + ' more', onClick:() => { phoneMore.add(status); render(); }} : null});
     sec.querySelectorAll('.short-row').forEach(rowEl => rowEl.addEventListener('click', e => {
       if (e.target.closest('a,button')) return;
@@ -1157,7 +1181,7 @@ function phoneList(visible) {
   }
   const more = searchMore();
   if (more) out.push(moreMark('phone-search', 0, more));
-  return h('div', {className:'phone-only short-list', 'data-key':'ticket-short'}, out);
+  return h('div', {className:(always ? '' : 'phone-only ') + 'short-list', 'data-key':'ticket-short'}, out);
 }
 /* ORCH-1081 (owner picked draft C, 20 Nov): the Calendar layout. Month = the weeks as rows (Mon-Fri and one Weekend
    cell; this week tallest, past weeks only "1 done"), Week = one full-width row per day with readable cards. Late
@@ -1296,11 +1320,30 @@ function list() {
   if (!tickets().length) return fragment(heading('Tickets'), ticketsEmpty());
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), tickets().length ? viewToggle() : null];
-  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
+  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || ticketTop || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
-  return fragment(top, !tickets().length ? ticketsEmpty() : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+  // W-022 C: under 900 px of page area the list is the compact rows (name, one line of state, the state mark at the
+  // right edge), never a table that scrolls sideways
+  const narrow = pageNarrow() && !!window.UI?.shortGroup;
+  return fragment(top, narrow ? phoneList(visible, true) : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+}
+// The width of the page area (the window less the menu and a Focus panel beside it). The list is drawn again when the
+// area crosses 900 px (a panel opens, the menu folds, the window is resized): only then, so nothing loops.
+const LIST_NARROW = 900;
+let narrowShown = false, narrowWatch = null;
+function pageNarrow() {
+  const area = typeof document === 'object' && document.getElementById ? document.getElementById('content') : null;
+  const narrowNow = () => { const w = area?.clientWidth || 0; return w > 0 && w < LIST_NARROW; };
+  if (area && !narrowWatch && typeof ResizeObserver === 'function') {
+    narrowWatch = new ResizeObserver(() => {
+      if (narrowNow() !== narrowShown && String(location.hash || '').split('?')[0] === '#tickets' && ticketView === 'list') render();
+    });
+    narrowWatch.observe(area);
+  }
+  narrowShown = narrowNow();
+  return narrowShown;
 }
 // No tickets at all: the master's one empty page (D4, UI.pageEmpty) with one sentence and New ticket (the page's one
 // filled button).
