@@ -364,8 +364,6 @@ def doctor(root: Path) -> dict:
     if late:
         rows.append(late)
     if (root / ".orch").is_dir():
-        from orch import procs
-
         rows.append(_row("background work", True, procs.power_words(root)))  # ORCH-2407: the limits, in words
     from orch import macfolders
 

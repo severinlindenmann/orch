@@ -919,8 +919,6 @@ def set_live_idle_minutes(root: Path, value: str) -> int:
 
 def set_background_max(root: Path, value: str) -> int:
     """[workspace] background_max: how many background tasks orch runs at once here (procs.bg_limits)."""
-    from orch import procs
-
     v = value.strip()
     if not (v.isascii() and v.isdigit()) or not 1 <= int(v) <= procs.BG_MAX_MOST:
         raise Refused(
@@ -932,8 +930,6 @@ def set_background_max(root: Path, value: str) -> int:
 
 def set_background_load(root: Path, value: str) -> float:
     """[workspace] background_load: the load per processor core over which background work waits."""
-    from orch import procs
-
     try:
         x = float(value.strip())
     except ValueError:
