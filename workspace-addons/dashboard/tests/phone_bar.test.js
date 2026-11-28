@@ -79,7 +79,7 @@ test('UI.shortGroup: header with count, rows with number, title, fact and one si
 const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, dataset:{}, append(...k) { this.children.push(...k); }});
 function listCtx(list, extra = {}) {
   const groups = [];
-  const UI = {shortGroup:o => { groups.push(o); return {o, querySelectorAll:() => [], querySelector:() => null}; }, statusIcon:n => h('svg', {className:'st ' + n})};
+  const UI = {...require('./kit_state.js'), shortGroup:o => { groups.push(o); return {o, querySelectorAll:() => [], querySelector:() => null}; }, statusIcon:n => h('svg', {className:'st ' + n})};
   const c = {h, window:{DashHelpers:helpers, UI}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), state:{runs:{}}, starting:new Set(), now:() => Date.now(),
     needsList:() => [], tickets:() => list, name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){},

@@ -385,7 +385,9 @@ function ticketMarkState(t) {
   if (st) return ['working', 'starting'].includes(st.state) ? {pill:'working', word:st.word} : st.state === 'you' ? {pill:'needs', word:'Needs you'} : {helper:st.state, word:st.state === 'limit' ? 'Usage limit' : st.word};
   if (['open', 'ready'].includes(status) && window.DashHelpers.changesAsked(t)) return {pill:'todo', word:'Changes asked'};
   if (['open', 'ready'].includes(status) && ticketIsPaused(t)) return {pill:'todo', word:'Paused'};
-  return {pill:'todo', word:{open:'Backlog', ready:'To do', active:'In progress', waiting:'Waiting'}[status] || 'To do'};
+  // the rest is the ticket's own status, in the master's words (the ticket page's strip says the same)
+  const plain = window.UI?.ticketState ? window.UI.ticketState(t, null) : null;
+  return plain ? {pill:plain.pill, word:plain.word} : {pill:'todo', word:window.DashHelpers.STATUS_WORD[status] || status};
 }
 function ticketMark(t) {
   const s = ticketMarkState(t);
@@ -1153,7 +1155,7 @@ function shortFact(t, row) {
 }
 // The one thing on the right of a compact row: the state mark (O-15 C, W-022 C), never a button.
 function shortSide(t) { return ticketMark(t); }
-// W-022 C: `always` = the page area is under 900 px wide (the Focus panel beside it, a small window): these rows are
+// W-022 C: `always` = the page area is under 900 px wide (a panel beside it, a small window): these rows are
 // the list then, at any screen width, and the table is not drawn.
 function phoneList(visible, always = false) {
   const rel = releaseGroups(visible), groups = ticketGroups(visible.filter(t => !rel.inRelease.has(t.id))), out = [];
@@ -1329,7 +1331,7 @@ function list() {
   const narrow = pageNarrow() && !!window.UI?.shortGroup;
   return fragment(top, narrow ? phoneList(visible, true) : fragment(ticketTable(visible), bulkBar(visible), window.UI?.shortGroup ? phoneList(visible) : null));
 }
-// The width of the page area (the window less the menu and a Focus panel beside it). The list is drawn again when the
+// The width of the page area (the window less the menu and a panel beside it). The list is drawn again when the
 // area crosses 900 px (a panel opens, the menu folds, the window is resized): only then, so nothing loops.
 const LIST_NARROW = 900;
 let narrowShown = false, narrowWatch = null;

@@ -28,7 +28,7 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 const byKey = (root, key) => nodes(root).find(n => n.attrs?.['data-key'] === key);
 const keys = (root, prefix) => nodes(root).map(n => n.attrs?.['data-key']).filter(k => k && k.startsWith(prefix));
 const pill = word => h('span', {className:'pill'}, word);
-const UI = {ticketPill:s => pill(s.word), helperPill:(state, word) => pill(word), statusIcon:name => h('svg', {className:'st ' + name}),
+const UI = {...require('./kit_state.js'), ticketPill:s => pill(s.word), helperPill:(state, word) => pill(word), statusIcon:name => h('svg', {className:'st ' + name}),
   shortGroup:o => h('section', {className:'card short-group', 'data-key':o.key, folded:o.folded, toggle:o.onToggle}, o.title, o.folded ? [] : o.rows.map(r => h('div', {className:'short-row', 'data-key':r.dataKey, href:r.href}, r.title, r.fact, r.side)))};
 
 function listCtx(items, extra = {}) {
