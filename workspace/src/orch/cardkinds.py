@@ -158,10 +158,9 @@ _STATE_ONLY = re.compile(
 
 def refuse_bad_question(text: str, options: list[str], card: bool) -> None:
     """The refusals of `orch ask` (owner's pick R5 A, 25 Nov 2026), each with the next step: a question
-    longer than one short sentence, and a report of a state with nothing to answer. A question without
-    answers to pick gets the next step instead (ASK_HINT): a free answer in the person's own words stays
-    possible (a tax number, an address), and existing helpers and add-ons ask such questions. A card brings
-    its own answers, so only the length applies to it."""
+    longer than one short sentence, and a report of a state with nothing to answer. The third, a helper's
+    question without answers to pick, is ASK_NEEDS_ANSWERS below. A card brings its own answers, so only
+    the length applies to it."""
     words = len((text or "").split())
     if words > QUESTION_WORDS_MAX:
         raise Refused(
@@ -177,6 +176,15 @@ def refuse_bad_question(text: str, options: list[str], card: bool) -> None:
         )
 
 
+# ORCH-2177 (AGENTS R2.4: every question carries options and a recommended answer): a helper's plain
+# question without answers to pick is refused, after every other check of the question (tickets.ask). The
+# person can still answer in their own words on the card. A person's own question without answers gets
+# the next step instead (ASK_HINT): the one caller in orch that cannot give options yet is an add-on's
+# question to another workspace, asked by a person's click and answered in free words.
+ASK_NEEDS_ANSWERS = (
+    "A question needs answers to pick, so one tap answers it (the person can still write their own): "
+    'orch ask <id> "<question>" --option "<answer>" --option "<other answer>" --recommend "<answer>".'
+)
 ASK_HINT = (
     "Next: a question with 2 to 4 --option and a --recommend is answered in one tap"
     " on the dashboard and the phone."

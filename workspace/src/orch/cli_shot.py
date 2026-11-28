@@ -86,7 +86,8 @@ def add_parsers(sub, common) -> None:
         "--page",
         metavar="NAME[=PART][,...]",
         help="several pages of one site in one run, after the address's # (e.g. home,tickets,"
-        "ticket=ticket/DM1-2); files are named <name>-<page>-<width>.png",
+        "ticket=ticket/DM1-2, or one Review card: review?card=<card id>); files are named "
+        "<name>-<page>-<width>.png",
     )
 
 
@@ -255,24 +256,38 @@ class _Pipe:
 
 PAGE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 PAGE_PART = re.compile(r"[A-Za-z0-9/_.~-]{1,120}")
+PAGE_QUERY = re.compile(r"[A-Za-z0-9/_.~%:=&+-]{1,200}")  # what a page reads after its ?: card=core%3Aq%3A...
 
 
 def parse_pages(text: str | None) -> list[tuple[str, str]]:
     """--page home,ticket=ticket/DM1-2 -> [(home, home), (ticket, ticket/DM1-2)]: a file name part and what
-    goes after the address's #."""
+    goes after the address's #. A page may carry a query, so one Review card can be shown alone
+    (ORCH-2164): review?card=<id> -> (review, review?card=<id>), also with a name of its own
+    (one=review?card=<id>)."""
     if not text:
         return []
     pages = []
     for item in (p.strip() for p in text.split(",")):
         if not item:
             continue
-        name, _, part = item.partition("=")
+        head, mark, query = item.partition("?")
+        name, _, part = head.partition("=")
         part = part or name
-        if not PAGE_NAME.fullmatch(name) or not PAGE_PART.fullmatch(part):
-            raise Refused(f"'{item[:60]}' is not a page like home or ticket=ticket/DM1-2.")
+        if (
+            not PAGE_NAME.fullmatch(name)
+            or not PAGE_PART.fullmatch(part)
+            or (mark and not PAGE_QUERY.fullmatch(query))
+        ):
+            raise Refused(
+                f"'{item[:60]}' is not a page like home, ticket=ticket/DM1-2 or review?card=<card id>."
+            )
         if any(n == name for n, _ in pages):
-            raise Refused(f"The page name '{name}' is given twice.")
-        pages.append((name, part))
+            raise Refused(
+                f"The page name '{name}' is given twice. Name each: one={part}{mark}{query[:40]}."
+                if mark
+                else f"The page name '{name}' is given twice."
+            )
+        pages.append((name, part + mark + query))
     return pages
 
 

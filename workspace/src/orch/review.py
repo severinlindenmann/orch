@@ -390,7 +390,10 @@ def _load_sources(root: Path, tid: str, files: list[str]) -> dict[str, bytes]:
         except safefile.TooLarge:
             raise Refused(f"'{name}' is over {MAX_FILE // (1024 * 1024)} MB.") from None
         if data is None:
-            raise Refused(f"'{src}' was not found, is a link, or is not allowed.")
+            raise Refused(
+                f"'{src}' was not found, is a link, or is not allowed; "
+                "give a file in the workspace like docs/x.png, or a file of this ticket as artifacts/<name>."
+            )
         if name in blobs and blobs[name] != data:
             raise Refused(f"Two different files are both named '{name}'. Rename one.")
         total += len(data)

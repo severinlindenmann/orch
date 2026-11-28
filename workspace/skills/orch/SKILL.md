@@ -228,7 +228,8 @@ rules hold for any work: taxes, a campaign, a trip, a website. Ask yourself what
 - Finished work is never asked about: set the ticket to Review. The Reviewer looks first; only what it leaves reaches
   the person (in Reviewer mode "propose" it proposes and the person clicks).
 - `orch ask` refuses a question longer than 40 words and a report of a state ("the helper is offline", "for your
-  information"): write those in the ticket summary. Stuck cards are made by orch alone.
+  information"): write those in the ticket summary. It also refuses a question without answers to pick: give 2 to 4
+  `--option` and a `--recommend` (the person can still write their own answer). Stuck cards are made by orch alone.
 
 **Cards are short and visual, never a text wall** (owner 17 Nov: "I will never read reviews like that"). A headline is one sentence; everything long goes in `details`, which sits behind one click. Pick the format that fits the news, as in the style guide (`/styleguide`, "Review card formats"):
 - Work finished: a Check card (orch builds it: headline, progress bar, chips, short steps). Put your result in the ticket summary: its FIRST sentence is the headline, so make it say the outcome.
@@ -370,6 +371,7 @@ Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colo
 
     orch shot <address or html file> --width 1280,1920,390 --out <folder>    # one picture per width, prints the paths
     orch shot <address> --page home,tickets --out <folder>                  # several pages of one site in one run
+    orch shot <address> --page "review?card=<card id>" --out <folder>       # one Review card alone (the id from orch review list --json)
 
 When the project's checks already take pictures of the pages a pull request changes, take none yourself: `orch ask <id> "<question>" --draft "<title>" --ci-shots <pull request address> --then "<what next>"`
 puts them on the card, every page at each width.
