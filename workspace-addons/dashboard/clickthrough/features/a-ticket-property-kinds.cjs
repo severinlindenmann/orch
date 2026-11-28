@@ -54,6 +54,8 @@ module.exports = {
     };
     const chosen = async key => (await row(key).locator('.ui-select-trigger').innerText()).trim();
     const typed = label => rail.getByLabel(label, { exact: true });
+    // the page settles a moment after a save (the answer, then a redraw): wait until `ok` holds, at most 4 s
+    const settled = async (read, ok) => { let v; for (let i = 0; i < 20; i++) { v = await read(); if (ok(v)) return v; await page.waitForTimeout(200); } return v; };
 
     // ---- Owner: typed in place
     await add('owner');
@@ -65,7 +67,7 @@ module.exports = {
     if (!(await offered('owner'))) note('Owner', 'after Cancel + Add no longer offers it');
     if (await row('owner').count()) await row('owner').locator('[data-action="inline"]').click(); else await add('owner');
     await act('ticket.edit', async () => { await typed('Owner').fill('Anna'); await page.keyboard.press('Enter'); });
-    if (!/Anna/.test(await words('owner'))) note('Owner', 'the saved name does not show: "' + (await words('owner')) + '"');
+    if (!/Anna/.test(await settled(() => words('owner'), v => /Anna/.test(v)))) note('Owner', 'the saved name does not show: "' + (await words('owner')) + '"');
     await row('owner').locator('[data-action="inline"]').click();
     await failing('ticket.edit', async () => { await typed('Owner').fill('Bert'); await page.keyboard.press('Enter'); });
     if (!(await toastShown())) note('Owner', 'a save that failed says nothing');
@@ -85,7 +87,7 @@ module.exports = {
       if (!(await offered('done_when'))) note('Done when', 'after Cancel + Add no longer offers it');
       if (await row('done-when').count()) await row('done-when').locator('[data-action="inline"]').click(); else await add('done_when');
       await act('ticket.edit', async () => { await dw.fill('Every guest has a badge with the right name; ' + 'spare badges are in the box. '.repeat(8)); await page.keyboard.press('Enter'); });
-      if (!/Every guest has a badge/.test(await words('done-when'))) note('Done when', 'the saved text does not show');
+      if (!/Every guest has a badge/.test(await settled(() => words('done-when'), v => /Every guest has a badge/.test(v)))) note('Done when', 'the saved text does not show');
       if (await row('done-when').getByRole('button', { name: /Show more|^More$/ }).count()) note('Done when', 'a long text is folded behind a toggle');
     }
 
@@ -101,7 +103,8 @@ module.exports = {
       if (await row('due').count()) await row('due').locator('[data-action="inline"]').click(); else await add('due');
       await cal.getByRole('button', { name: 'Next month' }).click();
       await act('ticket.edit', () => cal.locator('.cal-x').nth(14).click());
-      if (!(await row('due').count()) || /Set a due date|Not set/.test(await words('due'))) note('Due', 'the picked day does not show: "' + (await words('due')) + '"');
+      const due = await settled(() => words('due'), v => /\d/.test(v));
+      if (!/\d/.test(due) || /Set a due date|Not set/.test(due)) note('Due', 'the picked day does not show: "' + due + '"');
     }
     const dueSaved = await words('due');
 
@@ -132,14 +135,17 @@ module.exports = {
       }
       const opt = first instanceof RegExp ? page.getByRole('option', { name: first }) : page.getByRole('option', { name: first, exact: true });
       await act(op, () => opt.first().click());
-      saved[rowKey] = await chosen(rowKey);
-      if (first instanceof RegExp ? !first.test(saved[rowKey]) : saved[rowKey] !== first) note(label, 'the saved choice does not show: "' + saved[rowKey] + '"');
+      const fits = v => (first instanceof RegExp ? first.test(v) : v === first);
+      saved[rowKey] = await settled(() => chosen(rowKey), fits);
+      if (!fits(saved[rowKey])) note(label, 'the saved choice does not show: "' + saved[rowKey] + '"');
+      // and it stays: an older refresh landing a moment later must not flip the row back
+      await page.waitForTimeout(1200);
+      if ((await chosen(rowKey)) !== saved[rowKey]) note(label, 'a moment after the save the row reads "' + (await chosen(rowKey)) + '", saved is "' + saved[rowKey] + '"');
       // a save that fails: the row goes back to what is saved, and says so
       await row(rowKey).locator('.ui-select-trigger').click();
       await failing(op, () => page.getByRole('option', { name: second, exact: true }).click());
       if (!(await toastShown())) note(label, 'a save that failed says nothing');
-      await page.waitForTimeout(300);
-      const after = await chosen(rowKey);
+      const after = await settled(() => chosen(rowKey), v => v === saved[rowKey]);
       if (after !== saved[rowKey]) note(label, 'after a save that failed the row reads "' + after + '", saved is "' + saved[rowKey] + '"');
       void unset;
     }

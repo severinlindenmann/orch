@@ -208,7 +208,7 @@ test('W-033: no line without a recorded change; never a guess', () => {
 test('O-08: a choice whose save failed goes back to what is saved now, not to the value of its first draw', async () => {
   const toasts = [], synced = [];
   let answer = {ok:true};
-  const c = ctx({act:async () => answer, changeError:r => r.text});
+  const c = ctx({act:async () => answer, changeError:r => r.text, setTimeout:() => 0});
   c.window.orch.toast = (...a) => toasts.push(a); c.window.UI.select = {sync:() => synced.push(1)};
   const sel = c.priorityField({id:'t_one', priority:'normal'});
   sel.getAttribute = k => sel.attrs[k];
@@ -221,6 +221,11 @@ test('O-08: a choice whose save failed goes back to what is saved now, not to th
   assert.equal(sel.value, 'high', 'back to the saved value (before: back to the value of the first draw, "normal")');
   assert.deepEqual(toasts, [['That could not be saved just now. Try again.', 'error']]);
   assert.equal(synced.length, 1, 'the master select is told to show it');
+  assert.equal(sel.picked, null, 'and nothing is held as picked any more');
+  // a pick that is being saved is held: an older refresh that lands in between must not flip the row back
+  answer = {ok:true}; sel.value = 'low'; await sel.onchange();
+  assert.equal(sel.picked, 'low');
+  assert.match(source, /if \(n\.picked != null\) \{ if \(n\.picked === n\.dataset\.value\) n\.picked = null; else continue; \}/);
   for (const f of ['kindField', 'partOfField', 'modelField']) assert.match(source, new RegExp('function ' + f + '[\\s\\S]{0,1400}?propChoice\\(select, '), f + ' is the same kind of choice');
 });
 

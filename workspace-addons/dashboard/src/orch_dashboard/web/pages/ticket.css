@@ -152,7 +152,7 @@
 @media(prefers-reduced-motion:reduce){.ticket-page .status-change{animation:none}}
 .ticket-page .ticket-heading h1 .ed-title,.ticket-page .ticket-heading h1 .ed{padding-left:0;margin-left:0;border-color:transparent}
 .ticket-page .ticket-heading h1 .inline-host{display:block}
-.ticket-page .properties .links-card{padding-top:12px}
+.ticket-page .properties .links-card{padding-top:12px;padding-right:8px}  /* W-031: the reference rows reach 8 px past their list (their hover box); inside the column that made it scroll sideways */
 
 /* ---- Files tab: aligned toolbar, grouped picture tiles, list mode (matches mockup/previews) ---- */
 .ticket-page .files-toolbar .files-search{flex:1 1 220px;min-width:180px;height:40px;padding:0 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}

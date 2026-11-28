@@ -2055,8 +2055,14 @@ function propChoice(select, now, save, key = '', tid = '') {
   select.setAttribute?.('data-value', now);
   select.value = now;
   select.onchange = async () => {
-    const result = await save(select.value);
+    // what the person just picked stays shown until a redraw says the same (an older refresh that lands in between
+    // must not flip the row back); at most 10 s, so a pick can never stick for good
+    const picked = select.value;
+    select.picked = picked;
+    globalThis.setTimeout?.(() => { if (select.picked === picked) select.picked = null; }, 10000);
+    const result = await save(picked);
     if (result.ok) return;
+    select.picked = null;
     window.orch.toast(changeError(result), 'error');
     const saved = select.getAttribute?.('data-value') ?? now;
     select.value = saved;
@@ -2073,7 +2079,9 @@ if (typeof MutationObserver === 'function' && typeof document === 'object' && do
     let changed = false;
     for (const m of list) {
       const n = m.target;
-      if (n.tagName !== 'SELECT' || !n.closest('.ticket-side') || n.value === n.dataset.value) continue;
+      if (n.tagName !== 'SELECT' || !n.closest('.ticket-side')) continue;
+      if (n.picked != null) { if (n.picked === n.dataset.value) n.picked = null; else continue; }  // a pick being saved wins over an older refresh
+      if (n.value === n.dataset.value) continue;
       n.value = n.dataset.value; changed = true;
     }
     if (changed) window.UI?.select?.sync?.();
