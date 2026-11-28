@@ -212,3 +212,6 @@ pre.sub-code{min-width:0;width:100%;max-width:100%;white-space:pre;overflow:auto
 :root[data-size=master]{--fs-body:var(--fs-3)}
 :root[data-size=master] h1{font-size:var(--fs-title);line-height:36px;letter-spacing:-.025em}
 @media(min-width:721px){:root[data-size=master] .topbar{min-height:var(--topbar-height)}:root[data-size=master] .btn.primary,:root[data-size=master] .btn.primary.sm{min-height:var(--control-height)}}
+/* b307 (28 Nov): relay admin layouts built from tokens; candidates for the master (listed in the PR for b301) */
+.tabs button[aria-pressed=true]{color:var(--text);border-bottom-color:var(--brand)}
+.sheet .copy-box.full{max-height:none}

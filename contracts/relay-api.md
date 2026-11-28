@@ -645,7 +645,7 @@ Admin (same auth and port as the Admin API):
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/admin/api/problems` | – | `{items: [problem…], readers: [ws…]}`, all states, newest first, at most 500. `readers` = the workspaces that may pick problems up |
-| PUT | `/admin/api/problems/readers` | `{workspaces: [ws…]}` (full list; unknown id → `422`) | `200 {readers}`. Applies on the next call; raises no `version` |
+| PUT | `/admin/api/problems/readers` | `{workspaces: [ws…]}` (full list: nobody or one workspace, the same id twice counts once; two distinct ids or an unknown id → `422`) | `200 {readers}`. Applies on the next call; raises no `version`. A list stored before this rule may still name several: they keep reading, but `POST /v1/problems/<id>/status` `taken` answers `409 conflict` for every new claim until the admin saves one (O-33, 28 Nov) |
 | GET | `/admin/api/problems/<id>` | – | the problem plus `summary` |
 | GET | `/admin/api/problems/<id>/file` | – | the archive, as a download named `<ref>.tar` |
 | PATCH | `/admin/api/problems/<id>` | `{status}` | `200` the problem. The admin may set any state; `new` clears `taken_by`, `taken` by the admin leaves `taken_by` `null` |

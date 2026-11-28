@@ -88,7 +88,8 @@ async fn share_is_idempotent_and_listed_for_readers_only() {
         assert_eq!(s, 403, "{m} {p}");
         assert_eq!(v["error"], "forbidden");
     }
-    readers(&t, &[&b, &c]).await;
+    readers(&t, &[&b]).await;
+    assert_eq!(t.call(&c, "GET", "/v1/problems", None).await.0, 403);
     let (s, l) = t.call(&b, "GET", "/v1/problems", None).await;
     assert_eq!(s, 200);
     assert_eq!(l["next"], Value::Null);
@@ -216,7 +217,7 @@ async fn take_done_and_give_back_rules() {
         t.add_ws("B").await,
         t.add_ws("C").await,
     );
-    readers(&t, &[&b, &c]).await;
+    readers(&t, &[&b]).await;
     let id = share(&t, &a, "r-1116-1000-x").await.1["id"]
         .as_str()
         .unwrap()
@@ -247,8 +248,9 @@ async fn take_done_and_give_back_rules() {
         (200, json!("taken"), json!(b.id))
     );
     assert_eq!(v["taken_by_name"], "B");
-    // taking again by the holder is fine; another reader: 409 on every change
+    // taking again by the holder is fine; the admin moves the pick-up to C: C gets 409 on every change
     assert_eq!(st(&b, "taken").await.0, 200);
+    readers(&t, &[&c]).await;
     let (s, v) = st(&c, "taken").await;
     assert_eq!((s, v["error"].as_str().unwrap()), (409, "conflict"));
     assert_eq!(v["message"], "Another workspace already took this problem.");
@@ -260,15 +262,92 @@ async fn take_done_and_give_back_rules() {
     let (_, l) = t.call(&c, "GET", "/v1/problems?status=taken", None).await;
     assert_eq!(l["items"].as_array().unwrap().len(), 1);
     // done by the holder; give back clears the holder
+    readers(&t, &[&b]).await;
     assert_eq!(st(&b, "done").await.1["status"], "done");
-    let (_, l) = t.call(&c, "GET", "/v1/problems?status=all", None).await;
+    let (_, l) = t.call(&b, "GET", "/v1/problems?status=all", None).await;
     assert_eq!(l["items"][0]["status"], "done");
     let (s, v) = st(&b, "new").await;
     assert_eq!(
         (s, v["status"].clone(), v["taken_by"].clone()),
         (200, json!("new"), Value::Null)
     );
+    readers(&t, &[&c]).await;
     assert_eq!(st(&c, "taken").await.0, 200);
+}
+
+/// O-33: nobody or one workspace picks problems up; two distinct ones are refused; a setting from before with several
+/// keeps them reading but blocks new claims until the admin chooses one; no report is deleted on the way.
+#[tokio::test]
+async fn one_receiver_only_and_legacy_several_block_new_claims() {
+    let t = start().await;
+    let (a, b, c) = (
+        t.add_ws("A").await,
+        t.add_ws("B").await,
+        t.add_ws("C").await,
+    );
+    let id = share(&t, &a, "r-1116-1000-one").await.1["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let put = |ids: Vec<&str>| {
+        let body = json!({ "workspaces": ids });
+        let t = &t;
+        async move {
+            t.admin_json("PUT", "/admin/api/problems/readers", Some(body))
+                .await
+        }
+    };
+    // nobody, then one, the same id twice counts once, two distinct ones: 422 and the setting stays
+    assert_eq!(put(vec![]).await, (200, json!({"readers": []})));
+    assert_eq!(put(vec![&b.id]).await.1["readers"], json!([b.id]));
+    assert_eq!(put(vec![&b.id, &b.id]).await.1["readers"], json!([b.id]));
+    let (s, v) = put(vec![&b.id, &c.id]).await;
+    assert_eq!((s, v["error"].as_str().unwrap()), (422, "invalid"));
+    assert_eq!(
+        v["message"],
+        "Choose one workspace to pick problems up, or nobody."
+    );
+    let (_, l) = t.admin_json("GET", "/admin/api/problems", None).await;
+    assert_eq!(l["readers"], json!([b.id]));
+    // a setting from before this rule: two readers, written straight into the database
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO problem_readers(ws) VALUES(?1)",
+            [c.id.as_str()],
+        )
+        .unwrap();
+    let (_, l) = t.admin_json("GET", "/admin/api/problems", None).await;
+    assert_eq!(l["readers"].as_array().unwrap().len(), 2, "still readable");
+    for w in [&b, &c] {
+        let (s, l) = t.call(w, "GET", "/v1/problems", None).await;
+        assert_eq!((s, l["items"].as_array().unwrap().len()), (200, 1));
+        let (s, v) = t
+            .call(
+                w,
+                "POST",
+                &format!("/v1/problems/{id}/status"),
+                Some(json!({"status": "taken"})),
+            )
+            .await;
+        assert_eq!((s, v["error"].as_str().unwrap()), (409, "conflict"));
+        assert!(v["message"].as_str().unwrap().contains("choose one"));
+    }
+    // the admin chooses one explicitly: it may take the problem again; the report was never deleted
+    assert_eq!(put(vec![&c.id]).await.1["readers"], json!([c.id]));
+    let (s, v) = t
+        .call(
+            &c,
+            "POST",
+            &format!("/v1/problems/{id}/status"),
+            Some(json!({"status": "taken"})),
+        )
+        .await;
+    assert_eq!((s, v["taken_by"].clone()), (200, json!(c.id)));
+    let (_, l) = t.admin_json("GET", "/admin/api/problems", None).await;
+    assert_eq!(l["items"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]

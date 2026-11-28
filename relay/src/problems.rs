@@ -409,6 +409,14 @@ async fn set_status(
     let mine = holder.as_deref() == Some(me.as_str());
     match want {
         "taken" => {
+            // O-33: one workspace picks problems up. A setting from before that names several keeps them reading,
+            // but nobody takes a new problem until the admin chooses one.
+            let n: i64 = tx.query_row("SELECT COUNT(*) FROM problem_readers", [], |r| r.get(0))?;
+            if n > 1 && !mine {
+                return Err(conflict(
+                    "Several workspaces may pick problems up. Ask the relay admin to choose one under Report a problem.",
+                ));
+            }
             if holder.is_some() && !mine {
                 return Err(conflict("Another workspace already took this problem."));
             }
@@ -469,9 +477,17 @@ async fn put_readers(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> 
     let mut ids: Vec<&str> = vec![];
     for w in list {
         match w.as_str() {
-            Some(s) if store::ws_exists(&c, s) => ids.push(s),
+            Some(s) if store::ws_exists(&c, s) => {
+                if !ids.contains(&s) {
+                    ids.push(s)
+                }
+            }
             _ => return Err(invalid("One of the workspaces does not exist.")),
         }
+    }
+    // O-33: nobody or exactly one workspace receives and picks up shared problems.
+    if ids.len() > 1 {
+        return Err(invalid("Choose one workspace to pick problems up, or nobody."));
     }
     let tx = c.transaction()?;
     tx.execute("DELETE FROM problem_readers", [])?;

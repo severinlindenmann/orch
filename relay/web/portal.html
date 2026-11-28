@@ -88,6 +88,12 @@ function readable(m){const b=body(m);
  case 'allow':return 'Allowed '+(b?.kind||'an action')+(b?.mode==='permanent'?' for good':b?.mode?' once':'');
  case 'webhook':return 'An outside event arrived';
  default:return typeLabel[m.type]||'Update'}}
+// PFX-05: the address carries the page, its filters and the open item (#problems?f=done&open=pb_…).
+// Filters replace the address; opening an item adds one, so Back closes the panel and keeps the filters.
+function hashState(){const h=location.hash.slice(1),i=h.indexOf('?');return {key:i<0?h:h.slice(0,i),params:new URLSearchParams(i<0?'':h.slice(i+1))}}
+let onParams=null,openPushed=false;
+function setParams(patch,push){const {key,params}=hashState();for(const [k,v] of Object.entries(patch)){if(v===''||v===null||v===undefined||v===false)params.delete(k);else params.set(k,String(v))}const q=params.toString(),h='#'+(key||'overview')+(q?'?'+q:'');if(h===location.hash)return;if(push){openPushed=true;location.hash=h}else history.replaceState(null,'',h)}
+function closeOpen(){if(!hashState().params.get('open'))return;if(openPushed){openPushed=false;history.back()}else setParams({open:''})}
 function persist(){try{sessionStorage.setItem('orch_admin',token)}catch{}}
 function auth(msg){
  epoch++;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));workspaces=[];phoneList=[];subList=[];$('#crumb').textContent='Sign in';
@@ -462,31 +468,65 @@ async function downloadProblem(p){
  if(!r.ok)throw Error('The file could not be downloaded. Try again.');
  const url=URL.createObjectURL(await r.blob()),a=el('a',{href:url,download:p.ref+'.tar'});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
 }
-async function problemSheet(p){
+async function problemSheet(p,onDone){
  const d=await api('/problems/'+enc(p.id));let dlg;
  const part=(t,x)=>x?el('div',{},el('h3',{},t),el('p',{},x)):null;
- const change=async status=>{await api('/problems/'+enc(p.id),'PATCH',{status});orch.close(dlg);toast(status==='done'?'Marked as done':'Moved back to New');await route()};
+ const change=async status=>{await api('/problems/'+enc(p.id),'PATCH',{status});toast(status==='done'?'Marked as done':'Moved back to New');await orch.close(dlg);await onDone()};
+ const open=d.status!=='done';
  dlg=sheet(d.from_name+' · '+time(d.shared_at),
   sub(problemState(d)+' · '+d.files+(d.files===1?' file':' files')+(d.attachments?' · '+d.attachments+(d.attachments===1?' added file':' added files'):'')+(d.orch_version?' · orch '+d.orch_version:'')+(d.os?' · '+d.os:'')),
   ...(d.about==='feature'?[part('What they want',d.note),part('Why it would help',d.expected)]:[part('What happened',d.note),part('What was expected',d.expected)]),part('More details',d.more),
   d.problems.length?el('div',{},el('h3',{},'Checks that found a problem'),el('div',{class:'checks'},d.problems.map(n=>el('span',{class:'chip'},n)))):null,
-  el('div',{},el('h3',{},'Summary'),el('pre',{class:'copy-box',tabindex:0},d.summary||'')),
-  el('div',{class:'actions'},button('Download',()=>downloadProblem(d),'primary'),
-   button(d.status==='done'?'Reopen':'Mark done',()=>change(d.status==='done'?'new':'done')),
-   button('Delete',async()=>{if(!await confirmDialog('Delete this problem?','The report and its files are removed from the relay.','Delete'))return;await api('/problems/'+enc(p.id),'DELETE');orch.close(dlg);toast('Problem deleted');await route()},'ghost danger')));
+  el('div',{},el('h3',{},'Summary'),el('pre',{class:'copy-box full',tabindex:0},d.summary||'')),
+  el('div',{class:'actions'},button(open?'Mark done':'Reopen',()=>change(open?'done':'new'),open?'primary':''),
+   button('Download',()=>downloadProblem(d)),
+   button('Delete',async()=>{if(!await confirmDialog('Delete this problem?','The report and its files are removed from the relay.','Delete'))return;await api('/problems/'+enc(p.id),'DELETE');toast('Problem deleted');await orch.close(dlg);await onDone()},'ghost danger')));
+ return dlg;
 }
 const FEATURE_LABEL='Feature wish';  // a shared report that is a wish, not a problem
+// P-016: filters over the list, open ones first; O-33: one workspace (or nobody) picks problems up.
+const PROBLEM_FILTERS=[['new','New'],['taken','Taken'],['done','Done'],['all','All']];
+const PROBLEM_ORDER={new:0,taken:1,done:2};
+function receiverLine(readers,onSaved){
+ const known=readers.filter(id=>workspaces.some(w=>w.id===id)),several=known.length>1;
+ const box=el('section',{class:'card receiver'}),explain='This workspace sees every shared report and may pick it up. Other workspaces can still share reports.';
+ function line(){box.replaceChildren(el('div',{class:'card-row'},el('div',{class:'grow'},el('h3',{},'May pick up: '+(known.length?known.map(name).join(', '):'Nobody')),several?el('p',{class:'meta warn',role:'note'},'Several workspaces are set from before. They can still see reports, but nobody can pick up a new one until you choose one.'):sub(explain)),button(several?'Choose one':'Change',()=>edit(),several?'primary':'outline')))}
+ function edit(){
+  const sel=el('select',{name:'receiver','aria-label':'Who may pick problems up'},el('option',{value:'',disabled:true,selected:true},'Choose a workspace'),el('option',{value:'__nobody'},'Nobody'),workspaces.map(w=>el('option',{value:w.id},w.name)));
+  if(!several)sel.value=known[0]||'__nobody';
+  const f=form(async f=>{if(!sel.value)throw new FieldError('Choose a workspace, or Nobody.','receiver');const ws=sel.value==='__nobody'?[]:[sel.value];const r=await api('/problems/readers','PUT',{workspaces:ws});toast(ws.length?name(ws[0])+' now picks problems up.':'Nobody picks problems up now.');onSaved(r.readers||ws)},
+   field('Who may pick problems up',sel,explain+(several?' The others stop seeing reports; no report is deleted.':'')),el('div',{class:'actions'},submit('Save'),button('Cancel',()=>{line();box.querySelector('button')?.focus()},'ghost')));
+  box.replaceChildren(el('div',{class:'form-body'},f));sel.focus()}
+ line();return box;
+}
 async function problemsPage(v){
- const r=await api('/problems');if(v!==epoch)return;const items=r.items||[],picked=new Set(r.readers||[]);
- const pick=form(async f=>{await api('/problems/readers','PUT',{workspaces:selected(f)});toast('Saved')},
-  el('p',{},'These workspaces can see shared problems and pick them up. Other workspaces can still share problems.'),
-  workspaces.length?el('div',{class:'checks workspace-pills'},workspaces.map(w=>el('label',{},input('workspace',w.id,{type:'checkbox',checked:picked.has(w.id)}),w.name))):el('p',{class:'muted'},'Add a workspace first.'),
-  workspaces.length?submit('Save'):null);
- const rows=items.length?items.map(p=>el('div',{class:'card-row','data-row':''},el('div',{class:'grow'},el('h3',{},p.note||'No description'),
+ let items=[],readers=[];
+ async function load(){const r=await api('/problems');items=r.items||[];readers=r.readers||[]}
+ await load();if(v!==epoch)return;
+ const tabs=el('div',{class:'tabs',role:'group','aria-label':'Show problems'}),list=el('section',{class:'card'}),host=el('div');
+ const count=k=>k==='all'?items.length:items.filter(p=>p.status===k).length;
+ function filterNow(){const f=hashState().params.get('f');return PROBLEM_FILTERS.some(([k])=>k===f)?f:'new'}
+ function draw(){
+  const f=filterNow(),rows=items.filter(p=>f==='all'||p.status===f).sort((a,b)=>(PROBLEM_ORDER[a.status]??3)-(PROBLEM_ORDER[b.status]??3));
+  tabs.replaceChildren(...PROBLEM_FILTERS.map(([k,l])=>el('button',{type:'button','aria-pressed':String(k===f),onclick:()=>{setParams({f:k==='new'?'':k,open:''});draw()}},l,el('sup',{},String(count(k))))));
+  const other=PROBLEM_FILTERS.filter(([k])=>k!==f&&k!=='all'&&count(k));
+  list.replaceChildren(el('div',{class:'card-h'},el('h2',{tabindex:'-1'},PROBLEM_FILTERS.find(([k])=>k===f)[1]+' · '+rows.length)),...(rows.length?rows.map(p=>el('div',{class:'card-row','data-row':'','data-problem':p.id},el('div',{class:'grow'},el('h3',{},p.note||'No description'),
    sub('From '+p.from_name+' · '+time(p.shared_at)+(p.attachments?' · '+p.attachments+(p.attachments===1?' added file':' added files'):''))),
-   p.about==='feature'?el('span',{class:'chip'},FEATURE_LABEL):null,el('span',{class:'chip'+(p.status==='new'?' active':'')},problemState(p)),button('Open',()=>problemSheet(p)))):
-  [empty('No problems shared yet.','A problem gets here when someone presses Report a problem in their dashboard and chooses to share it.')];
- show(...head('',PROBLEMS_LABEL),panel('Who may pick problems up',el('div',{class:'form-body'},pick)),panel('Shared problems · '+items.length,...rows));
+   p.about==='feature'?el('span',{class:'chip'},FEATURE_LABEL):null,el('span',{class:'chip'+(p.status==='new'?' active':'')},problemState(p)),button('View',()=>setParams({open:p.id},true)))):
+   [items.length?empty(f==='new'?'No new problems':'Nothing here',f==='new'?'Every shared problem is taken or done.':'',other.length?el('div',{class:'actions'},other.map(([k,l])=>button('Show '+l.toLowerCase()+' · '+count(k),()=>{setParams({f:k});draw()},'outline'))):null)
+    :empty('No problems shared yet.','A problem gets here when someone presses Report a problem in their dashboard and chooses to share it.')]));
+ }
+ let openId='';
+ async function sync(params){
+  draw();const id=params.get('open')||'';if(id===openId)return;openId=id;
+  document.querySelectorAll('dialog.sheet[open]').forEach(d=>orch.close(d));if(!id)return;
+  const p=items.find(x=>x.id===id);if(!p){toast('This problem is no longer here.','error');setParams({open:''});openId='';return}
+  try{const d=await problemSheet(p,async()=>{await load();draw()});d.onclosed=()=>{if(hashState().key==='problems'&&hashState().params.get('open')===id){openId='';closeOpen()}else if(openId===id)openId=''}}catch(e){openId='';setParams({open:''});showError(null,e)}
+ }
+ const redrawReceiver=r=>{readers=r;host.replaceChildren(receiverLine(readers,redrawReceiver));host.querySelector('button')?.focus()};
+ host.replaceChildren(receiverLine(readers,redrawReceiver));
+ show(...head('',PROBLEMS_LABEL),tabs,list,host);
+ onParams=sync;await sync(hashState().params);
 }
 // Direct controls shared by the route views and network sheets.
 function enhance(root){
@@ -501,7 +541,7 @@ function enhance(root){
  root.querySelectorAll('.checks label').forEach(l=>l.classList.add('pill-check'));
 }
 function moreMenu(label,action){const items=el('div',{class:'menu-items',hidden:true},action),b=button('⋯',()=>{items.hidden=!items.hidden;b.setAttribute('aria-expanded',String(!items.hidden))},'ghost icon');b.setAttribute('aria-label','More actions for '+label);b.setAttribute('aria-expanded','false');const menu=el('div',{class:'more-menu'},b,items);menu.addEventListener('keydown',e=>{if(e.key==='Escape'){items.hidden=true;b.setAttribute('aria-expanded','false');b.focus();e.stopPropagation()}});return menu}
-function sheet(title,...content){const d=el('dialog',{class:'sheet','aria-label':title},el('div',{class:'row'},el('h2',{class:'grow'},title),button('Close',()=>orch.close(d),'ghost')),el('div',{class:'stack'},content));d.addEventListener('close',()=>d.remove());document.body.append(d);enhance(d);orch.open(d);return d}
+function sheet(title,...content){const d=el('dialog',{class:'sheet','aria-label':title},el('div',{class:'row'},el('h2',{class:'grow'},title),button('Close',()=>orch.close(d),'ghost')),el('div',{class:'stack'},content));d.addEventListener('close',()=>{d.remove();if(d.onclosed)d.onclosed()});document.body.append(d);enhance(d);orch.open(d);return d}
 function permissionLabel(r){return [r.text||r.files?'Messages':'',r.delegate?'Tasks':'',r.start?'Start':''].filter(Boolean).join(' · ')}
 function networkPairs(){
  const valid=new Set(workspaces.map(w=>w.id)),pairs=new Map(),order=new Map(workspaces.map((w,i)=>[w.id,i]));
@@ -776,7 +816,7 @@ function network(){
 let lastRoute=null,loadingTimer;
 async function route(){
 document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expanded','false');
- const key=screens.some(([k])=>k===location.hash.slice(1))?location.hash.slice(1):'overview',title=screens.find(([k])=>k===key)[1];
+ onParams=null;const hk=hashState().key,key=screens.some(([k])=>k===hk)?hk:'overview',title=screens.find(([k])=>k===key)[1];
  document.title='orch relay · '+title;$('#crumb').textContent=title;for(const a of $('#nav').children){a.classList.toggle('active',a.hash==='#'+key);if(a.hash==='#'+key)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}
  if(!token){auth();return}document.body.classList.remove('signedout');const v=++epoch;
  const topAdd=$('#top-add');topAdd.hidden=!['overview','subscribers'].includes(key);topAdd.textContent=key==='subscribers'?'Add subscriber':'Add workspace';topAdd.href=key==='subscribers'?'#subscribers':'#add';topAdd.onclick=key==='subscribers'?e=>{e.preventDefault();subscriberDialog()}:null;document.querySelectorAll('dialog[open]').forEach(d=>orch.close(d));const changed=lastRoute!==null&&lastRoute!==key;lastRoute=key;
@@ -787,6 +827,6 @@ for(const [key,title,hidden]of screens)if(!hidden)$('#nav').append(el('a',{href:
 $('#menu').addEventListener('click',()=>{const o=document.body.classList.toggle('menu-open');$('#menu').setAttribute('aria-expanded',String(o))});
 document.addEventListener('click',e=>{document.querySelectorAll('.more-menu').forEach(menu=>{if(!menu.contains(e.target)){menu.querySelector('.menu-items').hidden=true;menu.querySelector('button').setAttribute('aria-expanded','false')}})});
 document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;document.querySelectorAll('.more-menu [aria-expanded=true]').forEach(b=>{b.setAttribute('aria-expanded','false');b.parentElement.querySelector('.menu-items').hidden=true;b.focus()});if(document.body.classList.contains('menu-open')){document.body.classList.remove('menu-open');$('#menu').setAttribute('aria-expanded','false');$('#menu').focus()}});
-window.addEventListener('hashchange',()=>{clearToast();route()});route();
+window.addEventListener('hashchange',()=>{const {key,params}=hashState();if(token&&onParams&&key===lastRoute){if(!params.get('open'))openPushed=false;onParams(params);return}clearToast();route()});route();
 </script>
 </body></html>
