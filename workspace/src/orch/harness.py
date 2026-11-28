@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 from orch import procs
@@ -381,6 +382,9 @@ def _tracked(root: Path, rel: str) -> bool:
             return False  # plain folder (or no git program there): nothing can be tracked
     except Refused:
         return True  # cannot tell: treat the file as the team's
+    listed = _orch_listed(root, rel)  # ORCH-2384: the one listing of this command, when it can answer
+    if listed is not None:
+        return listed
     # .ORCH/... tracked is this file too (icase)
     rc, _, _ = _safegit().run_bytes(["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10)
     if rc not in (0, 1):  # 0 = tracked, 1 = not tracked; anything else (123, no git, a crash) = cannot tell
@@ -395,6 +399,9 @@ def tracked_ticket_paths(root: Path) -> set[str] | None:
             return set()
     except Refused:
         return None
+    names = _orch_tracked(root)  # ORCH-2384: the one listing of this command (every tracked file under .orch)
+    if names is not None:
+        return {n.casefold() for n in names[0]}
     rc, raw, _ = _safegit().run_bytes(["ls-files", "-z", "--", ":(icase,literal).orch/tickets"], root, 10)
     if rc != 0:
         return None
@@ -538,6 +545,9 @@ def _ignored(root: Path, rel: str) -> bool:
 def _untracked_all(root: Path, rels: list[str]) -> bool:
     """One git process for several paths: True only when the index definitely holds none of them (an empty
     listing). False means "ask path by path" (something is tracked, or git failed)."""
+    answers = [_orch_listed(root, r) for r in rels]  # ORCH-2384: no process when the kept listing can answer
+    if None not in answers:
+        return not any(answers)
     rc, out, _ = _safegit().run_bytes(["ls-files", "-z", "--", *[f":(icase){r}" for r in rels]], root, 10)
     return rc == 0 and not out.strip(b"\0")
 
@@ -591,6 +601,82 @@ def _private_key(root: Path, rel: str):
     except OSError:
         return None
     return (base, tuple(stamps))
+
+
+# ORCH-2384: "does git track this file" was asked once per private file (9 processes for one relay pull that
+# passes a message on, plus the ticket listing again and again). ONE listing of every tracked name under .orch
+# answers them all. It is kept like the answers above: for a moment, and only while the repository files and
+# the index are unchanged. The listing can only say "tracked" more often than git's own path question (names
+# compare without case and without the Unicode form; an entry that is a parent of the path counts too), never
+# less: "tracked" is the safe direction for every caller. No listing (no key, git failed) = ask path by path.
+_TRACKED_SEEN: dict[str, tuple[tuple, float, tuple[frozenset, frozenset]]] = {}
+_TRACKED_MAX = 64
+
+
+def _fold(name: str) -> str:
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _index_key(root: Path):
+    """Plain stats of what decides which files git tracks here: the repository itself (_git_state_key) and its
+    index. None = cannot tell cheaply."""
+    base = _git_state_key(root)
+    if base is None:
+        return None
+    try:
+        real = Path(os.path.realpath(root))
+        top = next((d for d in (real, *real.parents) if os.path.isdir(d / ".git")), None)
+        if top is None:
+            return None
+        try:
+            st = os.lstat(top / ".git" / "index")
+            stamp = (st.st_ino, st.st_mode, st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            stamp = None
+    except OSError:
+        return None
+    return (base, stamp)
+
+
+def _orch_tracked(root: Path) -> tuple[frozenset, frozenset] | None:
+    """Every name the index holds under .orch (any spelling of the folder), relative to root: (as git spells
+    them, folded for comparing). One git process, kept for a moment while the index is unchanged. None = no
+    listing: the caller asks git about its own path as before. Only call inside a git work tree."""
+    key = _index_key(root)
+    if key is None:
+        return None
+    name = os.path.realpath(root)
+    hit = _TRACKED_SEEN.get(name)
+    if hit and hit[0] == key and 0 <= time.monotonic() - hit[1] < PRIVATE_KEEP:
+        return hit[2]
+    rc, raw, _ = _safegit().run_bytes(["ls-files", "-z", "--", ":(icase,literal).orch"], root, 10)
+    if rc != 0:  # too long, a timeout, a refusal: path by path, with the refusals of before
+        return None
+    names = frozenset(os.fsdecode(n) for n in raw.split(b"\0") if n)
+    got = (names, frozenset(_fold(n) for n in names))
+    if _index_key(root) == key:  # the index changed while git read it: this answer is used once, not kept
+        if len(_TRACKED_SEEN) >= _TRACKED_MAX:
+            _TRACKED_SEEN.clear()
+        _TRACKED_SEEN[name] = (key, time.monotonic(), got)
+    return got
+
+
+def _orch_listed(root: Path, rel: str) -> bool | None:
+    """Does the index hold root/rel, a file below it, or an entry that is one of its parent folders? None when
+    the listing cannot answer (rel is not a plain path under .orch, or there is no listing)."""
+    parts = rel.split("/")
+    if _ascii_lower(parts[0]) != ".orch" or len(parts) < 2 or any(p in ("", ".", "..") for p in parts):
+        return None
+    if "\\" in rel or any(c in rel for c in "*?[]"):  # git reads these as a pattern: ask git itself
+        return None
+    names = _orch_tracked(root)
+    if names is None:
+        return None
+    folded = [_fold(p) for p in parts]
+    if any("/".join(folded[:i]) in names[1] for i in range(1, len(folded) + 1)):
+        return True
+    below = "/".join(folded) + "/"
+    return any(n.startswith(below) for n in names[1])
 
 
 def _private_kept(root: Path, rel: str, key) -> bool:
@@ -688,8 +774,11 @@ def check_private_path(root: Path, path: Path, known: frozenset = frozenset()) -
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
+    listed = None if ("untracked", rel) in known else _orch_listed(root, rel)
     if ("untracked", rel) in known:
         rc = 1
+    elif listed is not None:
+        rc = 0 if listed else 1  # ORCH-2384: the one listing of this command
     else:
         rc, _, _ = _safegit().run_bytes(  # .ORCH/... tracked is this file too (icase)
             ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
