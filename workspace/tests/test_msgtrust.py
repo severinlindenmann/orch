@@ -389,6 +389,36 @@ def test_a_changed_workspaces_json_stays_held_while_the_relay_is_away(ws, run, r
     assert [h["why"] for h in msgtrust.held(ws)] == ["not_accepted"]
 
 
+def test_a_sender_that_stays_held_starts_one_refresh_not_one_per_pull(ws, run, rel, monkeypatch):
+    """ORCH-2376 (Low 2 of the security review of PR #3411): a paired workspace whose key disagrees with the
+    kept copy stays held. Its first message asks the relay once; the next ones wait with it, with no new
+    refresh on every pull. After a quiet while the next message asks once more."""
+    from orch import relay
+    from orch.errors import Refused
+
+    asked = []
+
+    def away(root):
+        asked.append(1)
+        raise Refused("The relay could not be reached.")
+
+    _rewrite_listed_file(ws, SEED_EVIL)
+    monkeypatch.setattr(relay, "refresh", away)
+    for _ in range(3):  # three pulls, each with a new message of the same sender
+        rel.inbox.append(signed_msg(SEED_EVIL))
+        inbox(run)
+    assert len(asked) == 1, asked
+    assert [h["why"] for h in msgtrust.held(ws)] == ["not_accepted"] * 3
+    rel.inbox.extend([signed_msg(SEED_EVIL), signed_msg(SEED_EVIL)])  # two in one pull: still none
+    inbox(run)
+    assert len(asked) == 1, asked
+    monkeypatch.setattr(relay, "SETTLE_AGAIN", 0)  # as if the newest held one were minutes old
+    rel.inbox.append(signed_msg(SEED_EVIL))
+    inbox(run)
+    assert len(asked) == 2, asked
+    assert relay._settle_due(ws, None) is True and relay._settle_due(ws, "ws_nobody0001") is True
+
+
 def test_an_install_without_a_kept_copy_settles_first_contact_by_a_refresh(ws, run, rel):
     """An install from before ORCH-2349 has workspaces.json but no kept keys: the first message is held,
     the pull asks the relay, and the message is handed on in the same run (a task too, never dropped)."""
