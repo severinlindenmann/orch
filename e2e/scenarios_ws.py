@@ -355,6 +355,14 @@ def _sched(e, ws: Path, *args):
     return e.sh(["orch", "automation", *args], cwd=ws)
 
 
+def _sched_start(e, ws: Path):
+    """Start the automation so it reads the config written just before. Turning the add-on on already started
+    it with its default pass every 60 s, and a running one sleeps that long before it reads the config again:
+    a wait 8 s away was then started too late for the scenario (ORCH-2216). Stop it first, then start."""
+    _sched(e, ws, "stop")
+    return _sched(e, ws, "start")
+
+
 def _wait(fn, secs: float, step: float = 1.0):
     return wait_for(fn, secs, step)
 
@@ -370,7 +378,7 @@ def a4(e):
     e.orch(ws, "wait", t, "--until", until)
     check(tload(ws, t)["waiting_on"] == {"kind": "time", "until": until}, f"waiting_on: {tload(ws, t).get('waiting_on')}")
     check("wake_at" not in tload(ws, t), "legacy wake_at written")
-    rc, out, err = _sched(e, ws, "start")
+    rc, out, err = _sched_start(e, ws)
     check(rc == 0, f"automation start: {err or out}")
     try:
         check(_sched(e, ws, "status")[0] == 0, "automation not running")
@@ -401,7 +409,7 @@ def a5(e):
     rep = e.orchj(ws, "automation", "repeat", t, "* * * * *")
     check(rep["recurring"] is True and rep["cron"] == "* * * * *", f"repeat: {rep}")
     check(tload(ws, t)["ext"]["automation"]["cron"] == "* * * * *" and "recurring" not in tload(ws, t), "ext.automation not set / legacy field")
-    rc, out, err = _sched(e, ws, "start")
+    rc, out, err = _sched_start(e, ws)
     check(rc == 0, f"automation start: {err or out}")
     try:
         def finished():  # the prompt spans lines and may hold the words: count only the fake agent's own lines

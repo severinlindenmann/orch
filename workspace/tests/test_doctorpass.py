@@ -564,6 +564,34 @@ def test_paused_closed_unplanned_and_not_repeating_are_left_out():
     assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30)] == ["t_done"]
 
 
+def test_a_repeat_that_was_switched_off_is_not_stopped(ws, monkeypatch):
+    """ORCH-2356: a repeat turned off on purpose still carried its old time plan, and the health check opened
+    a "Repeat stopped" ticket for it every 15 minutes. The add-on's own ticket data schema says which field
+    switches its repeat off (x-orch-off); the core names no field of an add-on."""
+    from orch import addons
+
+    schema = {
+        "properties": {
+            "paused": {"type": "boolean", "x-orch-off": True},
+            "recurring": {"type": "boolean", "x-orch-off": False},
+            "cron": {"type": "string"},
+        }
+    }
+    asked: list[str] = []
+    monkeypatch.setattr(addons, "active_ext_schema", lambda root, name: asked.append(name) or schema)
+    old = "2026-11-17T08:00:00Z"
+    rows = [
+        _rep("t_off", old, old, status="done", recurring=False),
+        _rep("t_off2", old, old, recurring=False),
+        _rep("t_on", old, old),
+    ]
+    assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30, ws)] == ["t_on"]
+    assert asked == ["automation"]  # the schema is read once, not per ticket
+    # an add-on that is not on here (no schema) or declares no off switch: counted as before
+    monkeypatch.setattr(addons, "active_ext_schema", lambda root, name: None)
+    assert [r["ticket"] for r in doctorpass.overdue_repeats(rows, NOW, 30, ws)] == ["t_off", "t_off2", "t_on"]
+
+
 def test_a_repeat_whose_add_on_started_it_after_the_planned_time_is_not_stopped(ws):
     """ORCH-395: the add-on started the 23:00 run but its last/next run write was lost; the run shows."""
     planned = "2026-11-17T10:00:00Z"

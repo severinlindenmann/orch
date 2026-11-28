@@ -136,16 +136,18 @@ async function heapMb(cdp) {
     const reads = m.reads.filter(r => r[1] >= t0).map(([p, a, b]) => [p, a - t0, b - t0]);
     rows.push({ page: name, ms, err, ...diff(s0, snap(m)), reads, heapMb: await heapMb(cdp) });
   }
-  // an idle minute on Home: nothing clicked, the tab shown
-  await page.goto('about:blank').catch(() => {});
-  await page.goto(base + '/#home');
-  await usable(page, false).catch(() => {});
-  await page.waitForTimeout(3000);
-  s0 = snap(m);
-  await page.waitForTimeout(IDLE * 1000);
-  const idle = diff(s0, snap(m));
-  const top = Object.entries(idle.byPath).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  rows.push({ page: `Idle Home ${IDLE} s`, ms: null, ...idle, byPath: Object.fromEntries(top), heapMb: await heapMb(cdp) });
+  // an idle minute on Home: nothing clicked, the tab shown (--idle-seconds 0: page times only, ORCH-2370)
+  if (IDLE > 0) {
+    await page.goto('about:blank').catch(() => {});
+    await page.goto(base + '/#home');
+    await usable(page, false).catch(() => {});
+    await page.waitForTimeout(3000);
+    s0 = snap(m);
+    await page.waitForTimeout(IDLE * 1000);
+    const idle = diff(s0, snap(m));
+    const top = Object.entries(idle.byPath).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    rows.push({ page: `Idle Home ${IDLE} s`, ms: null, ...idle, byPath: Object.fromEntries(top), heapMb: await heapMb(cdp) });
+  }
   await browser.close();
   const kb = n => (n / 1024).toFixed(0).padStart(8) + ' KB';
   for (const r of rows) {

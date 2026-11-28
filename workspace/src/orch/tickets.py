@@ -4458,7 +4458,7 @@ def validate_ext(schema: dict, obj: dict, addon: str) -> None:
 OFF_MARK = "x-orch-off"
 
 
-def _off_values(schema: dict | None) -> dict:
+def off_values(schema: dict | None) -> dict:
     """The fields an add-on's ticket_ext schema marks with x-orch-off, and the value that switches its repeat
     off: {field: True|False}. Declared by the add-on, never inferred from stored data; core names no field."""
     props = (schema or {}).get("properties") if isinstance(schema, dict) else None
@@ -4474,7 +4474,7 @@ def _off_values(schema: dict | None) -> dict:
 def _repeat_block(ticket: dict, addon: str, schema: dict | None) -> tuple[dict, dict] | None:
     """(ext block, off values) of an ACTIVE add-on whose own ticket_ext schema marks fields that switch a
     repeat off, else None (R1.2: core names no add-on)."""
-    off = _off_values(schema)
+    off = off_values(schema)
     if not off:
         return None
     cur = (ticket.get("ext") or {}).get(addon)
