@@ -215,3 +215,10 @@ pre.sub-code{min-width:0;width:100%;max-width:100%;white-space:pre;overflow:auto
 /* b307 (28 Nov): relay admin layouts built from tokens; candidates for the master (listed in the PR for b301) */
 .tabs button[aria-pressed=true]{color:var(--text);border-bottom-color:var(--brand)}
 .sheet .copy-box.full{max-height:none}
+.msg-line{display:grid;grid-template-columns:3.5rem minmax(8rem,18rem) minmax(0,1fr) auto;align-items:center;gap:12px;min-height:40px;padding:6px 16px;border-top:1px solid var(--border);color:var(--text);text-decoration:none}
+.msg-line:hover{background:var(--surface-2)}
+.msg-line>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg-line .msg-tail{display:flex;gap:6px;align-items:center;justify-content:flex-end}
+.msg-line .msg-ticket{max-width:14rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
+.day-group .card-h h2{font-size:inherit;font-weight:inherit;display:inline}
+@media(max-width:899px){.msg-line{grid-template-columns:3.5rem minmax(0,1fr) auto;row-gap:2px}.msg-line .msg-text{grid-column:2/-1;grid-row:2}.msg-line .msg-wait{display:none}}

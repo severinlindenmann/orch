@@ -684,7 +684,7 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | POST | `/admin/api/workspaces/<id>/token` | – | `200 {token, prompt}`. Also drops a pending profile change |
 | DELETE | `/admin/api/workspaces/<id>` | – | `204` |
 | GET / PUT | `/admin/api/rules` | PUT: `{rules: [{from, to, text, files, delegate, start}]}` (full list) | `{rules: […]}` |
-| GET | `/admin/api/messages?workspace=&type=` | – | list of message + `{acked}`, decrypted with the master key |
+| GET | `/admin/api/messages?workspace=&type=&id=&since=&until=&q=&progress=hide&limit=&after=` | – | `{items: [message + {acked}], next}`, decrypted with the master key, newest first. Additive (O-31, P-015, 28 Nov): `id` one message; `since`/`until` Unix seconds of the time the relay stored it (`since ≤ t < until`, one day of the portal; not a number → `422`); `q` (≤ 200 characters) matches the message text and the sender's or receiver's name, case-insensitive; `progress=hide` leaves out progress pings (text updates `ack`, `working`, `note` and `refresh-hint`). With `q` or `progress=hide` the answer adds `hidden` (pings left out) and `scanned`, and one page reads at most 2000 messages: `next` is then set even when fewer than `limit` matched, so the portal goes on |
 | GET | `/admin/api/allows` | – | list of `{from, to, kind, key, mode, created_at}` (read from `allow` messages) |
 | GET | `/admin/api/shared` | – | `{version, skills, mcp, credentials (names only), assign}` |
 | PUT | `/admin/api/shared/skills/<name>` | `.tar.gz` of the skill folder | `200 {name, version}` |

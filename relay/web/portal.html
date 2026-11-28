@@ -159,7 +159,7 @@ function hasChange(w){const p=w.pending;if(!p)return false;const dd=p.descriptio
 function feedRow(m,n){return el('div',{class:'card-row feed'},el('span',{class:'feed-icon'},uiIcon('send')),el('div',{},el('h3',{},readable(m).split('\n')[0]+(n>1?' ×'+n:'')),el('p',{},name(m.from)+' → '+name(m.to)),el('p',{},ago(m.created_at)+' · '+(typeLabel[m.type]||'Update'))))}
 let networkRules=[];
 async function overview(v){
- const [recent,r]=await Promise.all([api('/messages?limit=40'),api('/rules')]);if(v!==epoch)return;networkRules=r.rules||[];
+ const [recent,r]=await Promise.all([api('/messages?limit=40&progress=hide'),api('/rules')]);if(v!==epoch)return;networkRules=r.rules||[];
  const feed=[];for(const m of (recent.items||[]).filter(m=>!noise(m)&&isKnown(m.from)&&isKnown(m.to))){const k=readable(m).split('\n')[0]+'|'+m.from+'|'+m.to+'|'+m.type,p=feed[feed.length-1];if(p&&p.k===k){p.n++;continue}if(feed.length<5)feed.push({m,k,n:1});else break}
  reviewNotes={};const off=workspaces.filter(w=>!w.online).length,wait=workspaces.reduce((s,w)=>s+(Number(w.unread)||0),0);
  const net=panel('Your network',el('div',{id:'network-host'},network()));net.firstChild.append(el('span',{class:'meta muted'},workspaces.length+' workspaces · '+phoneList.length+' phones · '+subList.length+' subscribers'),button('Add connection',()=>edgeSheet(),'outline'));
@@ -248,28 +248,69 @@ function drawRules(r,allows){
 }
 function workspaceSelect(label='All workspaces'){return el('select',{'aria-label':'Filter by workspace'},el('option',{value:''},label),workspaces.map(w=>el('option',{value:w.id},w.name)))}
 const clock=v=>{const d=new Date(v);return isNaN(d)?'':d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})};
-function message(m){const b=body(m),t=m.type==='question'?(typeof b==='string'?b:b?.text||'A question'):readable(m),txt=el('p',{class:'message-text'},t),meta=el('div',{class:'row meta muted'},!['text','file'].includes(m.type)?el('span',{class:'chip'},typeLabel[m.type]||'Update'):null,m.acked?null:el('span',{class:'status'},el('span',{class:'dot needs'}),'Waiting to be picked up'),m.ticket?el('span',{class:'mono'},m.ticket):null,m.type==='question'&&Array.isArray(b?.options)?b.options.map(o=>el('span',{class:'chip'},typeof o==='string'?o:o?.label||o?.text||'')):null);
- const row=el('article',{class:'message-row'},el('div',{class:'row'},el('span',{class:'grow'},name(m.from)+' → '+name(m.to)),el('time',{class:'meta muted',title:time(m.created_at)},clock(m.created_at))));
- if(m.type==='file'){const files=Array.isArray(b?.files)?b.files:[b];row.append(el('div',{class:'row'},files.map(f=>el('span',{class:'chip file-chip'},uiIcon('file'),(f?.name||f?.filename||'A file')+(f?.size!==undefined?' · '+bytes(f.size):'')))))}else{row.append(txt);const more=button('Show all',()=>{const expanded=txt.classList.toggle('expanded');more._t=more.textContent=expanded?'Show less':'Show all'},'ghost text-button');more.hidden=true;row.append(more);requestAnimationFrame(()=>{if(row.isConnected)more.hidden=txt.scrollHeight<=txt.clientHeight+1})}if(meta.childNodes.length)row.append(meta);return row;
+// O-31 (B): one list of one-line rows, loaded page by page and by day, with search; P-015: progress hidden by default.
+const ticketLabel=m=>{const t=body(m)?.update?.title;return typeof t==='string'&&t.trim()?t.trim():m.ticket||''};
+function messageLine(m){
+ const first=readable(m).split('\n')[0],kind=!['text','file'].includes(m.type)?typeLabel[m.type]||'Update':'',tl=ticketLabel(m);
+ const a=el('a',{href:'#messages?open='+enc(m.id),class:'msg-line','data-msg':m.id,onclick:e=>{e.preventDefault();setParams({open:m.id},true)}},
+  el('time',{class:'meta muted',datetime:m.created_at||'',title:time(m.created_at)},clock(m.created_at)),
+  el('span',{class:'msg-who'},name(m.from)+' → '+name(m.to)),
+  el('span',{class:'msg-text'},first),
+  el('span',{class:'msg-tail'},kind?el('span',{class:'chip'},kind):null,tl?el('span',{class:'chip msg-ticket',title:tl},tl):null,m.acked?null:el('span',{class:'status',title:'Waiting to be picked up'},el('span',{class:'dot needs'}),el('span',{class:'msg-wait'},'Waiting'))));
+ a.setAttribute('aria-label',name(m.from)+' to '+name(m.to)+', '+clock(m.created_at)+': '+first+(kind?', '+kind:'')+(m.acked?'':', waiting to be picked up'));
+ return a;
 }
+function messageSheet(m){
+ const b=body(m),tl=ticketLabel(m),files=m.type==='file'?(Array.isArray(b?.files)?b.files:[b]):[];
+ return sheet(name(m.from)+' → '+name(m.to),
+  sub(time(m.created_at)+' · '+(typeLabel[m.type]||'Update')+(m.acked?' · Picked up':' · Waiting to be picked up')),
+  tl?el('p',{},el('span',{class:'chip',title:m.ticket||''},tl)):null,
+  files.length?el('div',{class:'row'},files.map(f=>el('span',{class:'chip file-chip'},uiIcon('file'),(f?.name||f?.filename||'A file')+(f?.size!==undefined?' · '+bytes(f.size):'')))):el('p',{class:'message-text expanded'},m.type==='question'?(typeof b==='string'?b:b?.text||'A question'):readable(m)),
+  m.type==='question'&&Array.isArray(b?.options)?el('div',{class:'row'},b.options.map(o=>el('span',{class:'chip'},typeof o==='string'?o:o?.label||o?.text||''))):null);
+}
+const isoDay=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function dayRange(v){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v||'');if(!m)return null;const a=new Date(+m[1],m[2]-1,+m[3]),b=new Date(+m[1],m[2]-1,+m[3]+1);return isNaN(a)?null:[Math.floor(a/1000),Math.floor(b/1000),a]}
 function messages(v){
- const ws=workspaceSelect(),typeSel=el('select',{'aria-label':'Filter by kind'},el('option',{value:''},'All kinds'),['text','question','file','answer','delegate','start','allow','webhook'].map(t=>el('option',{value:t},typeLabel[t]))),list=el('div',{class:'stack'}),note=el('p',{class:'msg-note',role:'status'});let next=null,seenPages=new Set(),revision=0,days=new Map(),shown=0,hiddenPast=0,hints=0;
- const past=el('input',{type:'checkbox',id:'past'});const pastL=el('label',{class:'check'},past,'Show past connections');
+ const P=()=>hashState().params,start=P();
+ const ws=workspaceSelect(),typeSel=el('select',{'aria-label':'Filter by kind'},el('option',{value:''},'All kinds'),['text','question','file','answer','delegate','start','allow','webhook'].map(t=>el('option',{value:t},typeLabel[t])));
+ const search=input('q','',{type:'search',placeholder:'Workspace or text',autocomplete:'off','aria-label':'Search messages'}),day=input('day','',{type:'date',max:isoDay(new Date()),'aria-label':'Day'});
+ const hideP=el('input',{type:'checkbox',id:'hide-progress',checked:true}),past=el('input',{type:'checkbox',id:'past'});
+ const list=el('div',{class:'stack'}),note=el('p',{class:'msg-note',role:'status'});let next=null,seenPages=new Set(),revision=0,days=new Map(),shown=0,hiddenPast=0,hiddenProgress=0,loaded=new Map();
  const more=button('Load more',()=>load(false),'','Loading…');more.hidden=true;
- const render=m=>{const d=dayLabel(m.created_at);let g=days.get(d);if(!g){const rows=el('div',{class:'day-rows'}),cnt=el('span',{},''),det=el('section',{class:'card day-group'},el('div',{class:'card-h'},d,' · ',cnt),rows);g={det,rows,cnt,n:0};days.set(d,g);list.append(det)}g.rows.append(message(m));g.n++;shown++}
- function summary(){const parts=[];for(const g of days.values())g.cnt.textContent=g.n;const last=[...days.values()].pop();if(last&&next)last.cnt.textContent=last.n+' so far';
+ const shift=n=>{const r=dayRange(day.value)||dayRange(isoDay(new Date()));const d=new Date(r[2]);d.setDate(d.getDate()+n);if(d>new Date())return;day.value=isoDay(d);apply()};
+ const earlier=button('Earlier day',()=>shift(-1),'ghost'),later=button('Later day',()=>shift(1),'ghost');
+ // The filters live in the address (PFX-05); typing replaces it, opening a message adds one entry.
+ function fromParams(p){ws.value=workspaces.some(w=>w.id===p.get('ws'))?p.get('ws'):'';typeSel.value=typeLabel[p.get('kind')]?p.get('kind'):'';search.value=p.get('q')||'';day.value=dayRange(p.get('day'))?p.get('day'):'';hideP.checked=p.get('progress')!=='all';past.checked=p.get('past')==='1'}
+ const filterKey=p=>['ws','kind','q','day','progress','past'].map(k=>p.get(k)||'').join('|');
+ let lastKey='';
+ function apply(){setParams({ws:ws.value,kind:typeSel.value,q:search.value.trim(),day:day.value,progress:hideP.checked?'':'all',past:past.checked?'1':''});lastKey=filterKey(P());load(true)}
+ const render=m=>{loaded.set(m.id,m);const d=dayLabel(m.created_at);let g=days.get(d);if(!g){const rows=el('div',{class:'day-rows'}),cnt=el('span',{},''),iso=isoDay(new Date(m.created_at)),only=!day.value&&!isNaN(new Date(m.created_at))?el('a',{href:'#messages',class:'quiet-link meta',onclick:e=>{e.preventDefault();day.value=iso;apply()}},'Only this day'):null;const det=el('section',{class:'card day-group'},el('div',{class:'card-h'},el('h2',{},d,' · ',cnt),only),rows);g={det,rows,cnt,n:0};days.set(d,g);list.append(det)}g.rows.append(messageLine(m));g.n++;shown++}
+ function summary(){for(const g of days.values())g.cnt.textContent=g.n;
   note.replaceChildren('Showing '+shown+(shown===1?' message':' messages')+(next?' so far':''));
-  if(hiddenPast&&!past.checked)note.append(' · '+hiddenPast+' from past connections hidden · ',button('Show',()=>{past.checked=true;load(true)},'link-btn'));
-  if(hints)note.append(' · '+hints+' background '+(hints===1?'update':'updates')+' not shown')}
- async function load(reset){const rev=++revision;if(reset){next=null;seenPages=new Set();days=new Map();shown=hiddenPast=hints=0;list.replaceChildren(skeleton());more.hidden=true;note.replaceChildren()}
- try{let got=0,first=reset,guard=0;
-  do{const q=new URLSearchParams({limit:'40'});if(ws.value)q.set('workspace',ws.value);if(typeSel.value)q.set('type',typeSel.value);if(next)q.set('after',next);
-   const r=await api('/messages?'+q);if(v!==epoch||rev!==revision)return;if(first){list.replaceChildren();first=false}
-   for(const m of (r.items||[])){if(noise(m)){hints++;continue}if(!past.checked&&!(isKnown(m.from)&&isKnown(m.to))){hiddenPast++;continue}render(m);got++}
-   next=r.next;if(next&&seenPages.has(next))throw Error('The relay repeated a page. Try again.');if(next)seenPages.add(next)}while(next&&got<40&&++guard<40);
-  if(!shown)list.append(empty('No messages',hiddenPast?'Everything here is from past connections.':'Nothing matches yet. Messages between your workspaces and phones show up here.'));
-  summary();more.hidden=!next}catch(e){if(v!==epoch||rev!==revision)return;if(reset)list.replaceChildren(empty('Messages could not be loaded',e.message,button('Try again',()=>load(true))));else showError(null,e)}}
- ws.onchange=typeSel.onchange=past.onchange=()=>load(true);show(...head('Conversations','Messages','What your workspaces and phones are saying.'),el('div',{class:'filters'},field('Workspace',ws),field('Kind',typeSel),pastL),note,list,el('div',{class:'actions'},more),el('footer',{class:'portal-footer'},'Messages and files sent through the relay are stored encrypted; the relay admin can read them. Only share links are end-to-end encrypted.'));return load(true);
+  if(hiddenProgress&&hideP.checked)note.append(' · '+hiddenProgress+' progress '+(hiddenProgress===1?'update':'updates')+' hidden · ',button('Show',()=>{hideP.checked=false;apply()},'link-btn'));
+  if(hiddenPast&&!past.checked)note.append(' · '+hiddenPast+' from past connections hidden · ',button('Show',()=>{past.checked=true;apply()},'link-btn'))}
+ async function load(reset){const rev=++revision;if(reset){next=null;seenPages=new Set();days=new Map();shown=hiddenPast=hiddenProgress=0;list.replaceChildren(skeleton());more.hidden=true;note.replaceChildren()}
+  later.disabled=!day.value||day.value>=isoDay(new Date());
+  try{let got=0,first=reset,guard=0;const range=dayRange(day.value);
+   do{const q=new URLSearchParams({limit:'40'});if(ws.value)q.set('workspace',ws.value);if(typeSel.value)q.set('type',typeSel.value);if(search.value.trim())q.set('q',search.value.trim());if(hideP.checked)q.set('progress','hide');if(range){q.set('since',range[0]);q.set('until',range[1])}if(next)q.set('after',next);
+    const r=await api('/messages?'+q);if(v!==epoch||rev!==revision)return;if(first){list.replaceChildren();first=false}
+    hiddenProgress+=Number(r.hidden)||0;
+    for(const m of (r.items||[])){if(!past.checked&&!(isKnown(m.from)&&isKnown(m.to))){hiddenPast++;continue}render(m);got++}
+    next=r.next;if(next&&seenPages.has(next))throw Error('The relay repeated a page. Try again.');if(next)seenPages.add(next)}while(next&&got<40&&++guard<40);
+   if(!shown)list.append(empty(search.value.trim()?'Nothing found':day.value?'No messages on this day':'No messages',search.value.trim()?'No message matches “'+search.value.trim()+'”'+(day.value?' on this day':'')+'. Check the spelling or clear the search.':hiddenPast?'Everything here is from past connections.':hiddenProgress?'Only progress updates here. Untick Hide progress updates to see them.':'Nothing matches yet. Messages between your workspaces and phones show up here.',search.value.trim()||day.value?button('Clear search and day',()=>{search.value='';day.value='';apply()},'outline'):null));
+   summary();more.hidden=!next}catch(e){if(v!==epoch||rev!==revision)return;if(reset)list.replaceChildren(empty('Messages could not be loaded',e.message,button('Try again',()=>load(true))));else showError(null,e)}}
+ let openId='',typing;
+ async function sync(p){
+  if(filterKey(p)!==lastKey){fromParams(p);lastKey=filterKey(p);load(true)}
+  const id=p.get('open')||'';if(id===openId)return;openId=id;document.querySelectorAll('dialog.sheet[open]').forEach(d=>orch.close(d));if(!id)return;
+  let m=loaded.get(id);if(!m){try{m=(await api('/messages?id='+enc(id))).items?.[0]}catch(e){showError(null,e)}}
+  if(openId!==id)return;if(!m){openId='';toast('This message is no longer on the relay.','error');setParams({open:''});return}
+  const d=messageSheet(m);d.onclosed=()=>{if(hashState().key==='messages'&&hashState().params.get('open')===id){openId='';closeOpen()}else if(openId===id)openId='';document.querySelector('[data-msg="'+CSS.escape(id)+'"]')?.focus()};
+ }
+ ws.onchange=typeSel.onchange=past.onchange=hideP.onchange=day.onchange=apply;search.oninput=()=>{clearTimeout(typing);typing=setTimeout(apply,300)};search.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();clearTimeout(typing);apply()}};
+ fromParams(start);lastKey=filterKey(start);
+ show(...head('Conversations','Messages','What your workspaces and phones are saying.'),el('div',{class:'filters'},field('Search',search),field('Workspace',ws),field('Kind',typeSel),el('div',{class:'field'},el('label',{htmlFor:'msg-day'},'Day'),el('div',{class:'row'},Object.assign(day,{id:'msg-day'}),earlier,later))),el('div',{class:'row'},el('label',{class:'check'},hideP,'Hide progress updates'),el('label',{class:'check'},past,'Show past connections')),note,list,el('div',{class:'actions'},more),el('footer',{class:'portal-footer'},'Messages and files sent through the relay are stored encrypted; the relay admin can read them. Only share links are end-to-end encrypted.'));
+ onParams=sync;const first=load(true);sync(start);return first;
 }
 function checks(selected=[]){return el('fieldset',{},el('legend',{},'Can reach'),el('div',{class:'checks workspace-pills'},workspaces.map(w=>el('label',{},input('workspace',w.id,{type:'checkbox',checked:selected.includes(w.id)}),w.name))))}
 const selected=f=>[...f.querySelectorAll('input[name="workspace"]:checked')].map(c=>c.value);

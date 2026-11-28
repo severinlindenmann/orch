@@ -700,33 +700,122 @@ fn query_msgs(
     Ok((rows, next))
 }
 
+/// Progress pings (P-015): ticket updates that only report a step (`ack`, `working`, `note`) and shared-tool refresh hints.
+fn is_progress(typ: &str, body: &Value) -> bool {
+    typ == "refresh-hint"
+        || (typ == "text"
+            && matches!(
+                body.get("update").and_then(|u| u.get("kind")).and_then(Value::as_str),
+                Some("ack" | "working" | "note")
+            ))
+}
+
+/// Every string inside a message body, for the admin search (bounded: deep or huge bodies stop early).
+fn body_text(v: &Value, out: &mut String, depth: usize) {
+    if depth > 6 || out.len() > 20_000 {
+        return;
+    }
+    match v {
+        Value::String(t) => {
+            out.push_str(t);
+            out.push('\n')
+        }
+        Value::Array(a) => a.iter().for_each(|x| body_text(x, out, depth + 1)),
+        Value::Object(o) => o.values().for_each(|x| body_text(x, out, depth + 1)),
+        _ => {}
+    }
+}
+
+/// Rows read per admin search page at most; the page answers with `next` so the portal goes on (O-31).
+const SCAN_CAP: i64 = 2000;
+
 async fn messages(
     State(app): State<AppState>,
     h: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Res<Json<Value>> {
     guard(&app, &h)?;
-    let (limit, after) = page_params(&q);
+    let (limit, mut after) = page_params(&q);
     let (mut filter, mut args) = (String::new(), vec![]);
+    let mut arg = |f: &str, v: String, filter: &mut String| {
+        args.push(v);
+        *filter += &f.replace("?N", &format!("?{}", args.len() + 1));
+    };
     if let Some(w) = q.get("workspace").filter(|w| !w.is_empty()) {
-        filter += " AND (from_addr=?2 OR to_addr=?2)";
-        args.push(w.clone());
+        arg(" AND (from_addr=?N OR to_addr=?N)", w.clone(), &mut filter);
     }
     if let Some(t) = q.get("type").filter(|t| !t.is_empty()) {
-        filter += &format!(" AND type=?{}", args.len() + 2);
-        args.push(t.clone());
+        arg(" AND type=?N", t.clone(), &mut filter);
     }
+    if let Some(id) = q.get("id").filter(|t| !t.is_empty()) {
+        arg(" AND id=?N", id.clone(), &mut filter);
+    }
+    // One day (or any range) by the time the relay stored the message, in Unix seconds: since <= stored_at < until.
+    for (k, op) in [("since", ">="), ("until", "<")] {
+        if let Some(v) = q.get(k).filter(|v| !v.is_empty()) {
+            let n: i64 = v
+                .parse()
+                .map_err(|_| invalid(format!("`{k}` must be a time in seconds.")))?;
+            filter += &format!(" AND stored_at{op}{n}");
+        }
+    }
+    let needle = q
+        .get("q")
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty());
+    if needle.as_ref().is_some_and(|t| t.chars().count() > 200) {
+        return Err(invalid("The search is too long. Use at most 200 characters."));
+    }
+    let hide = q.get("progress").map(String::as_str) == Some("hide");
     let c = app.db.lock().unwrap();
-    let (rows, next) = query_msgs(&c, &filter, args, limit, after)?;
-    let items: Vec<Value> = rows
-        .iter()
-        .map(|m| {
-            let mut j = msg_json(&app.key, m);
-            j["acked"] = m.acked.into();
-            j
-        })
-        .collect();
-    Ok(Json(json!({"items": items, "next": next})))
+    let item = |m: &store::Msg| {
+        let mut j = msg_json(&app.key, m);
+        j["acked"] = m.acked.into();
+        j
+    };
+    if needle.is_none() && !hide {
+        let (rows, next) = query_msgs(&c, &filter, args, limit, after)?;
+        let items: Vec<Value> = rows.iter().map(item).collect();
+        return Ok(Json(json!({"items": items, "next": next})));
+    }
+    // Search and hidden progress need the opened body: read at most SCAN_CAP rows, newest first.
+    let names: HashMap<String, String> = c
+        .prepare("SELECT id, name FROM workspaces UNION ALL SELECT id, name FROM phones")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let (mut items, mut hidden, mut scanned, mut next) = (vec![], 0i64, 0i64, None);
+    'scan: loop {
+        let (rows, more) = query_msgs(&c, &filter, args.clone(), 200, after)?;
+        for m in &rows {
+            scanned += 1;
+            after = m.seq;
+            let j = item(m);
+            if hide && is_progress(&m.typ, &j["body"]) {
+                hidden += 1;
+            } else if needle.as_ref().map_or(true, |n| {
+                let mut text = String::new();
+                body_text(&j["body"], &mut text, 0);
+                for id in [&m.from, &m.to] {
+                    text.push_str(names.get(id).map_or("", String::as_str));
+                    text.push('\n');
+                }
+                text.to_lowercase().contains(n.as_str())
+            }) {
+                items.push(j);
+            }
+            if items.len() as i64 >= limit || scanned >= SCAN_CAP {
+                let last = rows.last().map(|l| l.seq) != Some(m.seq) || more.is_some();
+                next = last.then(|| encode_cursor(m.seq));
+                break 'scan;
+            }
+        }
+        if more.is_none() {
+            break;
+        }
+    }
+    Ok(Json(
+        json!({"items": items, "next": next, "hidden": hidden, "scanned": scanned}),
+    ))
 }
 
 async fn allows(

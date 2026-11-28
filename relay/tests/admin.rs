@@ -757,3 +757,103 @@ async fn admin_root_goes_to_the_portal() {
     assert!(r.status().is_redirection());
     assert_eq!(r.headers()["location"], "/admin");
 }
+
+/// O-31 / P-015: the admin message list searches the opened text and names, hides progress pings with a count,
+/// loads one day by `since`/`until`, finds one message by `id`, and pages a search with `next`.
+#[tokio::test]
+async fn admin_messages_search_day_progress_and_id() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("Studio Alpha").await, t.add_ws("Pilatus").await);
+    t.rules(json!([rule(&a, &b, [true, true, false, false])]))
+        .await;
+    let text = |s: &str| json!({ "text": s });
+    let ping = |k: &str, s: &str| json!({"text": s, "update": {"kind": k, "title": "Weekly report"}});
+    for body in [
+        text("The invoice for March is attached"),
+        ping("note", "Tasks: 0 of 6 done"),
+        ping("working", "Status: review"),
+        ping("ack", "Got it"),
+        ping("result", "Done: the report is ready"),
+        text("Lunch?"),
+    ] {
+        assert_eq!(t.send(&a, &b.id, "text", body).await.0, 201);
+    }
+    let get = |q: &'static str| {
+        let t = &t;
+        async move {
+            let (s, v) = t
+                .admin_json("GET", &format!("/admin/api/messages?{q}"), None)
+                .await;
+            assert_eq!(s, 200, "{q}: {v}");
+            v
+        }
+    };
+    let texts = |v: &Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["body"]["text"].as_str().unwrap_or("").to_string())
+            .collect()
+    };
+    // unchanged without the new fields: all six, no `hidden`
+    let all = get("limit=40").await;
+    assert_eq!(all["items"].as_array().unwrap().len(), 6);
+    assert!(all.get("hidden").is_none());
+    // progress hidden, with the count; a result update stays
+    let v = get("limit=40&progress=hide").await;
+    assert_eq!(
+        texts(&v),
+        ["Lunch?", "Done: the report is ready", "The invoice for March is attached"]
+    );
+    assert_eq!((v["hidden"].as_i64(), v["next"].clone()), (Some(3), Value::Null));
+    // search: text, case-insensitive, and a workspace name
+    assert_eq!(texts(&get("q=INVOICE").await), ["The invoice for March is attached"]);
+    assert_eq!(get("q=pilatus&limit=40").await["items"].as_array().unwrap().len(), 6);
+    assert!(get("q=nothing-like-this").await["items"].as_array().unwrap().is_empty());
+    // a search page that is full answers `next`; the next page goes on from there
+    let p1 = get("q=pilatus&limit=2").await;
+    assert_eq!(p1["items"].as_array().unwrap().len(), 2);
+    let cur = p1["next"].as_str().unwrap().to_string();
+    let (_, p2) = t
+        .admin_json(
+            "GET",
+            &format!("/admin/api/messages?q=pilatus&limit=10&after={cur}"),
+            None,
+        )
+        .await;
+    assert_eq!(p2["items"].as_array().unwrap().len(), 4);
+    assert_eq!(p2["next"], Value::Null);
+    // one day by stored time: today has everything, the day before nothing; a bad time is refused
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let (_, v) = t
+        .admin_json(
+            "GET",
+            &format!("/admin/api/messages?since={}&until={}", now - 3600, now + 3600),
+            None,
+        )
+        .await;
+    assert_eq!(v["items"].as_array().unwrap().len(), 6);
+    let (_, v) = t
+        .admin_json(
+            "GET",
+            &format!("/admin/api/messages?since={}&until={}", now - 90000, now - 3600),
+            None,
+        )
+        .await;
+    assert!(v["items"].as_array().unwrap().is_empty());
+    let (s, _) = t
+        .admin_json("GET", "/admin/api/messages?since=yesterday", None)
+        .await;
+    assert_eq!(s, 422);
+    // one message by id (the address of an open message)
+    let id = all["items"][3]["id"].as_str().unwrap().to_string();
+    let (_, v) = t
+        .admin_json("GET", &format!("/admin/api/messages?id={id}"), None)
+        .await;
+    assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    assert_eq!(v["items"][0]["id"], id.as_str());
+}
